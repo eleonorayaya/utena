@@ -36,7 +36,7 @@ func TestValidateSession(t *testing.T) {
 				LastUsedAt:  time.Now(),
 			},
 			expectError: true,
-			errorMsg:    "ID cannot be empty",
+			errorMsg:    "session name cannot be empty",
 		},
 		{
 			name: "empty WorkspaceID",
@@ -44,8 +44,7 @@ func TestValidateSession(t *testing.T) {
 				ID:         "session-1",
 				LastUsedAt: time.Now(),
 			},
-			expectError: true,
-			errorMsg:    "WorkspaceID cannot be empty",
+			expectError: false,
 		},
 		{
 			name: "zero LastUsedAt",
@@ -61,6 +60,79 @@ func TestValidateSession(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateSession(tt.session)
+
+			if tt.expectError {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidateSessionName(t *testing.T) {
+	tests := []struct {
+		name        string
+		sessionName string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "valid alphanumeric",
+			sessionName: "my-session-1",
+			expectError: false,
+		},
+		{
+			name:        "valid with underscores",
+			sessionName: "my_session_2",
+			expectError: false,
+		},
+		{
+			name:        "valid single character",
+			sessionName: "a",
+			expectError: false,
+		},
+		{
+			name:        "empty name",
+			sessionName: "",
+			expectError: true,
+			errorMsg:    "session name cannot be empty",
+		},
+		{
+			name:        "contains spaces",
+			sessionName: "my session",
+			expectError: true,
+			errorMsg:    "contains invalid characters",
+		},
+		{
+			name:        "contains dots",
+			sessionName: "my.session",
+			expectError: true,
+			errorMsg:    "contains invalid characters",
+		},
+		{
+			name:        "contains special characters",
+			sessionName: "my@session!",
+			expectError: true,
+			errorMsg:    "contains invalid characters",
+		},
+		{
+			name:        "exceeds 50 characters",
+			sessionName: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			expectError: true,
+			errorMsg:    "cannot exceed 50 characters",
+		},
+		{
+			name:        "exactly 50 characters",
+			sessionName: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSessionName(tt.sessionName)
 
 			if tt.expectError {
 				require.Error(t, err)

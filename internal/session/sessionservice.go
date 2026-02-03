@@ -51,9 +51,11 @@ func (s *SessionService) GetSession(ctx context.Context, id string) (*Session, e
 
 func (s *SessionService) CreateSession(ctx context.Context, session *Session) error {
 
-	_, err := s.workspaceStore.GetByID(session.WorkspaceID)
-	if err != nil {
-		return err
+	if session.WorkspaceID != "" {
+		_, err := s.workspaceStore.GetByID(session.WorkspaceID)
+		if err != nil {
+			return err
+		}
 	}
 
 	if session.LastUsedAt.IsZero() {
@@ -94,6 +96,29 @@ func (s *SessionService) UpdateSession(ctx context.Context, session *Session) er
 	}
 
 	return s.store.Update(session)
+}
+
+func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Session, error) {
+	session, err := s.store.GetByID(name)
+	if err != nil {
+		return nil, err
+	}
+
+	session.LastUsedAt = time.Now()
+	session.IsActive = true
+
+	if err := s.store.Update(session); err != nil {
+		return nil, err
+	}
+
+	s.eventBus.Publish(ctx, eventbus.Event{
+		Type: eventbus.SessionActivated,
+		Data: eventbus.SessionActivatedEvent{
+			SessionName: name,
+		},
+	})
+
+	return session, nil
 }
 
 func (s *SessionService) DeleteSession(ctx context.Context, id string) error {

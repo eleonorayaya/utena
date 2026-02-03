@@ -6,6 +6,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
+	"github.com/spf13/afero"
 )
 
 type SessionModule struct {
@@ -15,8 +16,8 @@ type SessionModule struct {
 	Router     *SessionRouter
 }
 
-func NewSessionModule(workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus) *SessionModule {
-	store := NewSessionStore()
+func NewSessionModule(workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, fs afero.Fs, configDir string) *SessionModule {
+	store := NewSessionStore(fs, configDir)
 	service := NewSessionService(store, workspaceModule.Store, bus)
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
@@ -30,7 +31,6 @@ func NewSessionModule(workspaceModule *workspace.WorkspaceModule, bus eventbus.E
 }
 
 func (m *SessionModule) OnAppStart(ctx context.Context) error {
-
 	if err := m.Store.OnAppStart(ctx); err != nil {
 		return err
 	}
@@ -43,7 +43,6 @@ func (m *SessionModule) OnAppStart(ctx context.Context) error {
 }
 
 func (m *SessionModule) OnAppEnd(ctx context.Context) error {
-
 	if err := m.Service.OnAppEnd(ctx); err != nil {
 		return err
 	}

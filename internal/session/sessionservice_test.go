@@ -7,21 +7,19 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/workspace"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-// setupSessionService creates a session service with fresh stores
 func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore) {
 	t.Helper()
 
 	bus := eventbus.NewEventBus()
-	sessionStore := NewSessionStore()
+	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
 	workspaceStore := workspace.NewWorkspaceStore()
 
-	// Initialize workspace store with test data
-	ctx := context.Background()
-	err := workspaceStore.OnAppStart(ctx)
-	require.NoError(t, err)
+	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
+	workspaceStore.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
 
 	service := NewSessionService(sessionStore, workspaceStore, bus)
 	return service, sessionStore, workspaceStore

@@ -8,6 +8,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/workspace"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,14 +18,13 @@ func setupZellijService(t *testing.T) (*ZellijService, *session.SessionService, 
 	ctx := context.Background()
 
 	bus := eventbus.NewEventBus()
-	sessionStore := session.NewSessionStore()
+	sessionStore := session.NewSessionStore(afero.NewMemMapFs(), "/config")
 	workspaceStore := workspace.NewWorkspaceStore()
 
-	err := workspaceStore.OnAppStart(ctx)
-	require.NoError(t, err)
+	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 
 	sessionService := session.NewSessionService(sessionStore, workspaceStore, bus)
-	err = sessionService.OnAppStart(ctx)
+	err := sessionService.OnAppStart(ctx)
 	require.NoError(t, err)
 
 	zellijService := NewZellijService(sessionService, bus)
@@ -63,7 +63,7 @@ func TestZellijService_ProcessSessionUpdate_CreateNewSessions(t *testing.T) {
 	require.True(t, session1.IsAttached)
 	require.True(t, session1.IsActive)
 	require.False(t, session1.IsDead)
-	require.Equal(t, "ws-1", session1.WorkspaceID)
+	require.Empty(t, session1.WorkspaceID)
 
 	session2, err := sessionStore.GetByID("session-2")
 	require.NoError(t, err)

@@ -2,18 +2,32 @@ package workspace
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 )
+
+type config struct {
+	WorkspaceRoots []string `json:"workspace_roots"`
+}
 
 type WorkspaceStore struct {
 	mu         sync.RWMutex
 	workspaces map[string]*Workspace
+	configPath string
 }
 
 func NewWorkspaceStore() *WorkspaceStore {
+	homeDir, _ := os.UserHomeDir()
 	return &WorkspaceStore{
 		workspaces: make(map[string]*Workspace),
+		configPath: filepath.Join(homeDir, ".config", "utena", "config.json"),
 	}
 }
 
@@ -51,6 +65,10 @@ func (s *WorkspaceStore) List() []Workspace {
 		workspaces = append(workspaces, *ws)
 	}
 
+	sort.Slice(workspaces, func(i, j int) bool {
+		return workspaces[i].Name < workspaces[j].Name
+	})
+
 	return workspaces
 }
 
@@ -75,19 +93,9 @@ func (s *WorkspaceStore) Add(ws *Workspace) error {
 }
 
 func (s *WorkspaceStore) OnAppStart(ctx context.Context) error {
-	workspaces := []*Workspace{
-		{
-			ID:        "ws-1",
-			Name:      "utena",
-			Path:      "/Users/eleonora/dev/utena",
-			IsGitRepo: true,
-		},
-		{
-			ID:        "ws-2",
-			Name:      "example-project",
-			Path:      "/Users/eleonora/dev/example",
-			IsGitRepo: false,
-		},
+	workspaces, err := s.discoverWorkspaces()
+	if err != nil {
+		return err
 	}
 
 	for _, ws := range workspaces {
@@ -101,4 +109,87 @@ func (s *WorkspaceStore) OnAppStart(ctx context.Context) error {
 
 func (s *WorkspaceStore) OnAppEnd(ctx context.Context) error {
 	return nil
+}
+
+func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
+	cfg, err := s.loadConfig()
+	if err != nil {
+		return nil, nil
+	}
+
+	if len(cfg.WorkspaceRoots) == 0 {
+		return nil, nil
+	}
+
+	var workspaces []*Workspace
+
+	for _, root := range cfg.WorkspaceRoots {
+		expanded := expandHome(root)
+
+		entries, err := os.ReadDir(expanded)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+
+			fullPath := filepath.Join(expanded, entry.Name())
+			id := generateID(fullPath)
+			isGitRepo := isGitRepository(fullPath)
+
+			workspaces = append(workspaces, &Workspace{
+				ID:        id,
+				Name:      entry.Name(),
+				Path:      fullPath,
+				IsGitRepo: isGitRepo,
+			})
+		}
+	}
+
+	sort.Slice(workspaces, func(i, j int) bool {
+		return workspaces[i].Name < workspaces[j].Name
+	})
+
+	return workspaces, nil
+}
+
+func (s *WorkspaceStore) loadConfig() (*config, error) {
+	data, err := os.ReadFile(s.configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+func expandHome(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return filepath.Join(homeDir, path[2:])
+	}
+	return path
+}
+
+func generateID(path string) string {
+	hash := sha256.Sum256([]byte(path))
+	return hex.EncodeToString(hash[:8])
+}
+
+func isGitRepository(path string) bool {
+	info, err := os.Stat(filepath.Join(path, ".git"))
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }

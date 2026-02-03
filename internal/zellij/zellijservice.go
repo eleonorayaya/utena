@@ -24,6 +24,7 @@ func NewZellijService(sessionService *session.SessionService, bus eventbus.Event
 
 func (z *ZellijService) OnAppStart(ctx context.Context) error {
 	z.eventBus.Subscribe(eventbus.SessionCreateRequested, z.handleSessionCreateRequested)
+	z.eventBus.Subscribe(eventbus.SessionActivated, z.handleSessionActivated)
 	return nil
 }
 
@@ -63,7 +64,7 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 	for sessionID, sessionUpdate := range activeSessions {
 		newSession := &session.Session{
 			ID:          sessionID,
-			WorkspaceID: "ws-1",
+			WorkspaceID: "",
 			IsAttached:  sessionUpdate.IsCurrentSession,
 			IsActive:    true,
 			IsDead:      false,
@@ -84,6 +85,14 @@ func (z *ZellijService) handleSessionCreateRequested(ctx context.Context, event 
 		return nil
 	}
 	return z.CreateSession(data.SessionName, data.WorkspacePath)
+}
+
+func (z *ZellijService) handleSessionActivated(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(eventbus.SessionActivatedEvent)
+	if !ok {
+		return nil
+	}
+	return z.SwitchSession(data.SessionName)
 }
 
 func (z *ZellijService) sendCommandToPlugin(command Command) error {
