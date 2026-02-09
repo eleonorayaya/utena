@@ -1,11 +1,9 @@
 package tui
 
 import (
-	"fmt"
-	"strings"
-
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/session"
 )
 
@@ -15,29 +13,30 @@ type activateSessionMsg struct {
 
 type switchToNewSessionMsg struct{}
 
-var (
-	cursorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	sessionStyle    = lipgloss.NewStyle()
-	workspaceStyle  = lipgloss.NewStyle().Faint(true)
-	emptyStateStyle = lipgloss.NewStyle().Faint(true)
-)
+type sessionItem struct {
+	session session.Session
+}
+
+func (i sessionItem) Title() string       { return i.session.ID }
+func (i sessionItem) Description() string { return i.session.WorkspaceID }
+func (i sessionItem) FilterValue() string { return i.session.ID }
 
 type SessionListModel struct {
-	sessions []session.Session
-	cursor   int
-	ready    bool
+	list list.Model
 }
 
 func NewSessionListModel() SessionListModel {
-	return SessionListModel{}
+	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
+	l.Title = "Sessions"
+	l.AdditionalShortHelpKeys = func() []key.Binding {
+		return []key.Binding{selectKey, newSessionKey}
+	}
+	return SessionListModel{list: l}
 }
 
-func (m *SessionListModel) SetSessions(sessions []session.Session) {
-	m.sessions = sessions
-	m.ready = true
-	if m.cursor >= len(sessions) {
-		m.cursor = max(0, len(sessions)-1)
-	}
+func (m *SessionListModel) SetSize(width, height int) {
+	m.list.SetWidth(width)
+	m.list.SetHeight(height)
 }
 
 func (m SessionListModel) Init() tea.Cmd {
@@ -47,66 +46,34 @@ func (m SessionListModel) Init() tea.Cmd {
 func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionsLoadedMsg:
-		m.SetSessions(msg.sessions)
-		return m, nil
+		items := make([]list.Item, len(msg.sessions))
+		for i, s := range msg.sessions {
+			items[i] = sessionItem{session: s}
+		}
+		cmd := m.list.SetItems(items)
+		return m, cmd
 
 	case tea.KeyMsg:
-		if !m.ready || len(m.sessions) == 0 {
-			switch msg.String() {
-			case "n":
-				return m, func() tea.Msg { return switchToNewSessionMsg{} }
-			case "q", "esc":
-				return m, tea.Quit
-			}
-			return m, nil
+		if m.list.FilterState() == list.Filtering {
+			break
 		}
-
-		switch msg.String() {
-		case "j", "down":
-			if m.cursor < len(m.sessions)-1 {
-				m.cursor++
+		switch {
+		case key.Matches(msg, selectKey):
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				return m, func() tea.Msg {
+					return activateSessionMsg{name: item.session.ID}
+				}
 			}
-		case "k", "up":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case "enter":
-			return m, func() tea.Msg {
-				return activateSessionMsg{name: m.sessions[m.cursor].ID}
-			}
-		case "n":
+		case key.Matches(msg, newSessionKey):
 			return m, func() tea.Msg { return switchToNewSessionMsg{} }
-		case "q", "esc":
-			return m, tea.Quit
 		}
 	}
 
-	return m, nil
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
 }
 
 func (m SessionListModel) View() string {
-	if !m.ready {
-		return ""
-	}
-
-	if len(m.sessions) == 0 {
-		return emptyStateStyle.Render("No sessions found. Press 'n' to create one.")
-	}
-
-	var b strings.Builder
-	for i, s := range m.sessions {
-		cursor := "  "
-		if i == m.cursor {
-			cursor = cursorStyle.Render("❯ ")
-		}
-
-		line := sessionStyle.Render(s.ID)
-		if s.WorkspaceID != "" {
-			line += "  " + workspaceStyle.Render(s.WorkspaceID)
-		}
-
-		fmt.Fprintf(&b, "%s%s\n", cursor, line)
-	}
-
-	return b.String()
+	return m.list.View()
 }

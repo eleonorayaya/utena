@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,11 +16,15 @@ import (
 	"github.com/eleonorayaya/utena/internal/zellij"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httplog/v3"
 	"github.com/go-chi/render"
 	"github.com/spf13/afero"
 )
 
 func StartDaemon() {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -64,8 +69,7 @@ func StartDaemon() {
 func serveAPI(ctx context.Context, workspaceModule *workspace.WorkspaceModule, sessionModule *session.SessionModule, zellijModule *zellij.ZellijModule) {
 	r := chi.NewRouter()
 
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
+	r.Use(httplog.RequestLogger(slog.Default(), &httplog.Options{}))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.URLFormat)
 	r.Use(render.SetContentType(render.ContentTypeJSON))

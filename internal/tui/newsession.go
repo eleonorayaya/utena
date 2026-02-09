@@ -1,12 +1,12 @@
 package tui
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
@@ -16,14 +16,31 @@ type switchToNameInputMsg struct {
 
 type switchToSessionListMsg struct{}
 
+type workspaceItem struct {
+	workspace workspace.Workspace
+}
+
+func (i workspaceItem) Title() string       { return i.workspace.Name }
+func (i workspaceItem) Description() string { return abbreviatePath(i.workspace.Path) }
+func (i workspaceItem) FilterValue() string { return i.workspace.Name }
+
 type NewSessionModel struct {
-	workspaces []workspace.Workspace
-	cursor     int
-	ready      bool
+	list list.Model
 }
 
 func NewNewSessionModel() NewSessionModel {
-	return NewSessionModel{}
+	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
+	l.Title = "Select workspace"
+	l.KeyMap.Quit.SetEnabled(false)
+	l.AdditionalShortHelpKeys = func() []key.Binding {
+		return []key.Binding{selectKey, backKey}
+	}
+	return NewSessionModel{list: l}
+}
+
+func (m *NewSessionModel) SetSize(width, height int) {
+	m.list.SetWidth(width)
+	m.list.SetHeight(height)
 }
 
 func (m NewSessionModel) Init() tea.Cmd {
@@ -33,62 +50,38 @@ func (m NewSessionModel) Init() tea.Cmd {
 func (m NewSessionModel) Update(msg tea.Msg) (NewSessionModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspacesLoadedMsg:
-		m.workspaces = msg.workspaces
-		m.cursor = 0
-		m.ready = true
-		return m, nil
+		items := make([]list.Item, len(msg.workspaces))
+		for i, ws := range msg.workspaces {
+			items[i] = workspaceItem{workspace: ws}
+		}
+		cmd := m.list.SetItems(items)
+		return m, cmd
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "j", "down":
-			if m.cursor < len(m.workspaces)-1 {
-				m.cursor++
-			}
-		case "k", "up":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case "enter":
-			if len(m.workspaces) > 0 {
+		if m.list.FilterState() == list.Filtering {
+			break
+		}
+		switch {
+		case key.Matches(msg, selectKey):
+			if item, ok := m.list.SelectedItem().(workspaceItem); ok {
 				return m, func() tea.Msg {
-					return switchToNameInputMsg{workspace: m.workspaces[m.cursor]}
+					return switchToNameInputMsg{workspace: item.workspace}
 				}
 			}
-		case "esc":
+		case key.Matches(msg, backKey):
 			return m, func() tea.Msg {
 				return switchToSessionListMsg{}
 			}
 		}
 	}
 
-	return m, nil
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
 }
 
-var dimStyle = lipgloss.NewStyle().Faint(true)
-
 func (m NewSessionModel) View() string {
-	var b strings.Builder
-
-	b.WriteString("Select workspace:\n\n")
-
-	if !m.ready {
-		return b.String()
-	}
-
-	if len(m.workspaces) == 0 {
-		b.WriteString("No workspaces found.\n")
-	} else {
-		for i, ws := range m.workspaces {
-			cursor := "  "
-			if i == m.cursor {
-				cursor = "❯ "
-			}
-			path := abbreviatePath(ws.Path)
-			b.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, ws.Name, dimStyle.Render(path)))
-		}
-	}
-
-	return b.String()
+	return m.list.View()
 }
 
 func abbreviatePath(path string) string {

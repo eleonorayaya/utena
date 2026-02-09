@@ -36,7 +36,8 @@ func (s *SessionStore) GetByID(id string) (*Session, error) {
 		return nil, errors.New("session not found")
 	}
 
-	return session, nil
+	copy := *session
+	return &copy, nil
 }
 
 func (s *SessionStore) List() []Session {
@@ -104,7 +105,8 @@ func (s *SessionStore) Add(session *Session) error {
 		return fmt.Errorf("session '%s' already exists: %w", session.ID, ErrSessionAlreadyExists)
 	}
 
-	s.sessions[session.ID] = session
+	copy := *session
+	s.sessions[session.ID] = &copy
 	s.save()
 	return nil
 }

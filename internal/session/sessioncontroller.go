@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/eleonorayaya/utena/internal/common"
+	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
 )
@@ -70,7 +71,8 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := c.service.CreateSessionAndNotify(ctx, data.Session); err != nil {
-		if errors.Is(err, ErrSessionAlreadyExists) {
+		var wsNotFound *workspace.WorkspaceNotFoundError
+		if errors.Is(err, ErrSessionAlreadyExists) || errors.As(err, &wsNotFound) {
 			render.Render(w, r, common.ErrInvalidRequest(err))
 			return
 		}
@@ -96,6 +98,11 @@ func (c *SessionController) UpdateSession(w http.ResponseWriter, r *http.Request
 	data.Session.ID = id
 
 	if err := c.service.UpdateSession(ctx, data.Session); err != nil {
+		var wsNotFound *workspace.WorkspaceNotFoundError
+		if errors.As(err, &wsNotFound) {
+			render.Render(w, r, common.ErrInvalidRequest(err))
+			return
+		}
 		render.Render(w, r, common.ErrUnknown(err))
 		return
 	}

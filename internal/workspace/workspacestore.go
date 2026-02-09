@@ -13,6 +13,14 @@ import (
 	"sync"
 )
 
+type WorkspaceNotFoundError struct {
+	WorkspaceID string
+}
+
+func (e *WorkspaceNotFoundError) Error() string {
+	return "workspace not found: " + e.WorkspaceID
+}
+
 type config struct {
 	WorkspaceRoots []string `json:"workspace_roots"`
 }
@@ -37,7 +45,7 @@ func (s *WorkspaceStore) GetByID(id string) (*Workspace, error) {
 
 	ws, ok := s.workspaces[id]
 	if !ok {
-		return nil, errors.New("workspace not found")
+		return nil, &WorkspaceNotFoundError{WorkspaceID: id}
 	}
 
 	return ws, nil
@@ -53,7 +61,7 @@ func (s *WorkspaceStore) GetByPath(path string) (*Workspace, error) {
 		}
 	}
 
-	return nil, errors.New("workspace not found")
+	return nil, &WorkspaceNotFoundError{WorkspaceID: path}
 }
 
 func (s *WorkspaceStore) List() []Workspace {

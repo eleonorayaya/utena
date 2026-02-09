@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -43,8 +44,8 @@ func (m NameInputModel) Init() tea.Cmd {
 func (m NameInputModel) Update(msg tea.Msg) (NameInputModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
+		switch {
+		case key.Matches(msg, nameInputKeyMap.Confirm):
 			name := m.input.Value()
 			if name == "" {
 				name = defaultSessionName(m.workspace.Name)
@@ -57,7 +58,7 @@ func (m NameInputModel) Update(msg tea.Msg) (NameInputModel, tea.Cmd) {
 			return m, func() tea.Msg {
 				return createSessionMsg{name: name, workspaceID: m.workspace.ID}
 			}
-		case "esc":
+		case key.Matches(msg, nameInputKeyMap.Back):
 			return m, func() tea.Msg {
 				return switchToSessionListMsg{}
 			}

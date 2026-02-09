@@ -20,6 +20,7 @@ type App struct {
 	nameInput     NameInputModel
 	help          help.Model
 	pendingCreate string
+	width, height int
 }
 
 func NewApp() App {
@@ -37,6 +38,12 @@ func (a App) Init() tea.Cmd {
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		a.width = msg.Width
+		a.height = msg.Height
+		a.sessionList.SetSize(msg.Width, msg.Height)
+		a.newSession.SetSize(msg.Width, msg.Height)
+
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			return a, tea.Quit
@@ -51,6 +58,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case switchToNewSessionMsg:
 		a.activeView = workspacePickerView
 		a.newSession = NewNewSessionModel()
+		a.newSession.SetSize(a.width, a.height)
 		return a, fetchWorkspaces()
 
 	case switchToNameInputMsg:
@@ -87,22 +95,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) View() string {
-	var content string
-	var helpView string
-
 	switch a.activeView {
 	case workspacePickerView:
-		content = a.newSession.View()
-		helpView = a.help.View(workspacePickerKeyMap)
+		return a.newSession.View()
 	case nameInputView:
-		content = a.nameInput.View()
-		helpView = a.help.View(nameInputKeyMap)
+		return a.nameInput.View() + "\n\n" + a.help.View(nameInputKeyMap)
 	default:
-		content = a.sessionList.View()
-		helpView = a.help.View(sessionListKeyMap)
+		return a.sessionList.View()
 	}
-
-	return content + "\n\n" + helpView
 }
 
 type errMsg struct{ err error }

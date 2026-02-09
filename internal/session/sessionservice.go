@@ -87,8 +87,12 @@ func (s *SessionService) CreateSessionAndNotify(ctx context.Context, session *Se
 }
 
 func (s *SessionService) UpdateSession(ctx context.Context, session *Session) error {
+	existing, err := s.store.GetByID(session.ID)
+	if err != nil {
+		return err
+	}
 
-	if session.WorkspaceID != "" {
+	if session.WorkspaceID != "" && session.WorkspaceID != existing.WorkspaceID {
 		_, err := s.workspaceStore.GetByID(session.WorkspaceID)
 		if err != nil {
 			return err
