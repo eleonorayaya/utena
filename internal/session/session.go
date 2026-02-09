@@ -1,6 +1,11 @@
 package session
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var ErrSessionAlreadyExists = errors.New("session already exists")
 
 type Session struct {
 	ID          string    `json:"id"`

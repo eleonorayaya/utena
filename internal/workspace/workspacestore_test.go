@@ -2,16 +2,37 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-// setupWorkspaceStore creates a fresh workspace store
 func setupWorkspaceStore(t *testing.T) *WorkspaceStore {
 	t.Helper()
 	return NewWorkspaceStore()
+}
+
+func setupWorkspaceStoreWithConfig(t *testing.T, roots []string) (*WorkspaceStore, string) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	cfg := config{WorkspaceRoots: roots}
+	data, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	err = os.WriteFile(configPath, data, 0644)
+	require.NoError(t, err)
+
+	store := NewWorkspaceStore()
+	store.configPath = configPath
+
+	return store, tmpDir
 }
 
 func TestNewWorkspaceStore(t *testing.T) {
@@ -33,7 +54,6 @@ func TestWorkspaceStore_Add(t *testing.T) {
 	err := store.Add(ws)
 	require.NoError(t, err)
 
-	// Verify workspace was added
 	retrieved, err := store.GetByID("ws-1")
 	require.NoError(t, err)
 	require.Equal(t, ws.ID, retrieved.ID)
@@ -132,7 +152,6 @@ func TestWorkspaceStore_List(t *testing.T) {
 	list := store.List()
 	require.Len(t, list, 2)
 
-	// Verify both workspaces are in the list
 	ids := make(map[string]bool)
 	for _, ws := range list {
 		ids[ws.ID] = true
@@ -140,6 +159,20 @@ func TestWorkspaceStore_List(t *testing.T) {
 
 	require.True(t, ids["ws-1"], "ws-1 not found in list")
 	require.True(t, ids["ws-2"], "ws-2 not found in list")
+}
+
+func TestWorkspaceStore_List_SortedAlphabetically(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	store.Add(&Workspace{ID: "ws-3", Name: "charlie", Path: "/path3"})
+	store.Add(&Workspace{ID: "ws-1", Name: "alpha", Path: "/path1"})
+	store.Add(&Workspace{ID: "ws-2", Name: "bravo", Path: "/path2"})
+
+	list := store.List()
+	require.Len(t, list, 3)
+	require.Equal(t, "alpha", list[0].Name)
+	require.Equal(t, "bravo", list[1].Name)
+	require.Equal(t, "charlie", list[2].Name)
 }
 
 func TestWorkspaceStore_List_Empty(t *testing.T) {
@@ -154,7 +187,6 @@ func TestWorkspaceStore_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	numGoroutines := 10
 
-	// Concurrent adds
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(id int) {
@@ -170,7 +202,6 @@ func TestWorkspaceStore_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 
-	// Concurrent reads
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func() {
@@ -181,37 +212,132 @@ func TestWorkspaceStore_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 
-	// Should have added workspaces without panic
 	list := store.List()
 	require.Len(t, list, numGoroutines)
 }
 
-func TestWorkspaceStore_OnAppStart(t *testing.T) {
-	store := setupWorkspaceStore(t)
+func TestWorkspaceStore_OnAppStart_WithConfig(t *testing.T) {
+	rootDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(rootDir, "project-alpha", ".git"), 0755)
+	os.MkdirAll(filepath.Join(rootDir, "project-beta"), 0755)
+
+	store, _ := setupWorkspaceStoreWithConfig(t, []string{rootDir})
 
 	ctx := context.Background()
 	err := store.OnAppStart(ctx)
 	require.NoError(t, err)
 
-	// Verify workspaces were initialized
 	workspaces := store.List()
 	require.Len(t, workspaces, 2)
 
-	// Check ws-1 (utena)
-	ws1, err := store.GetByID("ws-1")
-	require.NoError(t, err)
-	require.Equal(t, "ws-1", ws1.ID)
-	require.Equal(t, "utena", ws1.Name)
-	require.Equal(t, "/Users/eleonora/dev/utena", ws1.Path)
-	require.True(t, ws1.IsGitRepo)
+	require.Equal(t, "project-alpha", workspaces[0].Name)
+	require.Equal(t, filepath.Join(rootDir, "project-alpha"), workspaces[0].Path)
+	require.True(t, workspaces[0].IsGitRepo)
 
-	// Check ws-2 (example-project)
-	ws2, err := store.GetByID("ws-2")
+	require.Equal(t, "project-beta", workspaces[1].Name)
+	require.Equal(t, filepath.Join(rootDir, "project-beta"), workspaces[1].Path)
+	require.False(t, workspaces[1].IsGitRepo)
+}
+
+func TestWorkspaceStore_OnAppStart_NoConfigFile(t *testing.T) {
+	store := NewWorkspaceStore()
+	store.configPath = "/nonexistent/path/config.json"
+
+	ctx := context.Background()
+	err := store.OnAppStart(ctx)
 	require.NoError(t, err)
-	require.Equal(t, "ws-2", ws2.ID)
-	require.Equal(t, "example-project", ws2.Name)
-	require.Equal(t, "/Users/eleonora/dev/example", ws2.Path)
-	require.False(t, ws2.IsGitRepo)
+
+	workspaces := store.List()
+	require.Empty(t, workspaces)
+}
+
+func TestWorkspaceStore_OnAppStart_EmptyRoots(t *testing.T) {
+	store, _ := setupWorkspaceStoreWithConfig(t, []string{})
+
+	ctx := context.Background()
+	err := store.OnAppStart(ctx)
+	require.NoError(t, err)
+
+	workspaces := store.List()
+	require.Empty(t, workspaces)
+}
+
+func TestWorkspaceStore_OnAppStart_MultipleRoots(t *testing.T) {
+	root1 := t.TempDir()
+	root2 := t.TempDir()
+
+	os.MkdirAll(filepath.Join(root1, "project-a", ".git"), 0755)
+	os.MkdirAll(filepath.Join(root2, "project-b"), 0755)
+
+	store, _ := setupWorkspaceStoreWithConfig(t, []string{root1, root2})
+
+	ctx := context.Background()
+	err := store.OnAppStart(ctx)
+	require.NoError(t, err)
+
+	workspaces := store.List()
+	require.Len(t, workspaces, 2)
+
+	require.Equal(t, "project-a", workspaces[0].Name)
+	require.True(t, workspaces[0].IsGitRepo)
+
+	require.Equal(t, "project-b", workspaces[1].Name)
+	require.False(t, workspaces[1].IsGitRepo)
+}
+
+func TestWorkspaceStore_OnAppStart_SkipsFiles(t *testing.T) {
+	rootDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(rootDir, "real-project"), 0755)
+	os.WriteFile(filepath.Join(rootDir, "not-a-dir.txt"), []byte("hello"), 0644)
+
+	store, _ := setupWorkspaceStoreWithConfig(t, []string{rootDir})
+
+	ctx := context.Background()
+	err := store.OnAppStart(ctx)
+	require.NoError(t, err)
+
+	workspaces := store.List()
+	require.Len(t, workspaces, 1)
+	require.Equal(t, "real-project", workspaces[0].Name)
+}
+
+func TestWorkspaceStore_OnAppStart_InvalidRootSkipped(t *testing.T) {
+	rootDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(rootDir, "good-project"), 0755)
+
+	store, _ := setupWorkspaceStoreWithConfig(t, []string{"/nonexistent/root", rootDir})
+
+	ctx := context.Background()
+	err := store.OnAppStart(ctx)
+	require.NoError(t, err)
+
+	workspaces := store.List()
+	require.Len(t, workspaces, 1)
+	require.Equal(t, "good-project", workspaces[0].Name)
+}
+
+func TestWorkspaceStore_OnAppStart_StableIDs(t *testing.T) {
+	rootDir := t.TempDir()
+	os.MkdirAll(filepath.Join(rootDir, "my-project"), 0755)
+
+	store1, _ := setupWorkspaceStoreWithConfig(t, []string{rootDir})
+	ctx := context.Background()
+	err := store1.OnAppStart(ctx)
+	require.NoError(t, err)
+
+	store2, _ := setupWorkspaceStoreWithConfig(t, []string{rootDir})
+	err = store2.OnAppStart(ctx)
+	require.NoError(t, err)
+
+	ws1 := store1.List()
+	ws2 := store2.List()
+
+	require.Len(t, ws1, 1)
+	require.Len(t, ws2, 1)
+	require.Equal(t, ws1[0].ID, ws2[0].ID)
 }
 
 func TestWorkspaceStore_OnAppEnd(t *testing.T) {
@@ -220,4 +346,40 @@ func TestWorkspaceStore_OnAppEnd(t *testing.T) {
 	ctx := context.Background()
 	err := store.OnAppEnd(ctx)
 	require.NoError(t, err)
+}
+
+func TestExpandHome(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	result := expandHome("~/dev")
+	require.Equal(t, filepath.Join(homeDir, "dev"), result)
+
+	result = expandHome("/absolute/path")
+	require.Equal(t, "/absolute/path", result)
+
+	result = expandHome("relative/path")
+	require.Equal(t, "relative/path", result)
+}
+
+func TestGenerateID(t *testing.T) {
+	id1 := generateID("/path/to/project")
+	id2 := generateID("/path/to/project")
+	id3 := generateID("/different/path")
+
+	require.Equal(t, id1, id2)
+	require.NotEqual(t, id1, id3)
+	require.Len(t, id1, 16)
+}
+
+func TestIsGitRepository(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	gitDir := filepath.Join(tmpDir, "git-project")
+	os.MkdirAll(filepath.Join(gitDir, ".git"), 0755)
+	require.True(t, isGitRepository(gitDir))
+
+	nonGitDir := filepath.Join(tmpDir, "non-git-project")
+	os.MkdirAll(nonGitDir, 0755)
+	require.False(t, isGitRepository(nonGitDir))
 }

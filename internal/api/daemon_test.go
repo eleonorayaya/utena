@@ -16,10 +16,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-// setupTestRouter creates a test router with all modules initialized
 func setupTestRouter(t *testing.T) chi.Router {
 	t.Helper()
 
@@ -27,16 +27,14 @@ func setupTestRouter(t *testing.T) chi.Router {
 
 	bus := eventbus.NewEventBus()
 
-	// Initialize modules
 	workspaceModule := workspace.NewWorkspaceModule()
-	sessionModule := session.NewSessionModule(workspaceModule, bus)
+	sessionModule := session.NewSessionModule(workspaceModule, bus, afero.NewMemMapFs(), "/config")
 	zellijModule := zellij.NewZellijModule(sessionModule, bus)
 
-	// Call OnAppStart for all modules
-	err := workspaceModule.OnAppStart(ctx)
-	require.NoError(t, err)
+	workspaceModule.Store.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
+	workspaceModule.Store.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
 
-	err = sessionModule.OnAppStart(ctx)
+	err := workspaceModule.OnAppStart(ctx)
 	require.NoError(t, err)
 
 	err = zellijModule.OnAppStart(ctx)

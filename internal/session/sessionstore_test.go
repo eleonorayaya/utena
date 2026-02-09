@@ -2,17 +2,18 @@ package session
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-// setupSessionStore creates a fresh session store
 func setupSessionStore(t *testing.T) *SessionStore {
 	t.Helper()
-	return NewSessionStore()
+	return NewSessionStore(afero.NewMemMapFs(), "/config")
 }
 
 func TestNewSessionStore(t *testing.T) {
@@ -61,8 +62,7 @@ func TestSessionStore_Add_EmptyWorkspaceID(t *testing.T) {
 	store := setupSessionStore(t)
 	session := &Session{ID: "session-1", LastUsedAt: time.Now()}
 	err := store.Add(session)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "WorkspaceID cannot be empty")
+	require.NoError(t, err)
 }
 
 func TestSessionStore_Add_Duplicate(t *testing.T) {
@@ -76,7 +76,8 @@ func TestSessionStore_Add_Duplicate(t *testing.T) {
 
 	err = store.Add(session2)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "already exists")
+	require.True(t, errors.Is(err, ErrSessionAlreadyExists))
+	require.Contains(t, err.Error(), "'session-1' already exists")
 }
 
 func TestSessionStore_GetByID(t *testing.T) {

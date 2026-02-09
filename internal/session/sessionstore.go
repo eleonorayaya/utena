@@ -2,19 +2,28 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"path/filepath"
 	"sort"
 	"sync"
+
+	"github.com/spf13/afero"
 )
 
 type SessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session
+	mu        sync.RWMutex
+	sessions  map[string]*Session
+	fs        afero.Fs
+	configDir string
 }
 
-func NewSessionStore() *SessionStore {
+func NewSessionStore(fs afero.Fs, configDir string) *SessionStore {
 	return &SessionStore{
-		sessions: make(map[string]*Session),
+		sessions:  make(map[string]*Session),
+		fs:        fs,
+		configDir: configDir,
 	}
 }
 
@@ -27,7 +36,8 @@ func (s *SessionStore) GetByID(id string) (*Session, error) {
 		return nil, errors.New("session not found")
 	}
 
-	return session, nil
+	copy := *session
+	return &copy, nil
 }
 
 func (s *SessionStore) List() []Session {
@@ -64,6 +74,21 @@ func (s *SessionStore) ListByWorkspace(workspaceID string) []Session {
 	return sessions
 }
 
+func (s *SessionStore) sessionsPath() string {
+	return filepath.Join(s.configDir, "sessions.json")
+}
+
+func (s *SessionStore) save() {
+	s.fs.MkdirAll(s.configDir, 0755)
+
+	data, err := json.Marshal(s.sessions)
+	if err != nil {
+		return
+	}
+
+	afero.WriteFile(s.fs, s.sessionsPath(), data, 0644)
+}
+
 func (s *SessionStore) Add(session *Session) error {
 	if session == nil {
 		return errors.New("session cannot be nil")
@@ -73,18 +98,16 @@ func (s *SessionStore) Add(session *Session) error {
 		return errors.New("session ID cannot be empty")
 	}
 
-	if session.WorkspaceID == "" {
-		return errors.New("session WorkspaceID cannot be empty")
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if _, exists := s.sessions[session.ID]; exists {
-		return errors.New("session with this ID already exists")
+		return fmt.Errorf("session '%s' already exists: %w", session.ID, ErrSessionAlreadyExists)
 	}
 
-	s.sessions[session.ID] = session
+	copy := *session
+	s.sessions[session.ID] = &copy
+	s.save()
 	return nil
 }
 
@@ -105,6 +128,7 @@ func (s *SessionStore) Update(session *Session) error {
 	}
 
 	s.sessions[session.ID] = session
+	s.save()
 	return nil
 }
 
@@ -121,15 +145,28 @@ func (s *SessionStore) Delete(id string) error {
 	}
 
 	delete(s.sessions, id)
+	s.save()
 	return nil
 }
 
 func (s *SessionStore) OnAppStart(ctx context.Context) error {
+	data, err := afero.ReadFile(s.fs, s.sessionsPath())
+	if err != nil {
+		return nil
+	}
+
+	loaded := make(map[string]*Session)
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions = loaded
 
 	return nil
 }
 
 func (s *SessionStore) OnAppEnd(ctx context.Context) error {
-
 	return nil
 }

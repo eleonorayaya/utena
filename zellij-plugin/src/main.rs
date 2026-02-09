@@ -152,6 +152,12 @@ impl ZellijPlugin for State {
                 Logger::get().start_tracing();
             }
             Event::SessionUpdate(sessions, _) => {
+                let current_session_name = sessions
+                    .iter()
+                    .find(|s| s.is_current_session)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default();
+
                 let session_updates: Vec<SessionUpdate> = sessions
                     .iter()
                     .map(|session| SessionUpdate {
@@ -161,7 +167,7 @@ impl ZellijPlugin for State {
                     .collect();
 
                 let req = SessionUpdateRequest {
-                    id: String::from("test string"),
+                    id: current_session_name,
                     sessions: session_updates,
                 };
 

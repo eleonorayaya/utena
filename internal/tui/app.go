@@ -1,100 +1,108 @@
 package tui
 
 import (
-	"io"
-	"log"
-	"net/http"
-	"time"
-
 	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type keyMap struct {
-	Quit key.Binding
-}
+type view int
 
-func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Quit}
-}
-
-func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{k.Quit},
-	}
-}
+const (
+	sessionListView view = iota
+	workspacePickerView
+	nameInputView
+)
 
 type App struct {
-	resp string
-	keys keyMap
-	help help.Model
-}
-
-func (a App) Init() tea.Cmd {
-	return fetchWorkspaces
-}
-
-func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.QuitMsg:
-		return a, tea.Quit
-
-	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, a.keys.Quit):
-			return a, tea.Quit
-		}
-
-	case sessionResp:
-		a.resp = msg.body
-	}
-
-	return a, nil
-}
-
-func (a App) View() string {
-	s := "hiiiii xD"
-	if a.resp != "" {
-		s += "\n" + a.resp
-	}
-	s += "\n\n" + a.help.View(a.keys)
-	return s
+	activeView    view
+	sessionList   SessionListModel
+	newSession    NewSessionModel
+	nameInput     NameInputModel
+	help          help.Model
+	pendingCreate string
+	width, height int
 }
 
 func NewApp() App {
 	return App{
-		keys: keyMap{
-			Quit: key.NewBinding(
-				key.WithKeys("q", "ctrl+c"),
-				key.WithHelp("q", "quit"),
-			),
-		},
-		help: help.New(),
+		activeView:  sessionListView,
+		sessionList: NewSessionListModel(),
+		newSession:  NewNewSessionModel(),
+		help:        help.New(),
 	}
 }
 
-type sessionResp struct {
-	body string
+func (a App) Init() tea.Cmd {
+	return fetchSessions()
 }
-type errMsg struct{ error }
 
-func (e errMsg) Error() string { return e.error.Error() }
+func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		a.width = msg.Width
+		a.height = msg.Height
+		a.sessionList.SetSize(msg.Width, msg.Height)
+		a.newSession.SetSize(msg.Width, msg.Height)
 
-func fetchWorkspaces() tea.Msg {
-	c := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-	res, err := c.Get("http://localhost:3333/sessions")
-	if err != nil {
-		return errMsg{err}
-	}
-	defer res.Body.Close()
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return a, tea.Quit
+		}
 
-	bodyBytes, err := io.ReadAll(res.Body)
-	if err != nil {
-		log.Fatal(err)
+	case activateSessionMsg:
+		return a, activateSession(msg.name)
+
+	case sessionActivatedMsg:
+		return a, tea.Quit
+
+	case switchToNewSessionMsg:
+		a.activeView = workspacePickerView
+		a.newSession = NewNewSessionModel()
+		a.newSession.SetSize(a.width, a.height)
+		return a, fetchWorkspaces()
+
+	case switchToNameInputMsg:
+		a.activeView = nameInputView
+		a.nameInput = NewNameInputModel(msg.workspace)
+		return a, a.nameInput.Init()
+
+	case switchToSessionListMsg:
+		a.activeView = sessionListView
+		return a, fetchSessions()
+
+	case createSessionMsg:
+		a.pendingCreate = msg.name
+		return a, createSession(msg.name, msg.workspaceID)
+
+	case sessionCreatedMsg:
+		return a, activateSession(a.pendingCreate)
+
+	case errMsg:
+		_ = msg.err
+		return a, nil
 	}
-	bodyString := string(bodyBytes)
-	return sessionResp{bodyString}
+
+	var cmd tea.Cmd
+	switch a.activeView {
+	case sessionListView:
+		a.sessionList, cmd = a.sessionList.Update(msg)
+	case workspacePickerView:
+		a.newSession, cmd = a.newSession.Update(msg)
+	case nameInputView:
+		a.nameInput, cmd = a.nameInput.Update(msg)
+	}
+	return a, cmd
 }
+
+func (a App) View() string {
+	switch a.activeView {
+	case workspacePickerView:
+		return a.newSession.View()
+	case nameInputView:
+		return a.nameInput.View() + "\n\n" + a.help.View(nameInputKeyMap)
+	default:
+		return a.sessionList.View()
+	}
+}
+
+type errMsg struct{ err error }
