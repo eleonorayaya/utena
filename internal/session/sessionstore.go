@@ -33,7 +33,7 @@ func (s *SessionStore) GetByID(id string) (*Session, error) {
 
 	session, ok := s.sessions[id]
 	if !ok {
-		return nil, errors.New("session not found")
+		return nil, ErrSessionNotFound
 	}
 
 	copy := *session
@@ -124,7 +124,7 @@ func (s *SessionStore) Update(session *Session) error {
 	defer s.mu.Unlock()
 
 	if _, exists := s.sessions[session.ID]; !exists {
-		return errors.New("session not found")
+		return ErrSessionNotFound
 	}
 
 	s.sessions[session.ID] = session
@@ -141,7 +141,7 @@ func (s *SessionStore) Delete(id string) error {
 	defer s.mu.Unlock()
 
 	if _, exists := s.sessions[id]; !exists {
-		return errors.New("session not found")
+		return ErrSessionNotFound
 	}
 
 	delete(s.sessions, id)

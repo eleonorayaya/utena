@@ -78,7 +78,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, activateSession(a.pendingCreate)
 
 	case errMsg:
-		_ = msg.err
+		if a.activeView == nameInputView {
+			a.nameInput.err = msg.err.Error()
+			return a, nil
+		}
 		return a, nil
 	}
 

@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -17,6 +18,16 @@ var apiClient = &http.Client{
 }
 
 const baseURL = "http://localhost:3333"
+
+func parseAPIError(res *http.Response, fallback string) errMsg {
+	var errResp struct {
+		Error string `json:"error"`
+	}
+	if json.NewDecoder(res.Body).Decode(&errResp) == nil && errResp.Error != "" {
+		return errMsg{errors.New(errResp.Error)}
+	}
+	return errMsg{fmt.Errorf("%s: unexpected status %d", fallback, res.StatusCode)}
+}
 
 type sessionsLoadedMsg struct {
 	sessions []session.Session
@@ -86,7 +97,7 @@ func activateSession(name string) tea.Cmd {
 		defer res.Body.Close()
 
 		if res.StatusCode != http.StatusOK {
-			return errMsg{fmt.Errorf("activate session: unexpected status %d", res.StatusCode)}
+			return parseAPIError(res, "activate session")
 		}
 
 		return sessionActivatedMsg{}
@@ -111,7 +122,7 @@ func createSession(name, workspaceID string) tea.Cmd {
 		defer res.Body.Close()
 
 		if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusCreated {
-			return errMsg{fmt.Errorf("create session: unexpected status %d", res.StatusCode)}
+			return parseAPIError(res, "create session")
 		}
 
 		return sessionCreatedMsg{}

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
@@ -74,14 +75,22 @@ func (s *SessionService) CreateSessionAndNotify(ctx context.Context, session *Se
 		return err
 	}
 
-	event := eventbus.Event{
+	var workspacePath string
+	if session.WorkspaceID != "" {
+		if ws, err := s.workspaceStore.GetByID(session.WorkspaceID); err == nil {
+			workspacePath = ws.Path
+		}
+	}
+
+	if err := s.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionCreateRequested,
 		Data: eventbus.SessionCreateRequestedEvent{
 			SessionName:   session.ID,
-			WorkspacePath: "",
+			WorkspacePath: workspacePath,
 		},
+	}); err != nil {
+		return fmt.Errorf("failed to notify plugin: %w", err)
 	}
-	s.eventBus.Publish(ctx, event)
 
 	return nil
 }
@@ -115,12 +124,14 @@ func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Ses
 		return nil, err
 	}
 
-	s.eventBus.Publish(ctx, eventbus.Event{
+	if err := s.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionActivated,
 		Data: eventbus.SessionActivatedEvent{
 			SessionName: name,
 		},
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("failed to notify plugin: %w", err)
+	}
 
 	return session, nil
 }
