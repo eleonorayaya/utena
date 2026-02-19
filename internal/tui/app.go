@@ -78,6 +78,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+	case deleteSessionMsg:
+		return a, deleteSession(msg.id)
+
+	case sessionDeletedMsg:
+		return a, fetchSessions()
+
 	case activateSessionMsg:
 		return a, activateSession(msg.name)
 

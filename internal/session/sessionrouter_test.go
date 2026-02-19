@@ -254,7 +254,8 @@ func TestSessionRouter_DeleteSession(t *testing.T) {
 	// Assert
 	require.Equal(t, http.StatusNoContent, w.Code)
 
-	// Verify deletion
-	_, err := sessionStore.GetByID("session-1")
-	require.Error(t, err)
+	retrieved, err := sessionStore.GetByID("session-1")
+	require.NoError(t, err)
+	require.True(t, retrieved.IsDeleted)
+	require.NotNil(t, retrieved.Cleanup)
 }

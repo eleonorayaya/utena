@@ -11,6 +11,8 @@ import (
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
+const EventSessionDeleted = "session.deleted"
+
 type SessionService struct {
 	store          *SessionStore
 	workspaceStore *workspace.WorkspaceStore
@@ -152,5 +154,45 @@ func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Ses
 }
 
 func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
-	return s.store.Delete(id)
+	session, err := s.store.GetByID(id)
+	if err != nil {
+		return err
+	}
+
+	if session.IsAttached {
+		return ErrSessionAttached
+	}
+
+	cleanup := &Cleanup{}
+
+	if session.WorktreePath != "" && session.WorkspaceID != "" {
+		ws, err := s.workspaceStore.GetByID(session.WorkspaceID)
+		if err == nil {
+			if rmErr := s.gitService.RemoveWorktree(ctx, ws.Path, session.WorktreePath); rmErr != nil {
+				slog.Warn("failed to remove worktree", "error", rmErr)
+			} else {
+				cleanup.WorktreeRemoved = true
+			}
+			if brErr := s.gitService.DeleteBranch(ctx, ws.Path, id); brErr != nil {
+				slog.Warn("failed to delete branch", "error", brErr)
+			} else {
+				cleanup.BranchDeleted = true
+			}
+		} else {
+			slog.Warn("workspace not found during cleanup, skipping worktree/branch removal", "workspace_id", session.WorkspaceID)
+		}
+	}
+
+	session.IsDeleted = true
+	session.Cleanup = cleanup
+
+	if err := s.store.Update(session); err != nil {
+		return err
+	}
+
+	return s.eventBus.Publish(ctx, eventbus.Event{
+		Type: EventSessionDeleted,
+		Data: session,
+	})
 }
+

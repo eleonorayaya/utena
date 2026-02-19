@@ -209,6 +209,32 @@ func createSession(name, workspaceID, baseBranch string) tea.Cmd {
 	}
 }
 
+type sessionDeletedMsg struct {
+	id string
+}
+
+func deleteSession(id string) tea.Cmd {
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodDelete, baseURL+"/sessions/"+id, nil)
+		if err != nil {
+			return errMsg{err}
+		}
+
+		res, err := apiClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] delete session %q: %v", id, err)
+			return errMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusNoContent {
+			return parseAPIError(res, "delete session")
+		}
+
+		return sessionDeletedMsg{id: id}
+	}
+}
+
 type workspaceAddedMsg struct{}
 
 func addWorkspace(path string, asRoot bool) tea.Cmd {

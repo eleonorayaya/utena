@@ -2,6 +2,9 @@ package zellij
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"os/exec"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
@@ -23,7 +26,22 @@ func NewZellijService(sessionService *session.SessionService, bus eventbus.Event
 }
 
 func (z *ZellijService) OnAppStart(ctx context.Context) error {
+	z.eventBus.Subscribe(session.EventSessionDeleted, z.handleSessionDeleted)
 	return nil
+}
+
+func (z *ZellijService) handleSessionDeleted(ctx context.Context, event eventbus.Event) error {
+	sess, ok := event.Data.(*session.Session)
+	if !ok {
+		return fmt.Errorf("unexpected event data type: %T", event.Data)
+	}
+
+	if err := z.KillSession(ctx, sess.ID); err != nil {
+		return err
+	}
+
+	sess.Cleanup.ZellijSessionKilled = true
+	return z.sessionService.UpdateSession(ctx, sess)
 }
 
 func (z *ZellijService) OnAppEnd(ctx context.Context) error {
@@ -78,6 +96,15 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 		}
 	}
 
+	return nil
+}
+
+func (z *ZellijService) KillSession(ctx context.Context, name string) error {
+	cmd := exec.CommandContext(ctx, "zellij", "kill-session", name)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		slog.Warn("failed to kill zellij session", "session", name, "error", err, "output", string(output))
+		return fmt.Errorf("zellij kill-session failed: %s: %w", string(output), err)
+	}
 	return nil
 }
 

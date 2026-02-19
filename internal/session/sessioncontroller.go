@@ -116,7 +116,15 @@ func (c *SessionController) DeleteSession(w http.ResponseWriter, r *http.Request
 	id := chi.URLParam(r, "id")
 
 	if err := c.service.DeleteSession(ctx, id); err != nil {
-		render.Render(w, r, common.ErrNotFound())
+		if errors.Is(err, ErrSessionNotFound) {
+			render.Render(w, r, common.ErrNotFound())
+			return
+		}
+		if errors.Is(err, ErrSessionAttached) {
+			render.Render(w, r, common.ErrInvalidRequest(err))
+			return
+		}
+		render.Render(w, r, common.ErrUnknown(err))
 		return
 	}
 
