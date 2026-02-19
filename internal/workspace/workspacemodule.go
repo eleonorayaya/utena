@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/afero"
 )
@@ -12,12 +13,14 @@ type WorkspaceModule struct {
 	Service    *WorkspaceService
 	Controller *WorkspaceController
 	Router     *WorkspaceRouter
+	GitService *git.GitService
 }
 
 func NewWorkspaceModule(fs afero.Fs, configDir string) *WorkspaceModule {
 	store := NewWorkspaceStore(fs, configDir)
 	service := NewWorkspaceService(store)
-	controller := NewWorkspaceController(service)
+	gitService := git.NewGitService()
+	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 
 	return &WorkspaceModule{
@@ -25,6 +28,7 @@ func NewWorkspaceModule(fs afero.Fs, configDir string) *WorkspaceModule {
 		Service:    service,
 		Controller: controller,
 		Router:     router,
+		GitService: gitService,
 	}
 }
 

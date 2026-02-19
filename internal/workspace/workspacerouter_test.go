@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +23,8 @@ func setupWorkspaceRouter(t *testing.T) (*WorkspaceRouter, *WorkspaceStore) {
 	store.Add(&Workspace{ID: "ws-2", Name: "example-project", Path: "/path/to/example", IsGitRepo: false})
 
 	service := NewWorkspaceService(store)
-	controller := NewWorkspaceController(service)
+	gitService := git.NewGitService()
+	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 
 	return router, store
@@ -94,7 +96,8 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 	wsDir := t.TempDir()
 
 	service := NewWorkspaceService(store)
-	controller := NewWorkspaceController(service)
+	gitService := git.NewGitService()
+	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 
 	body := fmt.Sprintf(`{"path": %q, "as_root": false}`, wsDir)

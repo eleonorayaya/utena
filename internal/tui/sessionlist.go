@@ -67,11 +67,7 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 			if s.IsDead {
 				continue
 			}
-			name := msg.workspaceNames[s.WorkspaceID]
-			if name == "" && s.WorkspaceID != "" {
-				name = s.WorkspaceID
-			}
-			items = append(items, sessionItem{session: s, workspaceName: name})
+			items = append(items, sessionItem{session: s, workspaceName: s.WorkspaceName})
 		}
 		cmd := m.list.SetItems(items)
 		return m, cmd

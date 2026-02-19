@@ -15,6 +15,7 @@ type view int
 const (
 	sessionListView view = iota
 	workspacePickerView
+	branchPickerView
 	nameInputView
 	debugView
 	filePickerView
@@ -25,11 +26,13 @@ type App struct {
 	previousView         view
 	sessionList          SessionListModel
 	newSession           NewSessionModel
+	branchPicker         BranchPickerModel
 	nameInput            NameInputModel
 	filePicker           FilePickerModel
 	help                 help.Model
 	pendingCreate        string
 	pendingWorkspacePath string
+	pendingBranch        string
 	logPath              string
 	width, height        int
 }
@@ -57,6 +60,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		a.sessionList.SetSize(msg.Width, msg.Height)
 		a.newSession.SetSize(msg.Width, msg.Height)
+		if a.activeView == branchPickerView {
+			a.branchPicker.SetSize(msg.Width, msg.Height)
+		}
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
@@ -87,8 +93,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.newSession.SetSize(a.width, a.height)
 		return a, fetchWorkspaces()
 
+	case switchToBranchPickerMsg:
+		a.activeView = branchPickerView
+		a.branchPicker = NewBranchPickerModel(msg.workspace)
+		a.branchPicker.SetSize(a.width, a.height)
+		return a, fetchBranches(msg.workspace.ID)
+
+	case branchSelectedMsg:
+		a.activeView = nameInputView
+		a.pendingBranch = msg.branch
+		a.nameInput = NewNameInputModel(msg.workspace)
+		return a, a.nameInput.Init()
+
 	case switchToNameInputMsg:
 		a.activeView = nameInputView
+		a.pendingBranch = ""
 		a.nameInput = NewNameInputModel(msg.workspace)
 		return a, a.nameInput.Init()
 
@@ -99,9 +118,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case createSessionMsg:
 		a.pendingCreate = msg.name
 		a.pendingWorkspacePath = a.nameInput.workspace.Path
-		return a, createSession(msg.name, msg.workspaceID)
+		return a, createSession(msg.name, msg.workspaceID, a.pendingBranch)
 
 	case sessionCreatedMsg:
+		if msg.worktreePath != "" {
+			a.pendingWorkspacePath = msg.worktreePath
+		}
 		return a, activateSession(a.pendingCreate)
 
 	case switchToFilePickerMsg:
@@ -121,6 +143,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		switch a.activeView {
+		case branchPickerView:
+			return a, a.branchPicker.list.NewStatusMessage(msg.err.Error())
 		case nameInputView:
 			a.nameInput.err = msg.err.Error()
 			return a, nil
@@ -136,6 +160,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.sessionList, cmd = a.sessionList.Update(msg)
 	case workspacePickerView:
 		a.newSession, cmd = a.newSession.Update(msg)
+	case branchPickerView:
+		a.branchPicker, cmd = a.branchPicker.Update(msg)
 	case nameInputView:
 		a.nameInput, cmd = a.nameInput.Update(msg)
 	case filePickerView:
@@ -150,6 +176,8 @@ func (a App) View() string {
 		return a.debugViewContent()
 	case workspacePickerView:
 		return a.newSession.View()
+	case branchPickerView:
+		return a.branchPicker.View()
 	case nameInputView:
 		return a.nameInput.View() + "\n\n" + a.help.View(nameInputKeyMap)
 	case filePickerView:

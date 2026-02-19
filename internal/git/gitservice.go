@@ -1,0 +1,50 @@
+package git
+
+import (
+	"context"
+	"fmt"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+type GitService struct{}
+
+func NewGitService() *GitService {
+	return &GitService{}
+}
+
+func (s *GitService) ListBranches(ctx context.Context, repoPath string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "branch", "--format=%(refname:short)")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list branches: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	branches := []string{}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			branches = append(branches, trimmed)
+		}
+	}
+	return branches, nil
+}
+
+func (s *GitService) Pull(ctx context.Context, repoPath string, branch string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "pull", "origin", branch)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git pull failed: %s: %w", string(output), err)
+	}
+	return nil
+}
+
+func (s *GitService) CreateWorktree(ctx context.Context, repoPath string, name string, baseBranch string) (string, error) {
+	worktreePath := filepath.Join(repoPath, ".worktrees", name)
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", "-b", name, worktreePath, baseBranch)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
+	}
+	return worktreePath, nil
+}

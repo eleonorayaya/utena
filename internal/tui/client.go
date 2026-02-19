@@ -37,8 +37,7 @@ func parseAPIError(res *http.Response, fallback string) errMsg {
 }
 
 type sessionsLoadedMsg struct {
-	sessions       []session.Session
-	workspaceNames map[string]string
+	sessions []session.Session
 }
 
 type workspacesLoadedMsg struct {
@@ -49,7 +48,9 @@ type sessionActivatedMsg struct {
 	name string
 }
 
-type sessionCreatedMsg struct{}
+type sessionCreatedMsg struct {
+	worktreePath string
+}
 
 type pipeSentMsg struct{}
 
@@ -71,34 +72,8 @@ func fetchSessions() tea.Cmd {
 			return errMsg{err}
 		}
 
-		names := fetchWorkspaceNames()
-
-		return sessionsLoadedMsg{sessions: resp.Sessions, workspaceNames: names}
+		return sessionsLoadedMsg{sessions: resp.Sessions}
 	}
-}
-
-func fetchWorkspaceNames() map[string]string {
-	names := make(map[string]string)
-	res, err := apiClient.Get(baseURL + "/workspaces")
-	if err != nil {
-		log.Printf("[ERROR] fetch workspace names: %v", err)
-		return names
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		return names
-	}
-
-	var resp workspace.WorkspaceListResponse
-	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-		return names
-	}
-
-	for _, ws := range resp.Workspaces {
-		names[ws.ID] = ws.Name
-	}
-	return names
 }
 
 func fetchWorkspaces() tea.Cmd {
@@ -120,6 +95,32 @@ func fetchWorkspaces() tea.Cmd {
 		}
 
 		return workspacesLoadedMsg{workspaces: resp.Workspaces}
+	}
+}
+
+type branchListResponse struct {
+	Branches []string `json:"branches"`
+}
+
+func fetchBranches(workspaceID string) tea.Cmd {
+	return func() tea.Msg {
+		res, err := apiClient.Get(baseURL + "/workspaces/" + workspaceID + "/branches")
+		if err != nil {
+			log.Printf("[ERROR] fetch branches: %v", err)
+			return errMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			return parseAPIError(res, "fetch branches")
+		}
+
+		var resp branchListResponse
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			return errMsg{err}
+		}
+
+		return branchesLoadedMsg{branches: resp.Branches}
 	}
 }
 
@@ -145,11 +146,14 @@ func activateSession(name string) tea.Cmd {
 	}
 }
 
-func createSession(name, workspaceID string) tea.Cmd {
+func createSession(name, workspaceID, baseBranch string) tea.Cmd {
 	return func() tea.Msg {
 		body := map[string]string{
 			"id":           name,
 			"workspace_id": workspaceID,
+		}
+		if baseBranch != "" {
+			body["base_branch"] = baseBranch
 		}
 		jsonBody, err := json.Marshal(body)
 		if err != nil {
@@ -167,7 +171,12 @@ func createSession(name, workspaceID string) tea.Cmd {
 			return parseAPIError(res, "create session")
 		}
 
-		return sessionCreatedMsg{}
+		var resp struct {
+			WorktreePath string `json:"worktree_path"`
+		}
+		json.NewDecoder(res.Body).Decode(&resp)
+
+		return sessionCreatedMsg{worktreePath: resp.WorktreePath}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -21,7 +22,8 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
 
-	service := NewSessionService(sessionStore, workspaceStore, bus)
+	gitService := git.NewGitService()
+	service := NewSessionService(sessionStore, workspaceStore, gitService, bus)
 	return service, sessionStore, workspaceStore
 }
 
