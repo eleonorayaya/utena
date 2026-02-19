@@ -33,16 +33,15 @@ func (z *ZellijService) OnAppStart(ctx context.Context) error {
 func (z *ZellijService) handleSessionDeleted(ctx context.Context, event eventbus.Event) error {
 	sess, ok := event.Data.(*session.Session)
 	if !ok {
-		return nil
+		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
 	if err := z.KillSession(ctx, sess.ID); err != nil {
-		return nil
+		return err
 	}
 
 	sess.Cleanup.ZellijSessionKilled = true
-	z.sessionService.UpdateSession(ctx, sess)
-	return nil
+	return z.sessionService.UpdateSession(ctx, sess)
 }
 
 func (z *ZellijService) OnAppEnd(ctx context.Context) error {

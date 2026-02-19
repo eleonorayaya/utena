@@ -190,11 +190,9 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 		return err
 	}
 
-	s.eventBus.Publish(ctx, eventbus.Event{
+	return s.eventBus.Publish(ctx, eventbus.Event{
 		Type: EventSessionDeleted,
 		Data: session,
 	})
-
-	return nil
 }
 
