@@ -37,7 +37,8 @@ func parseAPIError(res *http.Response, fallback string) errMsg {
 }
 
 type sessionsLoadedMsg struct {
-	sessions []session.Session
+	sessions       []session.Session
+	workspaceNames map[string]string
 }
 
 type workspacesLoadedMsg struct {
@@ -70,8 +71,34 @@ func fetchSessions() tea.Cmd {
 			return errMsg{err}
 		}
 
-		return sessionsLoadedMsg{sessions: resp.Sessions}
+		names := fetchWorkspaceNames()
+
+		return sessionsLoadedMsg{sessions: resp.Sessions, workspaceNames: names}
 	}
+}
+
+func fetchWorkspaceNames() map[string]string {
+	names := make(map[string]string)
+	res, err := apiClient.Get(baseURL + "/workspaces")
+	if err != nil {
+		log.Printf("[ERROR] fetch workspace names: %v", err)
+		return names
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return names
+	}
+
+	var resp workspace.WorkspaceListResponse
+	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+		return names
+	}
+
+	for _, ws := range resp.Workspaces {
+		names[ws.ID] = ws.Name
+	}
+	return names
 }
 
 func fetchWorkspaces() tea.Cmd {

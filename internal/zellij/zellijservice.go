@@ -48,7 +48,9 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 			sess.IsAttached = update.ConnectedClients > 0
 			sess.IsActive = true
 			sess.IsDead = false
-			sess.LastUsedAt = time.Now()
+			if sess.IsAttached {
+				sess.LastUsedAt = time.Now()
+			}
 			delete(activeSessions, sess.ID)
 		} else {
 			sess.IsDead = true
@@ -60,12 +62,15 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 	}
 
 	for sessionID, sessionUpdate := range activeSessions {
+		attached := sessionUpdate.ConnectedClients > 0
 		newSession := &session.Session{
 			ID:         sessionID,
-			IsAttached: sessionUpdate.ConnectedClients > 0,
+			IsAttached: attached,
 			IsActive:   true,
 			IsDead:     false,
-			LastUsedAt: time.Now(),
+		}
+		if attached {
+			newSession.LastUsedAt = time.Now()
 		}
 
 		if err := z.sessionService.CreateSession(ctx, newSession); err != nil {
