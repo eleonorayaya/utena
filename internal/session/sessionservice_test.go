@@ -2,6 +2,9 @@ package session
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -237,4 +240,121 @@ func TestSessionService_DeleteSession_NotFound(t *testing.T) {
 	err := service.DeleteSession(ctx, "nonexistent")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
+}
+
+func initTestRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmds := [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "command %v failed: %s", args, string(out))
+	}
+	return dir
+}
+
+func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
+	repoPath := initTestRepo(t)
+
+	bus := eventbus.NewEventBus()
+	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
+	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	workspaceStore.Add(&workspace.Workspace{ID: "ws-git", Name: "git-repo", Path: repoPath, IsGitRepo: true})
+
+	gitService := git.NewGitService()
+	service := NewSessionService(sessionStore, workspaceStore, gitService, bus)
+
+	session := &Session{
+		ID:          "my-feature",
+		WorkspaceID: "ws-git",
+		BaseBranch:  "main",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session)
+	require.NoError(t, err)
+
+	expectedPath := filepath.Join(repoPath, ".worktrees", "my-feature")
+	require.Equal(t, expectedPath, session.WorktreePath)
+
+	info, err := os.Stat(expectedPath)
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+
+	retrieved, err := sessionStore.GetByID("my-feature")
+	require.NoError(t, err)
+	require.Equal(t, expectedPath, retrieved.WorktreePath)
+	require.Equal(t, "main", retrieved.BaseBranch)
+}
+
+func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
+	repoPath := initTestRepo(t)
+
+	bus := eventbus.NewEventBus()
+	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
+	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	workspaceStore.Add(&workspace.Workspace{ID: "ws-git", Name: "git-repo", Path: repoPath, IsGitRepo: true})
+
+	gitService := git.NewGitService()
+	service := NewSessionService(sessionStore, workspaceStore, gitService, bus)
+
+	session := &Session{
+		ID:          "my-feature",
+		WorkspaceID: "ws-git",
+		BaseBranch:  "nonexistent",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to create worktree")
+
+	_, err = sessionStore.GetByID("my-feature")
+	require.Error(t, err)
+}
+
+func TestSessionService_CreateSession_NoBranch_SkipsWorktree(t *testing.T) {
+	service, sessionStore, _ := setupSessionService(t)
+
+	session := &Session{
+		ID:          "my-session",
+		WorkspaceID: "ws-1",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session)
+	require.NoError(t, err)
+	require.Empty(t, session.WorktreePath)
+
+	retrieved, err := sessionStore.GetByID("my-session")
+	require.NoError(t, err)
+	require.Empty(t, retrieved.WorktreePath)
+}
+
+func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T) {
+	bus := eventbus.NewEventBus()
+	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
+	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	workspaceStore.Add(&workspace.Workspace{ID: "ws-nogit", Name: "plain", Path: "/tmp/plain", IsGitRepo: false})
+
+	gitService := git.NewGitService()
+	service := NewSessionService(sessionStore, workspaceStore, gitService, bus)
+
+	session := &Session{
+		ID:          "my-session",
+		WorkspaceID: "ws-nogit",
+		BaseBranch:  "main",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session)
+	require.NoError(t, err)
+	require.Empty(t, session.WorktreePath)
 }
