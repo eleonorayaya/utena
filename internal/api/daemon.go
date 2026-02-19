@@ -81,7 +81,14 @@ func StartDaemon() {
 func serveAPI(ctx context.Context, workspaceModule *workspace.WorkspaceModule, sessionModule *session.SessionModule, zellijModule *zellij.ZellijModule, claudeModule *claude.ClaudeModule, prettyLogs bool) {
 	r := chi.NewRouter()
 
-	httplogOpts := &httplog.Options{}
+	httplogOpts := &httplog.Options{
+		LogExtraAttrs: func(r *http.Request, _ string, _ int) []slog.Attr {
+			if s := r.Header.Get("X-Zellij-Session"); s != "" {
+				return []slog.Attr{slog.String("zellij_session", s)}
+			}
+			return nil
+		},
+	}
 	if prettyLogs {
 		httplogOpts.Schema = httplog.SchemaECS.Concise(true)
 	}

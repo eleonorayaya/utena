@@ -14,18 +14,18 @@ import (
 const EventSessionDeleted = "session.deleted"
 
 type SessionService struct {
-	store          *SessionStore
-	workspaceStore *workspace.WorkspaceStore
-	gitService     *git.GitService
-	eventBus       eventbus.EventBus
+	store            *SessionStore
+	workspaceService *workspace.WorkspaceService
+	gitService       *git.GitService
+	eventBus         eventbus.EventBus
 }
 
-func NewSessionService(store *SessionStore, workspaceStore *workspace.WorkspaceStore, gitService *git.GitService, bus eventbus.EventBus) *SessionService {
+func NewSessionService(store *SessionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, bus eventbus.EventBus) *SessionService {
 	return &SessionService{
-		store:          store,
-		workspaceStore: workspaceStore,
-		gitService:     gitService,
-		eventBus:       bus,
+		store:            store,
+		workspaceService: workspaceService,
+		gitService:       gitService,
+		eventBus:         bus,
 	}
 }
 
@@ -50,7 +50,7 @@ func (s *SessionService) resolveWorkspaceName(session *Session) {
 	if session.WorkspaceID == "" {
 		return
 	}
-	ws, err := s.workspaceStore.GetByID(session.WorkspaceID)
+	ws, err := s.workspaceService.GetWorkspace(context.Background(), session.WorkspaceID)
 	if err != nil {
 		slog.Warn("failed to resolve workspace name", "session", session.ID, "workspace_id", session.WorkspaceID, "error", err)
 		return
@@ -60,7 +60,7 @@ func (s *SessionService) resolveWorkspaceName(session *Session) {
 
 func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceID string) ([]Session, error) {
 
-	_, err := s.workspaceStore.GetByID(workspaceID)
+	_, err := s.workspaceService.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session) er
 	var ws *workspace.Workspace
 	if session.WorkspaceID != "" {
 		var err error
-		ws, err = s.workspaceStore.GetByID(session.WorkspaceID)
+		ws, err = s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
 		if err != nil {
 			return err
 		}
@@ -102,6 +102,10 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session) er
 		return err
 	}
 
+	if session.WorkspaceID != "" {
+		s.workspaceService.Touch(ctx, session.WorkspaceID)
+	}
+
 	return nil
 }
 
@@ -112,7 +116,7 @@ func (s *SessionService) UpdateSession(ctx context.Context, session *Session) er
 	}
 
 	if session.WorkspaceID != "" && session.WorkspaceID != existing.WorkspaceID {
-		_, err := s.workspaceStore.GetByID(session.WorkspaceID)
+		_, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
 		if err != nil {
 			return err
 		}
@@ -150,6 +154,10 @@ func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Ses
 		return nil, err
 	}
 
+	if session.WorkspaceID != "" {
+		s.workspaceService.Touch(ctx, session.WorkspaceID)
+	}
+
 	return session, nil
 }
 
@@ -166,7 +174,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 	cleanup := &Cleanup{}
 
 	if session.WorktreePath != "" && session.WorkspaceID != "" {
-		ws, err := s.workspaceStore.GetByID(session.WorkspaceID)
+		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
 		if err == nil {
 			if rmErr := s.gitService.RemoveWorktree(ctx, ws.Path, session.WorktreePath); rmErr != nil {
 				slog.Warn("failed to remove worktree", "error", rmErr)
@@ -195,4 +203,3 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 		Data: session,
 	})
 }
-

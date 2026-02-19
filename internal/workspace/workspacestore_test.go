@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -176,6 +177,21 @@ func TestWorkspaceStore_List_SortedAlphabetically(t *testing.T) {
 	require.Equal(t, "alpha", list[0].Name)
 	require.Equal(t, "bravo", list[1].Name)
 	require.Equal(t, "charlie", list[2].Name)
+}
+
+func TestWorkspaceStore_List_SortedByLastUsedAt(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	now := time.Now()
+	store.Add(&Workspace{ID: "ws-1", Name: "alpha", Path: "/path1", LastUsedAt: now.Add(-2 * time.Hour)})
+	store.Add(&Workspace{ID: "ws-2", Name: "bravo", Path: "/path2", LastUsedAt: now})
+	store.Add(&Workspace{ID: "ws-3", Name: "charlie", Path: "/path3"})
+
+	list := store.List()
+	require.Len(t, list, 3)
+	require.Equal(t, "bravo", list[0].Name, "Most recent should be first")
+	require.Equal(t, "alpha", list[1].Name, "Second most recent should be second")
+	require.Equal(t, "charlie", list[2].Name, "Never-used should be last")
 }
 
 func TestWorkspaceStore_List_Empty(t *testing.T) {
@@ -512,6 +528,43 @@ func TestWorkspaceStore_AddWorkspaceRoot_InvalidPath(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestWorkspaceStore_Update(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	ws := &Workspace{ID: "ws-1", Name: "test", Path: "/path"}
+	store.Add(ws)
+
+	now := time.Now()
+	ws.LastUsedAt = now
+	err := store.Update(ws)
+	require.NoError(t, err)
+
+	retrieved, err := store.GetByID("ws-1")
+	require.NoError(t, err)
+	require.Equal(t, now.Unix(), retrieved.LastUsedAt.Unix())
+}
+
+func TestWorkspaceStore_Update_NotFound(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	ws := &Workspace{ID: "nonexistent", Name: "test", Path: "/path"}
+	err := store.Update(ws)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestWorkspaceStore_Update_Nil(t *testing.T) {
+	store := setupWorkspaceStore(t)
+	err := store.Update(nil)
+	require.Error(t, err)
+}
+
+func TestWorkspaceStore_Update_EmptyID(t *testing.T) {
+	store := setupWorkspaceStore(t)
+	err := store.Update(&Workspace{Name: "test"})
+	require.Error(t, err)
+}
+
 func TestWorkspaceStore_SaveConfig_CreatesDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "nested", "dir")
@@ -524,4 +577,47 @@ func TestWorkspaceStore_SaveConfig_CreatesDir(t *testing.T) {
 	cfg, err := store.loadConfig()
 	require.NoError(t, err)
 	require.Equal(t, []string{"/some/path"}, cfg.Workspaces)
+}
+
+func TestWorkspaceStore_Persistence(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	now := time.Now()
+	ws := &Workspace{ID: "ws-1", Name: "test", Path: "/path", LastUsedAt: now}
+	store.Add(ws)
+
+	store2 := NewWorkspaceStore(store.fs, store.configDir)
+	store2.load()
+
+	retrieved, err := store2.GetByID("ws-1")
+	require.NoError(t, err)
+	require.Equal(t, now.Unix(), retrieved.LastUsedAt.Unix())
+	require.Equal(t, "test", retrieved.Name)
+}
+
+func TestWorkspaceStore_OnAppStart_MergesDiscoveredWithPersisted(t *testing.T) {
+	rootDir := t.TempDir()
+	os.MkdirAll(filepath.Join(rootDir, "project-alpha"), 0755)
+
+	store, _ := setupWorkspaceStoreWithConfig(t, []string{rootDir})
+
+	ctx := context.Background()
+	err := store.OnAppStart(ctx)
+	require.NoError(t, err)
+
+	workspaces := store.List()
+	require.Len(t, workspaces, 1)
+	wsID := workspaces[0].ID
+
+	now := time.Now()
+	workspaces[0].LastUsedAt = now
+	store.Update(&workspaces[0])
+
+	store2 := NewWorkspaceStore(store.fs, store.configDir)
+	err = store2.OnAppStart(ctx)
+	require.NoError(t, err)
+
+	retrieved, err := store2.GetByID(wsID)
+	require.NoError(t, err)
+	require.Equal(t, now.Unix(), retrieved.LastUsedAt.Unix())
 }

@@ -84,6 +84,15 @@ func (s *WorkspaceStore) List() []Workspace {
 	}
 
 	sort.Slice(workspaces, func(i, j int) bool {
+		iUsed := !workspaces[i].LastUsedAt.IsZero()
+		jUsed := !workspaces[j].LastUsedAt.IsZero()
+
+		if iUsed && jUsed {
+			return workspaces[i].LastUsedAt.After(workspaces[j].LastUsedAt)
+		}
+		if iUsed != jUsed {
+			return iUsed
+		}
 		return workspaces[i].Name < workspaces[j].Name
 	})
 
@@ -107,6 +116,28 @@ func (s *WorkspaceStore) Add(ws *Workspace) error {
 	}
 
 	s.workspaces[ws.ID] = ws
+	s.save()
+	return nil
+}
+
+func (s *WorkspaceStore) Update(ws *Workspace) error {
+	if ws == nil {
+		return errors.New("workspace cannot be nil")
+	}
+	if ws.ID == "" {
+		return errors.New("workspace ID cannot be empty")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.workspaces[ws.ID]; !exists {
+		return &WorkspaceNotFoundError{WorkspaceID: ws.ID}
+	}
+
+	copy := *ws
+	s.workspaces[ws.ID] = &copy
+	s.save()
 	return nil
 }
 
@@ -205,16 +236,27 @@ func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
 }
 
 func (s *WorkspaceStore) OnAppStart(ctx context.Context) error {
-	workspaces, err := s.discoverWorkspaces()
+	s.mu.Lock()
+	s.load()
+	s.mu.Unlock()
+
+	discovered, err := s.discoverWorkspaces()
 	if err != nil {
 		return err
 	}
 
-	for _, ws := range workspaces {
-		if err := s.Add(ws); err != nil {
-			return err
+	s.mu.Lock()
+	for _, ws := range discovered {
+		if existing, ok := s.workspaces[ws.ID]; ok {
+			existing.Name = ws.Name
+			existing.Path = ws.Path
+			existing.IsGitRepo = ws.IsGitRepo
+		} else {
+			s.workspaces[ws.ID] = ws
 		}
 	}
+	s.save()
+	s.mu.Unlock()
 
 	return nil
 }
@@ -308,6 +350,33 @@ func (s *WorkspaceStore) saveConfig(cfg *config) error {
 		return err
 	}
 	return afero.WriteFile(s.fs, s.configPath(), data, 0644)
+}
+
+func (s *WorkspaceStore) workspacesPath() string {
+	return filepath.Join(s.configDir, "workspaces.json")
+}
+
+func (s *WorkspaceStore) load() {
+	data, err := afero.ReadFile(s.fs, s.workspacesPath())
+	if err != nil {
+		return
+	}
+
+	loaded := make(map[string]*Workspace)
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		return
+	}
+
+	s.workspaces = loaded
+}
+
+func (s *WorkspaceStore) save() {
+	s.fs.MkdirAll(s.configDir, 0755)
+	data, err := json.Marshal(s.workspaces)
+	if err != nil {
+		return
+	}
+	afero.WriteFile(s.fs, s.workspacesPath(), data, 0644)
 }
 
 func expandHome(path string) string {

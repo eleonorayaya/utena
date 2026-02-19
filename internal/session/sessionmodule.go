@@ -18,7 +18,7 @@ type SessionModule struct {
 
 func NewSessionModule(workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, fs afero.Fs, configDir string) *SessionModule {
 	store := NewSessionStore(fs, configDir)
-	service := NewSessionService(store, workspaceModule.Store, workspaceModule.GitService, bus)
+	service := NewSessionService(store, workspaceModule.Service, workspaceModule.GitService, bus)
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
