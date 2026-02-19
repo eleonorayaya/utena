@@ -25,8 +25,9 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
 
+	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceStore, gitService, bus)
+	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
 	return service, sessionStore, workspaceStore
 }
 
@@ -34,7 +35,7 @@ func TestNewSessionService(t *testing.T) {
 	service, _, _ := setupSessionService(t)
 	require.NotNil(t, service)
 	require.NotNil(t, service.store)
-	require.NotNil(t, service.workspaceStore)
+	require.NotNil(t, service.workspaceService)
 }
 
 func TestSessionService_OnAppStart(t *testing.T) {
@@ -269,8 +270,9 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-git", Name: "git-repo", Path: repoPath, IsGitRepo: true})
 
+	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceStore, gitService, bus)
+	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
 
 	session := &Session{
 		ID:          "my-feature",
@@ -303,8 +305,9 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-git", Name: "git-repo", Path: repoPath, IsGitRepo: true})
 
+	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceStore, gitService, bus)
+	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
 
 	session := &Session{
 		ID:          "my-feature",
@@ -345,8 +348,9 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-nogit", Name: "plain", Path: "/tmp/plain", IsGitRepo: false})
 
+	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceStore, gitService, bus)
+	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
 
 	session := &Session{
 		ID:          "my-session",

@@ -24,8 +24,9 @@ func setupZellijService(t *testing.T) (*ZellijService, *session.SessionService, 
 
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 
+	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	sessionService := session.NewSessionService(sessionStore, workspaceStore, gitService, bus)
+	sessionService := session.NewSessionService(sessionStore, workspaceService, gitService, bus)
 	err := sessionService.OnAppStart(ctx)
 	require.NoError(t, err)
 
