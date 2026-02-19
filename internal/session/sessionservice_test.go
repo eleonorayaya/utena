@@ -363,3 +363,39 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	require.NoError(t, err)
 	require.Empty(t, session.WorktreePath)
 }
+
+func TestSessionService_CreateSession_TouchesWorkspace(t *testing.T) {
+	service, _, workspaceStore := setupSessionService(t)
+
+	session := &Session{
+		ID:          "session-1",
+		WorkspaceID: "ws-1",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session)
+	require.NoError(t, err)
+
+	ws, err := workspaceStore.GetByID("ws-1")
+	require.NoError(t, err)
+	require.False(t, ws.LastUsedAt.IsZero())
+}
+
+func TestSessionService_ActivateSession_TouchesWorkspace(t *testing.T) {
+	service, sessionStore, workspaceStore := setupSessionService(t)
+
+	session := &Session{
+		ID:          "session-1",
+		WorkspaceID: "ws-1",
+		LastUsedAt:  time.Now().Add(-1 * time.Hour),
+	}
+	sessionStore.Add(session)
+
+	ctx := context.Background()
+	_, err := service.ActivateSession(ctx, "session-1")
+	require.NoError(t, err)
+
+	ws, err := workspaceStore.GetByID("ws-1")
+	require.NoError(t, err)
+	require.False(t, ws.LastUsedAt.IsZero())
+}

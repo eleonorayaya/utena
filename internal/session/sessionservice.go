@@ -102,6 +102,10 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session) er
 		return err
 	}
 
+	if session.WorkspaceID != "" {
+		s.workspaceService.Touch(ctx, session.WorkspaceID)
+	}
+
 	return nil
 }
 
@@ -148,6 +152,10 @@ func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Ses
 
 	if err := s.store.Update(session); err != nil {
 		return nil, err
+	}
+
+	if session.WorkspaceID != "" {
+		s.workspaceService.Touch(ctx, session.WorkspaceID)
 	}
 
 	return session, nil
