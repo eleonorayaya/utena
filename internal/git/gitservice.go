@@ -42,9 +42,12 @@ func (s *GitService) ListBranches(ctx context.Context, repoPath string) ([]strin
 }
 
 func (s *GitService) Pull(ctx context.Context, repoPath string, branch string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "pull", "origin", branch)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git pull failed: %s: %w", string(output), err)
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "fetch", "origin", branch+":"+branch)
+	if _, err := cmd.CombinedOutput(); err != nil {
+		fallback := exec.CommandContext(ctx, "git", "-C", repoPath, "pull", "origin", branch)
+		if output, err := fallback.CombinedOutput(); err != nil {
+			return fmt.Errorf("git pull failed: %s: %w", string(output), err)
+		}
 	}
 	return nil
 }

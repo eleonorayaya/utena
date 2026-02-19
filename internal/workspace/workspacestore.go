@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -225,6 +226,7 @@ func (s *WorkspaceStore) OnAppEnd(ctx context.Context) error {
 func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 	cfg, err := s.loadConfig()
 	if err != nil {
+		slog.Warn("failed to load workspace config, no workspaces will be available", "error", err)
 		return nil, nil
 	}
 
