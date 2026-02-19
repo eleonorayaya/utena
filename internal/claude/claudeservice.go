@@ -30,7 +30,7 @@ func (s *ClaudeService) HandleHookEvent(ctx context.Context, req *HookEventReque
 		return s.upsertWithStatus(req, StatusWorking)
 
 	case "Stop":
-		return s.upsertWithStatus(req, StatusNeedsAttention)
+		return s.upsertWithStatus(req, StatusCompleted)
 
 	case "Notification":
 		if req.NotificationType == "permission_prompt" {
