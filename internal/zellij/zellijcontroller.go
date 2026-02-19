@@ -2,7 +2,6 @@ package zellij
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"github.com/eleonorayaya/utena/internal/common"
@@ -22,8 +21,6 @@ func NewZellijController(service *ZellijService) *ZellijController {
 
 func (c *ZellijController) UpdateSessions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	zellijSession := r.Header.Get("X-Zellij-Session")
-	slog.Info("session update from plugin", "zellij_session", zellijSession)
 
 	req := &UpdateSessionsRequest{}
 	if err := render.Bind(r, req); err != nil {
