@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -176,6 +177,21 @@ func TestWorkspaceStore_List_SortedAlphabetically(t *testing.T) {
 	require.Equal(t, "alpha", list[0].Name)
 	require.Equal(t, "bravo", list[1].Name)
 	require.Equal(t, "charlie", list[2].Name)
+}
+
+func TestWorkspaceStore_List_SortedByLastUsedAt(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	now := time.Now()
+	store.Add(&Workspace{ID: "ws-1", Name: "alpha", Path: "/path1", LastUsedAt: now.Add(-2 * time.Hour)})
+	store.Add(&Workspace{ID: "ws-2", Name: "bravo", Path: "/path2", LastUsedAt: now})
+	store.Add(&Workspace{ID: "ws-3", Name: "charlie", Path: "/path3"})
+
+	list := store.List()
+	require.Len(t, list, 3)
+	require.Equal(t, "bravo", list[0].Name, "Most recent should be first")
+	require.Equal(t, "alpha", list[1].Name, "Second most recent should be second")
+	require.Equal(t, "charlie", list[2].Name, "Never-used should be last")
 }
 
 func TestWorkspaceStore_List_Empty(t *testing.T) {

@@ -84,6 +84,15 @@ func (s *WorkspaceStore) List() []Workspace {
 	}
 
 	sort.Slice(workspaces, func(i, j int) bool {
+		iUsed := !workspaces[i].LastUsedAt.IsZero()
+		jUsed := !workspaces[j].LastUsedAt.IsZero()
+
+		if iUsed && jUsed {
+			return workspaces[i].LastUsedAt.After(workspaces[j].LastUsedAt)
+		}
+		if iUsed != jUsed {
+			return iUsed
+		}
 		return workspaces[i].Name < workspaces[j].Name
 	})
 
