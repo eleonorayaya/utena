@@ -13,14 +13,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/spf13/afero"
 )
-
-type workspaceMeta struct {
-	LastUsedAt time.Time `json:"last_used_at"`
-}
 
 type WorkspaceNotFoundError struct {
 	WorkspaceID string
@@ -357,7 +352,7 @@ func (s *WorkspaceStore) loadMeta() {
 		return
 	}
 
-	var meta map[string]workspaceMeta
+	var meta map[string]Workspace
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return
 	}
@@ -370,10 +365,10 @@ func (s *WorkspaceStore) loadMeta() {
 }
 
 func (s *WorkspaceStore) saveMeta() {
-	meta := make(map[string]workspaceMeta)
+	meta := make(map[string]Workspace)
 	for id, ws := range s.workspaces {
 		if !ws.LastUsedAt.IsZero() {
-			meta[id] = workspaceMeta{LastUsedAt: ws.LastUsedAt}
+			meta[id] = *ws
 		}
 	}
 
