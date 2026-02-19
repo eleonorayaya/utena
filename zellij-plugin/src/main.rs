@@ -84,7 +84,6 @@ impl State {
                 if let Some(session_name) = command.session_name {
                     log_info!("Switching to session: {}", session_name);
                     switch_session_with_cwd(Some(&session_name), None);
-                    self.tui_open = false;
                 } else {
                     log_error!("switch_session missing session_name");
                 }
@@ -97,7 +96,6 @@ impl State {
                     log_info!("Creating session: {} at {}", session_name, workspace_path);
                     let cwd = PathBuf::from(workspace_path);
                     switch_session_with_cwd(Some(&session_name), Some(cwd));
-                    self.tui_open = false;
                 } else {
                     log_error!("create_session missing required fields");
                 }
@@ -229,9 +227,9 @@ impl ZellijPlugin for State {
 
                     if let Some(pane_info) = utena_pane {
                         if pane_info.is_held {
-                            log_info!("TUI command pane is held, closing pane");
+                            log_info!("TUI command pane is held, closing pane id={}", pane_info.id);
                             self.tui_open = false;
-                            close_focus();
+                            close_terminal_pane(pane_info.id);
                         }
                     }
                 }
