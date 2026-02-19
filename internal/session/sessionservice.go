@@ -174,7 +174,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 	cleanup := &Cleanup{}
 
 	if session.WorktreePath != "" && session.WorkspaceID != "" {
-		ws, err := s.workspaceStore.GetByID(session.WorkspaceID)
+		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
 		if err == nil {
 			if rmErr := s.gitService.RemoveWorktree(ctx, ws.Path, session.WorktreePath); rmErr != nil {
 				slog.Warn("failed to remove worktree", "error", rmErr)
