@@ -17,6 +17,7 @@ const (
 	workspacePickerView
 	nameInputView
 	debugView
+	filePickerView
 )
 
 type App struct {
@@ -25,6 +26,7 @@ type App struct {
 	sessionList          SessionListModel
 	newSession           NewSessionModel
 	nameInput            NameInputModel
+	filePicker           FilePickerModel
 	help                 help.Model
 	pendingCreate        string
 	pendingWorkspacePath string
@@ -102,6 +104,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionCreatedMsg:
 		return a, activateSession(a.pendingCreate)
 
+	case switchToFilePickerMsg:
+		a.activeView = filePickerView
+		a.filePicker = NewFilePickerModel()
+		a.filePicker.SetSize(a.width, a.height)
+		return a, a.filePicker.Init()
+
+	case workspaceAddedMsg:
+		a.activeView = workspacePickerView
+		a.newSession = NewNewSessionModel()
+		a.newSession.SetSize(a.width, a.height)
+		return a, fetchWorkspaces()
+
 	case pipeSentMsg:
 		return a, tea.Quit
 
@@ -124,6 +138,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.newSession, cmd = a.newSession.Update(msg)
 	case nameInputView:
 		a.nameInput, cmd = a.nameInput.Update(msg)
+	case filePickerView:
+		a.filePicker, cmd = a.filePicker.Update(msg)
 	}
 	return a, cmd
 }
@@ -136,6 +152,8 @@ func (a App) View() string {
 		return a.newSession.View()
 	case nameInputView:
 		return a.nameInput.View() + "\n\n" + a.help.View(nameInputKeyMap)
+	case filePickerView:
+		return a.filePicker.View()
 	default:
 		return a.sessionList.View()
 	}

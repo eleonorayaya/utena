@@ -144,6 +144,34 @@ func createSession(name, workspaceID string) tea.Cmd {
 	}
 }
 
+type workspaceAddedMsg struct{}
+
+func addWorkspace(path string, asRoot bool) tea.Cmd {
+	return func() tea.Msg {
+		body := map[string]interface{}{
+			"path":    path,
+			"as_root": asRoot,
+		}
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return errMsg{err}
+		}
+
+		res, err := apiClient.Post(baseURL+"/workspaces", "application/json", bytes.NewReader(jsonBody))
+		if err != nil {
+			log.Printf("[ERROR] add workspace %q: %v", path, err)
+			return errMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusCreated {
+			return parseAPIError(res, "add workspace")
+		}
+
+		return workspaceAddedMsg{}
+	}
+}
+
 func sendZellijPipe(command, sessionName, workspacePath string) tea.Cmd {
 	return func() tea.Msg {
 		payload := map[string]interface{}{
