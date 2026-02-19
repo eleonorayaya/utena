@@ -119,6 +119,26 @@ func (s *WorkspaceStore) Add(ws *Workspace) error {
 	return nil
 }
 
+func (s *WorkspaceStore) Update(ws *Workspace) error {
+	if ws == nil {
+		return errors.New("workspace cannot be nil")
+	}
+	if ws.ID == "" {
+		return errors.New("workspace ID cannot be empty")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.workspaces[ws.ID]; !exists {
+		return &WorkspaceNotFoundError{WorkspaceID: ws.ID}
+	}
+
+	copy := *ws
+	s.workspaces[ws.ID] = &copy
+	return nil
+}
+
 func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
 	info, err := s.fs.Stat(path)
 	if err != nil {

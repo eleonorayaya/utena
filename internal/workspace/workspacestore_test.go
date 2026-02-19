@@ -528,6 +528,43 @@ func TestWorkspaceStore_AddWorkspaceRoot_InvalidPath(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestWorkspaceStore_Update(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	ws := &Workspace{ID: "ws-1", Name: "test", Path: "/path"}
+	store.Add(ws)
+
+	now := time.Now()
+	ws.LastUsedAt = now
+	err := store.Update(ws)
+	require.NoError(t, err)
+
+	retrieved, err := store.GetByID("ws-1")
+	require.NoError(t, err)
+	require.Equal(t, now.Unix(), retrieved.LastUsedAt.Unix())
+}
+
+func TestWorkspaceStore_Update_NotFound(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	ws := &Workspace{ID: "nonexistent", Name: "test", Path: "/path"}
+	err := store.Update(ws)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestWorkspaceStore_Update_Nil(t *testing.T) {
+	store := setupWorkspaceStore(t)
+	err := store.Update(nil)
+	require.Error(t, err)
+}
+
+func TestWorkspaceStore_Update_EmptyID(t *testing.T) {
+	store := setupWorkspaceStore(t)
+	err := store.Update(&Workspace{Name: "test"})
+	require.Error(t, err)
+}
+
 func TestWorkspaceStore_SaveConfig_CreatesDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "nested", "dir")
