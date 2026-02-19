@@ -16,3 +16,4 @@ zellij-plugin/target
 out/
 .task/
 *.log
+.worktrees/
