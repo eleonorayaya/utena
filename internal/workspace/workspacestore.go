@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -99,6 +100,100 @@ func (s *WorkspaceStore) Add(ws *Workspace) error {
 
 	s.workspaces[ws.ID] = ws
 	return nil
+}
+
+func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path is not a directory: %s", path)
+	}
+
+	id := generateID(path)
+
+	s.mu.RLock()
+	_, exists := s.workspaces[id]
+	s.mu.RUnlock()
+	if exists {
+		return nil, fmt.Errorf("workspace already exists: %s", path)
+	}
+
+	ws := &Workspace{
+		ID:        id,
+		Name:      filepath.Base(path),
+		Path:      path,
+		IsGitRepo: isGitRepository(path),
+	}
+
+	if err := s.Add(ws); err != nil {
+		return nil, err
+	}
+
+	cfg, err := s.loadConfig()
+	if err != nil {
+		cfg = &config{}
+	}
+	cfg.Workspaces = append(cfg.Workspaces, path)
+	if err := s.saveConfig(cfg); err != nil {
+		return nil, fmt.Errorf("failed to save config: %w", err)
+	}
+
+	return ws, nil
+}
+
+func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path is not a directory: %s", path)
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	var added []Workspace
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		fullPath := filepath.Join(path, entry.Name())
+		id := generateID(fullPath)
+
+		s.mu.RLock()
+		_, exists := s.workspaces[id]
+		s.mu.RUnlock()
+		if exists {
+			continue
+		}
+
+		ws := &Workspace{
+			ID:        id,
+			Name:      entry.Name(),
+			Path:      fullPath,
+			IsGitRepo: isGitRepository(fullPath),
+		}
+		if err := s.Add(ws); err != nil {
+			continue
+		}
+		added = append(added, *ws)
+	}
+
+	cfg, err := s.loadConfig()
+	if err != nil {
+		cfg = &config{}
+	}
+	cfg.WorkspaceRoots = append(cfg.WorkspaceRoots, path)
+	if err := s.saveConfig(cfg); err != nil {
+		return nil, fmt.Errorf("failed to save config: %w", err)
+	}
+
+	return added, nil
 }
 
 func (s *WorkspaceStore) OnAppStart(ctx context.Context) error {

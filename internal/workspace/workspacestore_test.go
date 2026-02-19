@@ -441,6 +441,71 @@ func TestWorkspaceStore_SaveConfig(t *testing.T) {
 	require.Equal(t, []string{"/some/path", "/another/path"}, cfg.Workspaces)
 }
 
+func TestWorkspaceStore_AddWorkspace(t *testing.T) {
+	wsDir := t.TempDir()
+	os.MkdirAll(filepath.Join(wsDir, ".git"), 0755)
+
+	store, _ := setupWorkspaceStoreWithFullConfig(t, nil, nil)
+
+	ws, err := store.AddWorkspace(wsDir)
+	require.NoError(t, err)
+	require.Equal(t, filepath.Base(wsDir), ws.Name)
+	require.Equal(t, wsDir, ws.Path)
+	require.True(t, ws.IsGitRepo)
+
+	workspaces := store.List()
+	require.Len(t, workspaces, 1)
+
+	cfg, err := store.loadConfig()
+	require.NoError(t, err)
+	require.Contains(t, cfg.Workspaces, wsDir)
+}
+
+func TestWorkspaceStore_AddWorkspace_InvalidPath(t *testing.T) {
+	store, _ := setupWorkspaceStoreWithFullConfig(t, nil, nil)
+
+	_, err := store.AddWorkspace("/nonexistent/path")
+	require.Error(t, err)
+}
+
+func TestWorkspaceStore_AddWorkspace_AlreadyExists(t *testing.T) {
+	wsDir := t.TempDir()
+	store, _ := setupWorkspaceStoreWithFullConfig(t, nil, nil)
+
+	_, err := store.AddWorkspace(wsDir)
+	require.NoError(t, err)
+
+	_, err = store.AddWorkspace(wsDir)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already exists")
+}
+
+func TestWorkspaceStore_AddWorkspaceRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	os.MkdirAll(filepath.Join(rootDir, "proj-a", ".git"), 0755)
+	os.MkdirAll(filepath.Join(rootDir, "proj-b"), 0755)
+
+	store, _ := setupWorkspaceStoreWithFullConfig(t, nil, nil)
+
+	added, err := store.AddWorkspaceRoot(rootDir)
+	require.NoError(t, err)
+	require.Len(t, added, 2)
+
+	workspaces := store.List()
+	require.Len(t, workspaces, 2)
+
+	cfg, err := store.loadConfig()
+	require.NoError(t, err)
+	require.Contains(t, cfg.WorkspaceRoots, rootDir)
+}
+
+func TestWorkspaceStore_AddWorkspaceRoot_InvalidPath(t *testing.T) {
+	store, _ := setupWorkspaceStoreWithFullConfig(t, nil, nil)
+
+	_, err := store.AddWorkspaceRoot("/nonexistent/path")
+	require.Error(t, err)
+}
+
 func TestWorkspaceStore_SaveConfig_CreatesDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "nested", "dir", "config.json")
