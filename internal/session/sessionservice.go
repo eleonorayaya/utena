@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
+
+const EventSessionDeleted = "session.deleted"
 
 type SessionService struct {
 	store          *SessionStore
@@ -164,10 +165,6 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 
 	cleanup := &Cleanup{}
 
-	if err := s.killZellijSession(ctx, id); err == nil {
-		cleanup.ZellijSessionKilled = true
-	}
-
 	if session.WorktreePath != "" && session.WorkspaceID != "" {
 		ws, err := s.workspaceStore.GetByID(session.WorkspaceID)
 		if err == nil {
@@ -189,14 +186,15 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 	session.IsDeleted = true
 	session.Cleanup = cleanup
 
-	return s.store.Update(session)
-}
-
-func (s *SessionService) killZellijSession(ctx context.Context, name string) error {
-	cmd := exec.CommandContext(ctx, "zellij", "kill-session", name)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		slog.Warn("failed to kill zellij session", "session", name, "error", err, "output", string(output))
-		return fmt.Errorf("zellij kill-session failed: %s: %w", string(output), err)
+	if err := s.store.Update(session); err != nil {
+		return err
 	}
+
+	s.eventBus.Publish(ctx, eventbus.Event{
+		Type: EventSessionDeleted,
+		Data: session,
+	})
+
 	return nil
 }
+
