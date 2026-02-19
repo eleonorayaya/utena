@@ -1,16 +1,39 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 static LOGGER: OnceLock<Logger> = OnceLock::new();
 
 pub struct Logger {
     tracing_enabled: AtomicBool,
+    plugin_id: Mutex<Option<u32>>,
+    session_name: Mutex<String>,
 }
 
 impl Logger {
     fn init() -> Self {
         Logger {
             tracing_enabled: AtomicBool::new(false),
+            plugin_id: Mutex::new(None),
+            session_name: Mutex::new(String::new()),
+        }
+    }
+
+    pub fn set_plugin_id(&self, id: u32) {
+        *self.plugin_id.lock().unwrap() = Some(id);
+    }
+
+    pub fn set_session_name(&self, name: String) {
+        *self.session_name.lock().unwrap() = name;
+    }
+
+    fn prefix(&self) -> String {
+        let pid = self.plugin_id.lock().unwrap();
+        let name = self.session_name.lock().unwrap();
+        match (*pid, name.is_empty()) {
+            (Some(id), false) => format!("[p{}/{}] ", id, *name),
+            (Some(id), true) => format!("[p{}] ", id),
+            (None, false) => format!("[{}] ", *name),
+            (None, true) => String::new(),
         }
     }
 
@@ -47,34 +70,38 @@ impl Logger {
     }
 
     pub fn debug(&self, message: String) {
+        let msg = format!("{}{}", self.prefix(), message);
         if self.tracing_enabled.load(Ordering::Relaxed) {
-            tracing::debug!("{}", message);
+            tracing::debug!("{}", msg);
         } else {
-            eprintln!("[DEBUG] {}", message);
+            eprintln!("[DEBUG] {}", msg);
         }
     }
 
     pub fn info(&self, message: String) {
+        let msg = format!("{}{}", self.prefix(), message);
         if self.tracing_enabled.load(Ordering::Relaxed) {
-            tracing::info!("{}", message);
+            tracing::info!("{}", msg);
         } else {
-            eprintln!("[INFO] {}", message);
+            eprintln!("[INFO] {}", msg);
         }
     }
 
     pub fn warn(&self, message: String) {
+        let msg = format!("{}{}", self.prefix(), message);
         if self.tracing_enabled.load(Ordering::Relaxed) {
-            tracing::warn!("{}", message);
+            tracing::warn!("{}", msg);
         } else {
-            eprintln!("[WARN] {}", message);
+            eprintln!("[WARN] {}", msg);
         }
     }
 
     pub fn error(&self, message: String) {
+        let msg = format!("{}{}", self.prefix(), message);
         if self.tracing_enabled.load(Ordering::Relaxed) {
-            tracing::error!("{}", message);
+            tracing::error!("{}", msg);
         } else {
-            eprintln!("[ERROR] {}", message);
+            eprintln!("[ERROR] {}", msg);
         }
     }
 }

@@ -7,15 +7,24 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use zellij_tile::prelude::*;
 
-#[derive(Default)]
 struct State {
+    plugin_id: u32,
     tui_open: bool,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            plugin_id: 0,
+            tui_open: false,
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]
 struct SessionUpdate {
     name: String,
-    is_current_session: bool,
+    connected_clients: usize,
 }
 
 #[derive(Serialize, Debug)]
@@ -110,6 +119,10 @@ register_plugin!(State);
 
 impl ZellijPlugin for State {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
+        let ids = get_plugin_ids();
+        self.plugin_id = ids.plugin_id;
+        Logger::get().set_plugin_id(ids.plugin_id);
+
         request_permission(&[
             PermissionType::RunCommands,
             PermissionType::ChangeApplicationState,
@@ -158,25 +171,29 @@ impl ZellijPlugin for State {
                     .map(|s| s.name.clone())
                     .unwrap_or_default();
 
+                Logger::get().set_session_name(current_session_name.clone());
+
                 let session_updates: Vec<SessionUpdate> = sessions
                     .iter()
                     .map(|session| SessionUpdate {
                         name: session.name.clone(),
-                        is_current_session: session.is_current_session,
+                        connected_clients: session.connected_clients,
                     })
                     .collect();
 
                 let req = SessionUpdateRequest {
-                    id: current_session_name,
+                    id: current_session_name.clone(),
                     sessions: session_updates,
                 };
 
                 let body = serde_json::to_vec(&req).unwrap();
+                let mut headers = BTreeMap::new();
+                headers.insert("X-Zellij-Session".to_string(), current_session_name.clone());
                 let context = BTreeMap::new();
                 web_request(
                     String::from("http://localhost:3333/zellij/sessions"),
                     HttpVerb::Put,
-                    BTreeMap::new(),
+                    headers,
                     body,
                     context,
                 );
@@ -234,6 +251,12 @@ impl ZellijPlugin for State {
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
+        log_info!(
+            "Pipe message received: name={} payload={:?}",
+            pipe_message.name,
+            pipe_message.payload
+        );
+
         if pipe_message.name != "utena-commands" {
             return false;
         }
@@ -241,7 +264,7 @@ impl ZellijPlugin for State {
         let payload = match &pipe_message.payload {
             Some(p) => p,
             None => {
-                log_warn!("Received pipe message with no payload");
+                log_warn!("Received pipe message with no payload: {:#?}", pipe_message);
                 return false;
             }
         };

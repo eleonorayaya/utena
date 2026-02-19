@@ -6,6 +6,7 @@ import (
 )
 
 var ErrSessionAlreadyExists = errors.New("session already exists")
+var ErrSessionNotFound = errors.New("session not found")
 
 type Session struct {
 	ID          string    `json:"id"`

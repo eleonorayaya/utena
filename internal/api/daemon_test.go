@@ -188,11 +188,11 @@ func TestDaemon_ZellijSessionUpdate(t *testing.T) {
 		Sessions: []zellij.SessionUpdate{
 			{
 				Name:             "main-session",
-				IsCurrentSession: true,
+				ConnectedClients: 1,
 			},
 			{
 				Name:             "background-session",
-				IsCurrentSession: false,
+				ConnectedClients: 0,
 			},
 		},
 	}
@@ -285,11 +285,11 @@ func TestDaemon_ZellijSessionUpdate_MarkDeadSessions(t *testing.T) {
 		Sessions: []zellij.SessionUpdate{
 			{
 				Name:             "old-session-1",
-				IsCurrentSession: true,
+				ConnectedClients: 1,
 			},
 			{
 				Name:             "new-session",
-				IsCurrentSession: false,
+				ConnectedClients: 0,
 			},
 		},
 	}

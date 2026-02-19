@@ -17,7 +17,12 @@ type sessionItem struct {
 	session session.Session
 }
 
-func (i sessionItem) Title() string       { return i.session.ID }
+func (i sessionItem) Title() string {
+	if i.session.IsAttached {
+		return i.session.ID + " (attached)"
+	}
+	return i.session.ID
+}
 func (i sessionItem) Description() string { return i.session.WorkspaceID }
 func (i sessionItem) FilterValue() string { return i.session.ID }
 
@@ -60,6 +65,9 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 		switch {
 		case key.Matches(msg, selectKey):
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				if item.session.IsAttached {
+					return m, m.list.NewStatusMessage("already attached to this session")
+				}
 				return m, func() tea.Msg {
 					return activateSessionMsg{name: item.session.ID}
 				}

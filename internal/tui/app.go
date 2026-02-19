@@ -1,8 +1,13 @@
 package tui
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type view int
@@ -11,24 +16,31 @@ const (
 	sessionListView view = iota
 	workspacePickerView
 	nameInputView
+	debugView
 )
 
 type App struct {
-	activeView    view
-	sessionList   SessionListModel
-	newSession    NewSessionModel
-	nameInput     NameInputModel
-	help          help.Model
-	pendingCreate string
-	width, height int
+	activeView           view
+	previousView         view
+	sessionList          SessionListModel
+	newSession           NewSessionModel
+	nameInput            NameInputModel
+	help                 help.Model
+	pendingCreate        string
+	pendingWorkspacePath string
+	logPath              string
+	width, height        int
 }
 
-func NewApp() App {
+var debugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+func NewApp(logPath string) App {
 	return App{
 		activeView:  sessionListView,
 		sessionList: NewSessionListModel(),
 		newSession:  NewNewSessionModel(),
 		help:        help.New(),
+		logPath:     logPath,
 	}
 }
 
@@ -48,12 +60,24 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+c" {
 			return a, tea.Quit
 		}
+		if key.Matches(msg, debugKey) && a.activeView != debugView {
+			a.previousView = a.activeView
+			a.activeView = debugView
+			return a, nil
+		}
+		if a.activeView == debugView && key.Matches(msg, backKey) {
+			a.activeView = a.previousView
+			return a, nil
+		}
 
 	case activateSessionMsg:
 		return a, activateSession(msg.name)
 
 	case sessionActivatedMsg:
-		return a, tea.Quit
+		if a.pendingCreate != "" {
+			return a, sendZellijPipe("create_session", msg.name, a.pendingWorkspacePath)
+		}
+		return a, sendZellijPipe("switch_session", msg.name, "")
 
 	case switchToNewSessionMsg:
 		a.activeView = workspacePickerView
@@ -72,13 +96,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case createSessionMsg:
 		a.pendingCreate = msg.name
+		a.pendingWorkspacePath = a.nameInput.workspace.Path
 		return a, createSession(msg.name, msg.workspaceID)
 
 	case sessionCreatedMsg:
 		return a, activateSession(a.pendingCreate)
 
+	case pipeSentMsg:
+		return a, tea.Quit
+
 	case errMsg:
-		_ = msg.err
+		switch a.activeView {
+		case nameInputView:
+			a.nameInput.err = msg.err.Error()
+			return a, nil
+		case sessionListView:
+			return a, a.sessionList.list.NewStatusMessage(msg.err.Error())
+		}
 		return a, nil
 	}
 
@@ -96,6 +130,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a App) View() string {
 	switch a.activeView {
+	case debugView:
+		return a.debugViewContent()
 	case workspacePickerView:
 		return a.newSession.View()
 	case nameInputView:
@@ -103,6 +139,27 @@ func (a App) View() string {
 	default:
 		return a.sessionList.View()
 	}
+}
+
+func (a App) debugViewContent() string {
+	var b strings.Builder
+	b.WriteString(debugStyle.Render("Debug Info") + "\n\n")
+
+	lines := []struct{ label, value string }{
+		{"daemon", baseURL},
+		{"log", a.logPath},
+	}
+
+	for _, l := range lines {
+		v := l.value
+		if v == "" {
+			v = "(not set)"
+		}
+		b.WriteString(fmt.Sprintf("  %s: %s\n", debugStyle.Render(l.label), v))
+	}
+
+	b.WriteString("\n" + debugStyle.Render("esc: back"))
+	return b.String()
 }
 
 type errMsg struct{ err error }

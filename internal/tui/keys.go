@@ -6,6 +6,7 @@ var (
 	selectKey     = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select"))
 	newSessionKey = key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new"))
 	backKey       = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
+	debugKey      = key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "debug"))
 )
 
 type nameInputKeys struct {

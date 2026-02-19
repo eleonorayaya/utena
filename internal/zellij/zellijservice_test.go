@@ -42,11 +42,11 @@ func TestZellijService_ProcessSessionUpdate_CreateNewSessions(t *testing.T) {
 		Sessions: []SessionUpdate{
 			{
 				Name:             "session-1",
-				IsCurrentSession: true,
+				ConnectedClients: 1,
 			},
 			{
 				Name:             "session-2",
-				IsCurrentSession: false,
+				ConnectedClients: 0,
 			},
 		},
 	}
@@ -92,7 +92,7 @@ func TestZellijService_ProcessSessionUpdate_UpdateExistingSessions(t *testing.T)
 		Sessions: []SessionUpdate{
 			{
 				Name:             "session-1",
-				IsCurrentSession: true,
+				ConnectedClients: 1,
 			},
 		},
 	}
@@ -128,11 +128,11 @@ func TestZellijService_ProcessSessionUpdate_MixedCreateAndUpdate(t *testing.T) {
 		Sessions: []SessionUpdate{
 			{
 				Name:             "existing-session",
-				IsCurrentSession: true,
+				ConnectedClients: 1,
 			},
 			{
 				Name:             "new-session",
-				IsCurrentSession: false,
+				ConnectedClients: 0,
 			},
 		},
 	}
@@ -154,13 +154,6 @@ func TestZellijService_ProcessSessionUpdate_MixedCreateAndUpdate(t *testing.T) {
 	require.False(t, new.IsAttached)
 	require.True(t, new.IsActive)
 	require.False(t, new.IsDead)
-}
-
-func TestZellijService_CreateSession(t *testing.T) {
-	service, _, _ := setupZellijService(t)
-
-	err := service.CreateSession("new-session", "/tmp/workspace")
-	require.Error(t, err)
 }
 
 func TestZellijService_ProcessSessionUpdate_MarkDeadSessions(t *testing.T) {
@@ -196,11 +189,11 @@ func TestZellijService_ProcessSessionUpdate_MarkDeadSessions(t *testing.T) {
 		Sessions: []SessionUpdate{
 			{
 				Name:             "session-1",
-				IsCurrentSession: true,
+				ConnectedClients: 1,
 			},
 			{
 				Name:             "session-3",
-				IsCurrentSession: false,
+				ConnectedClients: 0,
 			},
 		},
 	}

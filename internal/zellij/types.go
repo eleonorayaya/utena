@@ -4,7 +4,7 @@ import "net/http"
 
 type SessionUpdate struct {
 	Name             string `json:"name"`
-	IsCurrentSession bool   `json:"is_current_session"`
+	ConnectedClients int    `json:"connected_clients"`
 }
 
 type UpdateSessionsRequest struct {

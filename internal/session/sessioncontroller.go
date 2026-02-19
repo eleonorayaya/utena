@@ -70,7 +70,7 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := c.service.CreateSessionAndNotify(ctx, data.Session); err != nil {
+	if err := c.service.CreateSession(ctx, data.Session); err != nil {
 		var wsNotFound *workspace.WorkspaceNotFoundError
 		if errors.Is(err, ErrSessionAlreadyExists) || errors.As(err, &wsNotFound) {
 			render.Render(w, r, common.ErrInvalidRequest(err))
@@ -129,7 +129,11 @@ func (c *SessionController) ActivateSession(w http.ResponseWriter, r *http.Reque
 
 	_, err := c.service.ActivateSession(ctx, name)
 	if err != nil {
-		render.Render(w, r, common.ErrNotFound())
+		if errors.Is(err, ErrSessionNotFound) {
+			render.Render(w, r, common.ErrNotFound())
+		} else {
+			render.Render(w, r, common.ErrUnknown(err))
+		}
 		return
 	}
 
