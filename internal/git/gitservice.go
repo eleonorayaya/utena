@@ -29,6 +29,15 @@ func (s *GitService) ListBranches(ctx context.Context, repoPath string) ([]strin
 			branches = append(branches, trimmed)
 		}
 	}
+
+	for i, b := range branches {
+		if b == "main" {
+			branches = append(branches[:i], branches[i+1:]...)
+			branches = append([]string{"main"}, branches...)
+			break
+		}
+	}
+
 	return branches, nil
 }
 
