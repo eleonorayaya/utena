@@ -23,6 +23,7 @@ func (e *WorkspaceNotFoundError) Error() string {
 
 type config struct {
 	WorkspaceRoots []string `json:"workspace_roots"`
+	Workspaces     []string `json:"workspaces,omitempty"`
 }
 
 type WorkspaceStore struct {
@@ -125,7 +126,7 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 		return nil, nil
 	}
 
-	if len(cfg.WorkspaceRoots) == 0 {
+	if len(cfg.WorkspaceRoots) == 0 && len(cfg.Workspaces) == 0 {
 		return nil, nil
 	}
 
@@ -157,6 +158,22 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 		}
 	}
 
+	for _, wsPath := range cfg.Workspaces {
+		expanded := expandHome(wsPath)
+		info, err := os.Stat(expanded)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		id := generateID(expanded)
+		isGitRepo := isGitRepository(expanded)
+		workspaces = append(workspaces, &Workspace{
+			ID:        id,
+			Name:      filepath.Base(expanded),
+			Path:      expanded,
+			IsGitRepo: isGitRepo,
+		})
+	}
+
 	sort.Slice(workspaces, func(i, j int) bool {
 		return workspaces[i].Name < workspaces[j].Name
 	})
@@ -176,6 +193,17 @@ func (s *WorkspaceStore) loadConfig() (*config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func (s *WorkspaceStore) saveConfig(cfg *config) error {
+	if err := os.MkdirAll(filepath.Dir(s.configPath), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.configPath, data, 0644)
 }
 
 func expandHome(path string) string {

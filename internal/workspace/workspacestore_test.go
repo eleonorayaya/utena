@@ -383,3 +383,75 @@ func TestIsGitRepository(t *testing.T) {
 	os.MkdirAll(nonGitDir, 0755)
 	require.False(t, isGitRepository(nonGitDir))
 }
+
+func setupWorkspaceStoreWithFullConfig(t *testing.T, roots []string, workspaces []string) (*WorkspaceStore, string) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	cfg := config{WorkspaceRoots: roots, Workspaces: workspaces}
+	data, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	err = os.WriteFile(configPath, data, 0644)
+	require.NoError(t, err)
+
+	store := NewWorkspaceStore()
+	store.configPath = configPath
+
+	return store, tmpDir
+}
+
+func TestWorkspaceStore_OnAppStart_WithAdHocWorkspaces(t *testing.T) {
+	rootDir := t.TempDir()
+	adHocDir := t.TempDir()
+	os.MkdirAll(filepath.Join(rootDir, "from-root"), 0755)
+	os.MkdirAll(filepath.Join(adHocDir, ".git"), 0755)
+
+	store, _ := setupWorkspaceStoreWithFullConfig(t, []string{rootDir}, []string{adHocDir})
+
+	ctx := context.Background()
+	err := store.OnAppStart(ctx)
+	require.NoError(t, err)
+
+	workspaces := store.List()
+	require.Len(t, workspaces, 2)
+
+	paths := make(map[string]bool)
+	for _, ws := range workspaces {
+		paths[ws.Path] = true
+	}
+	require.True(t, paths[filepath.Join(rootDir, "from-root")])
+	require.True(t, paths[adHocDir])
+}
+
+func TestWorkspaceStore_SaveConfig(t *testing.T) {
+	store, _ := setupWorkspaceStoreWithFullConfig(t, []string{"~/dev"}, []string{"/some/path"})
+
+	err := store.saveConfig(&config{
+		WorkspaceRoots: []string{"~/dev", "~/projects"},
+		Workspaces:     []string{"/some/path", "/another/path"},
+	})
+	require.NoError(t, err)
+
+	cfg, err := store.loadConfig()
+	require.NoError(t, err)
+	require.Equal(t, []string{"~/dev", "~/projects"}, cfg.WorkspaceRoots)
+	require.Equal(t, []string{"/some/path", "/another/path"}, cfg.Workspaces)
+}
+
+func TestWorkspaceStore_SaveConfig_CreatesDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "nested", "dir", "config.json")
+
+	store := NewWorkspaceStore()
+	store.configPath = configPath
+
+	err := store.saveConfig(&config{Workspaces: []string{"/some/path"}})
+	require.NoError(t, err)
+
+	cfg, err := store.loadConfig()
+	require.NoError(t, err)
+	require.Equal(t, []string{"/some/path"}, cfg.Workspaces)
+}
