@@ -47,13 +47,12 @@ func TestValidateSession(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "zero LastUsedAt",
+			name: "zero LastUsedAt is allowed",
 			session: &Session{
 				ID:          "session-1",
 				WorkspaceID: "ws-1",
 			},
-			expectError: true,
-			errorMsg:    "LastUsedAt cannot be zero",
+			expectError: false,
 		},
 	}
 

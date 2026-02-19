@@ -30,7 +30,7 @@ type FilePickerModel struct {
 
 func NewFilePickerModel() FilePickerModel {
 	fp := filepicker.New()
-	fp.DirAllowed = true
+	fp.DirAllowed = false
 	fp.FileAllowed = false
 	fp.ShowHidden = false
 	fp.SetHeight(15)
@@ -69,17 +69,19 @@ func (m FilePickerModel) updatePicking(msg tea.Msg) (FilePickerModel, tea.Cmd) {
 		if key.Matches(msg, backKey) {
 			return m, func() tea.Msg { return switchToNewSessionMsg{} }
 		}
+		if key.Matches(msg, selectDirKey) {
+			m.selectedPath = m.picker.CurrentDirectory
+			m.phase = choosingType
+			return m, nil
+		}
+		if key.Matches(msg, toggleHiddenKey) {
+			m.picker.ShowHidden = !m.picker.ShowHidden
+			return m, m.picker.Init()
+		}
 	}
 
 	var cmd tea.Cmd
 	m.picker, cmd = m.picker.Update(msg)
-
-	if didSelect, path := m.picker.DidSelectFile(msg); didSelect {
-		m.selectedPath = path
-		m.phase = choosingType
-		return m, nil
-	}
-
 	return m, cmd
 }
 
@@ -114,6 +116,6 @@ func (m FilePickerModel) View() string {
 			"  r  add as root (scan subdirectories)\n\n" +
 			"  esc: back"
 	default:
-		return m.picker.View()
+		return m.picker.View() + "\n\n  s: select dir  .: toggle hidden  esc: back"
 	}
 }

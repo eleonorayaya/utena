@@ -8,6 +8,8 @@ var (
 	backKey         = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
 	debugKey        = key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "debug"))
 	addWorkspaceKey = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add dir"))
+	selectDirKey    = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "select dir"))
+	toggleHiddenKey = key.NewBinding(key.WithKeys("."), key.WithHelp(".", "hidden"))
 )
 
 type nameInputKeys struct {
