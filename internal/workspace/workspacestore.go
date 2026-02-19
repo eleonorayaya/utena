@@ -13,9 +13,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/afero"
 )
+
+type workspaceMeta struct {
+	LastUsedAt time.Time `json:"last_used_at"`
+}
 
 type WorkspaceNotFoundError struct {
 	WorkspaceID string
@@ -136,6 +141,7 @@ func (s *WorkspaceStore) Update(ws *Workspace) error {
 
 	copy := *ws
 	s.workspaces[ws.ID] = &copy
+	s.saveMeta()
 	return nil
 }
 
@@ -245,6 +251,8 @@ func (s *WorkspaceStore) OnAppStart(ctx context.Context) error {
 		}
 	}
 
+	s.loadMeta()
+
 	return nil
 }
 
@@ -337,6 +345,44 @@ func (s *WorkspaceStore) saveConfig(cfg *config) error {
 		return err
 	}
 	return afero.WriteFile(s.fs, s.configPath(), data, 0644)
+}
+
+func (s *WorkspaceStore) metaPath() string {
+	return filepath.Join(s.configDir, "workspace_metadata.json")
+}
+
+func (s *WorkspaceStore) loadMeta() {
+	data, err := afero.ReadFile(s.fs, s.metaPath())
+	if err != nil {
+		return
+	}
+
+	var meta map[string]workspaceMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return
+	}
+
+	for id, m := range meta {
+		if ws, ok := s.workspaces[id]; ok {
+			ws.LastUsedAt = m.LastUsedAt
+		}
+	}
+}
+
+func (s *WorkspaceStore) saveMeta() {
+	meta := make(map[string]workspaceMeta)
+	for id, ws := range s.workspaces {
+		if !ws.LastUsedAt.IsZero() {
+			meta[id] = workspaceMeta{LastUsedAt: ws.LastUsedAt}
+		}
+	}
+
+	s.fs.MkdirAll(filepath.Dir(s.metaPath()), 0755)
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return
+	}
+	afero.WriteFile(s.fs, s.metaPath(), data, 0644)
 }
 
 func expandHome(path string) string {
