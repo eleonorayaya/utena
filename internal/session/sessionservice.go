@@ -203,4 +203,3 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 		Data: session,
 	})
 }
-

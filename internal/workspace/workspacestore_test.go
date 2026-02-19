@@ -579,24 +579,23 @@ func TestWorkspaceStore_SaveConfig_CreatesDir(t *testing.T) {
 	require.Equal(t, []string{"/some/path"}, cfg.Workspaces)
 }
 
-func TestWorkspaceStore_MetadataPersistence(t *testing.T) {
+func TestWorkspaceStore_Persistence(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
 	now := time.Now()
 	ws := &Workspace{ID: "ws-1", Name: "test", Path: "/path", LastUsedAt: now}
 	store.Add(ws)
-	store.saveMeta()
 
 	store2 := NewWorkspaceStore(store.fs, store.configDir)
-	store2.Add(&Workspace{ID: "ws-1", Name: "test", Path: "/path"})
-	store2.loadMeta()
+	store2.load()
 
 	retrieved, err := store2.GetByID("ws-1")
 	require.NoError(t, err)
 	require.Equal(t, now.Unix(), retrieved.LastUsedAt.Unix())
+	require.Equal(t, "test", retrieved.Name)
 }
 
-func TestWorkspaceStore_OnAppStart_MergesMetadata(t *testing.T) {
+func TestWorkspaceStore_OnAppStart_MergesDiscoveredWithPersisted(t *testing.T) {
 	rootDir := t.TempDir()
 	os.MkdirAll(filepath.Join(rootDir, "project-alpha"), 0755)
 
@@ -613,7 +612,6 @@ func TestWorkspaceStore_OnAppStart_MergesMetadata(t *testing.T) {
 	now := time.Now()
 	workspaces[0].LastUsedAt = now
 	store.Update(&workspaces[0])
-	store.saveMeta()
 
 	store2 := NewWorkspaceStore(store.fs, store.configDir)
 	err = store2.OnAppStart(ctx)

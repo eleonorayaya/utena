@@ -116,6 +116,7 @@ func (s *WorkspaceStore) Add(ws *Workspace) error {
 	}
 
 	s.workspaces[ws.ID] = ws
+	s.save()
 	return nil
 }
 
@@ -136,7 +137,7 @@ func (s *WorkspaceStore) Update(ws *Workspace) error {
 
 	copy := *ws
 	s.workspaces[ws.ID] = &copy
-	s.saveMeta()
+	s.save()
 	return nil
 }
 
@@ -235,18 +236,27 @@ func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
 }
 
 func (s *WorkspaceStore) OnAppStart(ctx context.Context) error {
-	workspaces, err := s.discoverWorkspaces()
+	s.mu.Lock()
+	s.load()
+	s.mu.Unlock()
+
+	discovered, err := s.discoverWorkspaces()
 	if err != nil {
 		return err
 	}
 
-	for _, ws := range workspaces {
-		if err := s.Add(ws); err != nil {
-			return err
+	s.mu.Lock()
+	for _, ws := range discovered {
+		if existing, ok := s.workspaces[ws.ID]; ok {
+			existing.Name = ws.Name
+			existing.Path = ws.Path
+			existing.IsGitRepo = ws.IsGitRepo
+		} else {
+			s.workspaces[ws.ID] = ws
 		}
 	}
-
-	s.loadMeta()
+	s.save()
+	s.mu.Unlock()
 
 	return nil
 }
@@ -342,42 +352,31 @@ func (s *WorkspaceStore) saveConfig(cfg *config) error {
 	return afero.WriteFile(s.fs, s.configPath(), data, 0644)
 }
 
-func (s *WorkspaceStore) metaPath() string {
-	return filepath.Join(s.configDir, "workspace_metadata.json")
+func (s *WorkspaceStore) workspacesPath() string {
+	return filepath.Join(s.configDir, "workspaces.json")
 }
 
-func (s *WorkspaceStore) loadMeta() {
-	data, err := afero.ReadFile(s.fs, s.metaPath())
+func (s *WorkspaceStore) load() {
+	data, err := afero.ReadFile(s.fs, s.workspacesPath())
 	if err != nil {
 		return
 	}
 
-	var meta map[string]Workspace
-	if err := json.Unmarshal(data, &meta); err != nil {
+	loaded := make(map[string]*Workspace)
+	if err := json.Unmarshal(data, &loaded); err != nil {
 		return
 	}
 
-	for id, m := range meta {
-		if ws, ok := s.workspaces[id]; ok {
-			ws.LastUsedAt = m.LastUsedAt
-		}
-	}
+	s.workspaces = loaded
 }
 
-func (s *WorkspaceStore) saveMeta() {
-	meta := make(map[string]Workspace)
-	for id, ws := range s.workspaces {
-		if !ws.LastUsedAt.IsZero() {
-			meta[id] = *ws
-		}
-	}
-
-	s.fs.MkdirAll(filepath.Dir(s.metaPath()), 0755)
-	data, err := json.Marshal(meta)
+func (s *WorkspaceStore) save() {
+	s.fs.MkdirAll(s.configDir, 0755)
+	data, err := json.Marshal(s.workspaces)
 	if err != nil {
 		return
 	}
-	afero.WriteFile(s.fs, s.metaPath(), data, 0644)
+	afero.WriteFile(s.fs, s.workspacesPath(), data, 0644)
 }
 
 func expandHome(path string) string {
