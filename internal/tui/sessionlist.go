@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
 )
 
@@ -14,18 +15,22 @@ type activateSessionMsg struct {
 type switchToNewSessionMsg struct{}
 
 type sessionItem struct {
-	session       session.Session
-	workspaceName string
+	session      session.Session
+	claudeStatus string
 }
 
 func (i sessionItem) Title() string {
+	title := i.session.ID
 	if i.session.IsAttached {
-		return i.session.ID + " (attached)"
+		title += " (attached)"
 	}
-	return i.session.ID
+	if i.claudeStatus != "" {
+		title += " " + i.claudeStatus
+	}
+	return title
 }
 func (i sessionItem) Description() string {
-	name := i.workspaceName
+	name := i.session.WorkspaceName
 	if name == "" {
 		name = "no workspace"
 	}
@@ -38,7 +43,9 @@ func (i sessionItem) Description() string {
 func (i sessionItem) FilterValue() string { return i.session.ID }
 
 type SessionListModel struct {
-	list list.Model
+	list           list.Model
+	sessions       []session.Session
+	claudeSessions map[string][]claude.ClaudeSession
 }
 
 func NewSessionListModel() SessionListModel {
@@ -59,17 +66,56 @@ func (m SessionListModel) Init() tea.Cmd {
 	return nil
 }
 
+func aggregateClaudeStatus(sessions []claude.ClaudeSession) string {
+	if len(sessions) == 0 {
+		return ""
+	}
+
+	hasNeedsAttention := false
+	hasWorking := false
+	for _, cs := range sessions {
+		switch cs.Status {
+		case claude.StatusNeedsAttention:
+			hasNeedsAttention = true
+		case claude.StatusWorking:
+			hasWorking = true
+		}
+	}
+
+	if hasNeedsAttention {
+		return "[needs attention]"
+	}
+	if hasWorking {
+		return "[working]"
+	}
+	return "[done]"
+}
+
+func (m *SessionListModel) rebuildItems() tea.Cmd {
+	var items []list.Item
+	for _, s := range m.sessions {
+		if s.IsDead {
+			continue
+		}
+		status := aggregateClaudeStatus(m.claudeSessions[s.ID])
+		items = append(items, sessionItem{session: s, claudeStatus: status})
+	}
+	return m.list.SetItems(items)
+}
+
 func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionsLoadedMsg:
-		var items []list.Item
-		for _, s := range msg.sessions {
-			if s.IsDead {
-				continue
-			}
-			items = append(items, sessionItem{session: s, workspaceName: s.WorkspaceName})
+		m.sessions = msg.sessions
+		cmd := m.rebuildItems()
+		return m, cmd
+
+	case claudeSessionsLoadedMsg:
+		m.claudeSessions = make(map[string][]claude.ClaudeSession)
+		for _, cs := range msg.claudeSessions {
+			m.claudeSessions[cs.SessionID] = append(m.claudeSessions[cs.SessionID], cs)
 		}
-		cmd := m.list.SetItems(items)
+		cmd := m.rebuildItems()
 		return m, cmd
 
 	case tea.KeyMsg:

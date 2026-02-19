@@ -50,7 +50,7 @@ func NewApp(logPath string) App {
 }
 
 func (a App) Init() tea.Cmd {
-	return fetchSessions()
+	return tea.Batch(fetchSessions(), fetchClaudeSessions())
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -113,7 +113,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case switchToSessionListMsg:
 		a.activeView = sessionListView
-		return a, fetchSessions()
+		return a, tea.Batch(fetchSessions(), fetchClaudeSessions())
 
 	case createSessionMsg:
 		a.pendingCreate = msg.name
