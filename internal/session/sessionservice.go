@@ -2,23 +2,27 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
 type SessionService struct {
 	store          *SessionStore
 	workspaceStore *workspace.WorkspaceStore
+	gitService     *git.GitService
 	eventBus       eventbus.EventBus
 }
 
-func NewSessionService(store *SessionStore, workspaceStore *workspace.WorkspaceStore, bus eventbus.EventBus) *SessionService {
+func NewSessionService(store *SessionStore, workspaceStore *workspace.WorkspaceStore, gitService *git.GitService, bus eventbus.EventBus) *SessionService {
 	return &SessionService{
 		store:          store,
 		workspaceStore: workspaceStore,
+		gitService:     gitService,
 		eventBus:       bus,
 	}
 }
@@ -33,7 +37,22 @@ func (s *SessionService) OnAppEnd(ctx context.Context) error {
 }
 
 func (s *SessionService) ListSessions(ctx context.Context) ([]Session, error) {
-	return s.store.List(), nil
+	sessions := s.store.List()
+	for i := range sessions {
+		s.resolveWorkspaceName(&sessions[i])
+	}
+	return sessions, nil
+}
+
+func (s *SessionService) resolveWorkspaceName(session *Session) {
+	if session.WorkspaceID == "" {
+		return
+	}
+	ws, err := s.workspaceStore.GetByID(session.WorkspaceID)
+	if err != nil {
+		return
+	}
+	session.WorkspaceName = ws.Name
 }
 
 func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceID string) ([]Session, error) {
@@ -51,12 +70,25 @@ func (s *SessionService) GetSession(ctx context.Context, id string) (*Session, e
 }
 
 func (s *SessionService) CreateSession(ctx context.Context, session *Session) error {
-
+	var ws *workspace.Workspace
 	if session.WorkspaceID != "" {
-		_, err := s.workspaceStore.GetByID(session.WorkspaceID)
+		var err error
+		ws, err = s.workspaceStore.GetByID(session.WorkspaceID)
 		if err != nil {
 			return err
 		}
+	}
+
+	if session.BaseBranch != "" && ws != nil && ws.IsGitRepo {
+		if err := s.gitService.Pull(ctx, ws.Path, session.BaseBranch); err != nil {
+			slog.Warn("git pull failed, continuing with worktree creation", "error", err)
+		}
+
+		worktreePath, err := s.gitService.CreateWorktree(ctx, ws.Path, session.ID, session.BaseBranch)
+		if err != nil {
+			return fmt.Errorf("failed to create worktree: %w", err)
+		}
+		session.WorktreePath = worktreePath
 	}
 
 	if session.LastUsedAt.IsZero() {

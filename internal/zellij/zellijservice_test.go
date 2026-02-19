@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/spf13/afero"
@@ -23,7 +24,8 @@ func setupZellijService(t *testing.T) (*ZellijService, *session.SessionService, 
 
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 
-	sessionService := session.NewSessionService(sessionStore, workspaceStore, bus)
+	gitService := git.NewGitService()
+	sessionService := session.NewSessionService(sessionStore, workspaceStore, gitService, bus)
 	err := sessionService.OnAppStart(ctx)
 	require.NoError(t, err)
 

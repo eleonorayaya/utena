@@ -64,6 +64,11 @@ func (m NewSessionModel) Update(msg tea.Msg) (NewSessionModel, tea.Cmd) {
 		switch {
 		case key.Matches(msg, selectKey):
 			if item, ok := m.list.SelectedItem().(workspaceItem); ok {
+				if item.workspace.IsGitRepo {
+					return m, func() tea.Msg {
+						return switchToBranchPickerMsg{workspace: item.workspace}
+					}
+				}
 				return m, func() tea.Msg {
 					return switchToNameInputMsg{workspace: item.workspace}
 				}

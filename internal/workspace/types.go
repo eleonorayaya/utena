@@ -53,3 +53,7 @@ func (a *AddWorkspaceRequest) Bind(r *http.Request) error {
 	}
 	return nil
 }
+
+type BranchListResponse struct {
+	Branches []string `json:"branches"`
+}
