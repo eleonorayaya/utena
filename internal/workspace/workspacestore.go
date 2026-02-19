@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/spf13/afero"
 )
 
 type WorkspaceNotFoundError struct {
@@ -30,15 +32,20 @@ type config struct {
 type WorkspaceStore struct {
 	mu         sync.RWMutex
 	workspaces map[string]*Workspace
-	configPath string
+	fs         afero.Fs
+	configDir  string
 }
 
-func NewWorkspaceStore() *WorkspaceStore {
-	homeDir, _ := os.UserHomeDir()
+func NewWorkspaceStore(fs afero.Fs, configDir string) *WorkspaceStore {
 	return &WorkspaceStore{
 		workspaces: make(map[string]*Workspace),
-		configPath: filepath.Join(homeDir, ".config", "utena", "config.json"),
+		fs:         fs,
+		configDir:  configDir,
 	}
+}
+
+func (s *WorkspaceStore) configPath() string {
+	return filepath.Join(s.configDir, "config.json")
 }
 
 func (s *WorkspaceStore) GetByID(id string) (*Workspace, error) {
@@ -103,7 +110,7 @@ func (s *WorkspaceStore) Add(ws *Workspace) error {
 }
 
 func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
-	info, err := os.Stat(path)
+	info, err := s.fs.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
@@ -124,7 +131,7 @@ func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
 		ID:        id,
 		Name:      filepath.Base(path),
 		Path:      path,
-		IsGitRepo: isGitRepository(path),
+		IsGitRepo: s.isGitRepository(path),
 	}
 
 	if err := s.Add(ws); err != nil {
@@ -144,7 +151,7 @@ func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
 }
 
 func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
-	info, err := os.Stat(path)
+	info, err := s.fs.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
 	}
@@ -152,7 +159,7 @@ func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
 		return nil, fmt.Errorf("path is not a directory: %s", path)
 	}
 
-	entries, err := os.ReadDir(path)
+	entries, err := afero.ReadDir(s.fs, path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read directory: %w", err)
 	}
@@ -176,7 +183,7 @@ func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
 			ID:        id,
 			Name:      entry.Name(),
 			Path:      fullPath,
-			IsGitRepo: isGitRepository(fullPath),
+			IsGitRepo: s.isGitRepository(fullPath),
 		}
 		if err := s.Add(ws); err != nil {
 			continue
@@ -230,7 +237,7 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 	for _, root := range cfg.WorkspaceRoots {
 		expanded := expandHome(root)
 
-		entries, err := os.ReadDir(expanded)
+		entries, err := afero.ReadDir(s.fs, expanded)
 		if err != nil {
 			continue
 		}
@@ -242,7 +249,7 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 
 			fullPath := filepath.Join(expanded, entry.Name())
 			id := generateID(fullPath)
-			isGitRepo := isGitRepository(fullPath)
+			isGitRepo := s.isGitRepository(fullPath)
 
 			workspaces = append(workspaces, &Workspace{
 				ID:        id,
@@ -255,12 +262,12 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 
 	for _, wsPath := range cfg.Workspaces {
 		expanded := expandHome(wsPath)
-		info, err := os.Stat(expanded)
+		info, err := s.fs.Stat(expanded)
 		if err != nil || !info.IsDir() {
 			continue
 		}
 		id := generateID(expanded)
-		isGitRepo := isGitRepository(expanded)
+		isGitRepo := s.isGitRepository(expanded)
 		workspaces = append(workspaces, &Workspace{
 			ID:        id,
 			Name:      filepath.Base(expanded),
@@ -277,7 +284,7 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 }
 
 func (s *WorkspaceStore) loadConfig() (*config, error) {
-	data, err := os.ReadFile(s.configPath)
+	data, err := afero.ReadFile(s.fs, s.configPath())
 	if err != nil {
 		return nil, err
 	}
@@ -291,14 +298,14 @@ func (s *WorkspaceStore) loadConfig() (*config, error) {
 }
 
 func (s *WorkspaceStore) saveConfig(cfg *config) error {
-	if err := os.MkdirAll(filepath.Dir(s.configPath), 0755); err != nil {
+	if err := s.fs.MkdirAll(filepath.Dir(s.configPath()), 0755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.configPath, data, 0644)
+	return afero.WriteFile(s.fs, s.configPath(), data, 0644)
 }
 
 func expandHome(path string) string {
@@ -317,8 +324,8 @@ func generateID(path string) string {
 	return hex.EncodeToString(hash[:8])
 }
 
-func isGitRepository(path string) bool {
-	info, err := os.Stat(filepath.Join(path, ".git"))
+func (s *WorkspaceStore) isGitRepository(path string) bool {
+	info, err := s.fs.Stat(filepath.Join(path, ".git"))
 	if err != nil {
 		return false
 	}

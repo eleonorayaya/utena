@@ -19,7 +19,7 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 
 	bus := eventbus.NewEventBus()
 	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
-	workspaceStore := workspace.NewWorkspaceStore()
+	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
 
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})

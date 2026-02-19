@@ -8,29 +8,32 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
 func setupWorkspaceStore(t *testing.T) *WorkspaceStore {
 	t.Helper()
-	return NewWorkspaceStore()
+	return NewWorkspaceStore(afero.NewMemMapFs(), "/config")
 }
 
 func setupWorkspaceStoreWithConfig(t *testing.T, roots []string) (*WorkspaceStore, string) {
 	t.Helper()
 
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.json")
+	configDir := filepath.Join(tmpDir, "config")
 
 	cfg := config{WorkspaceRoots: roots}
 	data, err := json.Marshal(cfg)
 	require.NoError(t, err)
 
-	err = os.WriteFile(configPath, data, 0644)
+	fs := afero.NewOsFs()
+	err = fs.MkdirAll(configDir, 0755)
+	require.NoError(t, err)
+	err = afero.WriteFile(fs, filepath.Join(configDir, "config.json"), data, 0644)
 	require.NoError(t, err)
 
-	store := NewWorkspaceStore()
-	store.configPath = configPath
+	store := NewWorkspaceStore(fs, configDir)
 
 	return store, tmpDir
 }
@@ -241,8 +244,7 @@ func TestWorkspaceStore_OnAppStart_WithConfig(t *testing.T) {
 }
 
 func TestWorkspaceStore_OnAppStart_NoConfigFile(t *testing.T) {
-	store := NewWorkspaceStore()
-	store.configPath = "/nonexistent/path/config.json"
+	store := NewWorkspaceStore(afero.NewMemMapFs(), "/nonexistent/path")
 
 	ctx := context.Background()
 	err := store.OnAppStart(ctx)
@@ -377,28 +379,32 @@ func TestIsGitRepository(t *testing.T) {
 
 	gitDir := filepath.Join(tmpDir, "git-project")
 	os.MkdirAll(filepath.Join(gitDir, ".git"), 0755)
-	require.True(t, isGitRepository(gitDir))
 
 	nonGitDir := filepath.Join(tmpDir, "non-git-project")
 	os.MkdirAll(nonGitDir, 0755)
-	require.False(t, isGitRepository(nonGitDir))
+
+	store := NewWorkspaceStore(afero.NewOsFs(), tmpDir)
+	require.True(t, store.isGitRepository(gitDir))
+	require.False(t, store.isGitRepository(nonGitDir))
 }
 
 func setupWorkspaceStoreWithFullConfig(t *testing.T, roots []string, workspaces []string) (*WorkspaceStore, string) {
 	t.Helper()
 
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.json")
+	configDir := filepath.Join(tmpDir, "config")
 
 	cfg := config{WorkspaceRoots: roots, Workspaces: workspaces}
 	data, err := json.Marshal(cfg)
 	require.NoError(t, err)
 
-	err = os.WriteFile(configPath, data, 0644)
+	fs := afero.NewOsFs()
+	err = fs.MkdirAll(configDir, 0755)
+	require.NoError(t, err)
+	err = afero.WriteFile(fs, filepath.Join(configDir, "config.json"), data, 0644)
 	require.NoError(t, err)
 
-	store := NewWorkspaceStore()
-	store.configPath = configPath
+	store := NewWorkspaceStore(fs, configDir)
 
 	return store, tmpDir
 }
@@ -508,10 +514,9 @@ func TestWorkspaceStore_AddWorkspaceRoot_InvalidPath(t *testing.T) {
 
 func TestWorkspaceStore_SaveConfig_CreatesDir(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "nested", "dir", "config.json")
+	configDir := filepath.Join(tmpDir, "nested", "dir")
 
-	store := NewWorkspaceStore()
-	store.configPath = configPath
+	store := NewWorkspaceStore(afero.NewOsFs(), configDir)
 
 	err := store.saveConfig(&config{Workspaces: []string{"/some/path"}})
 	require.NoError(t, err)

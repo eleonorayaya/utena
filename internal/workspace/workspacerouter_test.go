@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
 func setupWorkspaceRouter(t *testing.T) (*WorkspaceRouter, *WorkspaceStore) {
 	t.Helper()
 
-	store := NewWorkspaceStore()
+	store := NewWorkspaceStore(afero.NewMemMapFs(), "/config")
 
 	store.Add(&Workspace{ID: "ws-1", Name: "utena", Path: "/path/to/utena", IsGitRepo: true})
 	store.Add(&Workspace{ID: "ws-2", Name: "example-project", Path: "/path/to/example", IsGitRepo: false})
@@ -83,11 +83,13 @@ func TestWorkspaceRouter_GetWorkspaceByID_NotFound(t *testing.T) {
 
 func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.json")
-	os.WriteFile(configPath, []byte(`{}`), 0644)
+	configDir := filepath.Join(tmpDir, "config")
 
-	store := NewWorkspaceStore()
-	store.configPath = configPath
+	fs := afero.NewOsFs()
+	fs.MkdirAll(configDir, 0755)
+	afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644)
+
+	store := NewWorkspaceStore(fs, configDir)
 
 	wsDir := t.TempDir()
 

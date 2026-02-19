@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-// setupWorkspaceService creates a workspace service with a fresh store
 func setupWorkspaceService(t *testing.T) (*WorkspaceService, *WorkspaceStore) {
 	t.Helper()
-	store := NewWorkspaceStore()
+	store := NewWorkspaceStore(afero.NewMemMapFs(), "/config")
 	service := NewWorkspaceService(store)
 	return service, store
 }
@@ -119,11 +119,13 @@ func TestWorkspaceService_GetWorkspaceByPath_NotFound(t *testing.T) {
 func setupWorkspaceServiceWithConfig(t *testing.T) (*WorkspaceService, *WorkspaceStore) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.json")
-	os.WriteFile(configPath, []byte(`{}`), 0644)
+	configDir := filepath.Join(tmpDir, "config")
 
-	store := NewWorkspaceStore()
-	store.configPath = configPath
+	fs := afero.NewOsFs()
+	fs.MkdirAll(configDir, 0755)
+	afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644)
+
+	store := NewWorkspaceStore(fs, configDir)
 	service := NewWorkspaceService(store)
 	return service, store
 }
