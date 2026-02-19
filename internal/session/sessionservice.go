@@ -50,6 +50,7 @@ func (s *SessionService) resolveWorkspaceName(session *Session) {
 	}
 	ws, err := s.workspaceStore.GetByID(session.WorkspaceID)
 	if err != nil {
+		slog.Warn("failed to resolve workspace name", "session", session.ID, "workspace_id", session.WorkspaceID, "error", err)
 		return
 	}
 	session.WorkspaceName = ws.Name
