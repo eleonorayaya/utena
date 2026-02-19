@@ -44,3 +44,27 @@ func (c *WorkspaceController) GetWorkspaceByID(w http.ResponseWriter, r *http.Re
 	response := NewWorkspaceResponse(workspace)
 	render.Render(w, r, response)
 }
+
+func (c *WorkspaceController) AddWorkspace(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req AddWorkspaceRequest
+	if err := render.Bind(r, &req); err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
+
+	ws, err := c.service.AddWorkspace(ctx, req.Path, req.AsRoot)
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
+
+	render.Status(r, http.StatusCreated)
+	if ws != nil {
+		render.Render(w, r, NewWorkspaceListResponse([]Workspace{*ws}))
+	} else {
+		workspaces, _ := c.service.ListWorkspaces(ctx)
+		render.Render(w, r, NewWorkspaceListResponse(workspaces))
+	}
+}

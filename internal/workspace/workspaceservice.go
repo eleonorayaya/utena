@@ -35,3 +35,11 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, id string) (*Worksp
 func (s *WorkspaceService) GetWorkspaceByPath(ctx context.Context, path string) (*Workspace, error) {
 	return s.store.GetByPath(path)
 }
+
+func (s *WorkspaceService) AddWorkspace(ctx context.Context, path string, asRoot bool) (*Workspace, error) {
+	if asRoot {
+		_, err := s.store.AddWorkspaceRoot(path)
+		return nil, err
+	}
+	return s.store.AddWorkspace(path)
+}

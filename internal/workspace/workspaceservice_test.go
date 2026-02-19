@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -112,4 +114,41 @@ func TestWorkspaceService_GetWorkspaceByPath_NotFound(t *testing.T) {
 	_, err := service.GetWorkspaceByPath(ctx, "/nonexistent/path")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
+}
+
+func setupWorkspaceServiceWithConfig(t *testing.T) (*WorkspaceService, *WorkspaceStore) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	os.WriteFile(configPath, []byte(`{}`), 0644)
+
+	store := NewWorkspaceStore()
+	store.configPath = configPath
+	service := NewWorkspaceService(store)
+	return service, store
+}
+
+func TestWorkspaceService_AddWorkspace(t *testing.T) {
+	service, _ := setupWorkspaceServiceWithConfig(t)
+	wsDir := t.TempDir()
+
+	ctx := context.Background()
+	ws, err := service.AddWorkspace(ctx, wsDir, false)
+	require.NoError(t, err)
+	require.Equal(t, filepath.Base(wsDir), ws.Name)
+	require.Equal(t, wsDir, ws.Path)
+}
+
+func TestWorkspaceService_AddWorkspaceAsRoot(t *testing.T) {
+	service, _ := setupWorkspaceServiceWithConfig(t)
+	rootDir := t.TempDir()
+	os.MkdirAll(filepath.Join(rootDir, "project-a"), 0755)
+
+	ctx := context.Background()
+	ws, err := service.AddWorkspace(ctx, rootDir, true)
+	require.NoError(t, err)
+	require.Nil(t, ws)
+
+	workspaces, _ := service.ListWorkspaces(ctx)
+	require.Len(t, workspaces, 1)
 }

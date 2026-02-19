@@ -18,6 +18,7 @@ func (wr *WorkspaceRouter) Routes() chi.Router {
 	r := chi.NewRouter()
 
 	r.Get("/", wr.controller.ListWorkspaces)
+	r.Post("/", wr.controller.AddWorkspace)
 	r.Get("/{id}", wr.controller.GetWorkspaceByID)
 
 	return r

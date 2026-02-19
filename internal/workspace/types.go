@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/render"
@@ -39,4 +40,16 @@ func RenderWorkspaceList(workspaces []Workspace) []render.Renderer {
 		list[i] = NewWorkspaceResponse(&ws)
 	}
 	return list
+}
+
+type AddWorkspaceRequest struct {
+	Path   string `json:"path"`
+	AsRoot bool   `json:"as_root"`
+}
+
+func (a *AddWorkspaceRequest) Bind(r *http.Request) error {
+	if a.Path == "" {
+		return fmt.Errorf("path is required")
+	}
+	return nil
 }
