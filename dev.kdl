@@ -38,11 +38,11 @@ layout {
 
         pane size="40%" split_direction="horizontal" {
           pane size="20%" command="task" name="zellij logs" {
-            args "plugin:zellijlogs"
+            args "plugin:zellijlogs_tail"
           }
 
           pane command="task" name="plugin logs" {
-            args "plugin:logs"
+            args "plugin:logs_tail"
           }
         }
 

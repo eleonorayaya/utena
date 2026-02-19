@@ -1,29 +1,48 @@
 
 version: '3'
+
 vars:
   TARGET: 'wasm32-wasip1'
   BIN: 'utena.wasm'
+  PLUGIN_LOG_FILE: '/var/log/utena.log'
+  ZELLIJ_LOG_FILE:
+    sh: echo "$(find /var/folders -type f -name 'zellij.log' 2> /dev/null)"
+  LOG_LOOKBACK: 100
+
 tasks:
   build:
     sources:
       - 'src/**/*.rs'
     cmds:
       - cargo build --target {{.TARGET}} --release
+
   reload:
     cmds:
       - zellij action start-or-reload-plugin file:~/.config/zellij/plugins/{{.BIN}}
+
   deploy:
     deps:
       - build
     cmds:
       - cp "$(pwd)"/target/{{.TARGET}}/release/{{.BIN}} ~/.config/zellij/plugins/
       - task: reload
+
+  logs_tail:
+    cmds:
+      - tail -f {{ .PLUGIN_LOG_FILE }}
+
   logs:
     cmds:
-      - tail -f /var/log/utena.log 
+      - tail -n {{ .LOG_LOOKBACK }} {{ .PLUGIN_LOG_FILE }}
+
+  zellijlogs_tail:
+    cmds:
+      - tail -f {{ .ZELLIJ_LOG_FILE }}
+
   zellijlogs:
     cmds:
-      - tail -f "$(find /var/folders -type f -name 'zellij.log' 2> /dev/null)" 
+      - tail -n {{ .LOG_LOOKBACK }} {{ .ZELLIJ_LOG_FILE }}
+
   fmt:
     sources:
       - 'src/**/*.rs'

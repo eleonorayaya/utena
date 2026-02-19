@@ -8,6 +8,8 @@ tasks:
     cmds:
       - go build -o out/daemon cmd/daemon/main.go
   run:
+    env:
+      UTENA_LOG_PRETTY: true
     deps:
       - build
     cmds:

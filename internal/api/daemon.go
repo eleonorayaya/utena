@@ -22,6 +22,8 @@ import (
 )
 
 func StartDaemon() {
+	prettyLogs := os.Getenv("UTENA_LOG_PRETTY") == "true"
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
@@ -49,7 +51,7 @@ func StartDaemon() {
 		log.Fatalf("Failed to initialize zellij module: %v", err)
 	}
 
-	go serveAPI(ctx, workspaceModule, sessionModule, zellijModule)
+	go serveAPI(ctx, workspaceModule, sessionModule, zellijModule, prettyLogs)
 
 	<-ctx.Done()
 
@@ -66,10 +68,15 @@ func StartDaemon() {
 	}
 }
 
-func serveAPI(ctx context.Context, workspaceModule *workspace.WorkspaceModule, sessionModule *session.SessionModule, zellijModule *zellij.ZellijModule) {
+func serveAPI(ctx context.Context, workspaceModule *workspace.WorkspaceModule, sessionModule *session.SessionModule, zellijModule *zellij.ZellijModule, prettyLogs bool) {
 	r := chi.NewRouter()
 
-	r.Use(httplog.RequestLogger(slog.Default(), &httplog.Options{}))
+	httplogOpts := &httplog.Options{}
+	if prettyLogs {
+		httplogOpts.Schema = httplog.SchemaECS.Concise(true)
+	}
+
+	r.Use(httplog.RequestLogger(slog.Default(), httplogOpts))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.URLFormat)
 	r.Use(render.SetContentType(render.ContentTypeJSON))

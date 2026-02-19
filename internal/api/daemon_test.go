@@ -227,13 +227,11 @@ func TestDaemon_ZellijSessionUpdate(t *testing.T) {
 
 	mainSession := findSessionByID(sessionsResponse.Sessions, "main-session")
 	require.NotNil(t, mainSession)
-	require.True(t, mainSession.IsAttached)
 	require.True(t, mainSession.IsActive)
 	require.False(t, mainSession.IsDead)
 
 	bgSession := findSessionByID(sessionsResponse.Sessions, "background-session")
 	require.NotNil(t, bgSession)
-	require.False(t, bgSession.IsAttached)
 	require.True(t, bgSession.IsActive)
 	require.False(t, bgSession.IsDead)
 }
@@ -319,7 +317,6 @@ func TestDaemon_ZellijSessionUpdate_MarkDeadSessions(t *testing.T) {
 
 	oldSession1 := findSessionByID(sessionsResponse.Sessions, "old-session-1")
 	require.NotNil(t, oldSession1)
-	require.True(t, oldSession1.IsAttached)
 	require.False(t, oldSession1.IsDead)
 
 	oldSession2 := findSessionByID(sessionsResponse.Sessions, "old-session-2")

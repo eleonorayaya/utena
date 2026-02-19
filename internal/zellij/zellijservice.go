@@ -23,8 +23,6 @@ func NewZellijService(sessionService *session.SessionService, bus eventbus.Event
 }
 
 func (z *ZellijService) OnAppStart(ctx context.Context) error {
-	z.eventBus.Subscribe(eventbus.SessionCreateRequested, z.handleSessionCreateRequested)
-	z.eventBus.Subscribe(eventbus.SessionActivated, z.handleSessionActivated)
 	return nil
 }
 
@@ -46,8 +44,7 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 	for _, existingSession := range allSessions {
 		sess := existingSession
 
-		if update, exists := activeSessions[sess.ID]; exists {
-			sess.IsAttached = update.IsCurrentSession
+		if _, exists := activeSessions[sess.ID]; exists {
 			sess.IsActive = true
 			sess.IsDead = false
 			sess.LastUsedAt = time.Now()
@@ -61,14 +58,12 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 		}
 	}
 
-	for sessionID, sessionUpdate := range activeSessions {
+	for sessionID := range activeSessions {
 		newSession := &session.Session{
-			ID:          sessionID,
-			WorkspaceID: "",
-			IsAttached:  sessionUpdate.IsCurrentSession,
-			IsActive:    true,
-			IsDead:      false,
-			LastUsedAt:  time.Now(),
+			ID:         sessionID,
+			IsActive:   true,
+			IsDead:     false,
+			LastUsedAt: time.Now(),
 		}
 
 		if err := z.sessionService.CreateSession(ctx, newSession); err != nil {
@@ -79,22 +74,6 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 	return nil
 }
 
-func (z *ZellijService) handleSessionCreateRequested(ctx context.Context, event eventbus.Event) error {
-	data, ok := event.Data.(eventbus.SessionCreateRequestedEvent)
-	if !ok {
-		return nil
-	}
-	return z.CreateSession(data.SessionName, data.WorkspacePath)
-}
-
-func (z *ZellijService) handleSessionActivated(ctx context.Context, event eventbus.Event) error {
-	data, ok := event.Data.(eventbus.SessionActivatedEvent)
-	if !ok {
-		return nil
-	}
-	return z.SwitchSession(data.SessionName)
-}
-
 func (z *ZellijService) sendCommandToPlugin(command Command) error {
 	return z.pipeSender.SendCommand(command)
 }
@@ -102,23 +81,6 @@ func (z *ZellijService) sendCommandToPlugin(command Command) error {
 func (z *ZellijService) OpenPicker() error {
 	cmd := Command{
 		Command: "open_picker",
-	}
-	return z.sendCommandToPlugin(cmd)
-}
-
-func (z *ZellijService) SwitchSession(sessionName string) error {
-	cmd := Command{
-		Command:     "switch_session",
-		SessionName: &sessionName,
-	}
-	return z.sendCommandToPlugin(cmd)
-}
-
-func (z *ZellijService) CreateSession(sessionName, workspacePath string) error {
-	cmd := Command{
-		Command:       "create_session",
-		SessionName:   &sessionName,
-		WorkspacePath: &workspacePath,
 	}
 	return z.sendCommandToPlugin(cmd)
 }

@@ -13,61 +13,11 @@ The architecture enables the Zellij plugin to detect session changes and push up
 
 ## Build & Run Commands
 
-This project uses [Task](https://taskfile.dev) for builds. All commands use `task <target>`.
+This project uses [Task](https://taskfile.dev) as its build system. NEVER run `go`, `cargo`, or other build commands directly. NEVER `cd` into subdirectories to run commands. ALWAYS use `task <target>` from the project root.
 
-### Go Components (daemon & tui)
+See the `taskfile-commands` skill for the full command reference.
 
-Build and run the daemon (HTTP server on port 3333):
-```bash
-task daemon:build
-task daemon:run
-```
-
-Build and run the TUI (uses BUBBLETEA_LOG=tui.log for logging):
-```bash
-task tui:build
-task tui:run
-```
-
-Format Go code:
-```bash
-task fmt
-```
-
-### Zellij Plugin (Rust/WASM)
-
-The plugin is in the `zellij-plugin/` subdirectory with its own Taskfile.
-
-Build the plugin (compiles to wasm32-wasip1):
-```bash
-cd zellij-plugin
-task build
-```
-
-Build and deploy to Zellij (copies to ~/.config/zellij/plugins/ and reloads):
-```bash
-cd zellij-plugin
-task deploy
-```
-
-Watch Zellij logs:
-```bash
-cd zellij-plugin
-task logs
-```
-
-### Development Workflow
-
-Open the full development environment (requires Zellij):
-```bash
-task dev
-```
-
-This creates a Zellij layout (defined in `dev.kdl`) with panes for:
-- Running the daemon server
-- Tailing Zellij logs
-- Auto-recompiling and reloading the plugin
-- The active plugin instance
+Key commands: `task daemon:run`, `task tui:run`, `task plugin:deploy`, `task fmt`, `task test`.
 
 ## Architecture
 

@@ -2,7 +2,7 @@ package session
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
@@ -70,31 +70,6 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session) er
 	return nil
 }
 
-func (s *SessionService) CreateSessionAndNotify(ctx context.Context, session *Session) error {
-	if err := s.CreateSession(ctx, session); err != nil {
-		return err
-	}
-
-	var workspacePath string
-	if session.WorkspaceID != "" {
-		if ws, err := s.workspaceStore.GetByID(session.WorkspaceID); err == nil {
-			workspacePath = ws.Path
-		}
-	}
-
-	if err := s.eventBus.Publish(ctx, eventbus.Event{
-		Type: eventbus.SessionCreateRequested,
-		Data: eventbus.SessionCreateRequestedEvent{
-			SessionName:   session.ID,
-			WorkspacePath: workspacePath,
-		},
-	}); err != nil {
-		return fmt.Errorf("failed to notify plugin: %w", err)
-	}
-
-	return nil
-}
-
 func (s *SessionService) UpdateSession(ctx context.Context, session *Session) error {
 	existing, err := s.store.GetByID(session.ID)
 	if err != nil {
@@ -117,20 +92,27 @@ func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Ses
 		return nil, err
 	}
 
+	slog.Info("activate session", "session", name, "is_attached", session.IsAttached)
+
+	if session.IsAttached {
+		slog.Info("skipping activation for already attached session", "session", name)
+		return session, nil
+	}
+
+	for _, existing := range s.store.List() {
+		if existing.IsAttached {
+			slog.Info("clearing attached flag", "session", existing.ID)
+			existing.IsAttached = false
+			s.store.Update(&existing)
+		}
+	}
+
 	session.LastUsedAt = time.Now()
 	session.IsActive = true
+	session.IsAttached = true
 
 	if err := s.store.Update(session); err != nil {
 		return nil, err
-	}
-
-	if err := s.eventBus.Publish(ctx, eventbus.Event{
-		Type: eventbus.SessionActivated,
-		Data: eventbus.SessionActivatedEvent{
-			SessionName: name,
-		},
-	}); err != nil {
-		return nil, fmt.Errorf("failed to notify plugin: %w", err)
 	}
 
 	return session, nil
