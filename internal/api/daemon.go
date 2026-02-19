@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -38,6 +39,7 @@ func StartDaemon() {
 	workspaceModule := workspace.NewWorkspaceModule(afero.NewOsFs(), configDir)
 	sessionModule := session.NewSessionModule(workspaceModule, bus, afero.NewOsFs(), configDir)
 	zellijModule := zellij.NewZellijModule(sessionModule, bus)
+	claudeModule := claude.NewClaudeModule(afero.NewOsFs(), configDir)
 
 	if err := workspaceModule.OnAppStart(ctx); err != nil {
 		log.Fatalf("Failed to initialize workspace module: %v", err)
@@ -51,9 +53,17 @@ func StartDaemon() {
 		log.Fatalf("Failed to initialize zellij module: %v", err)
 	}
 
-	go serveAPI(ctx, workspaceModule, sessionModule, zellijModule, prettyLogs)
+	if err := claudeModule.OnAppStart(ctx); err != nil {
+		log.Fatalf("Failed to initialize claude module: %v", err)
+	}
+
+	go serveAPI(ctx, workspaceModule, sessionModule, zellijModule, claudeModule, prettyLogs)
 
 	<-ctx.Done()
+
+	if err := claudeModule.OnAppEnd(ctx); err != nil {
+		log.Printf("Error cleaning up claude module: %v", err)
+	}
 
 	if err := zellijModule.OnAppEnd(ctx); err != nil {
 		log.Printf("Error cleaning up zellij module: %v", err)
@@ -68,7 +78,7 @@ func StartDaemon() {
 	}
 }
 
-func serveAPI(ctx context.Context, workspaceModule *workspace.WorkspaceModule, sessionModule *session.SessionModule, zellijModule *zellij.ZellijModule, prettyLogs bool) {
+func serveAPI(ctx context.Context, workspaceModule *workspace.WorkspaceModule, sessionModule *session.SessionModule, zellijModule *zellij.ZellijModule, claudeModule *claude.ClaudeModule, prettyLogs bool) {
 	r := chi.NewRouter()
 
 	httplogOpts := &httplog.Options{}
@@ -84,6 +94,7 @@ func serveAPI(ctx context.Context, workspaceModule *workspace.WorkspaceModule, s
 	r.Mount("/workspaces", workspaceModule.Routes())
 	r.Mount("/sessions", sessionModule.Routes())
 	r.Mount("/zellij", zellijModule.Routes())
+	r.Mount("/claude", claudeModule.Routes())
 
 	log.Println("Starting daemon on :3333")
 	http.ListenAndServe(":3333", r)

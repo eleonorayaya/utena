@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
@@ -52,6 +53,10 @@ type sessionCreatedMsg struct {
 	worktreePath string
 }
 
+type claudeSessionsLoadedMsg struct {
+	claudeSessions []claude.ClaudeSession
+}
+
 type pipeSentMsg struct{}
 
 func fetchSessions() tea.Cmd {
@@ -73,6 +78,30 @@ func fetchSessions() tea.Cmd {
 		}
 
 		return sessionsLoadedMsg{sessions: resp.Sessions}
+	}
+}
+
+func fetchClaudeSessions() tea.Cmd {
+	return func() tea.Msg {
+		res, err := apiClient.Get(baseURL + "/claude/sessions")
+		if err != nil {
+			log.Printf("[ERROR] fetch claude sessions: %v", err)
+			return claudeSessionsLoadedMsg{}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			log.Printf("[ERROR] fetch claude sessions: status %d", res.StatusCode)
+			return claudeSessionsLoadedMsg{}
+		}
+
+		var resp claude.ClaudeSessionListResponse
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			log.Printf("[ERROR] decode claude sessions: %v", err)
+			return claudeSessionsLoadedMsg{}
+		}
+
+		return claudeSessionsLoadedMsg{claudeSessions: resp.ClaudeSessions}
 	}
 }
 

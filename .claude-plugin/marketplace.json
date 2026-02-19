@@ -1,0 +1,16 @@
+{
+  "name": "utena",
+  "owner": {
+    "name": "eleonorayaya"
+  },
+  "metadata": {
+    "description": "Utena workspace management plugins for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "utena-claude",
+      "source": "./plugins/utena-claude",
+      "description": "Claude Code integration hooks for Utena: reports session status (working, needs attention, completed) to the Utena daemon"
+    }
+  ]
+}
