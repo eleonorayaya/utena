@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"time"
 )
 
 type WorkspaceService struct {
@@ -34,6 +35,16 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, id string) (*Worksp
 
 func (s *WorkspaceService) GetWorkspaceByPath(ctx context.Context, path string) (*Workspace, error) {
 	return s.store.GetByPath(path)
+}
+
+func (s *WorkspaceService) Touch(ctx context.Context, id string) error {
+	ws, err := s.store.GetByID(id)
+	if err != nil {
+		return err
+	}
+
+	ws.LastUsedAt = time.Now()
+	return s.store.Update(ws)
 }
 
 func (s *WorkspaceService) AddWorkspace(ctx context.Context, path string, asRoot bool) (*Workspace, error) {

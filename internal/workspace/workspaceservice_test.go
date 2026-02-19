@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -153,4 +154,30 @@ func TestWorkspaceService_AddWorkspaceAsRoot(t *testing.T) {
 
 	workspaces, _ := service.ListWorkspaces(ctx)
 	require.Len(t, workspaces, 1)
+}
+
+func TestWorkspaceService_Touch(t *testing.T) {
+	service, store := setupWorkspaceService(t)
+
+	ws := &Workspace{ID: "ws-1", Name: "test", Path: "/path"}
+	store.Add(ws)
+
+	before := time.Now()
+	ctx := context.Background()
+	err := service.Touch(ctx, "ws-1")
+	require.NoError(t, err)
+
+	retrieved, err := store.GetByID("ws-1")
+	require.NoError(t, err)
+	require.False(t, retrieved.LastUsedAt.IsZero())
+	require.True(t, retrieved.LastUsedAt.After(before) || retrieved.LastUsedAt.Equal(before))
+}
+
+func TestWorkspaceService_Touch_NotFound(t *testing.T) {
+	service, _ := setupWorkspaceService(t)
+
+	ctx := context.Background()
+	err := service.Touch(ctx, "nonexistent")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
 }
