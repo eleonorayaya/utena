@@ -37,7 +37,8 @@ func parseAPIError(res *http.Response, fallback string) errMsg {
 }
 
 type sessionsLoadedMsg struct {
-	sessions []session.Session
+	sessions       []session.Session
+	workspaceNames map[string]string
 }
 
 type workspacesLoadedMsg struct {
@@ -70,8 +71,34 @@ func fetchSessions() tea.Cmd {
 			return errMsg{err}
 		}
 
-		return sessionsLoadedMsg{sessions: resp.Sessions}
+		names := fetchWorkspaceNames()
+
+		return sessionsLoadedMsg{sessions: resp.Sessions, workspaceNames: names}
 	}
+}
+
+func fetchWorkspaceNames() map[string]string {
+	names := make(map[string]string)
+	res, err := apiClient.Get(baseURL + "/workspaces")
+	if err != nil {
+		log.Printf("[ERROR] fetch workspace names: %v", err)
+		return names
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return names
+	}
+
+	var resp workspace.WorkspaceListResponse
+	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+		return names
+	}
+
+	for _, ws := range resp.Workspaces {
+		names[ws.ID] = ws.Name
+	}
+	return names
 }
 
 func fetchWorkspaces() tea.Cmd {
@@ -141,6 +168,34 @@ func createSession(name, workspaceID string) tea.Cmd {
 		}
 
 		return sessionCreatedMsg{}
+	}
+}
+
+type workspaceAddedMsg struct{}
+
+func addWorkspace(path string, asRoot bool) tea.Cmd {
+	return func() tea.Msg {
+		body := map[string]interface{}{
+			"path":    path,
+			"as_root": asRoot,
+		}
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return errMsg{err}
+		}
+
+		res, err := apiClient.Post(baseURL+"/workspaces", "application/json", bytes.NewReader(jsonBody))
+		if err != nil {
+			log.Printf("[ERROR] add workspace %q: %v", path, err)
+			return errMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusCreated {
+			return parseAPIError(res, "add workspace")
+		}
+
+		return workspaceAddedMsg{}
 	}
 }
 

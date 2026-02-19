@@ -6,11 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/spf13/afero"
 )
 
 type WorkspaceNotFoundError struct {
@@ -23,20 +26,26 @@ func (e *WorkspaceNotFoundError) Error() string {
 
 type config struct {
 	WorkspaceRoots []string `json:"workspace_roots"`
+	Workspaces     []string `json:"workspaces,omitempty"`
 }
 
 type WorkspaceStore struct {
 	mu         sync.RWMutex
 	workspaces map[string]*Workspace
-	configPath string
+	fs         afero.Fs
+	configDir  string
 }
 
-func NewWorkspaceStore() *WorkspaceStore {
-	homeDir, _ := os.UserHomeDir()
+func NewWorkspaceStore(fs afero.Fs, configDir string) *WorkspaceStore {
 	return &WorkspaceStore{
 		workspaces: make(map[string]*Workspace),
-		configPath: filepath.Join(homeDir, ".config", "utena", "config.json"),
+		fs:         fs,
+		configDir:  configDir,
 	}
+}
+
+func (s *WorkspaceStore) configPath() string {
+	return filepath.Join(s.configDir, "config.json")
 }
 
 func (s *WorkspaceStore) GetByID(id string) (*Workspace, error) {
@@ -100,6 +109,100 @@ func (s *WorkspaceStore) Add(ws *Workspace) error {
 	return nil
 }
 
+func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
+	info, err := s.fs.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path is not a directory: %s", path)
+	}
+
+	id := generateID(path)
+
+	s.mu.RLock()
+	_, exists := s.workspaces[id]
+	s.mu.RUnlock()
+	if exists {
+		return nil, fmt.Errorf("workspace already exists: %s", path)
+	}
+
+	ws := &Workspace{
+		ID:        id,
+		Name:      filepath.Base(path),
+		Path:      path,
+		IsGitRepo: s.isGitRepository(path),
+	}
+
+	if err := s.Add(ws); err != nil {
+		return nil, err
+	}
+
+	cfg, err := s.loadConfig()
+	if err != nil {
+		cfg = &config{}
+	}
+	cfg.Workspaces = append(cfg.Workspaces, path)
+	if err := s.saveConfig(cfg); err != nil {
+		return nil, fmt.Errorf("failed to save config: %w", err)
+	}
+
+	return ws, nil
+}
+
+func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
+	info, err := s.fs.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path is not a directory: %s", path)
+	}
+
+	entries, err := afero.ReadDir(s.fs, path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	var added []Workspace
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		fullPath := filepath.Join(path, entry.Name())
+		id := generateID(fullPath)
+
+		s.mu.RLock()
+		_, exists := s.workspaces[id]
+		s.mu.RUnlock()
+		if exists {
+			continue
+		}
+
+		ws := &Workspace{
+			ID:        id,
+			Name:      entry.Name(),
+			Path:      fullPath,
+			IsGitRepo: s.isGitRepository(fullPath),
+		}
+		if err := s.Add(ws); err != nil {
+			continue
+		}
+		added = append(added, *ws)
+	}
+
+	cfg, err := s.loadConfig()
+	if err != nil {
+		cfg = &config{}
+	}
+	cfg.WorkspaceRoots = append(cfg.WorkspaceRoots, path)
+	if err := s.saveConfig(cfg); err != nil {
+		return nil, fmt.Errorf("failed to save config: %w", err)
+	}
+
+	return added, nil
+}
+
 func (s *WorkspaceStore) OnAppStart(ctx context.Context) error {
 	workspaces, err := s.discoverWorkspaces()
 	if err != nil {
@@ -125,7 +228,7 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 		return nil, nil
 	}
 
-	if len(cfg.WorkspaceRoots) == 0 {
+	if len(cfg.WorkspaceRoots) == 0 && len(cfg.Workspaces) == 0 {
 		return nil, nil
 	}
 
@@ -134,7 +237,7 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 	for _, root := range cfg.WorkspaceRoots {
 		expanded := expandHome(root)
 
-		entries, err := os.ReadDir(expanded)
+		entries, err := afero.ReadDir(s.fs, expanded)
 		if err != nil {
 			continue
 		}
@@ -146,7 +249,7 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 
 			fullPath := filepath.Join(expanded, entry.Name())
 			id := generateID(fullPath)
-			isGitRepo := isGitRepository(fullPath)
+			isGitRepo := s.isGitRepository(fullPath)
 
 			workspaces = append(workspaces, &Workspace{
 				ID:        id,
@@ -157,6 +260,22 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 		}
 	}
 
+	for _, wsPath := range cfg.Workspaces {
+		expanded := expandHome(wsPath)
+		info, err := s.fs.Stat(expanded)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		id := generateID(expanded)
+		isGitRepo := s.isGitRepository(expanded)
+		workspaces = append(workspaces, &Workspace{
+			ID:        id,
+			Name:      filepath.Base(expanded),
+			Path:      expanded,
+			IsGitRepo: isGitRepo,
+		})
+	}
+
 	sort.Slice(workspaces, func(i, j int) bool {
 		return workspaces[i].Name < workspaces[j].Name
 	})
@@ -165,7 +284,7 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 }
 
 func (s *WorkspaceStore) loadConfig() (*config, error) {
-	data, err := os.ReadFile(s.configPath)
+	data, err := afero.ReadFile(s.fs, s.configPath())
 	if err != nil {
 		return nil, err
 	}
@@ -176,6 +295,17 @@ func (s *WorkspaceStore) loadConfig() (*config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func (s *WorkspaceStore) saveConfig(cfg *config) error {
+	if err := s.fs.MkdirAll(filepath.Dir(s.configPath()), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return afero.WriteFile(s.fs, s.configPath(), data, 0644)
 }
 
 func expandHome(path string) string {
@@ -194,8 +324,8 @@ func generateID(path string) string {
 	return hex.EncodeToString(hash[:8])
 }
 
-func isGitRepository(path string) bool {
-	info, err := os.Stat(filepath.Join(path, ".git"))
+func (s *WorkspaceStore) isGitRepository(path string) bool {
+	info, err := s.fs.Stat(filepath.Join(path, ".git"))
 	if err != nil {
 		return false
 	}

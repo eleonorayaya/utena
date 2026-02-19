@@ -19,7 +19,7 @@ func setupZellijService(t *testing.T) (*ZellijService, *session.SessionService, 
 
 	bus := eventbus.NewEventBus()
 	sessionStore := session.NewSessionStore(afero.NewMemMapFs(), "/config")
-	workspaceStore := workspace.NewWorkspaceStore()
+	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
 
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 

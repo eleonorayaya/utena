@@ -35,7 +35,7 @@ func StartDaemon() {
 	homeDir, _ := os.UserHomeDir()
 	configDir := filepath.Join(homeDir, ".config", "utena")
 
-	workspaceModule := workspace.NewWorkspaceModule()
+	workspaceModule := workspace.NewWorkspaceModule(afero.NewOsFs(), configDir)
 	sessionModule := session.NewSessionModule(workspaceModule, bus, afero.NewOsFs(), configDir)
 	zellijModule := zellij.NewZellijModule(sessionModule, bus)
 

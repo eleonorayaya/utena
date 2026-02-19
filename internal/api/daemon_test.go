@@ -27,7 +27,7 @@ func setupTestRouter(t *testing.T) chi.Router {
 
 	bus := eventbus.NewEventBus()
 
-	workspaceModule := workspace.NewWorkspaceModule()
+	workspaceModule := workspace.NewWorkspaceModule(afero.NewMemMapFs(), "/config")
 	sessionModule := session.NewSessionModule(workspaceModule, bus, afero.NewMemMapFs(), "/config")
 	zellijModule := zellij.NewZellijModule(sessionModule, bus)
 

@@ -14,7 +14,8 @@ type activateSessionMsg struct {
 type switchToNewSessionMsg struct{}
 
 type sessionItem struct {
-	session session.Session
+	session       session.Session
+	workspaceName string
 }
 
 func (i sessionItem) Title() string {
@@ -23,7 +24,17 @@ func (i sessionItem) Title() string {
 	}
 	return i.session.ID
 }
-func (i sessionItem) Description() string { return i.session.WorkspaceID }
+func (i sessionItem) Description() string {
+	name := i.workspaceName
+	if name == "" {
+		name = "no workspace"
+	}
+	if !i.session.LastUsedAt.IsZero() {
+		return name + " · " + timeAgo(i.session.LastUsedAt)
+	}
+	return name
+}
+
 func (i sessionItem) FilterValue() string { return i.session.ID }
 
 type SessionListModel struct {
@@ -51,9 +62,16 @@ func (m SessionListModel) Init() tea.Cmd {
 func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionsLoadedMsg:
-		items := make([]list.Item, len(msg.sessions))
-		for i, s := range msg.sessions {
-			items[i] = sessionItem{session: s}
+		var items []list.Item
+		for _, s := range msg.sessions {
+			if s.IsDead {
+				continue
+			}
+			name := msg.workspaceNames[s.WorkspaceID]
+			if name == "" && s.WorkspaceID != "" {
+				name = s.WorkspaceID
+			}
+			items = append(items, sessionItem{session: s, workspaceName: name})
 		}
 		cmd := m.list.SetItems(items)
 		return m, cmd

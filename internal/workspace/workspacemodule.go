@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/spf13/afero"
 )
 
 type WorkspaceModule struct {
@@ -13,8 +14,8 @@ type WorkspaceModule struct {
 	Router     *WorkspaceRouter
 }
 
-func NewWorkspaceModule() *WorkspaceModule {
-	store := NewWorkspaceStore()
+func NewWorkspaceModule(fs afero.Fs, configDir string) *WorkspaceModule {
+	store := NewWorkspaceStore(fs, configDir)
 	service := NewWorkspaceService(store)
 	controller := NewWorkspaceController(service)
 	router := NewWorkspaceRouter(controller)

@@ -2,17 +2,21 @@ package workspace
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
 func setupWorkspaceRouter(t *testing.T) (*WorkspaceRouter, *WorkspaceStore) {
 	t.Helper()
 
-	store := NewWorkspaceStore()
+	store := NewWorkspaceStore(afero.NewMemMapFs(), "/config")
 
 	store.Add(&Workspace{ID: "ws-1", Name: "utena", Path: "/path/to/utena", IsGitRepo: true})
 	store.Add(&Workspace{ID: "ws-2", Name: "example-project", Path: "/path/to/example", IsGitRepo: false})
@@ -75,4 +79,36 @@ func TestWorkspaceRouter_GetWorkspaceByID_NotFound(t *testing.T) {
 	router.Routes().ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+
+	fs := afero.NewOsFs()
+	fs.MkdirAll(configDir, 0755)
+	afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644)
+
+	store := NewWorkspaceStore(fs, configDir)
+
+	wsDir := t.TempDir()
+
+	service := NewWorkspaceService(store)
+	controller := NewWorkspaceController(service)
+	router := NewWorkspaceRouter(controller)
+
+	body := fmt.Sprintf(`{"path": %q, "as_root": false}`, wsDir)
+	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var response WorkspaceListResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Len(t, response.Workspaces, 1)
+	require.Equal(t, wsDir, response.Workspaces[0].Path)
 }

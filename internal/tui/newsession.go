@@ -33,7 +33,7 @@ func NewNewSessionModel() NewSessionModel {
 	l.Title = "Select workspace"
 	l.KeyMap.Quit.SetEnabled(false)
 	l.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{selectKey, backKey}
+		return []key.Binding{selectKey, backKey, addWorkspaceKey}
 	}
 	return NewSessionModel{list: l}
 }
@@ -72,6 +72,8 @@ func (m NewSessionModel) Update(msg tea.Msg) (NewSessionModel, tea.Cmd) {
 			return m, func() tea.Msg {
 				return switchToSessionListMsg{}
 			}
+		case key.Matches(msg, addWorkspaceKey):
+			return m, func() tea.Msg { return switchToFilePickerMsg{} }
 		}
 	}
 

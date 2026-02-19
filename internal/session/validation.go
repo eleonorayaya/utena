@@ -33,10 +33,6 @@ func ValidateSession(session *Session) error {
 		return err
 	}
 
-	if session.LastUsedAt.IsZero() {
-		return errors.New("session LastUsedAt cannot be zero")
-	}
-
 	return nil
 }
 
