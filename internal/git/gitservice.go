@@ -60,3 +60,19 @@ func (s *GitService) CreateWorktree(ctx context.Context, repoPath string, name s
 	}
 	return worktreePath, nil
 }
+
+func (s *GitService) RemoveWorktree(ctx context.Context, repoPath string, worktreePath string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "remove", worktreePath, "--force")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree remove failed: %s: %w", string(output), err)
+	}
+	return nil
+}
+
+func (s *GitService) DeleteBranch(ctx context.Context, repoPath string, branchName string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "branch", "-D", branchName)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git branch delete failed: %s: %w", string(output), err)
+	}
+	return nil
+}

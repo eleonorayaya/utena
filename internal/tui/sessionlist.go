@@ -14,6 +14,10 @@ type activateSessionMsg struct {
 
 type switchToNewSessionMsg struct{}
 
+type deleteSessionMsg struct {
+	id string
+}
+
 type sessionItem struct {
 	session      session.Session
 	claudeStatus string
@@ -43,16 +47,17 @@ func (i sessionItem) Description() string {
 func (i sessionItem) FilterValue() string { return i.session.ID }
 
 type SessionListModel struct {
-	list           list.Model
-	sessions       []session.Session
-	claudeSessions map[string][]claude.ClaudeSession
+	list            list.Model
+	sessions        []session.Session
+	claudeSessions  map[string][]claude.ClaudeSession
+	pendingDeleteID string
 }
 
 func NewSessionListModel() SessionListModel {
 	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Sessions"
 	l.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{selectKey, newSessionKey}
+		return []key.Binding{selectKey, newSessionKey, closeSessionKey}
 	}
 	return SessionListModel{list: l}
 }
@@ -94,7 +99,7 @@ func aggregateClaudeStatus(sessions []claude.ClaudeSession) string {
 func (m *SessionListModel) rebuildItems() tea.Cmd {
 	var items []list.Item
 	for _, s := range m.sessions {
-		if s.IsDead {
+		if s.IsDead || s.IsDeleted {
 			continue
 		}
 		status := aggregateClaudeStatus(m.claudeSessions[s.ID])
@@ -122,6 +127,9 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 		if m.list.FilterState() == list.Filtering {
 			break
 		}
+		if !key.Matches(msg, closeSessionKey) {
+			m.pendingDeleteID = ""
+		}
 		switch {
 		case key.Matches(msg, selectKey):
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {
@@ -134,6 +142,23 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 			}
 		case key.Matches(msg, newSessionKey):
 			return m, func() tea.Msg { return switchToNewSessionMsg{} }
+		case key.Matches(msg, closeSessionKey):
+			item, ok := m.list.SelectedItem().(sessionItem)
+			if !ok {
+				break
+			}
+			if item.session.IsAttached {
+				m.pendingDeleteID = ""
+				return m, m.list.NewStatusMessage("cannot close attached session")
+			}
+			if m.pendingDeleteID == item.session.ID {
+				m.pendingDeleteID = ""
+				return m, func() tea.Msg {
+					return deleteSessionMsg{id: item.session.ID}
+				}
+			}
+			m.pendingDeleteID = item.session.ID
+			return m, m.list.NewStatusMessage("press d again to close " + item.session.ID)
 		}
 	}
 

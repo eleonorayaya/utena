@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
@@ -152,5 +153,50 @@ func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Ses
 }
 
 func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
-	return s.store.Delete(id)
+	session, err := s.store.GetByID(id)
+	if err != nil {
+		return err
+	}
+
+	if session.IsAttached {
+		return ErrSessionAttached
+	}
+
+	cleanup := &Cleanup{}
+
+	if err := s.killZellijSession(ctx, id); err == nil {
+		cleanup.ZellijSessionKilled = true
+	}
+
+	if session.WorktreePath != "" && session.WorkspaceID != "" {
+		ws, err := s.workspaceStore.GetByID(session.WorkspaceID)
+		if err == nil {
+			if rmErr := s.gitService.RemoveWorktree(ctx, ws.Path, session.WorktreePath); rmErr != nil {
+				slog.Warn("failed to remove worktree", "error", rmErr)
+			} else {
+				cleanup.WorktreeRemoved = true
+			}
+			if brErr := s.gitService.DeleteBranch(ctx, ws.Path, id); brErr != nil {
+				slog.Warn("failed to delete branch", "error", brErr)
+			} else {
+				cleanup.BranchDeleted = true
+			}
+		} else {
+			slog.Warn("workspace not found during cleanup, skipping worktree/branch removal", "workspace_id", session.WorkspaceID)
+		}
+	}
+
+	session.IsDeleted = true
+	session.Cleanup = cleanup
+
+	return s.store.Update(session)
+}
+
+func (s *SessionService) killZellijSession(ctx context.Context, name string) error {
+	cmd := exec.CommandContext(ctx, "zellij", "kill-session", name)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		slog.Warn("failed to kill zellij session", "session", name, "error", err, "output", string(output))
+		return fmt.Errorf("zellij kill-session failed: %s: %w", string(output), err)
+	}
+	return nil
 }
