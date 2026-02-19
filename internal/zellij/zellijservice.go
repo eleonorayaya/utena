@@ -44,7 +44,8 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 	for _, existingSession := range allSessions {
 		sess := existingSession
 
-		if _, exists := activeSessions[sess.ID]; exists {
+		if update, exists := activeSessions[sess.ID]; exists {
+			sess.IsAttached = update.ConnectedClients > 0
 			sess.IsActive = true
 			sess.IsDead = false
 			sess.LastUsedAt = time.Now()
@@ -58,9 +59,10 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 		}
 	}
 
-	for sessionID := range activeSessions {
+	for sessionID, sessionUpdate := range activeSessions {
 		newSession := &session.Session{
 			ID:         sessionID,
+			IsAttached: sessionUpdate.ConnectedClients > 0,
 			IsActive:   true,
 			IsDead:     false,
 			LastUsedAt: time.Now(),

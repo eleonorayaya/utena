@@ -42,11 +42,11 @@ func TestZellijService_ProcessSessionUpdate_CreateNewSessions(t *testing.T) {
 		Sessions: []SessionUpdate{
 			{
 				Name:             "session-1",
-				IsCurrentSession: true,
+				ConnectedClients: 1,
 			},
 			{
 				Name:             "session-2",
-				IsCurrentSession: false,
+				ConnectedClients: 0,
 			},
 		},
 	}
@@ -60,6 +60,7 @@ func TestZellijService_ProcessSessionUpdate_CreateNewSessions(t *testing.T) {
 	session1, err := sessionStore.GetByID("session-1")
 	require.NoError(t, err)
 	require.Equal(t, "session-1", session1.ID)
+	require.True(t, session1.IsAttached)
 	require.True(t, session1.IsActive)
 	require.False(t, session1.IsDead)
 	require.Empty(t, session1.WorkspaceID)
@@ -67,6 +68,7 @@ func TestZellijService_ProcessSessionUpdate_CreateNewSessions(t *testing.T) {
 	session2, err := sessionStore.GetByID("session-2")
 	require.NoError(t, err)
 	require.Equal(t, "session-2", session2.ID)
+	require.False(t, session2.IsAttached)
 	require.True(t, session2.IsActive)
 	require.False(t, session2.IsDead)
 }
@@ -90,7 +92,7 @@ func TestZellijService_ProcessSessionUpdate_UpdateExistingSessions(t *testing.T)
 		Sessions: []SessionUpdate{
 			{
 				Name:             "session-1",
-				IsCurrentSession: true,
+				ConnectedClients: 1,
 			},
 		},
 	}
@@ -102,6 +104,7 @@ func TestZellijService_ProcessSessionUpdate_UpdateExistingSessions(t *testing.T)
 
 	updatedSession, err := sessionStore.GetByID("session-1")
 	require.NoError(t, err)
+	require.True(t, updatedSession.IsAttached)
 	require.True(t, updatedSession.IsActive)
 	require.False(t, updatedSession.IsDead)
 	require.True(t, updatedSession.LastUsedAt.After(oldTime))
@@ -125,11 +128,11 @@ func TestZellijService_ProcessSessionUpdate_MixedCreateAndUpdate(t *testing.T) {
 		Sessions: []SessionUpdate{
 			{
 				Name:             "existing-session",
-				IsCurrentSession: true,
+				ConnectedClients: 1,
 			},
 			{
 				Name:             "new-session",
-				IsCurrentSession: false,
+				ConnectedClients: 0,
 			},
 		},
 	}
@@ -142,11 +145,13 @@ func TestZellijService_ProcessSessionUpdate_MixedCreateAndUpdate(t *testing.T) {
 
 	updated, err := sessionStore.GetByID("existing-session")
 	require.NoError(t, err)
+	require.True(t, updated.IsAttached)
 	require.True(t, updated.IsActive)
 	require.False(t, updated.IsDead)
 
 	new, err := sessionStore.GetByID("new-session")
 	require.NoError(t, err)
+	require.False(t, new.IsAttached)
 	require.True(t, new.IsActive)
 	require.False(t, new.IsDead)
 }
@@ -184,11 +189,11 @@ func TestZellijService_ProcessSessionUpdate_MarkDeadSessions(t *testing.T) {
 		Sessions: []SessionUpdate{
 			{
 				Name:             "session-1",
-				IsCurrentSession: true,
+				ConnectedClients: 1,
 			},
 			{
 				Name:             "session-3",
-				IsCurrentSession: false,
+				ConnectedClients: 0,
 			},
 		},
 	}

@@ -24,7 +24,7 @@ impl Default for State {
 #[derive(Serialize, Debug)]
 struct SessionUpdate {
     name: String,
-    is_current_session: bool,
+    connected_clients: usize,
 }
 
 #[derive(Serialize, Debug)]
@@ -177,7 +177,7 @@ impl ZellijPlugin for State {
                     .iter()
                     .map(|session| SessionUpdate {
                         name: session.name.clone(),
-                        is_current_session: session.is_current_session,
+                        connected_clients: session.connected_clients,
                     })
                     .collect();
 
