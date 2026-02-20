@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -13,8 +14,12 @@ type PipeSender struct {
 }
 
 func NewPipeSender() *PipeSender {
+	pipeName := os.Getenv("UTENA_PIPE_NAME")
+	if pipeName == "" {
+		pipeName = "utena-commands"
+	}
 	return &PipeSender{
-		pipeName: "utena-commands",
+		pipeName: pipeName,
 	}
 }
 

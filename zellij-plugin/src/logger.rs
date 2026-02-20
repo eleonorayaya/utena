@@ -45,8 +45,8 @@ impl Logger {
         use std::fs::File;
         use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-        let log_path = "/host/utena.log";
-        let file_result = File::create(log_path);
+        let log_path = "/host/plugin.log";
+        let file_result = File::create(&log_path);
 
         match file_result {
             Ok(log_file) => {
@@ -58,7 +58,7 @@ impl Logger {
                     .is_ok()
                 {
                     self.tracing_enabled.store(true, Ordering::Relaxed);
-                    tracing::info!("tracing initialized at {:?}", log_path);
+                    tracing::info!("tracing initialized at {}", log_path);
                 } else {
                     eprintln!("[ERROR] error initializing tracing subscriber");
                 }

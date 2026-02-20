@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -22,7 +23,26 @@ var apiClient = &http.Client{
 	Timeout: 10 * time.Second,
 }
 
-const baseURL = "http://localhost:3333"
+var baseURL string
+var pipeName string
+
+func Configure(port, pipe string) {
+	if port == "" {
+		port = os.Getenv("UTENA_PORT")
+	}
+	if port == "" {
+		port = "3333"
+	}
+	baseURL = fmt.Sprintf("http://localhost:%s", port)
+
+	if pipe == "" {
+		pipe = os.Getenv("UTENA_PIPE_NAME")
+	}
+	if pipe == "" {
+		pipe = "utena-commands"
+	}
+	pipeName = pipe
+}
 
 func parseAPIError(res *http.Response, fallback string) errMsg {
 	body, _ := io.ReadAll(res.Body)
@@ -283,7 +303,7 @@ func sendZellijPipe(command, sessionName, workspacePath string) tea.Cmd {
 
 		log.Printf("[INFO] sending zellij pipe: %s", string(jsonPayload))
 
-		cmd := exec.Command("zellij", "pipe", "--name", "utena-commands")
+		cmd := exec.Command("zellij", "pipe", "--name", pipeName)
 		cmd.Stdin = strings.NewReader(string(jsonPayload))
 		output, err := cmd.CombinedOutput()
 		if err != nil {

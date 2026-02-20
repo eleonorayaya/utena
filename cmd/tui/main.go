@@ -21,6 +21,9 @@ func main() {
 		RunE:         runTUI,
 	}
 
+	rootCmd.Flags().String("port", "", "daemon port")
+	rootCmd.Flags().String("pipe-name", "", "zellij pipe name")
+
 	rootCmd.AddCommand(shellInitCmd())
 
 	if err := rootCmd.Execute(); err != nil {
@@ -29,7 +32,9 @@ func main() {
 }
 
 func runTUI(cmd *cobra.Command, args []string) error {
-	var opts []tea.ProgramOption
+	port, _ := cmd.Flags().GetString("port")
+	pipe, _ := cmd.Flags().GetString("pipe-name")
+	tui.Configure(port, pipe)
 
 	var resolvedLogPath string
 	logfilePath := os.Getenv("BUBBLETEA_LOG")
@@ -40,7 +45,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		resolvedLogPath, _ = filepath.Abs(logfilePath)
 	}
 
-	p := tea.NewProgram(tui.NewApp(resolvedLogPath), opts...)
+	p := tea.NewProgram(tui.NewApp(resolvedLogPath))
 	if _, err := p.Run(); err != nil {
 		return err
 	}

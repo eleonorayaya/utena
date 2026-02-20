@@ -7,9 +7,30 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use zellij_tile::prelude::*;
 
+const DAEMON_PORT: &str = match option_env!("UTENA_PORT") {
+    Some(p) => p,
+    None => "3333",
+};
+
+const PIPE_NAME: &str = match option_env!("UTENA_PIPE_NAME") {
+    Some(p) => p,
+    None => "utena-commands",
+};
+
+const DATA_DIR: &str = match option_env!("UTENA_DATA_DIR") {
+    Some(p) => p,
+    None => "",
+};
+
+const TUI_PATH: &str = match option_env!("UTENA_TUI_PATH") {
+    Some(p) => p,
+    None => "utena",
+};
+
 struct State {
     plugin_id: u32,
     tui_open: bool,
+    daemon_url: String,
 }
 
 impl Default for State {
@@ -17,6 +38,7 @@ impl Default for State {
         Self {
             plugin_id: 0,
             tui_open: false,
+            daemon_url: format!("http://localhost:{}/zellij/sessions", DAEMON_PORT),
         }
     }
 }
@@ -55,11 +77,14 @@ impl State {
             return;
         }
 
-        log_info!("Launching session picker TUI");
+        log_info!("Launching session picker TUI from {} (port={}, pipe={})", TUI_PATH, DAEMON_PORT, PIPE_NAME);
 
         let command = CommandToRun {
-            path: PathBuf::from("utena"),
-            args: vec![],
+            path: PathBuf::from(TUI_PATH),
+            args: vec![
+                "--port".to_string(), DAEMON_PORT.to_string(),
+                "--pipe-name".to_string(), PIPE_NAME.to_string(),
+            ],
             cwd: None,
         };
 
@@ -154,8 +179,15 @@ impl ZellijPlugin for State {
 
                 log_debug!("Perms updated: {:#?}", perms);
 
-                let host_path = PathBuf::from(&"/var/log");
-                change_host_folder(host_path);
+                let host_dir = if DATA_DIR.is_empty() {
+                    format!(
+                        "{}/.config/utena",
+                        std::env::var("HOME").unwrap_or_default()
+                    )
+                } else {
+                    DATA_DIR.to_string()
+                };
+                change_host_folder(PathBuf::from(host_dir));
 
                 should_render = false;
             }
@@ -189,7 +221,7 @@ impl ZellijPlugin for State {
                 headers.insert("X-Zellij-Session".to_string(), current_session_name.clone());
                 let context = BTreeMap::new();
                 web_request(
-                    String::from("http://localhost:3333/zellij/sessions"),
+                    self.daemon_url.clone(),
                     HttpVerb::Put,
                     headers,
                     body,
@@ -255,7 +287,7 @@ impl ZellijPlugin for State {
             pipe_message.payload
         );
 
-        if pipe_message.name != "utena-commands" {
+        if pipe_message.name != PIPE_NAME {
             return false;
         }
 
