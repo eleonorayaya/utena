@@ -7,7 +7,7 @@ tasks:
   build:
     sources:
       - 'internal/**/*.go'
-      - 'cmd/daemon/main.go'
+      - 'cmd/tui/main.go'
     cmds:
       - go build -o out/tui cmd/tui/main.go
   install:
@@ -16,6 +16,9 @@ tasks:
     cmds:
       - cp ./out/tui /usr/local/bin/utena
   run:
+    env:
+      UTENA_PORT: '{{.UTENA_PORT | default "3333"}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME | default ""}}'
     deps:
       - build
     cmds:
