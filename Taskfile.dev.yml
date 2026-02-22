@@ -8,12 +8,6 @@ vars:
   UTENA_PIPE_NAME: 'utena-commands-{{.UTENA_PORT}}'
   UTENA_TUI_PATH: '{{.ROOT_DIR}}/out/tui'
 
-env:
-  UTENA_PORT: '{{.UTENA_PORT}}'
-  UTENA_DATA_DIR: '{{.UTENA_DATA_DIR}}'
-  UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME}}'
-  UTENA_TUI_PATH: '{{.UTENA_TUI_PATH}}'
-
 tasks:
   default:
     cmds:
@@ -22,18 +16,35 @@ tasks:
       - zellij action new-tab --layout dev.kdl --name dev
 
   daemon:
+    env:
+      UTENA_PORT: '{{.UTENA_PORT}}'
+      UTENA_DATA_DIR: '{{.UTENA_DATA_DIR}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME}}'
     cmds:
       - task -w daemon:run
 
   tui:
+    env:
+      UTENA_PORT: '{{.UTENA_PORT}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME}}'
     cmds:
       - task -w tui:build
 
   plugin:build:
+    env:
+      UTENA_PORT: '{{.UTENA_PORT}}'
+      UTENA_DATA_DIR: '{{.UTENA_DATA_DIR}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME}}'
+      UTENA_TUI_PATH: '{{.UTENA_TUI_PATH}}'
     cmds:
       - task -w plugin:build
 
   plugin:dev:
+    env:
+      UTENA_PORT: '{{.UTENA_PORT}}'
+      UTENA_DATA_DIR: '{{.UTENA_DATA_DIR}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME}}'
+      UTENA_TUI_PATH: '{{.UTENA_TUI_PATH}}'
     cmds:
       - task plugin:dev
 

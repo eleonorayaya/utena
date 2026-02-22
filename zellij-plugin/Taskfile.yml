@@ -4,12 +4,15 @@ version: '3'
 vars:
   TARGET: 'wasm32-wasip1'
   BIN: 'utena.wasm'
+  _PORT:
+    sh: echo "${UTENA_PORT:-default}"
   ZELLIJ_LOG_FILE:
     sh: echo "$(find /var/folders -type f -name 'zellij.log' 2> /dev/null)"
   LOG_LOOKBACK: 100
 
 tasks:
   build:
+    label: 'build-{{._PORT}}'
     sources:
       - 'src/**/*.rs'
     cmds:
