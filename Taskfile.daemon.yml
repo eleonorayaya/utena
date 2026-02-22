@@ -15,7 +15,10 @@ tasks:
       - go build -o out/daemon cmd/daemon/main.go
   run:
     env:
-      UTENA_LOG_PRETTY: true
+      UTENA_LOG_PRETTY: 'true'
+      UTENA_PORT: '{{.UTENA_PORT | default "3333"}}'
+      UTENA_DATA_DIR: '{{.UTENA_DATA_DIR | default ""}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME | default ""}}'
     deps:
       - build
     cmds:

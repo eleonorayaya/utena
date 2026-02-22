@@ -8,8 +8,14 @@ includes:
     taskfile: Taskfile.daemon.yml
   tui:
     taskfile: Taskfile.tui.yml
-  dev:
-    taskfile: Taskfile.dev.yml
+
+vars:
+  DEV_PORT:
+    sh: printf '%s' "$(pwd)" | cksum | awk '{print 3333 + ($1 % 667)}'
+  DEV_DATA_DIR:
+    sh: echo "$HOME/.config/utena/{{.DEV_PORT}}"
+  DEV_PIPE_NAME: 'utena-commands-{{.DEV_PORT}}'
+  DEV_TUI_PATH: '{{.ROOT_DIR}}/out/tui'
 
 tasks:
   go:fmt:
@@ -30,3 +36,50 @@ tasks:
     cmds:
       - task: go:fmt
       - task: plugin:fmt
+
+  dev:
+    cmds:
+      - mkdir -p "{{.DEV_DATA_DIR}}"
+      - echo "Dev environment{{":"}} port={{.DEV_PORT}} pipe={{.DEV_PIPE_NAME}} data={{.DEV_DATA_DIR}}"
+      - zellij action new-tab --layout dev.kdl --name dev
+
+  dev:daemon:
+    cmds:
+      - task: daemon:run
+        vars:
+          UTENA_PORT: '{{.DEV_PORT}}'
+          UTENA_DATA_DIR: '{{.DEV_DATA_DIR}}'
+          UTENA_PIPE_NAME: '{{.DEV_PIPE_NAME}}'
+
+  dev:tui:
+    cmds:
+      - task: tui:build
+
+  dev:plugin:build:
+    cmds:
+      - task: plugin:build
+        vars:
+          UTENA_PORT: '{{.DEV_PORT}}'
+          UTENA_DATA_DIR: '{{.DEV_DATA_DIR}}'
+          UTENA_PIPE_NAME: '{{.DEV_PIPE_NAME}}'
+          UTENA_TUI_PATH: '{{.DEV_TUI_PATH}}'
+
+  dev:plugin:dev:
+    cmds:
+      - task: plugin:dev
+        vars:
+          UTENA_PORT: '{{.DEV_PORT}}'
+          UTENA_DATA_DIR: '{{.DEV_DATA_DIR}}'
+          UTENA_PIPE_NAME: '{{.DEV_PIPE_NAME}}'
+          UTENA_TUI_PATH: '{{.DEV_TUI_PATH}}'
+
+  dev:plugin:logs:
+    cmds:
+      - touch "{{.DEV_DATA_DIR}}/plugin.log"
+      - tail -f "{{.DEV_DATA_DIR}}/plugin.log"
+
+  dev:plugin:open:
+    cmds:
+      - task: plugin:open
+        vars:
+          UTENA_PIPE_NAME: '{{.DEV_PIPE_NAME}}'

@@ -4,15 +4,18 @@ version: '3'
 vars:
   TARGET: 'wasm32-wasip1'
   BIN: 'utena.wasm'
-  _PORT:
-    sh: echo "${UTENA_PORT:-default}"
   ZELLIJ_LOG_FILE:
     sh: echo "$(find /var/folders -type f -name 'zellij.log' 2> /dev/null)"
   LOG_LOOKBACK: 100
 
 tasks:
   build:
-    label: 'build-{{._PORT}}'
+    label: 'build-{{.UTENA_PORT | default "default"}}'
+    env:
+      UTENA_PORT: '{{.UTENA_PORT | default "3333"}}'
+      UTENA_DATA_DIR: '{{.UTENA_DATA_DIR | default ""}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME | default ""}}'
+      UTENA_TUI_PATH: '{{.UTENA_TUI_PATH | default "utena"}}'
     sources:
       - 'src/**/*.rs'
     cmds:
@@ -24,7 +27,12 @@ tasks:
 
   install:
     deps:
-      - build
+      - task: build
+        vars:
+          UTENA_PORT: '{{.UTENA_PORT}}'
+          UTENA_DATA_DIR: '{{.UTENA_DATA_DIR}}'
+          UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME}}'
+          UTENA_TUI_PATH: '{{.UTENA_TUI_PATH}}'
     cmds:
       - cp "$(pwd)"/target/{{.TARGET}}/release/{{.BIN}} ~/.config/zellij/plugins/
       - task: reload
@@ -48,13 +56,18 @@ tasks:
 
   dev:
     deps:
-      - build
+      - task: build
+        vars:
+          UTENA_PORT: '{{.UTENA_PORT}}'
+          UTENA_DATA_DIR: '{{.UTENA_DATA_DIR}}'
+          UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME}}'
+          UTENA_TUI_PATH: '{{.UTENA_TUI_PATH}}'
     cmds:
       - zellij action start-or-reload-plugin "file:$(pwd)/target/{{.TARGET}}/release/{{.BIN}}"
 
   open:
     cmds:
-      - echo '{"command":"open_picker"}' | zellij pipe --name "${UTENA_PIPE_NAME:-utena-commands}"
+      - echo '{"command":"open_picker"}' | zellij pipe --name "{{.UTENA_PIPE_NAME | default "utena-commands"}}"
 
   fmt:
     sources:
