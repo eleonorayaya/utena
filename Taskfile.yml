@@ -54,6 +54,9 @@ tasks:
   dev:tui:
     cmds:
       - task: tui:build
+        vars:
+          UTENA_PORT: '{{.DEV_PORT}}'
+          UTENA_PIPE_NAME: '{{.DEV_PIPE_NAME}}'
 
   dev:plugin:build:
     cmds:
