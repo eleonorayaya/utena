@@ -1,5 +1,11 @@
 version: '3'
 
+vars:
+  DAEMON_BIN: '{{.HOME}}/.local/bin/utena-daemon'
+  PLIST_NAME: com.utena.daemon.plist
+  PLIST_DEST: '{{.HOME}}/Library/LaunchAgents/{{.PLIST_NAME}}'
+  LOG_DIR: '{{.HOME}}/Library/Logs/utena'
+
 tasks:
   build:
     sources:
@@ -14,3 +20,24 @@ tasks:
       - build
     cmds:
       - ./out/daemon
+  install:
+    desc: Install the daemon as a launchd user agent
+    deps:
+      - build
+    cmds:
+      - mkdir -p {{shellQuote .LOG_DIR}}
+      - mkdir -p {{dir .DAEMON_BIN}}
+      - cp out/daemon {{shellQuote .DAEMON_BIN}}
+      - sed -e 's|__DAEMON_PATH__|{{.DAEMON_BIN}}|g' -e 's|__LOG_DIR__|{{.LOG_DIR}}|g' config/launchd/{{.PLIST_NAME}} > {{shellQuote .PLIST_DEST}}
+      - launchctl bootout gui/$(id -u) {{shellQuote .PLIST_DEST}} 2>/dev/null || true
+      - launchctl bootstrap gui/$(id -u) {{shellQuote .PLIST_DEST}}
+  logs:
+    desc: Tail the daemon logs
+    cmds:
+      - tail -f {{shellQuote .LOG_DIR}}/daemon.stdout.log {{shellQuote .LOG_DIR}}/daemon.stderr.log
+  uninstall:
+    desc: Uninstall the daemon launchd user agent
+    cmds:
+      - launchctl bootout gui/$(id -u) {{shellQuote .PLIST_DEST}} 2>/dev/null || true
+      - rm -f {{shellQuote .PLIST_DEST}}
+      - rm -f {{shellQuote .DAEMON_BIN}}
