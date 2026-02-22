@@ -11,6 +11,10 @@ var (
 	addWorkspaceKey = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add dir"))
 	selectDirKey    = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "select dir"))
 	toggleHiddenKey = key.NewBinding(key.WithKeys("."), key.WithHelp(".", "hidden"))
+	todoKey         = key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "todos"))
+	newTodoKey      = key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new"))
+	deleteTodoKey   = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
+	toggleAllKey    = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/current"))
 )
 
 type nameInputKeys struct {

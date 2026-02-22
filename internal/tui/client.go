@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/todo"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
@@ -266,6 +267,99 @@ func addWorkspace(path string, asRoot bool) tea.Cmd {
 		}
 
 		return workspaceAddedMsg{}
+	}
+}
+
+func fetchTodoData() tea.Cmd {
+	return func() tea.Msg {
+		todosRes, err := apiClient.Get(baseURL + "/todos")
+		if err != nil {
+			log.Printf("[ERROR] fetch todos: %v", err)
+			return errMsg{err}
+		}
+		defer todosRes.Body.Close()
+
+		if todosRes.StatusCode != http.StatusOK {
+			return parseAPIError(todosRes, "fetch todos")
+		}
+
+		var todosResp todo.TodoListResponse
+		if err := json.NewDecoder(todosRes.Body).Decode(&todosResp); err != nil {
+			return errMsg{err}
+		}
+
+		sessionsRes, err := apiClient.Get(baseURL + "/sessions")
+		if err != nil {
+			log.Printf("[ERROR] fetch sessions for todos: %v", err)
+			return todoDataLoadedMsg{todos: todosResp.Todos}
+		}
+		defer sessionsRes.Body.Close()
+
+		if sessionsRes.StatusCode != http.StatusOK {
+			log.Printf("[ERROR] fetch sessions for todos: status %d", sessionsRes.StatusCode)
+			return todoDataLoadedMsg{todos: todosResp.Todos}
+		}
+
+		var sessionsResp session.SessionListResponse
+		if err := json.NewDecoder(sessionsRes.Body).Decode(&sessionsResp); err != nil {
+			return todoDataLoadedMsg{todos: todosResp.Todos}
+		}
+
+		return todoDataLoadedMsg{
+			todos:    todosResp.Todos,
+			sessions: sessionsResp.Sessions,
+		}
+	}
+}
+
+func createTodo(name, description, workspaceID string) tea.Cmd {
+	return func() tea.Msg {
+		body := map[string]string{
+			"name":        name,
+			"description": description,
+		}
+		if workspaceID != "" {
+			body["workspace_id"] = workspaceID
+		}
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return errMsg{err}
+		}
+
+		res, err := apiClient.Post(baseURL+"/todos", "application/json", bytes.NewReader(jsonBody))
+		if err != nil {
+			log.Printf("[ERROR] create todo: %v", err)
+			return errMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusCreated {
+			return parseAPIError(res, "create todo")
+		}
+
+		return todoCreatedMsg{}
+	}
+}
+
+func deleteTodo(id string) tea.Cmd {
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodDelete, baseURL+"/todos/"+id, nil)
+		if err != nil {
+			return errMsg{err}
+		}
+
+		res, err := apiClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] delete todo %q: %v", id, err)
+			return errMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusNoContent {
+			return parseAPIError(res, "delete todo")
+		}
+
+		return todoDeletedMsg{id: id}
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/todo"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/eleonorayaya/utena/internal/zellij"
 	"github.com/go-chi/chi/v5"
@@ -19,6 +20,7 @@ type App struct {
 	Session   *session.SessionModule
 	Zellij    *zellij.ZellijModule
 	Claude    *claude.ClaudeModule
+	Todo      *todo.TodoModule
 }
 
 func NewApp(cfg Config) *App {
@@ -40,6 +42,7 @@ func newApp(fs afero.Fs, cfg Config) *App {
 		Session:   sessionModule,
 		Zellij:    zellij.NewZellijModule(sessionModule, bus),
 		Claude:    claude.NewClaudeModule(fs, cfg.ConfigDir),
+		Todo:      todo.NewTodoModule(workspaceModule, fs, cfg.ConfigDir),
 	}
 }
 
@@ -84,5 +87,6 @@ func (a *App) modules() []moduleEntry {
 		{"session", "/sessions", a.Session},
 		{"zellij", "/zellij", a.Zellij},
 		{"claude", "/claude", a.Claude},
+		{"todo", "/todos", a.Todo},
 	}
 }

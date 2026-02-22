@@ -30,6 +30,7 @@ func main() {
 	rootCmd.Flags().String("pipe-name", defaultPipeName, "zellij pipe name")
 
 	rootCmd.AddCommand(shellInitCmd())
+	rootCmd.AddCommand(todosCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -55,6 +56,35 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return nil
+}
+
+func todosCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "todos",
+		Short:        "Open todo list",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			port, _ := cmd.Root().Flags().GetString("port")
+			pipe, _ := cmd.Root().Flags().GetString("pipe-name")
+			tui.Configure(port, pipe)
+
+			var resolvedLogPath string
+			logfilePath := os.Getenv("BUBBLETEA_LOG")
+			if logfilePath != "" {
+				if _, err := tea.LogToFile(logfilePath, "utena"); err != nil {
+					log.Fatal(err)
+				}
+				resolvedLogPath, _ = filepath.Abs(logfilePath)
+			}
+
+			p := tea.NewProgram(tui.NewApp(resolvedLogPath, tui.WithInitialView(tui.TodoListView)))
+			if _, err := p.Run(); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	return cmd
 }
 
 func shellInitCmd() *cobra.Command {
