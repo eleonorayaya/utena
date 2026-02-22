@@ -57,7 +57,7 @@ func NewSessionListModel() SessionListModel {
 	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Sessions"
 	l.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{selectKey, newSessionKey, closeSessionKey}
+		return []key.Binding{selectKey, newSessionKey, closeSessionKey, todoKey}
 	}
 	return SessionListModel{list: l}
 }
@@ -142,6 +142,8 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 			}
 		case key.Matches(msg, newSessionKey):
 			return m, func() tea.Msg { return switchToNewSessionMsg{} }
+		case key.Matches(msg, todoKey):
+			return m, func() tea.Msg { return switchToTodoListMsg{} }
 		case key.Matches(msg, closeSessionKey):
 			item, ok := m.list.SelectedItem().(sessionItem)
 			if !ok {
