@@ -1,0 +1,58 @@
+version: '3'
+
+vars:
+  UTENA_PORT:
+    sh: printf '%s' "$(pwd)" | cksum | awk '{print 3333 + ($1 % 667)}'
+  UTENA_DATA_DIR:
+    sh: echo "$HOME/.config/utena/{{.UTENA_PORT}}"
+  UTENA_PIPE_NAME: 'utena-commands-{{.UTENA_PORT}}'
+  UTENA_TUI_PATH: '{{.ROOT_DIR}}/out/tui'
+
+tasks:
+  default:
+    cmds:
+      - mkdir -p "{{.UTENA_DATA_DIR}}"
+      - echo "Dev environment{{":"}} port={{.UTENA_PORT}} pipe={{.UTENA_PIPE_NAME}} data={{.UTENA_DATA_DIR}}"
+      - zellij action new-tab --layout dev.kdl --name dev
+
+  daemon:
+    env:
+      UTENA_PORT: '{{.UTENA_PORT}}'
+      UTENA_DATA_DIR: '{{.UTENA_DATA_DIR}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME}}'
+    cmds:
+      - task -w daemon:run
+
+  tui:
+    env:
+      UTENA_PORT: '{{.UTENA_PORT}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME}}'
+    cmds:
+      - task -w tui:build
+
+  plugin:build:
+    env:
+      UTENA_PORT: '{{.UTENA_PORT}}'
+      UTENA_DATA_DIR: '{{.UTENA_DATA_DIR}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME}}'
+      UTENA_TUI_PATH: '{{.UTENA_TUI_PATH}}'
+    cmds:
+      - task -w plugin:build
+
+  plugin:dev:
+    env:
+      UTENA_PORT: '{{.UTENA_PORT}}'
+      UTENA_DATA_DIR: '{{.UTENA_DATA_DIR}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME}}'
+      UTENA_TUI_PATH: '{{.UTENA_TUI_PATH}}'
+    cmds:
+      - task plugin:dev
+
+  plugin:logs:
+    cmds:
+      - touch "{{.UTENA_DATA_DIR}}/plugin.log"
+      - tail -f "{{.UTENA_DATA_DIR}}/plugin.log"
+
+  plugin:open:
+    cmds:
+      - echo '{"command":"open_picker"}' | zellij pipe --name "{{.UTENA_PIPE_NAME}}"

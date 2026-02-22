@@ -25,6 +25,17 @@ import (
 func StartDaemon() {
 	prettyLogs := os.Getenv("UTENA_LOG_PRETTY") == "true"
 
+	port := os.Getenv("UTENA_PORT")
+	if port == "" {
+		port = "3333"
+	}
+
+	configDir := os.Getenv("UTENA_DATA_DIR")
+	if configDir == "" {
+		homeDir, _ := os.UserHomeDir()
+		configDir = filepath.Join(homeDir, ".config", "utena")
+	}
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
@@ -32,9 +43,6 @@ func StartDaemon() {
 	defer stop()
 
 	bus := eventbus.NewEventBus()
-
-	homeDir, _ := os.UserHomeDir()
-	configDir := filepath.Join(homeDir, ".config", "utena")
 
 	workspaceModule := workspace.NewWorkspaceModule(afero.NewOsFs(), configDir)
 	sessionModule := session.NewSessionModule(workspaceModule, bus, afero.NewOsFs(), configDir)
@@ -57,7 +65,7 @@ func StartDaemon() {
 		log.Fatalf("Failed to initialize claude module: %v", err)
 	}
 
-	go serveAPI(ctx, workspaceModule, sessionModule, zellijModule, claudeModule, prettyLogs)
+	go serveAPI(ctx, workspaceModule, sessionModule, zellijModule, claudeModule, prettyLogs, port)
 
 	<-ctx.Done()
 
@@ -78,7 +86,7 @@ func StartDaemon() {
 	}
 }
 
-func serveAPI(ctx context.Context, workspaceModule *workspace.WorkspaceModule, sessionModule *session.SessionModule, zellijModule *zellij.ZellijModule, claudeModule *claude.ClaudeModule, prettyLogs bool) {
+func serveAPI(ctx context.Context, workspaceModule *workspace.WorkspaceModule, sessionModule *session.SessionModule, zellijModule *zellij.ZellijModule, claudeModule *claude.ClaudeModule, prettyLogs bool, port string) {
 	r := chi.NewRouter()
 
 	httplogOpts := &httplog.Options{
@@ -103,6 +111,7 @@ func serveAPI(ctx context.Context, workspaceModule *workspace.WorkspaceModule, s
 	r.Mount("/zellij", zellijModule.Routes())
 	r.Mount("/claude", claudeModule.Routes())
 
-	log.Println("Starting daemon on :3333")
-	http.ListenAndServe(":3333", r)
+	addr := ":" + port
+	log.Printf("Starting daemon on %s", addr)
+	http.ListenAndServe(addr, r)
 }

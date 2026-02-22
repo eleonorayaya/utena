@@ -10,7 +10,7 @@ tasks:
       - 'cmd/daemon/main.go'
     cmds:
       - go build -o out/tui cmd/tui/main.go
-  deploy:
+  install:
     deps:
       - build
     cmds:

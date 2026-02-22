@@ -4,13 +4,15 @@ version: '3'
 vars:
   TARGET: 'wasm32-wasip1'
   BIN: 'utena.wasm'
-  PLUGIN_LOG_FILE: '/var/log/utena.log'
+  _PORT:
+    sh: echo "${UTENA_PORT:-default}"
   ZELLIJ_LOG_FILE:
     sh: echo "$(find /var/folders -type f -name 'zellij.log' 2> /dev/null)"
   LOG_LOOKBACK: 100
 
 tasks:
   build:
+    label: 'build-{{._PORT}}'
     sources:
       - 'src/**/*.rs'
     cmds:
@@ -20,7 +22,7 @@ tasks:
     cmds:
       - zellij action start-or-reload-plugin file:~/.config/zellij/plugins/{{.BIN}}
 
-  deploy:
+  install:
     deps:
       - build
     cmds:
@@ -29,11 +31,12 @@ tasks:
 
   logs_tail:
     cmds:
-      - tail -f {{ .PLUGIN_LOG_FILE }}
+      - touch "${UTENA_DATA_DIR:-$HOME/.config/utena}/plugin.log"
+      - tail -f "${UTENA_DATA_DIR:-$HOME/.config/utena}/plugin.log"
 
   logs:
     cmds:
-      - tail -n {{ .LOG_LOOKBACK }} {{ .PLUGIN_LOG_FILE }}
+      - tail -n {{ .LOG_LOOKBACK }} "${UTENA_DATA_DIR:-$HOME/.config/utena}/plugin.log"
 
   zellijlogs_tail:
     cmds:
@@ -42,6 +45,16 @@ tasks:
   zellijlogs:
     cmds:
       - tail -n {{ .LOG_LOOKBACK }} {{ .ZELLIJ_LOG_FILE }}
+
+  dev:
+    deps:
+      - build
+    cmds:
+      - zellij action start-or-reload-plugin "file:$(pwd)/target/{{.TARGET}}/release/{{.BIN}}"
+
+  open:
+    cmds:
+      - echo '{"command":"open_picker"}' | zellij pipe --name "${UTENA_PIPE_NAME:-utena-commands}"
 
   fmt:
     sources:

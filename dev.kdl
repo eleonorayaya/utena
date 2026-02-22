@@ -10,7 +10,7 @@ layout {
         tab_normal               "#[fg=#8a7873] {name} {fullscreen_indicator}{sync_indicator}{floating_indicator}"
         tab_active               "#[fg=#a87bb7,bold,italic] {name} {fullscreen_indicator}{sync_indicator}{floating_indicator}"
         tab_fullscreen_indicator "□ "
-        tab_sync_indicator       "  "
+        tab_sync_indicator       "  "
         tab_floating_indicator   "󰉈 "
 
         command_git_branch_command     "git rev-parse --abbrev-ref HEAD"
@@ -29,10 +29,10 @@ layout {
       pane split_direction="vertical" {
         pane size="40%" {
           pane size="50%" command="task" name="tui" {
-            args "-w" "tui:deploy"
+            args "dev:tui"
           }
           pane size="50%" command="task" name="server" {
-            args "-w" "daemon:run"
+            args "dev:daemon"
           }
         }
 
@@ -42,18 +42,12 @@ layout {
           }
 
           pane command="task" name="plugin logs" {
-            args "plugin:logs_tail"
+            args "dev:plugin:logs"
           }
         }
 
-        pane split_direction="horizontal" size="20%" {
-          pane size="80%" command="task" name="plugin build" {
-            args "-w" "plugin:deploy"
-          }
-
-          pane {
-            plugin location="file:~/.config/zellij/plugins/utena.wasm" { }
-          }
+        pane size="20%" command="task" name="plugin build" {
+          args "dev:plugin:build"
         }
       }
     }

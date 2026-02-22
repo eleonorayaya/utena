@@ -8,6 +8,8 @@ includes:
     taskfile: Taskfile.daemon.yml
   tui:
     taskfile: Taskfile.tui.yml
+  dev:
+    taskfile: Taskfile.dev.yml
 
 tasks:
   go:fmt:
@@ -28,7 +30,3 @@ tasks:
     cmds:
       - task: go:fmt
       - task: plugin:fmt
-
-  dev:
-    cmds:
-      - zellij action new-tab --layout dev.kdl --name dev
