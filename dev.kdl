@@ -47,7 +47,7 @@ layout {
         }
 
         pane size="20%" command="task" name="plugin build" {
-          args "dev:plugin:build"
+          args "dev:plugin:dev"
         }
       }
     }
