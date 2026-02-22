@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -27,20 +26,7 @@ var baseURL string
 var pipeName string
 
 func Configure(port, pipe string) {
-	if port == "" {
-		port = os.Getenv("UTENA_PORT")
-	}
-	if port == "" {
-		port = "3333"
-	}
 	baseURL = fmt.Sprintf("http://localhost:%s", port)
-
-	if pipe == "" {
-		pipe = os.Getenv("UTENA_PIPE_NAME")
-	}
-	if pipe == "" {
-		pipe = "utena-commands"
-	}
 	pipeName = pipe
 }
 

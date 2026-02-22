@@ -13,6 +13,11 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui"
 )
 
+var (
+	defaultPort     = "3333"
+	defaultPipeName = "utena-commands"
+)
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:          "utena",
@@ -21,8 +26,8 @@ func main() {
 		RunE:         runTUI,
 	}
 
-	rootCmd.Flags().String("port", "", "daemon port")
-	rootCmd.Flags().String("pipe-name", "", "zellij pipe name")
+	rootCmd.Flags().String("port", defaultPort, "daemon port")
+	rootCmd.Flags().String("pipe-name", defaultPipeName, "zellij pipe name")
 
 	rootCmd.AddCommand(shellInitCmd())
 

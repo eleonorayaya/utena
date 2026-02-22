@@ -8,17 +8,18 @@ tasks:
     sources:
       - 'internal/**/*.go'
       - 'cmd/tui/main.go'
+    vars:
+      LDFLAGS: >-
+        -X main.defaultPort={{.UTENA_PORT | default "3333"}}
+        -X main.defaultPipeName={{.UTENA_PIPE_NAME | default "utena-commands"}}
     cmds:
-      - go build -o out/tui cmd/tui/main.go
+      - go build -ldflags '{{.LDFLAGS}}' -o out/tui cmd/tui/main.go
   install:
     deps:
       - build
     cmds:
       - cp ./out/tui /usr/local/bin/utena
   run:
-    env:
-      UTENA_PORT: '{{.UTENA_PORT | default "3333"}}'
-      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME | default ""}}'
     deps:
       - build
     cmds:
