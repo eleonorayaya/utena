@@ -61,6 +61,25 @@ func (s *GitService) CreateWorktree(ctx context.Context, repoPath string, name s
 	return worktreePath, nil
 }
 
+func (s *GitService) CheckoutWorktree(ctx context.Context, repoPath string, branch string) (string, error) {
+	sanitized := strings.ReplaceAll(branch, "/", "-")
+	worktreePath := filepath.Join(repoPath, ".worktrees", sanitized)
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", worktreePath, branch)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
+	}
+	return worktreePath, nil
+}
+
+func (s *GitService) CurrentBranch(ctx context.Context, repoPath string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "branch", "--show-current")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current branch: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 func (s *GitService) RemoveWorktree(ctx context.Context, repoPath string, worktreePath string) error {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "remove", worktreePath, "--force")
 	if output, err := cmd.CombinedOutput(); err != nil {

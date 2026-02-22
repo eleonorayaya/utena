@@ -55,5 +55,6 @@ func (a *AddWorkspaceRequest) Bind(r *http.Request) error {
 }
 
 type BranchListResponse struct {
-	Branches []string `json:"branches"`
+	Branches      []string `json:"branches"`
+	CurrentBranch string   `json:"current_branch"`
 }

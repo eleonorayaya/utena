@@ -13,6 +13,7 @@ tasks:
       - 'cmd/daemon/main.go'
     cmds:
       - go build -o out/daemon cmd/daemon/main.go
+
   run:
     env:
       UTENA_LOG_PRETTY: 'true'
@@ -23,6 +24,7 @@ tasks:
       - build
     cmds:
       - ./out/daemon
+
   install:
     desc: Install the daemon as a launchd user agent
     deps:
@@ -34,10 +36,12 @@ tasks:
       - sed -e 's|__DAEMON_PATH__|{{.DAEMON_BIN}}|g' -e 's|__LOG_DIR__|{{.LOG_DIR}}|g' config/launchd/{{.PLIST_NAME}} > {{shellQuote .PLIST_DEST}}
       - launchctl bootout gui/$(id -u) {{shellQuote .PLIST_DEST}} 2>/dev/null || true
       - launchctl bootstrap gui/$(id -u) {{shellQuote .PLIST_DEST}}
+
   logs:
     desc: Tail the daemon logs
     cmds:
       - tail -f {{shellQuote .LOG_DIR}}/daemon.stdout.log {{shellQuote .LOG_DIR}}/daemon.stderr.log
+
   uninstall:
     desc: Uninstall the daemon launchd user agent
     cmds:

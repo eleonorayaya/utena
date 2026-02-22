@@ -57,6 +57,7 @@ func RenderSessionList(sessions []Session) []render.Renderer {
 
 type CreateSessionRequest struct {
 	*Session
+	CreateWorktree *bool `json:"create_worktree,omitempty"`
 }
 
 func (c *CreateSessionRequest) Bind(r *http.Request) error {
@@ -66,6 +67,13 @@ func (c *CreateSessionRequest) Bind(r *http.Request) error {
 	}
 
 	return ValidateSession(c.Session)
+}
+
+func (c *CreateSessionRequest) ShouldCreateWorktree() bool {
+	if c.CreateWorktree == nil {
+		return true
+	}
+	return *c.CreateWorktree
 }
 
 type UpdateSessionRequest struct {

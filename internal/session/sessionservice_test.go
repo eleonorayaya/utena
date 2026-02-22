@@ -146,7 +146,7 @@ func TestSessionService_CreateSession(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session)
+	err := service.CreateSession(ctx, session, false)
 	require.NoError(t, err)
 
 	// Verify session was created
@@ -168,7 +168,7 @@ func TestSessionService_CreateSession_InvalidWorkspace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session)
+	err := service.CreateSession(ctx, session, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
@@ -226,7 +226,7 @@ func TestSessionService_DeleteSession(t *testing.T) {
 	sessionStore.Add(session)
 
 	ctx := context.Background()
-	err := service.DeleteSession(ctx, "session-1")
+	err := service.DeleteSession(ctx, "session-1", true)
 	require.NoError(t, err)
 
 	retrieved, err := sessionStore.GetByID("session-1")
@@ -239,7 +239,7 @@ func TestSessionService_DeleteSession_NotFound(t *testing.T) {
 	service, _, _ := setupSessionService(t)
 
 	ctx := context.Background()
-	err := service.DeleteSession(ctx, "nonexistent")
+	err := service.DeleteSession(ctx, "nonexistent", true)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
@@ -275,13 +275,14 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
 
 	session := &Session{
-		ID:          "my-feature",
-		WorkspaceID: "ws-git",
-		BaseBranch:  "main",
+		ID:            "my-feature",
+		WorkspaceID:   "ws-git",
+		BaseBranch:    "main",
+		BranchCreated: true,
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session)
+	err := service.CreateSession(ctx, session, true)
 	require.NoError(t, err)
 
 	expectedPath := filepath.Join(repoPath, ".worktrees", "my-feature")
@@ -310,13 +311,14 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
 
 	session := &Session{
-		ID:          "my-feature",
-		WorkspaceID: "ws-git",
-		BaseBranch:  "nonexistent",
+		ID:            "my-feature",
+		WorkspaceID:   "ws-git",
+		BaseBranch:    "nonexistent",
+		BranchCreated: true,
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session)
+	err := service.CreateSession(ctx, session, true)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to create worktree")
 
@@ -333,7 +335,7 @@ func TestSessionService_CreateSession_NoBranch_SkipsWorktree(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session)
+	err := service.CreateSession(ctx, session, false)
 	require.NoError(t, err)
 	require.Empty(t, session.WorktreePath)
 
@@ -359,7 +361,7 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session)
+	err := service.CreateSession(ctx, session, false)
 	require.NoError(t, err)
 	require.Empty(t, session.WorktreePath)
 }
@@ -373,7 +375,7 @@ func TestSessionService_CreateSession_TouchesWorkspace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session)
+	err := service.CreateSession(ctx, session, false)
 	require.NoError(t, err)
 
 	ws, err := workspaceStore.GetByID("ws-1")

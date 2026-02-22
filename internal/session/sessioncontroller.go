@@ -70,7 +70,7 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := c.service.CreateSession(ctx, data.Session); err != nil {
+	if err := c.service.CreateSession(ctx, data.Session, data.ShouldCreateWorktree()); err != nil {
 		var wsNotFound *workspace.WorkspaceNotFoundError
 		if errors.Is(err, ErrSessionAlreadyExists) || errors.As(err, &wsNotFound) {
 			render.Render(w, r, common.ErrInvalidRequest(err))
@@ -115,7 +115,9 @@ func (c *SessionController) DeleteSession(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 
-	if err := c.service.DeleteSession(ctx, id); err != nil {
+	deleteBranch := r.URL.Query().Get("delete_branch") != "false"
+
+	if err := c.service.DeleteSession(ctx, id, deleteBranch); err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			render.Render(w, r, common.ErrNotFound())
 			return

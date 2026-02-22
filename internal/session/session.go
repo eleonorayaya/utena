@@ -15,7 +15,9 @@ type Session struct {
 	ID            string    `json:"id"`
 	WorkspaceID   string    `json:"workspace_id"`
 	WorkspaceName string    `json:"workspace_name,omitempty"`
+	Branch        string    `json:"branch,omitempty"`
 	BaseBranch    string    `json:"base_branch,omitempty"`
+	BranchCreated bool      `json:"branch_created,omitempty"`
 	WorktreePath  string    `json:"worktree_path,omitempty"`
 	IsAttached    bool      `json:"is_attached"`
 	IsActive      bool      `json:"is_active"`

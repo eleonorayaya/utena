@@ -72,7 +72,7 @@ func (s *SessionService) GetSession(ctx context.Context, id string) (*Session, e
 	return s.store.GetByID(id)
 }
 
-func (s *SessionService) CreateSession(ctx context.Context, session *Session) error {
+func (s *SessionService) CreateSession(ctx context.Context, session *Session, createWorktree bool) error {
 	var ws *workspace.Workspace
 	if session.WorkspaceID != "" {
 		var err error
@@ -82,16 +82,32 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session) er
 		}
 	}
 
-	if session.BaseBranch != "" && ws != nil && ws.IsGitRepo {
-		if err := s.gitService.Pull(ctx, ws.Path, session.BaseBranch); err != nil {
-			slog.Warn("git pull failed, continuing with worktree creation", "error", err)
+	if ws != nil && ws.IsGitRepo && createWorktree {
+		pullBranch := session.BaseBranch
+		if !session.BranchCreated && session.Branch != "" {
+			pullBranch = session.Branch
 		}
 
-		worktreePath, err := s.gitService.CreateWorktree(ctx, ws.Path, session.ID, session.BaseBranch)
-		if err != nil {
-			return fmt.Errorf("failed to create worktree: %w", err)
+		if pullBranch != "" {
+			if err := s.gitService.Pull(ctx, ws.Path, pullBranch); err != nil {
+				slog.Warn("git pull failed, continuing with worktree creation", "error", err)
+			}
 		}
-		session.WorktreePath = worktreePath
+
+		if session.BranchCreated {
+			worktreePath, err := s.gitService.CreateWorktree(ctx, ws.Path, session.ID, session.BaseBranch)
+			if err != nil {
+				return fmt.Errorf("failed to create worktree: %w", err)
+			}
+			session.WorktreePath = worktreePath
+			session.Branch = session.ID
+		} else if session.Branch != "" {
+			worktreePath, err := s.gitService.CheckoutWorktree(ctx, ws.Path, session.Branch)
+			if err != nil {
+				return fmt.Errorf("failed to checkout worktree: %w", err)
+			}
+			session.WorktreePath = worktreePath
+		}
 	}
 
 	if session.LastUsedAt.IsZero() {
@@ -192,7 +208,7 @@ func (s *SessionService) ReviveSession(ctx context.Context, name string) (*Reviv
 	return &ReviveResult{Session: session, WorkspacePath: workspacePath}, nil
 }
 
-func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
+func (s *SessionService) DeleteSession(ctx context.Context, id string, deleteBranch bool) error {
 	session, err := s.store.GetByID(id)
 	if err != nil {
 		return err
@@ -204,18 +220,22 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 
 	cleanup := &Cleanup{}
 
-	if session.WorktreePath != "" && session.WorkspaceID != "" {
+	if session.WorkspaceID != "" {
 		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
 		if err == nil {
-			if rmErr := s.gitService.RemoveWorktree(ctx, ws.Path, session.WorktreePath); rmErr != nil {
-				slog.Warn("failed to remove worktree", "error", rmErr)
-			} else {
-				cleanup.WorktreeRemoved = true
+			if session.WorktreePath != "" {
+				if rmErr := s.gitService.RemoveWorktree(ctx, ws.Path, session.WorktreePath); rmErr != nil {
+					slog.Warn("failed to remove worktree", "error", rmErr)
+				} else {
+					cleanup.WorktreeRemoved = true
+				}
 			}
-			if brErr := s.gitService.DeleteBranch(ctx, ws.Path, id); brErr != nil {
-				slog.Warn("failed to delete branch", "error", brErr)
-			} else {
-				cleanup.BranchDeleted = true
+			if deleteBranch && session.Branch != "" {
+				if brErr := s.gitService.DeleteBranch(ctx, ws.Path, session.Branch); brErr != nil {
+					slog.Warn("failed to delete branch", "error", brErr)
+				} else {
+					cleanup.BranchDeleted = true
+				}
 			}
 		} else {
 			slog.Warn("workspace not found during cleanup, skipping worktree/branch removal", "workspace_id", session.WorkspaceID)

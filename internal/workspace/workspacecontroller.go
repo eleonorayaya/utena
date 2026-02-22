@@ -94,5 +94,10 @@ func (c *WorkspaceController) ListBranches(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	render.JSON(w, r, BranchListResponse{Branches: branches})
+	currentBranch, err := c.gitService.CurrentBranch(ctx, ws.Path)
+	if err != nil {
+		currentBranch = ""
+	}
+
+	render.JSON(w, r, BranchListResponse{Branches: branches, CurrentBranch: currentBranch})
 }
