@@ -9,54 +9,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/eleonorayaya/utena/internal/zellij"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/render"
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestRouter(t *testing.T) chi.Router {
+func setupTestRouter(t *testing.T) (*App, chi.Router) {
 	t.Helper()
 
-	ctx := context.Background()
+	cfg := Config{ConfigDir: "/config"}
+	app := NewTestApp(cfg)
 
-	bus := eventbus.NewEventBus()
+	app.Workspace.Store.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
+	app.Workspace.Store.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
 
-	workspaceModule := workspace.NewWorkspaceModule(afero.NewMemMapFs(), "/config")
-	sessionModule := session.NewSessionModule(workspaceModule, bus, afero.NewMemMapFs(), "/config")
-	zellijModule := zellij.NewZellijModule(sessionModule, bus)
-
-	workspaceModule.Store.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
-	workspaceModule.Store.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
-
-	err := workspaceModule.OnAppStart(ctx)
+	err := app.OnStart(context.Background())
 	require.NoError(t, err)
 
-	err = zellijModule.OnAppStart(ctx)
-	require.NoError(t, err)
+	server := BuildServer(app, cfg)
 
-	// Setup router
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.URLFormat)
-	r.Use(render.SetContentType(render.ContentTypeJSON))
-
-	// Mount module routers
-	r.Mount("/workspaces", workspaceModule.Routes())
-	r.Mount("/sessions", sessionModule.Routes())
-	r.Mount("/zellij", zellijModule.Routes())
-
-	return r
+	return app, server.Handler.(*chi.Mux)
 }
 
 func TestDaemon_ListWorkspaces(t *testing.T) {
-	router := setupTestRouter(t)
+	_, router := setupTestRouter(t)
 
 	req := httptest.NewRequest("GET", "/workspaces", nil)
 	w := httptest.NewRecorder()
@@ -80,7 +58,7 @@ func TestDaemon_ListWorkspaces(t *testing.T) {
 }
 
 func TestDaemon_GetWorkspaceByID(t *testing.T) {
-	router := setupTestRouter(t)
+	_, router := setupTestRouter(t)
 
 	req := httptest.NewRequest("GET", "/workspaces/ws-1", nil)
 	w := httptest.NewRecorder()
@@ -97,7 +75,7 @@ func TestDaemon_GetWorkspaceByID(t *testing.T) {
 }
 
 func TestDaemon_CreateAndGetSession(t *testing.T) {
-	router := setupTestRouter(t)
+	_, router := setupTestRouter(t)
 
 	// Create session
 	sess := &session.Session{
@@ -135,7 +113,7 @@ func TestDaemon_CreateAndGetSession(t *testing.T) {
 }
 
 func TestDaemon_ListSessions(t *testing.T) {
-	router := setupTestRouter(t)
+	_, router := setupTestRouter(t)
 
 	// Create multiple sessions
 	sessions := []*session.Session{
@@ -182,7 +160,7 @@ func TestDaemon_ListSessions(t *testing.T) {
 }
 
 func TestDaemon_ZellijSessionUpdate(t *testing.T) {
-	router := setupTestRouter(t)
+	_, router := setupTestRouter(t)
 
 	updateReq := &zellij.UpdateSessionsRequest{
 		Sessions: []zellij.SessionUpdate{
@@ -248,7 +226,7 @@ func findSessionByID(sessions []session.Session, id string) *session.Session {
 }
 
 func TestDaemon_ZellijSessionUpdate_MarkDeadSessions(t *testing.T) {
-	router := setupTestRouter(t)
+	_, router := setupTestRouter(t)
 
 	sess1 := &session.Session{
 		ID:          "old-session-1",

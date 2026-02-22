@@ -1,8 +1,13 @@
 package common
 
-import "context"
+import (
+	"context"
+
+	"github.com/go-chi/chi/v5"
+)
 
 type Module interface {
 	OnAppStart(ctx context.Context) error
 	OnAppEnd(ctx context.Context) error
+	Routes() chi.Router
 }
