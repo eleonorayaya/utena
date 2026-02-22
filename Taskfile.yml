@@ -36,6 +36,11 @@ tasks:
     cmds:
       - task: go:fmt
       - task: plugin:fmt
+  install:
+    cmds:
+      - task: daemon:install
+      - task: plugin:install
+      - task: tui:install
 
   dev:
     cmds:

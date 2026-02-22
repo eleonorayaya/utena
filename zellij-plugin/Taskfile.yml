@@ -14,7 +14,7 @@ tasks:
     env:
       UTENA_PORT: '{{.UTENA_PORT | default "3333"}}'
       UTENA_DATA_DIR: '{{.UTENA_DATA_DIR | default ""}}'
-      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME | default ""}}'
+      UTENA_PIPE_NAME: '{{.UTENA_PIPE_NAME | default "utena-commands"}}'
       UTENA_TUI_PATH: '{{.UTENA_TUI_PATH | default "utena"}}'
     sources:
       - 'src/**/*.rs'
