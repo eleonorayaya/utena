@@ -133,6 +133,10 @@ func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Ses
 
 	slog.Info("activate session", "session", name, "is_attached", session.IsAttached)
 
+	if session.IsDead {
+		return nil, ErrSessionDead
+	}
+
 	if session.IsAttached {
 		slog.Info("skipping activation for already attached session", "session", name)
 		return session, nil

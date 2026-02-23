@@ -260,3 +260,105 @@ func TestSessionRouter_DeleteSession(t *testing.T) {
 	require.True(t, retrieved.IsDeleted)
 	require.NotNil(t, retrieved.Cleanup)
 }
+
+func TestSessionRouter_ReviveSession(t *testing.T) {
+	router, sessionStore, _ := setupSessionRouter(t)
+
+	sessionStore.Add(&Session{ID: "dead-session", WorkspaceID: "ws-1", IsDead: true, LastUsedAt: time.Now()})
+
+	req := httptest.NewRequest("PUT", "/dead-session/revive", nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response SessionResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Equal(t, "dead-session", response.ID)
+	require.False(t, response.IsDead)
+	require.Equal(t, "/tmp/utena", response.WorkspacePath)
+
+	retrieved, err := sessionStore.GetByID("dead-session")
+	require.NoError(t, err)
+	require.False(t, retrieved.IsDead)
+}
+
+func TestSessionRouter_ReviveSession_NoWorkspace(t *testing.T) {
+	router, sessionStore, _ := setupSessionRouter(t)
+
+	sessionStore.Add(&Session{ID: "dead-no-ws", IsDead: true, LastUsedAt: time.Now()})
+
+	req := httptest.NewRequest("PUT", "/dead-no-ws/revive", nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response SessionResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.False(t, response.IsDead)
+	require.Empty(t, response.WorkspacePath)
+}
+
+func TestSessionRouter_ReviveSession_NotFound(t *testing.T) {
+	router, _, _ := setupSessionRouter(t)
+
+	req := httptest.NewRequest("PUT", "/nonexistent/revive", nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestSessionRouter_ReviveSession_NotDead(t *testing.T) {
+	router, sessionStore, _ := setupSessionRouter(t)
+
+	sessionStore.Add(&Session{ID: "alive-session", WorkspaceID: "ws-1", IsDead: false, LastUsedAt: time.Now()})
+
+	req := httptest.NewRequest("PUT", "/alive-session/revive", nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSessionRouter_ReviveSession_InvalidWorkspace(t *testing.T) {
+	router, sessionStore, _ := setupSessionRouter(t)
+
+	sessionStore.Add(&Session{ID: "dead-bad-ws", WorkspaceID: "nonexistent", IsDead: true, LastUsedAt: time.Now()})
+
+	req := httptest.NewRequest("PUT", "/dead-bad-ws/revive", nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+
+	retrieved, err := sessionStore.GetByID("dead-bad-ws")
+	require.NoError(t, err)
+	require.True(t, retrieved.IsDead)
+}
+
+func TestSessionRouter_ActivateSession_RejectsDeadSession(t *testing.T) {
+	router, sessionStore, _ := setupSessionRouter(t)
+
+	sessionStore.Add(&Session{ID: "dead-session", WorkspaceID: "ws-1", IsDead: true, LastUsedAt: time.Now()})
+
+	req := httptest.NewRequest("PUT", "/dead-session/activate", nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+
+	retrieved, err := sessionStore.GetByID("dead-session")
+	require.NoError(t, err)
+	require.True(t, retrieved.IsDead)
+	require.False(t, retrieved.IsAttached)
+}

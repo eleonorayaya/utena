@@ -139,6 +139,8 @@ func (c *SessionController) ActivateSession(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			render.Render(w, r, common.ErrNotFound())
+		} else if errors.Is(err, ErrSessionDead) {
+			render.Render(w, r, common.ErrInvalidRequest(err))
 		} else {
 			render.Render(w, r, common.ErrUnknown(err))
 		}
