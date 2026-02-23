@@ -135,18 +135,39 @@ func (c *SessionController) ActivateSession(w http.ResponseWriter, r *http.Reque
 	ctx := r.Context()
 	name := chi.URLParam(r, "name")
 
-	_, err := c.service.ActivateSession(ctx, name)
+	session, err := c.service.ActivateSession(ctx, name)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			render.Render(w, r, common.ErrNotFound())
+		} else if errors.Is(err, ErrSessionDead) {
+			render.Render(w, r, common.ErrInvalidRequest(err))
 		} else {
 			render.Render(w, r, common.ErrUnknown(err))
 		}
 		return
 	}
 
-	render.JSON(w, r, map[string]interface{}{
-		"success": true,
-		"message": "Session activated",
-	})
+	render.Render(w, r, NewSessionResponse(session))
+}
+
+func (c *SessionController) ReviveSession(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	name := chi.URLParam(r, "name")
+
+	result, err := c.service.ReviveSession(ctx, name)
+	if err != nil {
+		var wsNotFound *workspace.WorkspaceNotFoundError
+		if errors.Is(err, ErrSessionNotFound) {
+			render.Render(w, r, common.ErrNotFound())
+		} else if errors.Is(err, ErrSessionNotDead) {
+			render.Render(w, r, common.ErrInvalidRequest(err))
+		} else if errors.As(err, &wsNotFound) {
+			render.Render(w, r, common.ErrInvalidRequest(err))
+		} else {
+			render.Render(w, r, common.ErrUnknown(err))
+		}
+		return
+	}
+
+	render.Render(w, r, NewReviveResponse(result))
 }

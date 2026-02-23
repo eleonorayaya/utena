@@ -12,6 +12,10 @@ type activateSessionMsg struct {
 	name string
 }
 
+type reviveSessionMsg struct {
+	name string
+}
+
 type switchToNewSessionMsg struct{}
 
 type deleteSessionMsg struct {
@@ -25,7 +29,9 @@ type sessionItem struct {
 
 func (i sessionItem) Title() string {
 	title := i.session.ID
-	if i.session.IsAttached {
+	if i.session.IsDead {
+		title += " (dead)"
+	} else if i.session.IsAttached {
 		title += " (attached)"
 	}
 	if i.claudeStatus != "" {
@@ -99,7 +105,7 @@ func aggregateClaudeStatus(sessions []claude.ClaudeSession) string {
 func (m *SessionListModel) rebuildItems() tea.Cmd {
 	var items []list.Item
 	for _, s := range m.sessions {
-		if s.IsDead || s.IsDeleted {
+		if s.IsDeleted {
 			continue
 		}
 		status := aggregateClaudeStatus(m.claudeSessions[s.ID])
@@ -135,6 +141,11 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {
 				if item.session.IsAttached {
 					return m, m.list.NewStatusMessage("already attached to this session")
+				}
+				if item.session.IsDead {
+					return m, func() tea.Msg {
+						return reviveSessionMsg{name: item.session.ID}
+					}
 				}
 				return m, func() tea.Msg {
 					return activateSessionMsg{name: item.session.ID}

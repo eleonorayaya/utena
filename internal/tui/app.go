@@ -115,8 +115,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case activateSessionMsg:
 		return a, activateSession(msg.name)
 
+	case reviveSessionMsg:
+		return a, reviveSession(msg.name)
+
+	case sessionRevivedMsg:
+		a.pendingWorkspacePath = msg.worktreePath
+		if a.pendingWorkspacePath == "" {
+			a.pendingWorkspacePath = msg.workspacePath
+		}
+		return a, activateSession(msg.name)
+
 	case sessionActivatedMsg:
-		if a.pendingCreate != "" {
+		if a.pendingCreate != "" || a.pendingWorkspacePath != "" {
 			return a, sendZellijPipe("create_session", msg.name, a.pendingWorkspacePath)
 		}
 		return a, sendZellijPipe("switch_session", msg.name, "")
