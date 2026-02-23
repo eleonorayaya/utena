@@ -161,6 +161,33 @@ func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Ses
 	return session, nil
 }
 
+func (s *SessionService) ReviveSession(ctx context.Context, name string) (*ReviveResult, error) {
+	session, err := s.store.GetByID(name)
+	if err != nil {
+		return nil, err
+	}
+
+	if !session.IsDead {
+		return nil, ErrSessionNotDead
+	}
+
+	var workspacePath string
+	if session.WorkspaceID != "" {
+		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		workspacePath = ws.Path
+	}
+
+	session.IsDead = false
+	if err := s.store.Update(session); err != nil {
+		return nil, err
+	}
+
+	return &ReviveResult{Session: session, WorkspacePath: workspacePath}, nil
+}
+
 func (s *SessionService) DeleteSession(ctx context.Context, id string) error {
 	session, err := s.store.GetByID(id)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 var ErrSessionAlreadyExists = errors.New("session already exists")
 var ErrSessionNotFound = errors.New("session not found")
 var ErrSessionAttached = errors.New("cannot delete attached session")
+var ErrSessionNotDead = errors.New("session is not dead")
 
 type Session struct {
 	ID            string    `json:"id"`

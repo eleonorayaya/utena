@@ -56,6 +56,12 @@ type sessionActivatedMsg struct {
 	name string
 }
 
+type sessionRevivedMsg struct {
+	name          string
+	workspacePath string
+	worktreePath  string
+}
+
 type sessionCreatedMsg struct {
 	worktreePath string
 }
@@ -179,6 +185,38 @@ func activateSession(name string) tea.Cmd {
 		}
 
 		return sessionActivatedMsg{name: name}
+	}
+}
+
+func reviveSession(name string) tea.Cmd {
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodPut, baseURL+"/sessions/"+name+"/revive", nil)
+		if err != nil {
+			return errMsg{err}
+		}
+
+		res, err := apiClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] revive session %q: %v", name, err)
+			return errMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			return parseAPIError(res, "revive session")
+		}
+
+		var resp struct {
+			WorkspacePath string `json:"workspace_path"`
+			WorktreePath  string `json:"worktree_path"`
+		}
+		json.NewDecoder(res.Body).Decode(&resp)
+
+		return sessionRevivedMsg{
+			name:          name,
+			workspacePath: resp.WorkspacePath,
+			worktreePath:  resp.WorktreePath,
+		}
 	}
 }
 
