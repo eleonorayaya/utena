@@ -14,34 +14,27 @@ type view int
 
 const (
 	sessionListView view = iota
-	workspacePickerView
-	branchPickerView
-	nameInputView
-	debugView
-	filePickerView
+	sessionFormView
 	TodoListView
-	todoWorkspacePickerView
-	newTodoView
+	todoFormView
+	debugView
 )
 
 type App struct {
-	activeView           view
-	previousView         view
-	sessionList          SessionListModel
-	newSession           NewSessionModel
-	branchPicker         BranchPickerModel
-	nameInput            NameInputModel
-	filePicker           FilePickerModel
-	todoList             TodoListModel
-	todoWorkspacePicker  TodoWorkspacePickerModel
-	newTodo              NewTodoModel
-	help                 help.Model
-	pendingCreate        string
-	pendingWorkspacePath string
-	pendingBranch        string
-	logPath              string
-	initialView          view
-	width, height        int
+	sessions     SessionsProvider
+	workspaces   WorkspacesProvider
+	todos        TodosProvider
+	sessionList  SessionListModel
+	sessionForm  SessionFormModel
+	todoList     TodoListModel
+	todoForm     TodoFormModel
+	help         help.Model
+	activeView   view
+	previousView view
+	initialView  view
+	logPath      string
+	width        int
+	height       int
 }
 
 var debugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
@@ -58,9 +51,13 @@ func WithInitialView(v view) AppOption {
 func NewApp(logPath string, opts ...AppOption) App {
 	a := App{
 		activeView:  sessionListView,
+		sessions:    NewSessionsProvider(),
+		workspaces:  NewWorkspacesProvider(),
+		todos:       NewTodosProvider(),
 		sessionList: NewSessionListModel(),
-		newSession:  NewNewSessionModel(),
+		sessionForm: NewSessionFormModel(),
 		todoList:    NewTodoListModel(),
+		todoForm:    NewTodoFormModel(),
 		help:        help.New(),
 		logPath:     logPath,
 	}
@@ -71,212 +68,146 @@ func NewApp(logPath string, opts ...AppOption) App {
 }
 
 func (a App) Init() tea.Cmd {
-	if a.initialView == TodoListView {
-		return fetchTodoData()
+	cmds := []tea.Cmd{
+		a.sessions.Init(),
+		fetchWorkspaces(),
 	}
-	return tea.Batch(fetchSessions(), fetchClaudeSessions())
+	if a.initialView == TodoListView {
+		cmds = append(cmds, fetchTodos())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		a.width = msg.Width
-		a.height = msg.Height
-		a.sessionList.SetSize(msg.Width, msg.Height)
-		a.newSession.SetSize(msg.Width, msg.Height)
-		a.todoList.SetSize(msg.Width, msg.Height)
-		if a.activeView == branchPickerView {
-			a.branchPicker.SetSize(msg.Width, msg.Height)
-		}
-		if a.activeView == todoWorkspacePickerView {
-			a.todoWorkspacePicker.SetSize(msg.Width, msg.Height)
-		}
+	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
+		return a.onWindowSizeMsg(wsm)
+	}
 
+	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			return a, tea.Quit
 		}
-		if key.Matches(msg, debugKey) && a.activeView != debugView {
+		if key.Matches(msg, appKeys.Debug) && a.activeView != debugView {
 			a.previousView = a.activeView
 			a.activeView = debugView
 			return a, nil
 		}
-		if a.activeView == debugView && key.Matches(msg, backKey) {
+		if a.activeView == debugView && msg.String() == "esc" {
 			a.activeView = a.previousView
 			return a, nil
 		}
 
-	case deleteSessionMsg:
-		return a, deleteSession(msg.id)
+	case openSessionFormMsg:
+		a.activeView = sessionFormView
+		return a, a.sessionForm.Init()
 
-	case sessionDeletedMsg:
-		return a, fetchSessions()
+	case openTodosViewMsg:
+		a.activeView = TodoListView
+		return a, tea.Batch(a.todoList.Init(), fetchTodos())
 
-	case activateSessionMsg:
-		return a, activateSession(msg.name)
+	case openTodoFormMsg:
+		a.activeView = todoFormView
+		return a, a.todoForm.Init()
 
-	case sessionActivatedMsg:
-		if a.pendingCreate != "" {
-			return a, sendZellijPipe("create_session", msg.name, a.pendingWorkspacePath)
-		}
-		return a, sendZellijPipe("switch_session", msg.name, "")
-
-	case switchToNewSessionMsg:
-		a.activeView = workspacePickerView
-		a.newSession = NewNewSessionModel()
-		a.newSession.SetSize(a.width, a.height)
-		return a, fetchWorkspaces()
-
-	case switchToBranchPickerMsg:
-		a.activeView = branchPickerView
-		a.branchPicker = NewBranchPickerModel(msg.workspace)
-		a.branchPicker.SetSize(a.width, a.height)
-		return a, fetchBranches(msg.workspace.ID)
-
-	case branchSelectedMsg:
-		a.activeView = nameInputView
-		a.pendingBranch = msg.branch
-		a.nameInput = NewNameInputModel(msg.workspace)
-		return a, a.nameInput.Init()
-
-	case switchToNameInputMsg:
-		a.activeView = nameInputView
-		a.pendingBranch = ""
-		a.nameInput = NewNameInputModel(msg.workspace)
-		return a, a.nameInput.Init()
-
-	case switchToSessionListMsg:
+	case returnToSessionsMsg:
 		a.activeView = sessionListView
-		return a, tea.Batch(fetchSessions(), fetchClaudeSessions())
+		return a, tea.Batch(a.sessionList.Init(), a.sessions.Init())
 
-	case createSessionMsg:
-		a.pendingCreate = msg.name
-		a.pendingWorkspacePath = a.nameInput.workspace.Path
-		return a, createSession(msg.name, msg.workspaceID, a.pendingBranch)
+	case sessionFormCancelledMsg:
+		a.activeView = sessionListView
+		return a, a.sessionList.Init()
 
-	case sessionCreatedMsg:
-		if msg.worktreePath != "" {
-			a.pendingWorkspacePath = msg.worktreePath
-		}
-		return a, activateSession(a.pendingCreate)
-
-	case switchToFilePickerMsg:
-		a.previousView = a.activeView
-		a.activeView = filePickerView
-		a.filePicker = NewFilePickerModel()
-		a.filePicker.SetSize(a.width, a.height)
-		return a, a.filePicker.Init()
-
-	case workspaceAddedMsg:
-		if a.previousView == todoWorkspacePickerView {
-			a.activeView = todoWorkspacePickerView
-			a.todoWorkspacePicker = NewTodoWorkspacePickerModel()
-			a.todoWorkspacePicker.currentWorkspaceID = a.todoList.currentWorkspaceID
-			a.todoWorkspacePicker.SetSize(a.width, a.height)
-			return a, fetchWorkspaces()
-		}
-		a.activeView = workspacePickerView
-		a.newSession = NewNewSessionModel()
-		a.newSession.SetSize(a.width, a.height)
-		return a, fetchWorkspaces()
-
-	case switchToTodoListMsg:
+	case todoFormCancelledMsg:
 		a.activeView = TodoListView
-		a.todoList = NewTodoListModel()
-		a.todoList.SetSize(a.width, a.height)
-		return a, fetchTodoData()
-
-	case switchToTodoWorkspacePickerMsg:
-		a.activeView = todoWorkspacePickerView
-		a.todoWorkspacePicker = NewTodoWorkspacePickerModel()
-		a.todoWorkspacePicker.currentWorkspaceID = a.todoList.currentWorkspaceID
-		a.todoWorkspacePicker.SetSize(a.width, a.height)
-		return a, fetchWorkspaces()
-
-	case switchToNewTodoMsg:
-		a.activeView = newTodoView
-		a.newTodo = NewNewTodoModel(msg.workspace)
-		return a, a.newTodo.Init()
-
-	case createTodoMsg:
-		return a, createTodo(msg.name, msg.description, msg.workspaceID)
-
-	case todoCreatedMsg:
-		a.activeView = TodoListView
-		a.todoList = NewTodoListModel()
-		a.todoList.SetSize(a.width, a.height)
-		return a, fetchTodoData()
-
-	case deleteTodoMsg:
-		return a, deleteTodo(msg.id)
-
-	case todoDeletedMsg:
-		return a, fetchTodoData()
+		return a, a.todoList.Init()
 
 	case pipeSentMsg:
 		return a, tea.Quit
-
-	case errMsg:
-		switch a.activeView {
-		case branchPickerView:
-			return a, a.branchPicker.list.NewStatusMessage(msg.err.Error())
-		case nameInputView:
-			a.nameInput.err = msg.err.Error()
-			return a, nil
-		case newTodoView:
-			a.newTodo.err = msg.err.Error()
-			return a, nil
-		case sessionListView:
-			return a, a.sessionList.list.NewStatusMessage(msg.err.Error())
-		case TodoListView:
-			return a, a.todoList.list.NewStatusMessage(msg.err.Error())
-		}
-		return a, nil
 	}
 
+	var cmds []tea.Cmd
 	var cmd tea.Cmd
+	a.sessions, cmd = a.sessions.Update(msg)
+	cmds = append(cmds, cmd)
+	a.workspaces, cmd = a.workspaces.Update(msg)
+	cmds = append(cmds, cmd)
+	a.todos, cmd = a.todos.Update(msg)
+	cmds = append(cmds, cmd)
+
 	switch a.activeView {
 	case sessionListView:
 		a.sessionList, cmd = a.sessionList.Update(msg)
-	case workspacePickerView:
-		a.newSession, cmd = a.newSession.Update(msg)
-	case branchPickerView:
-		a.branchPicker, cmd = a.branchPicker.Update(msg)
-	case nameInputView:
-		a.nameInput, cmd = a.nameInput.Update(msg)
-	case filePickerView:
-		a.filePicker, cmd = a.filePicker.Update(msg)
+	case sessionFormView:
+		a.sessionForm, cmd = a.sessionForm.Update(msg)
 	case TodoListView:
 		a.todoList, cmd = a.todoList.Update(msg)
-	case todoWorkspacePickerView:
-		a.todoWorkspacePicker, cmd = a.todoWorkspacePicker.Update(msg)
-	case newTodoView:
-		a.newTodo, cmd = a.newTodo.Update(msg)
+	case todoFormView:
+		a.todoForm, cmd = a.todoForm.Update(msg)
 	}
-	return a, cmd
+	cmds = append(cmds, cmd)
+
+	return a, tea.Batch(cmds...)
+}
+
+func (a App) onWindowSizeMsg(wsm tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	a.width = wsm.Width
+	a.height = wsm.Height
+	msg := tea.WindowSizeMsg{Width: wsm.Width, Height: wsm.Height - 2}
+
+	var cmds []tea.Cmd
+	var cmd tea.Cmd
+	a.sessionList, cmd = a.sessionList.Update(msg)
+	cmds = append(cmds, cmd)
+	a.sessionForm, cmd = a.sessionForm.Update(msg)
+	cmds = append(cmds, cmd)
+	a.todoList, cmd = a.todoList.Update(msg)
+	cmds = append(cmds, cmd)
+	a.todoForm, cmd = a.todoForm.Update(msg)
+	cmds = append(cmds, cmd)
+	return a, tea.Batch(cmds...)
 }
 
 func (a App) View() string {
-	switch a.activeView {
-	case debugView:
+	if a.activeView == debugView {
 		return a.debugViewContent()
-	case workspacePickerView:
-		return a.newSession.View()
-	case branchPickerView:
-		return a.branchPicker.View()
-	case nameInputView:
-		return a.nameInput.View() + "\n\n" + a.help.View(nameInputKeyMap)
-	case filePickerView:
-		return a.filePicker.View()
-	case TodoListView:
-		return a.todoList.View()
-	case todoWorkspacePickerView:
-		return a.todoWorkspacePicker.View()
-	case newTodoView:
-		return a.newTodo.View() + "\n\n" + a.help.View(nameInputKeyMap)
-	default:
-		return a.sessionList.View()
 	}
+
+	var content string
+	switch a.activeView {
+	case sessionFormView:
+		content = a.sessionForm.View()
+	case TodoListView:
+		content = a.todoList.View()
+	case todoFormView:
+		content = a.todoForm.View()
+	default:
+		content = a.sessionList.View()
+	}
+
+	keys := a.keys()
+	helpView := a.help.View(keys)
+	if helpView != "" {
+		content += "\n" + helpView
+	}
+	return content
+}
+
+func (a App) keys() help.KeyMap {
+	keymaps := []help.KeyMap{appKeys}
+
+	switch a.activeView {
+	case sessionListView:
+		keymaps = append(keymaps, a.sessionList.Keys())
+	case sessionFormView:
+		keymaps = append(keymaps, a.sessionForm.Keys())
+	case TodoListView:
+		keymaps = append(keymaps, a.todoList.Keys())
+	case todoFormView:
+		keymaps = append(keymaps, a.todoForm.Keys())
+	}
+
+	return mergedKeyMap{keymaps: keymaps}
 }
 
 func (a App) debugViewContent() string {
@@ -299,5 +230,3 @@ func (a App) debugViewContent() string {
 	b.WriteString("\n" + debugStyle.Render("esc: back"))
 	return b.String()
 }
-
-type errMsg struct{ err error }

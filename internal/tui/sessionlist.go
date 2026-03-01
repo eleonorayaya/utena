@@ -1,22 +1,13 @@
 package tui
 
 import (
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
 )
-
-type activateSessionMsg struct {
-	name string
-}
-
-type switchToNewSessionMsg struct{}
-
-type deleteSessionMsg struct {
-	id string
-}
 
 type sessionItem struct {
 	session      session.Session
@@ -33,6 +24,7 @@ func (i sessionItem) Title() string {
 	}
 	return title
 }
+
 func (i sessionItem) Description() string {
 	name := i.session.WorkspaceName
 	if name == "" {
@@ -56,9 +48,7 @@ type SessionListModel struct {
 func NewSessionListModel() SessionListModel {
 	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Sessions"
-	l.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{selectKey, newSessionKey, closeSessionKey, todoKey}
-	}
+	l.SetShowHelp(false)
 	return SessionListModel{list: l}
 }
 
@@ -68,7 +58,15 @@ func (m *SessionListModel) SetSize(width, height int) {
 }
 
 func (m SessionListModel) Init() tea.Cmd {
-	return nil
+	return func() tea.Msg { return requestSessionsStateMsg{} }
+}
+
+func (m SessionListModel) Filtering() bool {
+	return m.list.FilterState() == list.Filtering
+}
+
+func (m SessionListModel) Keys() help.KeyMap {
+	return sessionListKeys
 }
 
 func aggregateClaudeStatus(sessions []claude.ClaudeSession) string {
@@ -110,28 +108,28 @@ func (m *SessionListModel) rebuildItems() tea.Cmd {
 
 func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case sessionsLoadedMsg:
+	case sessionsStateUpdatedMsg:
 		m.sessions = msg.sessions
+		m.claudeSessions = msg.claudeSessions
 		cmd := m.rebuildItems()
 		return m, cmd
 
-	case claudeSessionsLoadedMsg:
-		m.claudeSessions = make(map[string][]claude.ClaudeSession)
-		for _, cs := range msg.claudeSessions {
-			m.claudeSessions[cs.SessionID] = append(m.claudeSessions[cs.SessionID], cs)
-		}
-		cmd := m.rebuildItems()
-		return m, cmd
+	case errMsg:
+		return m, m.list.NewStatusMessage(msg.err.Error())
 
 	case tea.KeyMsg:
 		if m.list.FilterState() == list.Filtering {
 			break
 		}
-		if !key.Matches(msg, closeSessionKey) {
+		if !key.Matches(msg, sessionListKeys.Close) {
 			m.pendingDeleteID = ""
 		}
 		switch {
-		case key.Matches(msg, selectKey):
+		case key.Matches(msg, sessionListKeys.New):
+			return m, func() tea.Msg { return openSessionFormMsg{} }
+		case key.Matches(msg, sessionListKeys.Todos):
+			return m, func() tea.Msg { return openTodosViewMsg{} }
+		case key.Matches(msg, sessionListKeys.Select):
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {
 				if item.session.IsAttached {
 					return m, m.list.NewStatusMessage("already attached to this session")
@@ -140,11 +138,7 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 					return activateSessionMsg{name: item.session.ID}
 				}
 			}
-		case key.Matches(msg, newSessionKey):
-			return m, func() tea.Msg { return switchToNewSessionMsg{} }
-		case key.Matches(msg, todoKey):
-			return m, func() tea.Msg { return switchToTodoListMsg{} }
-		case key.Matches(msg, closeSessionKey):
+		case key.Matches(msg, sessionListKeys.Close):
 			item, ok := m.list.SelectedItem().(sessionItem)
 			if !ok {
 				break
@@ -156,7 +150,7 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 			if m.pendingDeleteID == item.session.ID {
 				m.pendingDeleteID = ""
 				return m, func() tea.Msg {
-					return deleteSessionMsg{id: item.session.ID}
+					return deleteSessionIntentMsg{id: item.session.ID}
 				}
 			}
 			m.pendingDeleteID = item.session.ID

@@ -77,13 +77,20 @@ impl State {
             return;
         }
 
-        log_info!("Launching session picker TUI from {} (port={}, pipe={})", TUI_PATH, DAEMON_PORT, PIPE_NAME);
+        log_info!(
+            "Launching session picker TUI from {} (port={}, pipe={})",
+            TUI_PATH,
+            DAEMON_PORT,
+            PIPE_NAME
+        );
 
         let command = CommandToRun {
             path: PathBuf::from(TUI_PATH),
             args: vec![
-                "--port".to_string(), DAEMON_PORT.to_string(),
-                "--pipe-name".to_string(), PIPE_NAME.to_string(),
+                "--port".to_string(),
+                DAEMON_PORT.to_string(),
+                "--pipe-name".to_string(),
+                PIPE_NAME.to_string(),
             ],
             cwd: None,
         };

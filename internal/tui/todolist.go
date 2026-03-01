@@ -1,27 +1,12 @@
 package tui
 
 import (
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/todo"
 )
-
-type switchToTodoListMsg struct{}
-
-type todoDataLoadedMsg struct {
-	todos    []todo.Todo
-	sessions []session.Session
-}
-
-type deleteTodoMsg struct {
-	id string
-}
-
-type todoDeletedMsg struct {
-	id string
-}
 
 type todoItem struct {
 	todo todo.Todo
@@ -41,20 +26,18 @@ func (i todoItem) Description() string {
 func (i todoItem) FilterValue() string { return i.todo.Name }
 
 type TodoListModel struct {
-	list               list.Model
-	todos              []todo.Todo
-	showAllWorkspaces  bool
-	currentWorkspaceID string
-	pendingDeleteID    string
+	list              list.Model
+	todos             []todo.Todo
+	showAllWorkspaces bool
+	activeWorkspaceID string
+	pendingDeleteID   string
 }
 
 func NewTodoListModel() TodoListModel {
 	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Todos"
 	l.KeyMap.Quit.SetEnabled(false)
-	l.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{newTodoKey, deleteTodoKey, toggleAllKey, backKey}
-	}
+	l.SetShowHelp(false)
 	return TodoListModel{list: l}
 }
 
@@ -63,20 +46,25 @@ func (m *TodoListModel) SetSize(width, height int) {
 	m.list.SetHeight(height)
 }
 
-func (m *TodoListModel) deriveCurrentWorkspace(sessions []session.Session) {
-	for _, s := range sessions {
-		if s.IsAttached {
-			m.currentWorkspaceID = s.WorkspaceID
-			return
-		}
-	}
-	m.currentWorkspaceID = ""
+func (m TodoListModel) Init() tea.Cmd {
+	return tea.Batch(
+		func() tea.Msg { return requestTodosStateMsg{} },
+		func() tea.Msg { return requestWorkspacesStateMsg{} },
+	)
+}
+
+func (m TodoListModel) Filtering() bool {
+	return m.list.FilterState() == list.Filtering
+}
+
+func (m TodoListModel) Keys() help.KeyMap {
+	return todoListKeys
 }
 
 func (m *TodoListModel) rebuildItems() tea.Cmd {
 	var items []list.Item
 	for _, t := range m.todos {
-		if !m.showAllWorkspaces && m.currentWorkspaceID != "" && t.WorkspaceID != m.currentWorkspaceID {
+		if !m.showAllWorkspaces && m.activeWorkspaceID != "" && t.WorkspaceID != m.activeWorkspaceID {
 			continue
 		}
 		items = append(items, todoItem{todo: t})
@@ -94,42 +82,50 @@ func (m *TodoListModel) updateTitle() {
 
 func (m TodoListModel) Update(msg tea.Msg) (TodoListModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case todoDataLoadedMsg:
+	case todosStateUpdatedMsg:
 		m.todos = msg.todos
-		m.deriveCurrentWorkspace(msg.sessions)
 		cmd := m.rebuildItems()
 		return m, cmd
+
+	case workspacesStateUpdatedMsg:
+		m.activeWorkspaceID = msg.activeWorkspaceID
+		cmd := m.rebuildItems()
+		return m, cmd
+
+	case errMsg:
+		return m, m.list.NewStatusMessage(msg.err.Error())
 
 	case tea.KeyMsg:
 		if m.list.FilterState() == list.Filtering {
 			break
 		}
-		if !key.Matches(msg, deleteTodoKey) {
+		if !key.Matches(msg, todoListKeys.Delete) {
 			m.pendingDeleteID = ""
 		}
 		switch {
-		case key.Matches(msg, newTodoKey):
-			return m, func() tea.Msg { return switchToTodoWorkspacePickerMsg{} }
-		case key.Matches(msg, deleteTodoKey):
+		case key.Matches(msg, todoListKeys.New):
+			return m, func() tea.Msg { return openTodoFormMsg{} }
+		case key.Matches(msg, todoListKeys.Back):
+			return m, func() tea.Msg { return returnToSessionsMsg{} }
+		case key.Matches(msg, todoListKeys.Delete):
 			item, ok := m.list.SelectedItem().(todoItem)
 			if !ok {
 				break
 			}
 			if m.pendingDeleteID == item.todo.ID {
 				m.pendingDeleteID = ""
+				id := item.todo.ID
 				return m, func() tea.Msg {
-					return deleteTodoMsg{id: item.todo.ID}
+					return deleteTodoIntentMsg{id: id}
 				}
 			}
 			m.pendingDeleteID = item.todo.ID
 			return m, m.list.NewStatusMessage("press d again to delete " + item.todo.Name)
-		case key.Matches(msg, toggleAllKey):
+		case key.Matches(msg, todoListKeys.ToggleAll):
 			m.showAllWorkspaces = !m.showAllWorkspaces
 			m.updateTitle()
 			cmd := m.rebuildItems()
 			return m, cmd
-		case key.Matches(msg, backKey):
-			return m, func() tea.Msg { return switchToSessionListMsg{} }
 		}
 	}
 

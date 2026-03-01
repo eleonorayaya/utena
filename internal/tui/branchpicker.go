@@ -1,20 +1,11 @@
 package tui
 
 import (
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eleonorayaya/utena/internal/workspace"
 )
-
-type switchToBranchPickerMsg struct {
-	workspace workspace.Workspace
-}
-
-type branchSelectedMsg struct {
-	workspace workspace.Workspace
-	branch    string
-}
 
 type branchItem struct {
 	name string
@@ -25,18 +16,15 @@ func (i branchItem) Description() string { return "" }
 func (i branchItem) FilterValue() string { return i.name }
 
 type BranchPickerModel struct {
-	list      list.Model
-	workspace workspace.Workspace
+	list list.Model
 }
 
-func NewBranchPickerModel(ws workspace.Workspace) BranchPickerModel {
+func NewBranchPickerModel() BranchPickerModel {
 	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Select base branch"
 	l.KeyMap.Quit.SetEnabled(false)
-	l.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{selectKey, backKey}
-	}
-	return BranchPickerModel{list: l, workspace: ws}
+	l.SetShowHelp(false)
+	return BranchPickerModel{list: l}
 }
 
 func (m *BranchPickerModel) SetSize(width, height int) {
@@ -44,12 +32,8 @@ func (m *BranchPickerModel) SetSize(width, height int) {
 	m.list.SetHeight(height)
 }
 
-func (m BranchPickerModel) Init() tea.Cmd {
-	return nil
-}
-
-type branchesLoadedMsg struct {
-	branches []string
+func (m BranchPickerModel) Keys() help.KeyMap {
+	return branchPickerKeys
 }
 
 func (m BranchPickerModel) Update(msg tea.Msg) (BranchPickerModel, tea.Cmd) {
@@ -66,18 +50,12 @@ func (m BranchPickerModel) Update(msg tea.Msg) (BranchPickerModel, tea.Cmd) {
 		if m.list.FilterState() == list.Filtering {
 			break
 		}
-		switch {
-		case key.Matches(msg, selectKey):
+		if key.Matches(msg, branchPickerKeys.Select) {
 			if item, ok := m.list.SelectedItem().(branchItem); ok {
-				ws := m.workspace
 				branch := item.name
 				return m, func() tea.Msg {
-					return branchSelectedMsg{workspace: ws, branch: branch}
+					return branchSelectedMsg{branch: branch}
 				}
-			}
-		case key.Matches(msg, backKey):
-			return m, func() tea.Msg {
-				return switchToNewSessionMsg{}
 			}
 		}
 	}

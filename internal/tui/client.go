@@ -53,7 +53,9 @@ type workspacesLoadedMsg struct {
 }
 
 type sessionActivatedMsg struct {
-	name string
+	name          string
+	pipeCommand   string
+	workspacePath string
 }
 
 type sessionCreatedMsg struct {
@@ -65,6 +67,28 @@ type claudeSessionsLoadedMsg struct {
 }
 
 type pipeSentMsg struct{}
+
+type todosLoadedMsg struct {
+	todos []todo.Todo
+}
+
+type sessionDeletedMsg struct {
+	id string
+}
+
+type workspaceAddedMsg struct{}
+
+type todoCreatedMsg struct{}
+
+type todoDeletedMsg struct {
+	id string
+}
+
+type branchesLoadedMsg struct {
+	branches []string
+}
+
+type errMsg struct{ err error }
 
 func fetchSessions() tea.Cmd {
 	return func() tea.Msg {
@@ -216,10 +240,6 @@ func createSession(name, workspaceID, baseBranch string) tea.Cmd {
 	}
 }
 
-type sessionDeletedMsg struct {
-	id string
-}
-
 func deleteSession(id string) tea.Cmd {
 	return func() tea.Msg {
 		req, err := http.NewRequest(http.MethodDelete, baseURL+"/sessions/"+id, nil)
@@ -241,8 +261,6 @@ func deleteSession(id string) tea.Cmd {
 		return sessionDeletedMsg{id: id}
 	}
 }
-
-type workspaceAddedMsg struct{}
 
 func addWorkspace(path string, asRoot bool) tea.Cmd {
 	return func() tea.Msg {
@@ -270,45 +288,25 @@ func addWorkspace(path string, asRoot bool) tea.Cmd {
 	}
 }
 
-func fetchTodoData() tea.Cmd {
+func fetchTodos() tea.Cmd {
 	return func() tea.Msg {
-		todosRes, err := apiClient.Get(baseURL + "/todos")
+		res, err := apiClient.Get(baseURL + "/todos")
 		if err != nil {
 			log.Printf("[ERROR] fetch todos: %v", err)
 			return errMsg{err}
 		}
-		defer todosRes.Body.Close()
+		defer res.Body.Close()
 
-		if todosRes.StatusCode != http.StatusOK {
-			return parseAPIError(todosRes, "fetch todos")
+		if res.StatusCode != http.StatusOK {
+			return parseAPIError(res, "fetch todos")
 		}
 
-		var todosResp todo.TodoListResponse
-		if err := json.NewDecoder(todosRes.Body).Decode(&todosResp); err != nil {
+		var resp todo.TodoListResponse
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
 			return errMsg{err}
 		}
 
-		sessionsRes, err := apiClient.Get(baseURL + "/sessions")
-		if err != nil {
-			log.Printf("[ERROR] fetch sessions for todos: %v", err)
-			return todoDataLoadedMsg{todos: todosResp.Todos}
-		}
-		defer sessionsRes.Body.Close()
-
-		if sessionsRes.StatusCode != http.StatusOK {
-			log.Printf("[ERROR] fetch sessions for todos: status %d", sessionsRes.StatusCode)
-			return todoDataLoadedMsg{todos: todosResp.Todos}
-		}
-
-		var sessionsResp session.SessionListResponse
-		if err := json.NewDecoder(sessionsRes.Body).Decode(&sessionsResp); err != nil {
-			return todoDataLoadedMsg{todos: todosResp.Todos}
-		}
-
-		return todoDataLoadedMsg{
-			todos:    todosResp.Todos,
-			sessions: sessionsResp.Sessions,
-		}
+		return todosLoadedMsg{todos: resp.Todos}
 	}
 }
 
