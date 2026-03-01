@@ -253,12 +253,26 @@ func TestSessionService_DeleteSession_NotFound(t *testing.T) {
 
 func initTestRepo(t *testing.T) string {
 	t.Helper()
+	bareDir := t.TempDir()
 	dir := t.TempDir()
+
+	bareCmds := [][]string{
+		{"git", "init", "--bare"},
+	}
+	for _, args := range bareCmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = bareDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "command %v failed: %s", args, string(out))
+	}
+
 	cmds := [][]string{
 		{"git", "init"},
 		{"git", "config", "user.email", "test@test.com"},
 		{"git", "config", "user.name", "Test"},
+		{"git", "remote", "add", "origin", bareDir},
 		{"git", "commit", "--allow-empty", "-m", "init"},
+		{"git", "push", "-u", "origin", "HEAD"},
 	}
 	for _, args := range cmds {
 		cmd := exec.Command(args[0], args[1:]...)
@@ -328,7 +342,7 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	ctx := context.Background()
 	err := service.CreateSession(ctx, session, true)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "failed to create worktree")
+	require.Contains(t, err.Error(), "failed to pull branch")
 
 	_, err = sessionStore.GetByID("git-repo-my-feature")
 	require.Error(t, err)

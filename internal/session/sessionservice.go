@@ -108,7 +108,7 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 
 		if pullBranch != "" {
 			if err := s.gitService.Pull(ctx, ws.Path, pullBranch); err != nil {
-				slog.Warn("git pull failed, continuing with worktree creation", "error", err)
+				return fmt.Errorf("failed to pull branch %q: %w", pullBranch, err)
 			}
 		}
 
