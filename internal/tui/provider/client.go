@@ -198,8 +198,10 @@ func (c *client) reviveSession(name string) tea.Cmd {
 func (c *client) createSession(name, workspaceID, baseBranch string) tea.Cmd {
 	return func() tea.Msg {
 		body := map[string]interface{}{
-			"id":           name,
 			"workspace_id": workspaceID,
+		}
+		if name != "" {
+			body["name"] = name
 		}
 		if baseBranch != "" {
 			body["base_branch"] = baseBranch
@@ -221,11 +223,12 @@ func (c *client) createSession(name, workspaceID, baseBranch string) tea.Cmd {
 		}
 
 		var resp struct {
+			ID           string `json:"id"`
 			WorktreePath string `json:"worktree_path"`
 		}
 		json.NewDecoder(res.Body).Decode(&resp)
 
-		return sessionCreatedMsg{worktreePath: resp.WorktreePath}
+		return sessionCreatedMsg{id: resp.ID, worktreePath: resp.WorktreePath}
 	}
 }
 

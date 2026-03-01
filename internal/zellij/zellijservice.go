@@ -83,6 +83,7 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 		attached := sessionUpdate.ConnectedClients > 0
 		newSession := &session.Session{
 			ID:         sessionID,
+			Name:       sessionID,
 			IsAttached: attached,
 			IsActive:   true,
 			IsDead:     false,

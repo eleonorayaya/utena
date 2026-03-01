@@ -13,8 +13,15 @@ type sessionItem struct {
 	claudeStatus string
 }
 
+func (i sessionItem) displayName() string {
+	if i.session.Name != "" {
+		return i.session.Name
+	}
+	return i.session.ID
+}
+
 func (i sessionItem) Title() string {
-	title := i.session.ID
+	title := i.displayName()
 	if i.session.IsDead {
 		title += " (dead)"
 	} else if i.session.IsAttached {
@@ -37,7 +44,7 @@ func (i sessionItem) Description() string {
 	return name
 }
 
-func (i sessionItem) FilterValue() string { return i.session.ID }
+func (i sessionItem) FilterValue() string { return i.displayName() }
 
 func aggregateClaudeStatus(sessions []claude.ClaudeSession) string {
 	if len(sessions) == 0 {

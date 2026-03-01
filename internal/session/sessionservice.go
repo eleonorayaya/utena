@@ -82,6 +82,24 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 		}
 	}
 
+	switch {
+	case session.Name != "":
+		if ws != nil {
+			session.ID = BuildSessionID(ws.Name, session.Name)
+		} else {
+			session.ID = session.Name
+		}
+	case session.Branch != "":
+		session.Name = sanitizeBranchName(session.Branch)
+		if ws != nil {
+			session.ID = BuildSessionID(ws.Name, session.Name)
+		} else {
+			session.ID = session.Name
+		}
+	default:
+		return fmt.Errorf("session name or branch is required")
+	}
+
 	if ws != nil && ws.IsGitRepo && createWorktree {
 		pullBranch := session.BaseBranch
 		if !session.BranchCreated && session.Branch != "" {

@@ -70,7 +70,15 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := c.service.CreateSession(ctx, data.Session, data.ShouldCreateWorktree()); err != nil {
+	session := &Session{
+		Name:          data.Name,
+		WorkspaceID:   data.WorkspaceID,
+		Branch:        data.Branch,
+		BaseBranch:    data.BaseBranch,
+		BranchCreated: data.BranchCreated,
+	}
+
+	if err := c.service.CreateSession(ctx, session, data.CreateWorktree); err != nil {
 		var wsNotFound *workspace.WorkspaceNotFoundError
 		if errors.Is(err, ErrSessionAlreadyExists) || errors.As(err, &wsNotFound) {
 			render.Render(w, r, common.ErrInvalidRequest(err))
@@ -80,7 +88,7 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	response := NewSessionResponse(data.Session)
+	response := NewSessionResponse(session)
 	render.Status(r, http.StatusCreated)
 	render.Render(w, r, response)
 }

@@ -57,8 +57,8 @@ func TestSessionService_ListSessions(t *testing.T) {
 
 	// Add test sessions
 	now := time.Now()
-	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", LastUsedAt: now.Add(-1 * time.Hour)}
-	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", LastUsedAt: now}
+	session1 := &Session{ID: "session-1", Name: "session-1", WorkspaceID: "ws-1", LastUsedAt: now.Add(-1 * time.Hour)}
+	session2 := &Session{ID: "session-2", Name: "session-2", WorkspaceID: "ws-2", LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 
@@ -76,9 +76,9 @@ func TestSessionService_ListSessionsByWorkspace(t *testing.T) {
 
 	// Add test sessions
 	now := time.Now()
-	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", LastUsedAt: now.Add(-1 * time.Hour)}
-	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", LastUsedAt: now}
-	session3 := &Session{ID: "session-3", WorkspaceID: "ws-1", LastUsedAt: now}
+	session1 := &Session{ID: "session-1", Name: "session-1", WorkspaceID: "ws-1", LastUsedAt: now.Add(-1 * time.Hour)}
+	session2 := &Session{ID: "session-2", Name: "session-2", WorkspaceID: "ws-2", LastUsedAt: now}
+	session3 := &Session{ID: "session-3", Name: "session-3", WorkspaceID: "ws-1", LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 	sessionStore.Add(session3)
@@ -111,6 +111,7 @@ func TestSessionService_GetSession(t *testing.T) {
 
 	session := &Session{
 		ID:          "session-1",
+		Name:        "session-1",
 		WorkspaceID: "ws-1",
 		IsAttached:  true,
 		IsActive:    true,
@@ -140,6 +141,7 @@ func TestSessionService_CreateSession(t *testing.T) {
 
 	session := &Session{
 		ID:          "session-1",
+		Name:        "session-1",
 		WorkspaceID: "ws-1",
 		IsAttached:  true,
 		IsActive:    true,
@@ -149,10 +151,11 @@ func TestSessionService_CreateSession(t *testing.T) {
 	err := service.CreateSession(ctx, session, false)
 	require.NoError(t, err)
 
-	// Verify session was created
-	retrieved, err := sessionStore.GetByID("session-1")
+	// Name is set and workspace exists, so ID is computed as {workspace}-{name}
+	require.Equal(t, "utena-session-1", session.ID)
+	retrieved, err := sessionStore.GetByID("utena-session-1")
 	require.NoError(t, err)
-	require.Equal(t, session.ID, retrieved.ID)
+	require.Equal(t, "session-1", retrieved.Name)
 
 	// Verify LastUsedAt was set
 	require.False(t, retrieved.LastUsedAt.IsZero())
@@ -163,6 +166,7 @@ func TestSessionService_CreateSession_InvalidWorkspace(t *testing.T) {
 
 	session := &Session{
 		ID:          "session-1",
+		Name:        "session-1",
 		WorkspaceID: "nonexistent",
 		LastUsedAt:  time.Now(),
 	}
@@ -178,6 +182,7 @@ func TestSessionService_UpdateSession(t *testing.T) {
 
 	session := &Session{
 		ID:          "session-1",
+		Name:        "session-1",
 		WorkspaceID: "ws-1",
 		IsAttached:  false,
 		IsActive:    true,
@@ -202,6 +207,7 @@ func TestSessionService_UpdateSession_InvalidWorkspace(t *testing.T) {
 
 	session := &Session{
 		ID:          "session-1",
+		Name:        "session-1",
 		WorkspaceID: "ws-1",
 		LastUsedAt:  time.Now(),
 	}
@@ -220,6 +226,7 @@ func TestSessionService_DeleteSession(t *testing.T) {
 
 	session := &Session{
 		ID:          "session-1",
+		Name:        "session-1",
 		WorkspaceID: "ws-1",
 		LastUsedAt:  time.Now(),
 	}
@@ -275,7 +282,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
 
 	session := &Session{
-		ID:            "my-feature",
+		Name:          "my-feature",
 		WorkspaceID:   "ws-git",
 		BaseBranch:    "main",
 		BranchCreated: true,
@@ -285,14 +292,15 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	err := service.CreateSession(ctx, session, true)
 	require.NoError(t, err)
 
-	expectedPath := filepath.Join(repoPath, ".worktrees", "my-feature")
+	require.Equal(t, "git-repo-my-feature", session.ID)
+	expectedPath := filepath.Join(repoPath, ".worktrees", "git-repo-my-feature")
 	require.Equal(t, expectedPath, session.WorktreePath)
 
 	info, err := os.Stat(expectedPath)
 	require.NoError(t, err)
 	require.True(t, info.IsDir())
 
-	retrieved, err := sessionStore.GetByID("my-feature")
+	retrieved, err := sessionStore.GetByID("git-repo-my-feature")
 	require.NoError(t, err)
 	require.Equal(t, expectedPath, retrieved.WorktreePath)
 	require.Equal(t, "main", retrieved.BaseBranch)
@@ -311,7 +319,7 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
 
 	session := &Session{
-		ID:            "my-feature",
+		Name:          "my-feature",
 		WorkspaceID:   "ws-git",
 		BaseBranch:    "nonexistent",
 		BranchCreated: true,
@@ -322,15 +330,54 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to create worktree")
 
-	_, err = sessionStore.GetByID("my-feature")
+	_, err = sessionStore.GetByID("git-repo-my-feature")
 	require.Error(t, err)
+}
+
+func TestSessionService_CreateSession_WithName_ComputesID(t *testing.T) {
+	service, sessionStore, _ := setupSessionService(t)
+
+	session := &Session{
+		Name:        "main",
+		WorkspaceID: "ws-1",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session, false)
+	require.NoError(t, err)
+
+	require.Equal(t, "utena-main", session.ID)
+	require.Equal(t, "main", session.Name)
+
+	retrieved, err := sessionStore.GetByID("utena-main")
+	require.NoError(t, err)
+	require.Equal(t, "main", retrieved.Name)
+	require.Equal(t, "utena-main", retrieved.ID)
+}
+
+func TestSessionService_CreateSession_WithName_NoWorkspace(t *testing.T) {
+	service, sessionStore, _ := setupSessionService(t)
+
+	session := &Session{
+		Name: "standalone",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session, false)
+	require.NoError(t, err)
+
+	require.Equal(t, "standalone", session.ID)
+
+	retrieved, err := sessionStore.GetByID("standalone")
+	require.NoError(t, err)
+	require.Equal(t, "standalone", retrieved.Name)
 }
 
 func TestSessionService_CreateSession_NoBranch_SkipsWorktree(t *testing.T) {
 	service, sessionStore, _ := setupSessionService(t)
 
 	session := &Session{
-		ID:          "my-session",
+		Name:        "my-session",
 		WorkspaceID: "ws-1",
 	}
 
@@ -339,7 +386,7 @@ func TestSessionService_CreateSession_NoBranch_SkipsWorktree(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, session.WorktreePath)
 
-	retrieved, err := sessionStore.GetByID("my-session")
+	retrieved, err := sessionStore.GetByID("utena-my-session")
 	require.NoError(t, err)
 	require.Empty(t, retrieved.WorktreePath)
 }
@@ -355,7 +402,7 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
 
 	session := &Session{
-		ID:          "my-session",
+		Name:        "my-session",
 		WorkspaceID: "ws-nogit",
 		BaseBranch:  "main",
 	}
@@ -363,6 +410,7 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	ctx := context.Background()
 	err := service.CreateSession(ctx, session, false)
 	require.NoError(t, err)
+	require.Equal(t, "plain-my-session", session.ID)
 	require.Empty(t, session.WorktreePath)
 }
 
@@ -371,6 +419,7 @@ func TestSessionService_CreateSession_TouchesWorkspace(t *testing.T) {
 
 	session := &Session{
 		ID:          "session-1",
+		Name:        "session-1",
 		WorkspaceID: "ws-1",
 	}
 
@@ -388,6 +437,7 @@ func TestSessionService_ActivateSession_TouchesWorkspace(t *testing.T) {
 
 	session := &Session{
 		ID:          "session-1",
+		Name:        "session-1",
 		WorkspaceID: "ws-1",
 		LastUsedAt:  time.Now().Add(-1 * time.Hour),
 	}

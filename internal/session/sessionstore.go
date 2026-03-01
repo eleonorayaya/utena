@@ -164,6 +164,12 @@ func (s *SessionStore) OnAppStart(ctx context.Context) error {
 	defer s.mu.Unlock()
 	s.sessions = loaded
 
+	for _, session := range s.sessions {
+		if session.Name == "" {
+			session.Name = session.ID
+		}
+	}
+
 	return nil
 }
 

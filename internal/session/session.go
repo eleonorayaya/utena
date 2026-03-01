@@ -2,6 +2,7 @@ package session
 
 import (
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,7 @@ var ErrSessionDead = errors.New("cannot activate dead session")
 
 type Session struct {
 	ID            string    `json:"id"`
+	Name          string    `json:"name,omitempty"`
 	WorkspaceID   string    `json:"workspace_id"`
 	WorkspaceName string    `json:"workspace_name,omitempty"`
 	Branch        string    `json:"branch,omitempty"`
@@ -31,4 +33,13 @@ type Cleanup struct {
 	ZellijSessionKilled bool `json:"zellij_session_killed"`
 	WorktreeRemoved     bool `json:"worktree_removed"`
 	BranchDeleted       bool `json:"branch_deleted"`
+}
+
+func BuildSessionID(workspaceName, name string) string {
+	sanitized := strings.ToLower(strings.ReplaceAll(workspaceName, " ", "-"))
+	return sanitized + "-" + name
+}
+
+func sanitizeBranchName(branch string) string {
+	return strings.ReplaceAll(branch, "/", "-")
 }

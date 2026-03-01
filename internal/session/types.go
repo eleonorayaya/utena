@@ -56,24 +56,22 @@ func RenderSessionList(sessions []Session) []render.Renderer {
 }
 
 type CreateSessionRequest struct {
-	*Session
-	CreateWorktree *bool `json:"create_worktree,omitempty"`
+	Name           string `json:"name,omitempty"`
+	WorkspaceID    string `json:"workspace_id"`
+	Branch         string `json:"branch,omitempty"`
+	BaseBranch     string `json:"base_branch,omitempty"`
+	BranchCreated  bool   `json:"branch_created"`
+	CreateWorktree bool   `json:"create_worktree"`
 }
 
 func (c *CreateSessionRequest) Bind(r *http.Request) error {
-
-	if c.Session == nil {
-		return errors.New("session cannot be nil")
+	if c.WorkspaceID == "" {
+		return errors.New("workspace_id is required")
 	}
-
-	return ValidateSession(c.Session)
-}
-
-func (c *CreateSessionRequest) ShouldCreateWorktree() bool {
-	if c.CreateWorktree == nil {
-		return true
+	if c.Name != "" {
+		return ValidateSessionName(c.Name)
 	}
-	return *c.CreateWorktree
+	return nil
 }
 
 type UpdateSessionRequest struct {
