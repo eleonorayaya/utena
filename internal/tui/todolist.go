@@ -41,11 +41,6 @@ func NewTodoListModel() TodoListModel {
 	return TodoListModel{list: l}
 }
 
-func (m *TodoListModel) SetSize(width, height int) {
-	m.list.SetWidth(width)
-	m.list.SetHeight(height)
-}
-
 func (m TodoListModel) Init() tea.Cmd {
 	return tea.Batch(
 		func() tea.Msg { return requestTodosStateMsg{} },
@@ -81,6 +76,12 @@ func (m *TodoListModel) updateTitle() {
 }
 
 func (m TodoListModel) Update(msg tea.Msg) (TodoListModel, tea.Cmd) {
+	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
+		m.list.SetWidth(wsm.Width)
+		m.list.SetHeight(wsm.Height)
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
 	case todosStateUpdatedMsg:
 		m.todos = msg.todos

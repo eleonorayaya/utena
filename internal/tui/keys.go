@@ -43,6 +43,22 @@ var appKeys = appKeyMap{
 	Debug: key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "debug")),
 }
 
+type debugKeyMap struct {
+	Back key.Binding
+}
+
+func (k debugKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Back}
+}
+
+func (k debugKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{{k.Back}}
+}
+
+var debugKeys = debugKeyMap{
+	Back: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+}
+
 type sessionListKeyMap struct {
 	Select key.Binding
 	Close  key.Binding

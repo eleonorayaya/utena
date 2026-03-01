@@ -98,6 +98,9 @@ func (m TodoFormModel) Update(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
 		return m, cmd
 	}
+	if _, ok := msg.(todoCreatedMsg); ok {
+		return m, func() tea.Msg { return todoFormCancelledMsg{} }
+	}
 	if msg, ok := msg.(errMsg); ok {
 		m.nameErr = msg.err.Error()
 		return m, nil

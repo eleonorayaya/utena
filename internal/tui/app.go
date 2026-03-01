@@ -1,13 +1,9 @@
 package tui
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type view int
@@ -28,16 +24,14 @@ type App struct {
 	sessionForm  SessionFormModel
 	todoList     TodoListModel
 	todoForm     TodoFormModel
+	debug        DebugModel
 	help         help.Model
 	activeView   view
 	previousView view
 	initialView  view
-	logPath      string
 	width        int
 	height       int
 }
-
-var debugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 type AppOption func(*App)
 
@@ -58,8 +52,8 @@ func NewApp(logPath string, opts ...AppOption) App {
 		sessionForm: NewSessionFormModel(),
 		todoList:    NewTodoListModel(),
 		todoForm:    NewTodoFormModel(),
+		debug:       NewDebugModel(logPath),
 		help:        help.New(),
-		logPath:     logPath,
 	}
 	for _, opt := range opts {
 		opt(&a)
@@ -93,10 +87,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.activeView = debugView
 			return a, nil
 		}
-		if a.activeView == debugView && msg.String() == "esc" {
-			a.activeView = a.previousView
-			return a, nil
-		}
+
+	case closeDebugMsg:
+		a.activeView = a.previousView
+		return a, nil
 
 	case openSessionFormMsg:
 		a.activeView = sessionFormView
@@ -144,6 +138,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.todoList, cmd = a.todoList.Update(msg)
 	case todoFormView:
 		a.todoForm, cmd = a.todoForm.Update(msg)
+	case debugView:
+		a.debug, cmd = a.debug.Update(msg)
 	}
 	cmds = append(cmds, cmd)
 
@@ -169,10 +165,6 @@ func (a App) onWindowSizeMsg(wsm tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) View() string {
-	if a.activeView == debugView {
-		return a.debugViewContent()
-	}
-
 	var content string
 	switch a.activeView {
 	case sessionFormView:
@@ -181,6 +173,8 @@ func (a App) View() string {
 		content = a.todoList.View()
 	case todoFormView:
 		content = a.todoForm.View()
+	case debugView:
+		content = a.debug.View()
 	default:
 		content = a.sessionList.View()
 	}
@@ -205,28 +199,10 @@ func (a App) keys() help.KeyMap {
 		keymaps = append(keymaps, a.todoList.Keys())
 	case todoFormView:
 		keymaps = append(keymaps, a.todoForm.Keys())
+	case debugView:
+		keymaps = append(keymaps, a.debug.Keys())
 	}
 
 	return mergedKeyMap{keymaps: keymaps}
 }
 
-func (a App) debugViewContent() string {
-	var b strings.Builder
-	b.WriteString(debugStyle.Render("Debug Info") + "\n\n")
-
-	lines := []struct{ label, value string }{
-		{"daemon", baseURL},
-		{"log", a.logPath},
-	}
-
-	for _, l := range lines {
-		v := l.value
-		if v == "" {
-			v = "(not set)"
-		}
-		b.WriteString(fmt.Sprintf("  %s: %s\n", debugStyle.Render(l.label), v))
-	}
-
-	b.WriteString("\n" + debugStyle.Render("esc: back"))
-	return b.String()
-}

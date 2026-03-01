@@ -52,11 +52,6 @@ func NewSessionListModel() SessionListModel {
 	return SessionListModel{list: l}
 }
 
-func (m *SessionListModel) SetSize(width, height int) {
-	m.list.SetWidth(width)
-	m.list.SetHeight(height)
-}
-
 func (m SessionListModel) Init() tea.Cmd {
 	return func() tea.Msg { return requestSessionsStateMsg{} }
 }
@@ -107,6 +102,12 @@ func (m *SessionListModel) rebuildItems() tea.Cmd {
 }
 
 func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
+	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
+		m.list.SetWidth(wsm.Width)
+		m.list.SetHeight(wsm.Height)
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
 	case sessionsStateUpdatedMsg:
 		m.sessions = msg.sessions
