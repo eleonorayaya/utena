@@ -16,6 +16,7 @@ type Model struct {
 	sessions        []session.Session
 	claudeSessions  map[string][]claude.ClaudeSession
 	pendingDeleteID string
+	showDead        bool
 }
 
 func New() Model {
@@ -41,6 +42,9 @@ func (m *Model) rebuildItems() tea.Cmd {
 	var items []list.Item
 	for _, s := range m.sessions {
 		if s.IsDeleted {
+			continue
+		}
+		if s.IsDead && !m.showDead {
 			continue
 		}
 		status := aggregateClaudeStatus(m.claudeSessions[s.ID])
@@ -87,6 +91,9 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.pendingDeleteID = ""
 	}
 	switch {
+	case key.Matches(msg, keys.ToggleDead):
+		m.showDead = !m.showDead
+		return m, m.rebuildItems(), true
 	case key.Matches(msg, keys.New):
 		return m, router.NavigateTo(router.SessionFormView), true
 	case key.Matches(msg, keys.Todos):
