@@ -41,6 +41,12 @@ func (m *WorkspacePickerModel) SetSize(width, height int) {
 	m.list.SetHeight(height)
 }
 
+func (m WorkspacePickerModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (WorkspacePickerModel, tea.Cmd) {
+	m.list.SetWidth(msg.Width)
+	m.list.SetHeight(msg.Height)
+	return m, nil
+}
+
 func (m WorkspacePickerModel) Keys() help.KeyMap {
 	return workspacePickerKeys
 }
@@ -73,7 +79,7 @@ func (m WorkspacePickerModel) Update(msg tea.Msg) (WorkspacePickerModel, tea.Cmd
 	case tea.KeyMsg:
 		var cmd tea.Cmd
 		var handled bool
-		m, cmd, handled = m.onKeyMsg(msg)
+		m, cmd, handled = m.OnKeyMsg(msg)
 		if handled {
 			return m, cmd
 		}
@@ -84,7 +90,7 @@ func (m WorkspacePickerModel) Update(msg tea.Msg) (WorkspacePickerModel, tea.Cmd
 	return m, cmd
 }
 
-func (m WorkspacePickerModel) onKeyMsg(msg tea.KeyMsg) (WorkspacePickerModel, tea.Cmd, bool) {
+func (m WorkspacePickerModel) OnKeyMsg(msg tea.KeyMsg) (WorkspacePickerModel, tea.Cmd, bool) {
 	if m.list.FilterState() == list.Filtering {
 		return m, nil, false
 	}

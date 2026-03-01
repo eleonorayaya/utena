@@ -32,6 +32,12 @@ func (m *BranchPickerModel) SetSize(width, height int) {
 	m.list.SetHeight(height)
 }
 
+func (m BranchPickerModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (BranchPickerModel, tea.Cmd) {
+	m.list.SetWidth(msg.Width)
+	m.list.SetHeight(msg.Height)
+	return m, nil
+}
+
 func (m BranchPickerModel) Keys() help.KeyMap {
 	return branchPickerKeys
 }
@@ -48,7 +54,7 @@ func (m BranchPickerModel) Update(msg tea.Msg) (BranchPickerModel, tea.Cmd) {
 	case tea.KeyMsg:
 		var cmd tea.Cmd
 		var handled bool
-		m, cmd, handled = m.onKeyMsg(msg)
+		m, cmd, handled = m.OnKeyMsg(msg)
 		if handled {
 			return m, cmd
 		}
@@ -59,7 +65,7 @@ func (m BranchPickerModel) Update(msg tea.Msg) (BranchPickerModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m BranchPickerModel) onKeyMsg(msg tea.KeyMsg) (BranchPickerModel, tea.Cmd, bool) {
+func (m BranchPickerModel) OnKeyMsg(msg tea.KeyMsg) (BranchPickerModel, tea.Cmd, bool) {
 	if m.list.FilterState() == list.Filtering {
 		return m, nil, false
 	}

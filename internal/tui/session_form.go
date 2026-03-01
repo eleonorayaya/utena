@@ -87,7 +87,7 @@ func (m SessionFormModel) Keys() help.KeyMap {
 func (m SessionFormModel) Update(msg tea.Msg) (SessionFormModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		return m.onWindowSizeMsg(msg)
+		return m.OnWindowSizeMsg(msg)
 	case workspacesStateUpdatedMsg:
 		var cmd tea.Cmd
 		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
@@ -112,9 +112,13 @@ func (m SessionFormModel) Update(msg tea.Msg) (SessionFormModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m SessionFormModel) onWindowSizeMsg(msg tea.WindowSizeMsg) (SessionFormModel, tea.Cmd) {
+func (m SessionFormModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (SessionFormModel, tea.Cmd) {
 	m.SetSize(msg.Width, msg.Height)
 	return m, nil
+}
+
+func (m SessionFormModel) OnKeyMsg(_ tea.KeyMsg) (SessionFormModel, tea.Cmd, bool) {
+	return m, nil, false
 }
 
 func (m SessionFormModel) updateWorkspacePicker(msg tea.Msg) (SessionFormModel, tea.Cmd) {

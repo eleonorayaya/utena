@@ -31,7 +31,14 @@ func NewFilePickerModel() FilePickerModel {
 func (m *FilePickerModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
-	m.picker.SetHeight(height - 4)
+	m.picker.SetHeight(height)
+}
+
+func (m FilePickerModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (FilePickerModel, tea.Cmd) {
+	m.width = msg.Width
+	m.height = msg.Height
+	m.picker.SetHeight(msg.Height - 4)
+	return m, nil
 }
 
 func (m FilePickerModel) Init() tea.Cmd {
@@ -44,7 +51,7 @@ func (m FilePickerModel) Keys() help.KeyMap {
 
 func (m FilePickerModel) Update(msg tea.Msg) (FilePickerModel, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
-		m, cmd, handled := m.onKeyMsg(msg)
+		m, cmd, handled := m.OnKeyMsg(msg)
 		if handled {
 			return m, cmd
 		}
@@ -55,7 +62,7 @@ func (m FilePickerModel) Update(msg tea.Msg) (FilePickerModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m FilePickerModel) onKeyMsg(msg tea.KeyMsg) (FilePickerModel, tea.Cmd, bool) {
+func (m FilePickerModel) OnKeyMsg(msg tea.KeyMsg) (FilePickerModel, tea.Cmd, bool) {
 	if key.Matches(msg, filePickerKeys.SelectDir) {
 		return m, func() tea.Msg {
 			return directorySelectedMsg{path: m.picker.CurrentDirectory}

@@ -78,7 +78,7 @@ func (m *TodoListModel) updateTitle() {
 func (m TodoListModel) Update(msg tea.Msg) (TodoListModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		return m.onWindowSizeMsg(msg)
+		return m.OnWindowSizeMsg(msg)
 	case todosStateUpdatedMsg:
 		m.todos = msg.todos
 		return m, m.rebuildItems()
@@ -90,7 +90,7 @@ func (m TodoListModel) Update(msg tea.Msg) (TodoListModel, tea.Cmd) {
 	case tea.KeyMsg:
 		var cmd tea.Cmd
 		var handled bool
-		m, cmd, handled = m.onKeyMsg(msg)
+		m, cmd, handled = m.OnKeyMsg(msg)
 		if handled {
 			return m, cmd
 		}
@@ -101,13 +101,13 @@ func (m TodoListModel) Update(msg tea.Msg) (TodoListModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m TodoListModel) onWindowSizeMsg(msg tea.WindowSizeMsg) (TodoListModel, tea.Cmd) {
+func (m TodoListModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (TodoListModel, tea.Cmd) {
 	m.list.SetWidth(msg.Width)
 	m.list.SetHeight(msg.Height)
 	return m, nil
 }
 
-func (m TodoListModel) onKeyMsg(msg tea.KeyMsg) (TodoListModel, tea.Cmd, bool) {
+func (m TodoListModel) OnKeyMsg(msg tea.KeyMsg) (TodoListModel, tea.Cmd, bool) {
 	if m.list.FilterState() == list.Filtering {
 		return m, nil, false
 	}

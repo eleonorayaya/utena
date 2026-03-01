@@ -104,7 +104,7 @@ func (m *SessionListModel) rebuildItems() tea.Cmd {
 func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		return m.onWindowSizeMsg(msg)
+		return m.OnWindowSizeMsg(msg)
 	case sessionsStateUpdatedMsg:
 		m.sessions = msg.sessions
 		m.claudeSessions = msg.claudeSessions
@@ -114,7 +114,7 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 	case tea.KeyMsg:
 		var cmd tea.Cmd
 		var handled bool
-		m, cmd, handled = m.onKeyMsg(msg)
+		m, cmd, handled = m.OnKeyMsg(msg)
 		if handled {
 			return m, cmd
 		}
@@ -125,13 +125,13 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m SessionListModel) onWindowSizeMsg(msg tea.WindowSizeMsg) (SessionListModel, tea.Cmd) {
+func (m SessionListModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (SessionListModel, tea.Cmd) {
 	m.list.SetWidth(msg.Width)
 	m.list.SetHeight(msg.Height)
 	return m, nil
 }
 
-func (m SessionListModel) onKeyMsg(msg tea.KeyMsg) (SessionListModel, tea.Cmd, bool) {
+func (m SessionListModel) OnKeyMsg(msg tea.KeyMsg) (SessionListModel, tea.Cmd, bool) {
 	if m.list.FilterState() == list.Filtering {
 		return m, nil, false
 	}

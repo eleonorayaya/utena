@@ -90,7 +90,7 @@ func (m TodoFormModel) Keys() help.KeyMap {
 func (m TodoFormModel) Update(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		return m.onWindowSizeMsg(msg)
+		return m.OnWindowSizeMsg(msg)
 	case workspacesStateUpdatedMsg:
 		m.activeWorkspaceID = msg.activeWorkspaceID
 		var cmd tea.Cmd
@@ -116,9 +116,13 @@ func (m TodoFormModel) Update(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m TodoFormModel) onWindowSizeMsg(msg tea.WindowSizeMsg) (TodoFormModel, tea.Cmd) {
+func (m TodoFormModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (TodoFormModel, tea.Cmd) {
 	m.SetSize(msg.Width, msg.Height)
 	return m, nil
+}
+
+func (m TodoFormModel) OnKeyMsg(_ tea.KeyMsg) (TodoFormModel, tea.Cmd, bool) {
+	return m, nil, false
 }
 
 func (m TodoFormModel) updateWorkspacePicker(msg tea.Msg) (TodoFormModel, tea.Cmd) {

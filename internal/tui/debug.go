@@ -27,7 +27,7 @@ func (m DebugModel) Keys() help.KeyMap {
 
 func (m DebugModel) Update(msg tea.Msg) (DebugModel, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
-		m, cmd, handled := m.onKeyMsg(msg)
+		m, cmd, handled := m.OnKeyMsg(msg)
 		if handled {
 			return m, cmd
 		}
@@ -35,7 +35,11 @@ func (m DebugModel) Update(msg tea.Msg) (DebugModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m DebugModel) onKeyMsg(msg tea.KeyMsg) (DebugModel, tea.Cmd, bool) {
+func (m DebugModel) OnWindowSizeMsg(_ tea.WindowSizeMsg) (DebugModel, tea.Cmd) {
+	return m, nil
+}
+
+func (m DebugModel) OnKeyMsg(msg tea.KeyMsg) (DebugModel, tea.Cmd, bool) {
 	if key.Matches(msg, debugKeys.Back) {
 		return m, func() tea.Msg { return navigateMsg{target: backView} }, true
 	}
