@@ -68,29 +68,38 @@ func (m WorkspacePickerModel) Update(msg tea.Msg) (WorkspacePickerModel, tea.Cmd
 		for i, ws := range workspaces {
 			items[i] = workspaceItem{workspace: ws}
 		}
-		cmd := m.list.SetItems(items)
-		return m, cmd
+		return m, m.list.SetItems(items)
 
 	case tea.KeyMsg:
-		if m.list.FilterState() == list.Filtering {
-			break
-		}
-		switch {
-		case key.Matches(msg, workspacePickerKeys.Select):
-			if item, ok := m.list.SelectedItem().(workspaceItem); ok {
-				ws := item.workspace
-				return m, func() tea.Msg {
-					return workspaceSelectedMsg{workspace: ws}
-				}
-			}
-		case key.Matches(msg, workspacePickerKeys.AddDir):
-			return m, func() tea.Msg { return addDirectoryRequestMsg{} }
+		var cmd tea.Cmd
+		var handled bool
+		m, cmd, handled = m.onKeyMsg(msg)
+		if handled {
+			return m, cmd
 		}
 	}
 
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
+}
+
+func (m WorkspacePickerModel) onKeyMsg(msg tea.KeyMsg) (WorkspacePickerModel, tea.Cmd, bool) {
+	if m.list.FilterState() == list.Filtering {
+		return m, nil, false
+	}
+	switch {
+	case key.Matches(msg, workspacePickerKeys.Select):
+		if item, ok := m.list.SelectedItem().(workspaceItem); ok {
+			ws := item.workspace
+			return m, func() tea.Msg {
+				return workspaceSelectedMsg{workspace: ws}
+			}, true
+		}
+	case key.Matches(msg, workspacePickerKeys.AddDir):
+		return m, func() tea.Msg { return addDirectoryRequestMsg{} }, true
+	}
+	return m, nil, false
 }
 
 func (m WorkspacePickerModel) View() string {

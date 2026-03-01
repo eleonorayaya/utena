@@ -76,56 +76,22 @@ func (m *TodoListModel) updateTitle() {
 }
 
 func (m TodoListModel) Update(msg tea.Msg) (TodoListModel, tea.Cmd) {
-	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
-		m.list.SetWidth(wsm.Width)
-		m.list.SetHeight(wsm.Height)
-		return m, nil
-	}
-
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m.onWindowSizeMsg(msg)
 	case todosStateUpdatedMsg:
 		m.todos = msg.todos
-		cmd := m.rebuildItems()
-		return m, cmd
-
+		return m, m.rebuildItems()
 	case workspacesStateUpdatedMsg:
 		m.activeWorkspaceID = msg.activeWorkspaceID
-		cmd := m.rebuildItems()
-		return m, cmd
-
+		return m, m.rebuildItems()
 	case errMsg:
 		return m, m.list.NewStatusMessage(msg.err.Error())
-
 	case tea.KeyMsg:
-		if m.list.FilterState() == list.Filtering {
-			break
-		}
-		if !key.Matches(msg, todoListKeys.Delete) {
-			m.pendingDeleteID = ""
-		}
-		switch {
-		case key.Matches(msg, todoListKeys.New):
-			return m, func() tea.Msg { return navigateMsg{target: todoFormView} }
-		case key.Matches(msg, todoListKeys.Back):
-			return m, func() tea.Msg { return navigateMsg{target: sessionListView} }
-		case key.Matches(msg, todoListKeys.Delete):
-			item, ok := m.list.SelectedItem().(todoItem)
-			if !ok {
-				break
-			}
-			if m.pendingDeleteID == item.todo.ID {
-				m.pendingDeleteID = ""
-				id := item.todo.ID
-				return m, func() tea.Msg {
-					return deleteTodoIntentMsg{id: id}
-				}
-			}
-			m.pendingDeleteID = item.todo.ID
-			return m, m.list.NewStatusMessage("press d again to delete " + item.todo.Name)
-		case key.Matches(msg, todoListKeys.ToggleAll):
-			m.showAllWorkspaces = !m.showAllWorkspaces
-			m.updateTitle()
-			cmd := m.rebuildItems()
+		var cmd tea.Cmd
+		var handled bool
+		m, cmd, handled = m.onKeyMsg(msg)
+		if handled {
 			return m, cmd
 		}
 	}
@@ -133,6 +99,46 @@ func (m TodoListModel) Update(msg tea.Msg) (TodoListModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
+}
+
+func (m TodoListModel) onWindowSizeMsg(msg tea.WindowSizeMsg) (TodoListModel, tea.Cmd) {
+	m.list.SetWidth(msg.Width)
+	m.list.SetHeight(msg.Height)
+	return m, nil
+}
+
+func (m TodoListModel) onKeyMsg(msg tea.KeyMsg) (TodoListModel, tea.Cmd, bool) {
+	if m.list.FilterState() == list.Filtering {
+		return m, nil, false
+	}
+	if !key.Matches(msg, todoListKeys.Delete) {
+		m.pendingDeleteID = ""
+	}
+	switch {
+	case key.Matches(msg, todoListKeys.New):
+		return m, func() tea.Msg { return navigateMsg{target: todoFormView} }, true
+	case key.Matches(msg, todoListKeys.Back):
+		return m, func() tea.Msg { return navigateMsg{target: sessionListView} }, true
+	case key.Matches(msg, todoListKeys.Delete):
+		item, ok := m.list.SelectedItem().(todoItem)
+		if !ok {
+			return m, nil, false
+		}
+		if m.pendingDeleteID == item.todo.ID {
+			m.pendingDeleteID = ""
+			id := item.todo.ID
+			return m, func() tea.Msg {
+				return deleteTodoIntentMsg{id: id}
+			}, true
+		}
+		m.pendingDeleteID = item.todo.ID
+		return m, m.list.NewStatusMessage("press d again to delete " + item.todo.Name), true
+	case key.Matches(msg, todoListKeys.ToggleAll):
+		m.showAllWorkspaces = !m.showAllWorkspaces
+		m.updateTitle()
+		return m, m.rebuildItems(), true
+	}
+	return m, nil, false
 }
 
 func (m TodoListModel) View() string {

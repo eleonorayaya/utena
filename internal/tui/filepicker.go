@@ -43,22 +43,29 @@ func (m FilePickerModel) Keys() help.KeyMap {
 }
 
 func (m FilePickerModel) Update(msg tea.Msg) (FilePickerModel, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if key.Matches(msg, filePickerKeys.SelectDir) {
-			return m, func() tea.Msg {
-				return directorySelectedMsg{path: m.picker.CurrentDirectory}
-			}
-		}
-		if key.Matches(msg, filePickerKeys.ToggleHidden) {
-			m.picker.ShowHidden = !m.picker.ShowHidden
-			return m, m.picker.Init()
+	if msg, ok := msg.(tea.KeyMsg); ok {
+		m, cmd, handled := m.onKeyMsg(msg)
+		if handled {
+			return m, cmd
 		}
 	}
 
 	var cmd tea.Cmd
 	m.picker, cmd = m.picker.Update(msg)
 	return m, cmd
+}
+
+func (m FilePickerModel) onKeyMsg(msg tea.KeyMsg) (FilePickerModel, tea.Cmd, bool) {
+	if key.Matches(msg, filePickerKeys.SelectDir) {
+		return m, func() tea.Msg {
+			return directorySelectedMsg{path: m.picker.CurrentDirectory}
+		}, true
+	}
+	if key.Matches(msg, filePickerKeys.ToggleHidden) {
+		m.picker.ShowHidden = !m.picker.ShowHidden
+		return m, m.picker.Init(), true
+	}
+	return m, nil, false
 }
 
 func (m FilePickerModel) View() string {

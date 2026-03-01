@@ -43,26 +43,35 @@ func (m BranchPickerModel) Update(msg tea.Msg) (BranchPickerModel, tea.Cmd) {
 		for i, b := range msg.branches {
 			items[i] = branchItem{name: b}
 		}
-		cmd := m.list.SetItems(items)
-		return m, cmd
+		return m, m.list.SetItems(items)
 
 	case tea.KeyMsg:
-		if m.list.FilterState() == list.Filtering {
-			break
-		}
-		if key.Matches(msg, branchPickerKeys.Select) {
-			if item, ok := m.list.SelectedItem().(branchItem); ok {
-				branch := item.name
-				return m, func() tea.Msg {
-					return branchSelectedMsg{branch: branch}
-				}
-			}
+		var cmd tea.Cmd
+		var handled bool
+		m, cmd, handled = m.onKeyMsg(msg)
+		if handled {
+			return m, cmd
 		}
 	}
 
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
+}
+
+func (m BranchPickerModel) onKeyMsg(msg tea.KeyMsg) (BranchPickerModel, tea.Cmd, bool) {
+	if m.list.FilterState() == list.Filtering {
+		return m, nil, false
+	}
+	if key.Matches(msg, branchPickerKeys.Select) {
+		if item, ok := m.list.SelectedItem().(branchItem); ok {
+			branch := item.name
+			return m, func() tea.Msg {
+				return branchSelectedMsg{branch: branch}
+			}, true
+		}
+	}
+	return m, nil, false
 }
 
 func (m BranchPickerModel) View() string {

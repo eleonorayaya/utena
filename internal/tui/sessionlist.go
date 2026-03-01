@@ -102,66 +102,75 @@ func (m *SessionListModel) rebuildItems() tea.Cmd {
 }
 
 func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
-	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
-		m.list.SetWidth(wsm.Width)
-		m.list.SetHeight(wsm.Height)
-		return m, nil
-	}
-
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m.onWindowSizeMsg(msg)
 	case sessionsStateUpdatedMsg:
 		m.sessions = msg.sessions
 		m.claudeSessions = msg.claudeSessions
-		cmd := m.rebuildItems()
-		return m, cmd
-
+		return m, m.rebuildItems()
 	case errMsg:
 		return m, m.list.NewStatusMessage(msg.err.Error())
-
 	case tea.KeyMsg:
-		if m.list.FilterState() == list.Filtering {
-			break
-		}
-		if !key.Matches(msg, sessionListKeys.Close) {
-			m.pendingDeleteID = ""
-		}
-		switch {
-		case key.Matches(msg, sessionListKeys.New):
-			return m, func() tea.Msg { return navigateMsg{target: sessionFormView} }
-		case key.Matches(msg, sessionListKeys.Todos):
-			return m, func() tea.Msg { return navigateMsg{target: TodoListView} }
-		case key.Matches(msg, sessionListKeys.Select):
-			if item, ok := m.list.SelectedItem().(sessionItem); ok {
-				if item.session.IsAttached {
-					return m, m.list.NewStatusMessage("already attached to this session")
-				}
-				return m, func() tea.Msg {
-					return activateSessionMsg{name: item.session.ID}
-				}
-			}
-		case key.Matches(msg, sessionListKeys.Close):
-			item, ok := m.list.SelectedItem().(sessionItem)
-			if !ok {
-				break
-			}
-			if item.session.IsAttached {
-				m.pendingDeleteID = ""
-				return m, m.list.NewStatusMessage("cannot close attached session")
-			}
-			if m.pendingDeleteID == item.session.ID {
-				m.pendingDeleteID = ""
-				return m, func() tea.Msg {
-					return deleteSessionIntentMsg{id: item.session.ID}
-				}
-			}
-			m.pendingDeleteID = item.session.ID
-			return m, m.list.NewStatusMessage("press d again to close " + item.session.ID)
+		var cmd tea.Cmd
+		var handled bool
+		m, cmd, handled = m.onKeyMsg(msg)
+		if handled {
+			return m, cmd
 		}
 	}
 
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
+}
+
+func (m SessionListModel) onWindowSizeMsg(msg tea.WindowSizeMsg) (SessionListModel, tea.Cmd) {
+	m.list.SetWidth(msg.Width)
+	m.list.SetHeight(msg.Height)
+	return m, nil
+}
+
+func (m SessionListModel) onKeyMsg(msg tea.KeyMsg) (SessionListModel, tea.Cmd, bool) {
+	if m.list.FilterState() == list.Filtering {
+		return m, nil, false
+	}
+	if !key.Matches(msg, sessionListKeys.Close) {
+		m.pendingDeleteID = ""
+	}
+	switch {
+	case key.Matches(msg, sessionListKeys.New):
+		return m, func() tea.Msg { return navigateMsg{target: sessionFormView} }, true
+	case key.Matches(msg, sessionListKeys.Todos):
+		return m, func() tea.Msg { return navigateMsg{target: TodoListView} }, true
+	case key.Matches(msg, sessionListKeys.Select):
+		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			if item.session.IsAttached {
+				return m, m.list.NewStatusMessage("already attached to this session"), true
+			}
+			return m, func() tea.Msg {
+				return activateSessionMsg{name: item.session.ID}
+			}, true
+		}
+	case key.Matches(msg, sessionListKeys.Close):
+		item, ok := m.list.SelectedItem().(sessionItem)
+		if !ok {
+			return m, nil, false
+		}
+		if item.session.IsAttached {
+			m.pendingDeleteID = ""
+			return m, m.list.NewStatusMessage("cannot close attached session"), true
+		}
+		if m.pendingDeleteID == item.session.ID {
+			m.pendingDeleteID = ""
+			return m, func() tea.Msg {
+				return deleteSessionIntentMsg{id: item.session.ID}
+			}, true
+		}
+		m.pendingDeleteID = item.session.ID
+		return m, m.list.NewStatusMessage("press d again to close " + item.session.ID), true
+	}
+	return m, nil, false
 }
 
 func (m SessionListModel) View() string {

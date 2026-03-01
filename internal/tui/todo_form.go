@@ -88,20 +88,17 @@ func (m TodoFormModel) Keys() help.KeyMap {
 }
 
 func (m TodoFormModel) Update(msg tea.Msg) (TodoFormModel, tea.Cmd) {
-	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
-		m.SetSize(wsm.Width, wsm.Height)
-		return m, nil
-	}
-	if msg, ok := msg.(workspacesStateUpdatedMsg); ok {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m.onWindowSizeMsg(msg)
+	case workspacesStateUpdatedMsg:
 		m.activeWorkspaceID = msg.activeWorkspaceID
 		var cmd tea.Cmd
 		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
 		return m, cmd
-	}
-	if _, ok := msg.(todoCreatedMsg); ok {
+	case todoCreatedMsg:
 		return m, func() tea.Msg { return navigateMsg{target: TodoListView} }
-	}
-	if msg, ok := msg.(errMsg); ok {
+	case errMsg:
 		m.nameErr = msg.err.Error()
 		return m, nil
 	}
@@ -116,6 +113,11 @@ func (m TodoFormModel) Update(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 	case todoNameInputStep:
 		return m.updateNameInput(msg)
 	}
+	return m, nil
+}
+
+func (m TodoFormModel) onWindowSizeMsg(msg tea.WindowSizeMsg) (TodoFormModel, tea.Cmd) {
+	m.SetSize(msg.Width, msg.Height)
 	return m, nil
 }
 

@@ -85,16 +85,14 @@ func (m SessionFormModel) Keys() help.KeyMap {
 }
 
 func (m SessionFormModel) Update(msg tea.Msg) (SessionFormModel, tea.Cmd) {
-	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
-		m.SetSize(wsm.Width, wsm.Height)
-		return m, nil
-	}
-	if wsMsg, ok := msg.(workspacesStateUpdatedMsg); ok {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m.onWindowSizeMsg(msg)
+	case workspacesStateUpdatedMsg:
 		var cmd tea.Cmd
-		m.workspacePicker, cmd = m.workspacePicker.Update(wsMsg)
+		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
 		return m, cmd
-	}
-	if msg, ok := msg.(errMsg); ok {
+	case errMsg:
 		m.nameErr = msg.err.Error()
 		return m, nil
 	}
@@ -111,6 +109,11 @@ func (m SessionFormModel) Update(msg tea.Msg) (SessionFormModel, tea.Cmd) {
 	case sessionNameInputStep:
 		return m.updateNameInput(msg)
 	}
+	return m, nil
+}
+
+func (m SessionFormModel) onWindowSizeMsg(msg tea.WindowSizeMsg) (SessionFormModel, tea.Cmd) {
+	m.SetSize(msg.Width, msg.Height)
 	return m, nil
 }
 

@@ -51,17 +51,13 @@ func (a App) Init() tea.Cmd {
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
-		a.width = wsm.Width
-		a.height = wsm.Height
-		adjusted := tea.WindowSizeMsg{Width: wsm.Width, Height: wsm.Height - 2}
-		var cmd tea.Cmd
-		a.router, cmd = a.router.Update(adjusted)
-		return a, cmd
-	}
-
-	if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "ctrl+c" {
-		return a, tea.Quit
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return a.onWindowSizeMsg(msg)
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return a, tea.Quit
+		}
 	}
 
 	var cmds []tea.Cmd
@@ -77,6 +73,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	return a, tea.Batch(cmds...)
+}
+
+func (a App) onWindowSizeMsg(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	a.width = msg.Width
+	a.height = msg.Height
+	adjusted := tea.WindowSizeMsg{Width: msg.Width, Height: msg.Height - 2}
+	var cmd tea.Cmd
+	a.router, cmd = a.router.Update(adjusted)
+	return a, cmd
 }
 
 func (a App) View() string {

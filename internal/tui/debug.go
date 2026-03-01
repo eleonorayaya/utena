@@ -27,11 +27,19 @@ func (m DebugModel) Keys() help.KeyMap {
 
 func (m DebugModel) Update(msg tea.Msg) (DebugModel, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
-		if key.Matches(msg, debugKeys.Back) {
-			return m, func() tea.Msg { return navigateMsg{target: backView} }
+		m, cmd, handled := m.onKeyMsg(msg)
+		if handled {
+			return m, cmd
 		}
 	}
 	return m, nil
+}
+
+func (m DebugModel) onKeyMsg(msg tea.KeyMsg) (DebugModel, tea.Cmd, bool) {
+	if key.Matches(msg, debugKeys.Back) {
+		return m, func() tea.Msg { return navigateMsg{target: backView} }, true
+	}
+	return m, nil, false
 }
 
 func (m DebugModel) View() string {
