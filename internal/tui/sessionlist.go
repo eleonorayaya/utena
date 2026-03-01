@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
 )
 
 type sessionItem struct {
@@ -53,7 +54,7 @@ func NewSessionListModel() SessionListModel {
 }
 
 func (m SessionListModel) Init() (SessionListModel, tea.Cmd) {
-	return m, tea.Batch(fetchSessions(), fetchClaudeSessions())
+	return m, provider.FetchSessions()
 }
 
 func (m SessionListModel) Filtering() bool {
@@ -105,12 +106,12 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.OnWindowSizeMsg(msg)
-	case sessionsStateUpdatedMsg:
-		m.sessions = msg.sessions
-		m.claudeSessions = msg.claudeSessions
+	case provider.SessionsStateUpdatedMsg:
+		m.sessions = msg.Sessions
+		m.claudeSessions = msg.ClaudeSessions
 		return m, m.rebuildItems()
-	case errMsg:
-		return m, m.list.NewStatusMessage(msg.err.Error())
+	case provider.ErrMsg:
+		return m, m.list.NewStatusMessage(msg.Err.Error())
 	case tea.KeyMsg:
 		var cmd tea.Cmd
 		var handled bool
@@ -148,9 +149,7 @@ func (m SessionListModel) OnKeyMsg(msg tea.KeyMsg) (SessionListModel, tea.Cmd, b
 			if item.session.IsAttached {
 				return m, m.list.NewStatusMessage("already attached to this session"), true
 			}
-			return m, func() tea.Msg {
-				return activateSessionMsg{name: item.session.ID}
-			}, true
+			return m, provider.ActivateSession(item.session.ID), true
 		}
 	case key.Matches(msg, sessionListKeys.Close):
 		item, ok := m.list.SelectedItem().(sessionItem)
@@ -163,9 +162,7 @@ func (m SessionListModel) OnKeyMsg(msg tea.KeyMsg) (SessionListModel, tea.Cmd, b
 		}
 		if m.pendingDeleteID == item.session.ID {
 			m.pendingDeleteID = ""
-			return m, func() tea.Msg {
-				return deleteSessionIntentMsg{id: item.session.ID}
-			}, true
+			return m, provider.DeleteSession(item.session.ID), true
 		}
 		m.pendingDeleteID = item.session.ID
 		return m, m.list.NewStatusMessage("press d again to close " + item.session.ID), true

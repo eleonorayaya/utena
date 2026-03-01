@@ -13,11 +13,12 @@ import (
 var debugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 type DebugModel struct {
-	logPath string
+	logPath   string
+	daemonURL string
 }
 
-func NewDebugModel(logPath string) DebugModel {
-	return DebugModel{logPath: logPath}
+func NewDebugModel(logPath, daemonURL string) DebugModel {
+	return DebugModel{logPath: logPath, daemonURL: daemonURL}
 }
 
 func (m DebugModel) Keys() help.KeyMap {
@@ -54,7 +55,7 @@ func (m DebugModel) View() string {
 	b.WriteString(debugStyle.Render("Debug Info") + "\n\n")
 
 	lines := []struct{ label, value string }{
-		{"daemon", baseURL},
+		{"daemon", m.daemonURL},
 		{"log", m.logPath},
 	}
 

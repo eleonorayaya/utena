@@ -1,18 +1,19 @@
 package tui
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/bubbles/help"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
 )
 
 type App struct {
-	sessions   SessionsProvider
-	workspaces WorkspacesProvider
-	todos      TodosProvider
-	router     Router
-	help       help.Model
-	width      int
-	height     int
+	provider provider.Provider
+	router   Router
+	help     help.Model
+	width    int
+	height   int
 }
 
 type AppOption func(*App)
@@ -23,13 +24,12 @@ func WithInitialView(v view) AppOption {
 	}
 }
 
-func NewApp(logPath string, opts ...AppOption) App {
+func NewApp(logPath, port, pipeName string, opts ...AppOption) App {
+	baseURL := fmt.Sprintf("http://localhost:%s", port)
 	a := App{
-		sessions:   NewSessionsProvider(),
-		workspaces: NewWorkspacesProvider(),
-		todos:      NewTodosProvider(),
-		router:     NewRouter(logPath),
-		help:       help.New(),
+		provider: provider.NewRootProvider(baseURL, pipeName),
+		router:   NewRouter(logPath, baseURL),
+		help:     help.New(),
 	}
 	for _, opt := range opts {
 		opt(&a)
@@ -54,11 +54,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
-	a.sessions, cmd = a.sessions.Update(msg)
-	cmds = append(cmds, cmd)
-	a.workspaces, cmd = a.workspaces.Update(msg)
-	cmds = append(cmds, cmd)
-	a.todos, cmd = a.todos.Update(msg)
+	a.provider, cmd = a.provider.Update(msg)
 	cmds = append(cmds, cmd)
 
 	a.router, cmd = a.router.Update(msg)

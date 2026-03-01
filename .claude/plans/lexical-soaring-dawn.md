@@ -1,87 +1,155 @@
-# Extract Router Model from App
+# Extract Providers into Sub-Package
 
 ## Context
 
-App currently mixes two responsibilities: wiring providers with data and routing views. The `activeView`, `previousView`, view dispatch switches, `onNavigate`, `onWindowSizeMsg`, `View()`, and `keys()` are all routing concerns that should live in their own model. This will leave App as a thin shell that wires providers to a router.
+App currently owns three provider models (`SessionsProvider`, `WorkspacesProvider`, `TodosProvider`) and an HTTP client, all in the `tui` package alongside view models. This mixes data-layer concerns with UI concerns. Moving providers and client into `internal/tui/provider/` separates these responsibilities and establishes a clear public API boundary: views consume public state update messages and call public action functions, while all provider internals (intent messages, client response messages, HTTP implementation) stay private.
 
 ## Design
 
-### Router (`internal/tui/router.go` — new)
+### Package: `internal/tui/provider/`
 
-Owns all view models and all view-routing state/logic.
+**Public surface:**
 
 ```go
-type Router struct {
-    sessionList  SessionListModel
-    sessionForm  SessionFormModel
-    todoList     TodoListModel
-    todoForm     TodoFormModel
-    debug        DebugModel
-    activeView   view
-    previousView view
+// Provider interface — used as App's field type
+type Provider interface {
+    Update(tea.Msg) (Provider, tea.Cmd)
 }
+
+// State update messages — consumed by views via type switch
+type SessionsStateUpdatedMsg struct { ... }
+type WorkspacesStateUpdatedMsg struct { ... }
+type TodosStateUpdatedMsg struct { ... }
+type BranchesLoadedMsg struct { ... }
+type TodoCreatedMsg struct{}
+type ErrMsg struct{ Err error }
+
+// Action cmd functions — called by views to trigger provider behavior
+func Configure(port, pipe string)
+func DaemonURL() string
+func NewRootProvider() Provider
+
+func FetchSessions() tea.Cmd
+func FetchClaudeSessions() tea.Cmd
+func FetchWorkspaces() tea.Cmd
+func FetchBranches(workspaceID string) tea.Cmd
+func FetchTodos() tea.Cmd
+
+func RequestSessionsState() tea.Cmd
+func RequestWorkspacesState() tea.Cmd
+
+func ActivateSession(name string) tea.Cmd
+func CreateSession(name, workspaceID, branch, workspacePath string) tea.Cmd
+func DeleteSession(id string) tea.Cmd
+func CreateTodo(name, description, workspaceID string) tea.Cmd
+func DeleteTodo(id string) tea.Cmd
+func AddWorkspace(path string, asRoot bool) tea.Cmd
 ```
 
-**Moves from app.go to router.go:**
-- `view` type + all constants (`sessionListView` ... `backView`)
-- `navigateMsg` handling (`onNavigate`)
-- `?` key handling (debug toggle — it's view switching, not app-level like ctrl+c)
-- `onWindowSizeMsg` (routes to all views)
-- Active view dispatch in Update (the `switch a.activeView` block)
-- `View()` — returns active view's rendered content
-- `Keys()` — returns active view's keymap
+**Private internals:** `rootProvider` struct, three sub-providers, all intent/request messages, all client response messages (except the public ones above), HTTP client implementation.
 
-**Router.Update flow:**
-1. `tea.WindowSizeMsg` → forward to all views
-2. `tea.KeyMsg` with `?` → toggle debug view
-3. `navigateMsg` → `onNavigate`
-4. Everything else → route to active view
+### Message Categorization
+
+**Move to provider (public)** — consumed by views in type switches:
+- `SessionsStateUpdatedMsg` (fields: `Sessions`, `ClaudeSessions`)
+- `WorkspacesStateUpdatedMsg` (fields: `Workspaces`, `ActiveWorkspaceID`)
+- `TodosStateUpdatedMsg` (fields: `Todos`)
+- `BranchesLoadedMsg` (fields: `Branches`)
+- `TodoCreatedMsg`
+- `ErrMsg` (field: `Err`)
+
+**Move to provider (private)** — only used within provider package:
+- `sessionsLoadedMsg`, `claudeSessionsLoadedMsg`, `workspacesLoadedMsg`, `todosLoadedMsg`
+- `sessionActivatedMsg`, `sessionCreatedMsg`, `sessionDeletedMsg`
+- `workspaceAddedMsg`, `todoDeletedMsg`
+- `requestSessionsStateMsg`, `requestWorkspacesStateMsg`, `requestTodosStateMsg`
+- `createSessionIntentMsg`, `deleteSessionIntentMsg`
+- `createTodoIntentMsg`, `deleteTodoIntentMsg`
+- `addWorkspaceIntentMsg`, `activateSessionMsg`, `setActiveWorkspaceMsg`
+
+**Stay in tui/messages.go** — purely view-to-view messages:
+- `navigateMsg`, `workspaceSelectedMsg`, `branchSelectedMsg`
+- `addDirectoryRequestMsg`, `directorySelectedMsg`
+
+### RootProvider
+
+```go
+type rootProvider struct {
+    sessions   sessionsProvider
+    workspaces workspacesProvider
+    todos      todosProvider
+}
+
+func (p rootProvider) Update(msg tea.Msg) (Provider, tea.Cmd) {
+    var cmds []tea.Cmd
+    var cmd tea.Cmd
+    p.sessions, cmd = p.sessions.Update(msg)
+    cmds = append(cmds, cmd)
+    p.workspaces, cmd = p.workspaces.Update(msg)
+    cmds = append(cmds, cmd)
+    p.todos, cmd = p.todos.Update(msg)
+    cmds = append(cmds, cmd)
+    return p, tea.Batch(cmds...)
+}
+```
 
 ### App after refactor
 
 ```go
 type App struct {
-    sessions   SessionsProvider
-    workspaces WorkspacesProvider
-    todos      TodosProvider
-    router     Router
-    help       help.Model
-    initialView view
-    width      int
-    height     int
+    provider provider.Provider
+    router   Router
+    help     help.Model
+    width    int
+    height   int
+}
+
+func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    // ctrl+c, window size handling...
+    var cmds []tea.Cmd
+    var cmd tea.Cmd
+    a.provider, cmd = a.provider.Update(msg)
+    cmds = append(cmds, cmd)
+    a.router, cmd = a.router.Update(msg)
+    cmds = append(cmds, cmd)
+    return a, tea.Batch(cmds...)
 }
 ```
 
-**App.Update flow:**
-1. `tea.WindowSizeMsg` → store full dimensions, create adjusted msg (height-2), pass to router
-2. `tea.KeyMsg` ctrl+c → quit
-3. Everything else → providers + router
-
-**App.View:** `router.View()` + help bar
-
-**App.keys():** `appKeys` (just quit) + `router.Keys()`
-
-### appKeys change
-
-`appKeys` keeps only `Quit`. `Debug` moves to a router-level key since it's view switching. The help bar merges `appKeys` + `router.Keys()`, so `?` still appears.
-
 ## Files
 
-### New
-- `internal/tui/router.go` — Router struct, `NewRouter`, `Update`, `onNavigate`, `onWindowSizeMsg`, `View`, `Keys`
+### New (`internal/tui/provider/`)
+- `provider.go` — `Provider` interface, `rootProvider` struct, `NewRootProvider`
+- `messages.go` — public message types (6 types listed above)
+- `actions.go` — public `tea.Cmd` functions + `Configure` + `DaemonURL`
+- `client.go` — private HTTP client, private response message types, `apiClient`/`baseURL`/`pipeName` vars
+- `sessions.go` — private `sessionsProvider`
+- `workspaces.go` — private `workspacesProvider`
+- `todos.go` — private `todosProvider`
 
 ### Modified
-- `internal/tui/app.go` — remove view type/constants, remove all view models, remove `previousView`, remove `onNavigate`/`onWindowSizeMsg`/`debugViewContent`/`keys` view-switch logic. Add `router Router` field. Simplify Update/View/keys.
-- `internal/tui/keys.go` — move `Debug` out of `appKeyMap` into a new `routerKeyMap` (or just handle it inline in Router)
+- `internal/tui/app.go` — replace three provider fields with single `provider.Provider`, update `NewApp`, `Init`, `Update`
+- `internal/tui/messages.go` — remove all provider-related messages, keep only view-to-view messages
+- `internal/tui/sessionlist.go` — use `provider.X` for message types and action functions
+- `internal/tui/session_form.go` — use `provider.X`
+- `internal/tui/todolist.go` — use `provider.X`
+- `internal/tui/todo_form.go` — use `provider.X`
+- `internal/tui/workspace_picker.go` — use `provider.WorkspacesStateUpdatedMsg`
+- `internal/tui/branchpicker.go` — use `provider.BranchesLoadedMsg`
+- `internal/tui/debug.go` — use `provider.DaemonURL()` instead of `baseURL`
+- `cmd/tui/main.go` — call `provider.Configure(...)` instead of `tui.Configure(...)`
 
 ### Unchanged
-- All view models, providers, messages.go, client.go, debug.go — they already emit `navigateMsg` and don't reference App directly
+- `internal/tui/router.go`, `keys.go`, `model.go`, `filepicker.go`, `helpers.go`
 
 ## Steps
 
-1. Create `internal/tui/router.go` with the `view` type/constants, `Router` struct, `NewRouter`, and all methods (`Update`, `onNavigate`, `onWindowSizeMsg`, `View`, `Keys`)
-2. Update `internal/tui/keys.go` — `appKeyMap` keeps only `Quit`; add `Debug` key binding to Router (either as a `routerKeyMap` or a package-level var)
-3. Update `internal/tui/app.go` — replace view models + routing state with `router Router`, simplify Update/View/keys, adjust `NewApp`/`WithInitialView`
+1. Create `internal/tui/provider/` directory and all 7 files
+2. Update `internal/tui/messages.go` — remove provider-related messages
+3. Update all view files — import `provider` package, replace message types (e.g., `sessionsStateUpdatedMsg` → `provider.SessionsStateUpdatedMsg`, `.sessions` → `.Sessions`), replace action calls (e.g., `fetchSessions()` → `provider.FetchSessions()`, intent msg creation → `provider.CreateTodo(...)`)
+4. Update `internal/tui/app.go` — single `provider.Provider` field
+5. Update `internal/tui/debug.go` — `provider.DaemonURL()`
+6. Update `cmd/tui/main.go` — `provider.Configure(...)`
 
 ## Verification
 

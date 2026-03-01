@@ -43,14 +43,14 @@ type Router struct {
 	previousView view
 }
 
-func NewRouter(logPath string) Router {
+func NewRouter(logPath, daemonURL string) Router {
 	return Router{
 		activeView:  sessionListView,
 		sessionList: NewSessionListModel(),
 		sessionForm: NewSessionFormModel(),
 		todoList:    NewTodoListModel(),
 		todoForm:    NewTodoFormModel(),
-		debug:       NewDebugModel(logPath),
+		debug:       NewDebugModel(logPath, daemonURL),
 	}
 }
 

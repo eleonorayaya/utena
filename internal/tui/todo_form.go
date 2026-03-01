@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
@@ -71,7 +72,7 @@ func (m TodoFormModel) Init() (TodoFormModel, tea.Cmd) {
 	m.nameErr = ""
 	m.nameInput.SetValue("")
 	m.descInput.SetValue("")
-	return m, fetchWorkspaces()
+	return m, provider.FetchWorkspaces()
 }
 
 func (m TodoFormModel) Keys() help.KeyMap {
@@ -91,15 +92,15 @@ func (m TodoFormModel) Update(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.OnWindowSizeMsg(msg)
-	case workspacesStateUpdatedMsg:
-		m.activeWorkspaceID = msg.activeWorkspaceID
+	case provider.WorkspacesStateUpdatedMsg:
+		m.activeWorkspaceID = msg.ActiveWorkspaceID
 		var cmd tea.Cmd
 		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
 		return m, cmd
-	case todoCreatedMsg:
+	case provider.TodoCreatedMsg:
 		return m, func() tea.Msg { return navigateMsg{target: TodoListView} }
-	case errMsg:
-		m.nameErr = msg.err.Error()
+	case provider.ErrMsg:
+		m.nameErr = msg.Err.Error()
 		return m, nil
 	}
 
@@ -176,18 +177,13 @@ func (m TodoFormModel) updateFilePicker(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 
 func (m TodoFormModel) updateDirTypeChoice(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
-		path := m.selectedDirPath
 		switch msg.String() {
 		case "w":
 			m.activeStep = todoWorkspacePickerStep
-			return m, func() tea.Msg {
-				return addWorkspaceIntentMsg{path: path, asRoot: false}
-			}
+			return m, provider.AddWorkspace(m.selectedDirPath, false)
 		case "r":
 			m.activeStep = todoWorkspacePickerStep
-			return m, func() tea.Msg {
-				return addWorkspaceIntentMsg{path: path, asRoot: true}
-			}
+			return m, provider.AddWorkspace(m.selectedDirPath, true)
 		case "esc":
 			m.activeStep = todoFilePickerStep
 			return m, nil
@@ -211,16 +207,10 @@ func (m TodoFormModel) updateNameInput(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 			if m.selectedWorkspace != nil {
 				wsID = m.selectedWorkspace.ID
 			}
-			return m, func() tea.Msg {
-				return createTodoIntentMsg{
-					name:        name,
-					description: desc,
-					workspaceID: wsID,
-				}
-			}
+			return m, provider.CreateTodo(name, desc, wsID)
 		case key.Matches(msg, todoFormInputKeys.Back):
 			m.activeStep = todoWorkspacePickerStep
-			return m, func() tea.Msg { return requestWorkspacesStateMsg{} }
+			return m, provider.RequestWorkspacesState()
 		case key.Matches(msg, todoFormInputKeys.NextTab):
 			if m.focusIndex == 0 {
 				m.focusIndex = 1

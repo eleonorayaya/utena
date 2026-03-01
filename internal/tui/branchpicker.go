@@ -5,6 +5,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
 )
 
 type branchItem struct {
@@ -48,9 +49,9 @@ func (m BranchPickerModel) Keys() help.KeyMap {
 
 func (m BranchPickerModel) Update(msg tea.Msg) (BranchPickerModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case branchesLoadedMsg:
-		items := make([]list.Item, len(msg.branches))
-		for i, b := range msg.branches {
+	case provider.BranchesLoadedMsg:
+		items := make([]list.Item, len(msg.Branches))
+		for i, b := range msg.Branches {
 			items[i] = branchItem{name: b}
 		}
 		return m, m.list.SetItems(items)

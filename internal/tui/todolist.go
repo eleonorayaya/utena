@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/todo"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
 )
 
 type todoItem struct {
@@ -42,7 +43,7 @@ func NewTodoListModel() TodoListModel {
 }
 
 func (m TodoListModel) Init() (TodoListModel, tea.Cmd) {
-	return m, tea.Batch(fetchTodos(), fetchWorkspaces())
+	return m, tea.Batch(provider.FetchTodos(), provider.FetchWorkspaces())
 }
 
 func (m TodoListModel) Filtering() bool {
@@ -76,14 +77,14 @@ func (m TodoListModel) Update(msg tea.Msg) (TodoListModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.OnWindowSizeMsg(msg)
-	case todosStateUpdatedMsg:
-		m.todos = msg.todos
+	case provider.TodosStateUpdatedMsg:
+		m.todos = msg.Todos
 		return m, m.rebuildItems()
-	case workspacesStateUpdatedMsg:
-		m.activeWorkspaceID = msg.activeWorkspaceID
+	case provider.WorkspacesStateUpdatedMsg:
+		m.activeWorkspaceID = msg.ActiveWorkspaceID
 		return m, m.rebuildItems()
-	case errMsg:
-		return m, m.list.NewStatusMessage(msg.err.Error())
+	case provider.ErrMsg:
+		return m, m.list.NewStatusMessage(msg.Err.Error())
 	case tea.KeyMsg:
 		var cmd tea.Cmd
 		var handled bool
@@ -123,10 +124,7 @@ func (m TodoListModel) OnKeyMsg(msg tea.KeyMsg) (TodoListModel, tea.Cmd, bool) {
 		}
 		if m.pendingDeleteID == item.todo.ID {
 			m.pendingDeleteID = ""
-			id := item.todo.ID
-			return m, func() tea.Msg {
-				return deleteTodoIntentMsg{id: id}
-			}, true
+			return m, provider.DeleteTodo(item.todo.ID), true
 		}
 		m.pendingDeleteID = item.todo.ID
 		return m, m.list.NewStatusMessage("press d again to delete " + item.todo.Name), true

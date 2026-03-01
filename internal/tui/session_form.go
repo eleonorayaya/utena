@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
@@ -58,7 +59,7 @@ func (m SessionFormModel) Init() (SessionFormModel, tea.Cmd) {
 	m.selectedDirPath = ""
 	m.nameErr = ""
 	m.nameInput.SetValue("")
-	return m, fetchWorkspaces()
+	return m, provider.FetchWorkspaces()
 }
 
 func (m *SessionFormModel) SetSize(width, height int) {
@@ -88,12 +89,12 @@ func (m SessionFormModel) Update(msg tea.Msg) (SessionFormModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.OnWindowSizeMsg(msg)
-	case workspacesStateUpdatedMsg:
+	case provider.WorkspacesStateUpdatedMsg:
 		var cmd tea.Cmd
 		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
 		return m, cmd
-	case errMsg:
-		m.nameErr = msg.err.Error()
+	case provider.ErrMsg:
+		m.nameErr = msg.Err.Error()
 		return m, nil
 	}
 
@@ -129,7 +130,7 @@ func (m SessionFormModel) updateWorkspacePicker(msg tea.Msg) (SessionFormModel, 
 			m.activeStep = sessionBranchPickerStep
 			m.branchPicker = NewBranchPickerModel()
 			m.branchPicker.SetSize(m.width, m.height)
-			return m, fetchBranches(msg.workspace.ID)
+			return m, provider.RequestBranches(msg.workspace.ID)
 		}
 		m.activeStep = sessionNameInputStep
 		m.initNameInput()
@@ -177,13 +178,11 @@ func (m SessionFormModel) updateDirTypeChoice(msg tea.Msg) (SessionFormModel, te
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "w":
-			path := m.selectedDirPath
 			m.activeStep = sessionWorkspacePickerStep
-			return m, func() tea.Msg { return addWorkspaceIntentMsg{path: path, asRoot: false} }
+			return m, provider.AddWorkspace(m.selectedDirPath, false)
 		case "r":
-			path := m.selectedDirPath
 			m.activeStep = sessionWorkspacePickerStep
-			return m, func() tea.Msg { return addWorkspaceIntentMsg{path: path, asRoot: true} }
+			return m, provider.AddWorkspace(m.selectedDirPath, true)
 		case "esc":
 			m.activeStep = sessionFilePickerStep
 			return m, nil
@@ -203,7 +202,7 @@ func (m SessionFormModel) updateBranchPicker(msg tea.Msg) (SessionFormModel, tea
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
 			m.activeStep = sessionWorkspacePickerStep
-			return m, func() tea.Msg { return requestWorkspacesStateMsg{} }
+			return m, provider.RequestWorkspacesState()
 		}
 	}
 
@@ -225,16 +224,7 @@ func (m SessionFormModel) updateNameInput(msg tea.Msg) (SessionFormModel, tea.Cm
 				m.nameErr = err.Error()
 				return m, nil
 			}
-			ws := m.selectedWorkspace
-			branch := m.selectedBranch
-			return m, func() tea.Msg {
-				return createSessionIntentMsg{
-					name:          name,
-					workspaceID:   ws.ID,
-					branch:        branch,
-					workspacePath: ws.Path,
-				}
-			}
+			return m, provider.CreateSession(name, m.selectedWorkspace.ID, m.selectedBranch, m.selectedWorkspace.Path)
 		case key.Matches(msg, formKeys.Back):
 			if m.selectedWorkspace.IsGitRepo {
 				m.activeStep = sessionBranchPickerStep

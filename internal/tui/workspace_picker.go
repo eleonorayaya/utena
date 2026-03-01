@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
@@ -57,9 +58,9 @@ func (m WorkspacePickerModel) Keys() help.KeyMap {
 
 func (m WorkspacePickerModel) Update(msg tea.Msg) (WorkspacePickerModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspacesStateUpdatedMsg:
-		m.activeWorkspaceID = msg.activeWorkspaceID
-		workspaces := msg.workspaces
+	case provider.WorkspacesStateUpdatedMsg:
+		m.activeWorkspaceID = msg.ActiveWorkspaceID
+		workspaces := msg.Workspaces
 
 		if m.sortActiveFirst && m.activeWorkspaceID != "" {
 			sorted := make([]workspace.Workspace, 0, len(workspaces))

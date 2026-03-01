@@ -40,7 +40,6 @@ func main() {
 func runTUI(cmd *cobra.Command, args []string) error {
 	port, _ := cmd.Flags().GetString("port")
 	pipe, _ := cmd.Flags().GetString("pipe-name")
-	tui.Configure(port, pipe)
 
 	var resolvedLogPath string
 	logfilePath := os.Getenv("BUBBLETEA_LOG")
@@ -51,7 +50,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		resolvedLogPath, _ = filepath.Abs(logfilePath)
 	}
 
-	p := tea.NewProgram(tui.NewApp(resolvedLogPath))
+	p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, pipe))
 	if _, err := p.Run(); err != nil {
 		return err
 	}
@@ -66,7 +65,6 @@ func todosCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
 			pipe, _ := cmd.Root().Flags().GetString("pipe-name")
-			tui.Configure(port, pipe)
 
 			var resolvedLogPath string
 			logfilePath := os.Getenv("BUBBLETEA_LOG")
@@ -77,7 +75,7 @@ func todosCmd() *cobra.Command {
 				resolvedLogPath, _ = filepath.Abs(logfilePath)
 			}
 
-			p := tea.NewProgram(tui.NewApp(resolvedLogPath, tui.WithInitialView(tui.TodoListView)))
+			p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, pipe, tui.WithInitialView(tui.TodoListView)))
 			if _, err := p.Run(); err != nil {
 				return err
 			}
