@@ -66,8 +66,6 @@ type claudeSessionsLoadedMsg struct {
 	claudeSessions []claude.ClaudeSession
 }
 
-type pipeSentMsg struct{}
-
 type todosLoadedMsg struct {
 	todos []todo.Todo
 }
@@ -376,7 +374,7 @@ func sendZellijPipe(command, sessionName, workspacePath string) tea.Cmd {
 		jsonPayload, err := json.Marshal(payload)
 		if err != nil {
 			log.Printf("[ERROR] marshal pipe command: %v", err)
-			return pipeSentMsg{}
+			return tea.Quit()
 		}
 
 		log.Printf("[INFO] sending zellij pipe: %s", string(jsonPayload))
@@ -388,6 +386,6 @@ func sendZellijPipe(command, sessionName, workspacePath string) tea.Cmd {
 			log.Printf("[ERROR] zellij pipe failed: %v output: %s", err, string(output))
 		}
 
-		return pipeSentMsg{}
+		return tea.Quit()
 	}
 }

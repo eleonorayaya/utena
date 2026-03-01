@@ -91,9 +91,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case navigateMsg:
 		return a.onNavigate(msg)
-
-	case pipeSentMsg:
-		return a, tea.Quit
 	}
 
 	var cmds []tea.Cmd
