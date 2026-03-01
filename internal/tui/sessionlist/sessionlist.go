@@ -40,7 +40,7 @@ func (m Model) Keys() help.KeyMap {
 func (m *Model) rebuildItems() tea.Cmd {
 	var items []list.Item
 	for _, s := range m.sessions {
-		if s.IsDead || s.IsDeleted {
+		if s.IsDeleted {
 			continue
 		}
 		status := aggregateClaudeStatus(m.claudeSessions[s.ID])
@@ -95,6 +95,9 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			if item.session.IsAttached {
 				return m, m.list.NewStatusMessage("already attached to this session"), true
+			}
+			if item.session.IsDead {
+				return m, provider.ReviveSession(item.session.ID), true
 			}
 			return m, provider.ActivateSession(item.session.ID), true
 		}

@@ -162,6 +162,38 @@ func (c *client) activateSession(name string) tea.Cmd {
 	}
 }
 
+func (c *client) reviveSession(name string) tea.Cmd {
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodPut, c.baseURL+"/sessions/"+name+"/revive", nil)
+		if err != nil {
+			return ErrMsg{err}
+		}
+
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] revive session %q: %v", name, err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			return parseAPIError(res, "revive session")
+		}
+
+		var resp struct {
+			WorkspacePath string `json:"workspace_path"`
+			WorktreePath  string `json:"worktree_path"`
+		}
+		json.NewDecoder(res.Body).Decode(&resp)
+
+		return sessionRevivedMsg{
+			name:          name,
+			workspacePath: resp.WorkspacePath,
+			worktreePath:  resp.WorktreePath,
+		}
+	}
+}
+
 func (c *client) createSession(name, workspaceID, baseBranch string) tea.Cmd {
 	return func() tea.Msg {
 		body := map[string]string{

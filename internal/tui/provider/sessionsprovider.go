@@ -36,6 +36,10 @@ func CreateSession(name, workspaceID, branch, workspacePath string) tea.Cmd {
 	}
 }
 
+func ReviveSession(name string) tea.Cmd {
+	return func() tea.Msg { return reviveSessionIntentMsg{name: name} }
+}
+
 func DeleteSession(id string) tea.Cmd {
 	return func() tea.Msg { return deleteSessionIntentMsg{id: id} }
 }
@@ -52,6 +56,10 @@ type createSessionIntentMsg struct {
 	workspaceID   string
 	branch        string
 	workspacePath string
+}
+
+type reviveSessionIntentMsg struct {
+	name string
 }
 
 type deleteSessionIntentMsg struct {
@@ -78,6 +86,12 @@ type sessionActivatedMsg struct {
 
 type sessionCreatedMsg struct {
 	worktreePath string
+}
+
+type sessionRevivedMsg struct {
+	name          string
+	workspacePath string
+	worktreePath  string
 }
 
 type sessionDeletedMsg struct {
@@ -149,6 +163,33 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 				}
 			}
 			return result
+		}
+
+	case reviveSessionIntentMsg:
+		name := msg.name
+		return p, func() tea.Msg {
+			reviveResult := p.client.reviveSession(name)()
+			if err, ok := reviveResult.(ErrMsg); ok {
+				return err
+			}
+			revived, ok := reviveResult.(sessionRevivedMsg)
+			if !ok {
+				return ErrMsg{Err: fmt.Errorf("unexpected result from reviveSession")}
+			}
+			wp := revived.workspacePath
+			if revived.worktreePath != "" {
+				wp = revived.worktreePath
+			}
+
+			activateResult := p.client.activateSession(name)()
+			if err, ok := activateResult.(ErrMsg); ok {
+				return err
+			}
+			return sessionActivatedMsg{
+				name:          name,
+				pipeCommand:   "create_session",
+				workspacePath: wp,
+			}
 		}
 
 	case createSessionIntentMsg:

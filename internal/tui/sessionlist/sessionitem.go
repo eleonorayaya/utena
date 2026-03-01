@@ -15,7 +15,9 @@ type sessionItem struct {
 
 func (i sessionItem) Title() string {
 	title := i.session.ID
-	if i.session.IsAttached {
+	if i.session.IsDead {
+		title += " (dead)"
+	} else if i.session.IsAttached {
 		title += " (attached)"
 	}
 	if i.claudeStatus != "" {
