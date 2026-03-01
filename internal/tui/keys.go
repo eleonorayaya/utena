@@ -26,21 +26,19 @@ func (m mergedKeyMap) FullHelp() [][]key.Binding {
 }
 
 type appKeyMap struct {
-	Quit  key.Binding
-	Debug key.Binding
+	Quit key.Binding
 }
 
 func (k appKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Quit, k.Debug}
+	return []key.Binding{k.Quit}
 }
 
 func (k appKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Quit, k.Debug}}
+	return [][]key.Binding{{k.Quit}}
 }
 
 var appKeys = appKeyMap{
-	Quit:  key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
-	Debug: key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "debug")),
+	Quit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 }
 
 type debugKeyMap struct {
