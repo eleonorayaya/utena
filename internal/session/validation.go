@@ -28,11 +28,6 @@ func ValidateSession(session *Session) error {
 	if session == nil {
 		return errors.New("session cannot be nil")
 	}
-
-	if err := ValidateSessionName(session.ID); err != nil {
-		return err
-	}
-
 	return nil
 }
 

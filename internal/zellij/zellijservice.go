@@ -83,6 +83,7 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 		attached := sessionUpdate.ConnectedClients > 0
 		newSession := &session.Session{
 			ID:         sessionID,
+			Name:       sessionID,
 			IsAttached: attached,
 			IsActive:   true,
 			IsDead:     false,
@@ -91,7 +92,7 @@ func (z *ZellijService) ProcessSessionUpdate(ctx context.Context, req *UpdateSes
 			newSession.LastUsedAt = time.Now()
 		}
 
-		if err := z.sessionService.CreateSession(ctx, newSession); err != nil {
+		if err := z.sessionService.CreateSession(ctx, newSession, false); err != nil {
 			return err
 		}
 	}

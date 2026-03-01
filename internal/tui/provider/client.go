@@ -115,7 +115,8 @@ func (c *client) fetchWorkspaces() tea.Cmd {
 }
 
 type branchListResponse struct {
-	Branches []string `json:"branches"`
+	Branches      []string `json:"branches"`
+	CurrentBranch string   `json:"current_branch"`
 }
 
 func (c *client) fetchBranches(workspaceID string) tea.Cmd {
@@ -196,9 +197,11 @@ func (c *client) reviveSession(name string) tea.Cmd {
 
 func (c *client) createSession(name, workspaceID, baseBranch string) tea.Cmd {
 	return func() tea.Msg {
-		body := map[string]string{
-			"id":           name,
+		body := map[string]interface{}{
 			"workspace_id": workspaceID,
+		}
+		if name != "" {
+			body["name"] = name
 		}
 		if baseBranch != "" {
 			body["base_branch"] = baseBranch
@@ -220,11 +223,12 @@ func (c *client) createSession(name, workspaceID, baseBranch string) tea.Cmd {
 		}
 
 		var resp struct {
+			ID           string `json:"id"`
 			WorktreePath string `json:"worktree_path"`
 		}
 		json.NewDecoder(res.Body).Decode(&resp)
 
-		return sessionCreatedMsg{worktreePath: resp.WorktreePath}
+		return sessionCreatedMsg{id: resp.ID, worktreePath: resp.WorktreePath}
 	}
 }
 

@@ -85,6 +85,7 @@ type sessionActivatedMsg struct {
 }
 
 type sessionCreatedMsg struct {
+	id           string
 	worktreePath string
 }
 
@@ -206,17 +207,18 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 			if !ok {
 				return ErrMsg{Err: fmt.Errorf("unexpected result from createSession")}
 			}
+			sessionID := created.id
 			wp := workspacePath
 			if created.worktreePath != "" {
 				wp = created.worktreePath
 			}
 
-			activateResult := p.client.activateSession(name)()
+			activateResult := p.client.activateSession(sessionID)()
 			if err, ok := activateResult.(ErrMsg); ok {
 				return err
 			}
 			return sessionActivatedMsg{
-				name:          name,
+				name:          sessionID,
 				pipeCommand:   "create_session",
 				workspacePath: wp,
 			}

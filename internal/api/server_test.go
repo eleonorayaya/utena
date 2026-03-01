@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -77,16 +76,7 @@ func TestDaemon_GetWorkspaceByID(t *testing.T) {
 func TestDaemon_CreateAndGetSession(t *testing.T) {
 	_, router := setupTestRouter(t)
 
-	// Create session
-	sess := &session.Session{
-		ID:          "test-session-1",
-		WorkspaceID: "ws-1",
-		IsAttached:  true,
-		IsActive:    true,
-		LastUsedAt:  time.Now(),
-	}
-	body, err := json.Marshal(sess)
-	require.NoError(t, err)
+	body := []byte(`{"name":"test-session-1","workspace_id":"ws-1"}`)
 
 	req := httptest.NewRequest("POST", "/sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -96,8 +86,13 @@ func TestDaemon_CreateAndGetSession(t *testing.T) {
 
 	require.Equal(t, http.StatusCreated, w.Code)
 
-	// Get session
-	req = httptest.NewRequest("GET", "/sessions/test-session-1", nil)
+	var createResp session.SessionResponse
+	err := json.Unmarshal(w.Body.Bytes(), &createResp)
+	require.NoError(t, err)
+	require.Equal(t, "utena-test-session-1", createResp.ID)
+	require.Equal(t, "test-session-1", createResp.Name)
+
+	req = httptest.NewRequest("GET", "/sessions/utena-test-session-1", nil)
 	w = httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -107,33 +102,20 @@ func TestDaemon_CreateAndGetSession(t *testing.T) {
 	var response session.SessionResponse
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	require.Equal(t, "test-session-1", response.ID)
+	require.Equal(t, "utena-test-session-1", response.ID)
 	require.Equal(t, "ws-1", response.WorkspaceID)
-	require.True(t, response.IsAttached)
 }
 
 func TestDaemon_ListSessions(t *testing.T) {
 	_, router := setupTestRouter(t)
 
-	// Create multiple sessions
-	sessions := []*session.Session{
-		{
-			ID:          "session-1",
-			WorkspaceID: "ws-1",
-			LastUsedAt:  time.Now().Add(-1 * time.Hour),
-		},
-		{
-			ID:          "session-2",
-			WorkspaceID: "ws-2",
-			LastUsedAt:  time.Now(),
-		},
+	bodies := []string{
+		`{"name":"session-1","workspace_id":"ws-1"}`,
+		`{"name":"session-2","workspace_id":"ws-2"}`,
 	}
 
-	for _, sess := range sessions {
-		body, err := json.Marshal(sess)
-		require.NoError(t, err)
-
-		req := httptest.NewRequest("POST", "/sessions", bytes.NewReader(body))
+	for _, b := range bodies {
+		req := httptest.NewRequest("POST", "/sessions", bytes.NewReader([]byte(b)))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -141,7 +123,6 @@ func TestDaemon_ListSessions(t *testing.T) {
 		require.Equal(t, http.StatusCreated, w.Code)
 	}
 
-	// List sessions
 	req := httptest.NewRequest("GET", "/sessions", nil)
 	w := httptest.NewRecorder()
 
@@ -154,9 +135,12 @@ func TestDaemon_ListSessions(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, response.Sessions, 2)
 
-	// Verify MRU sorting (most recent first)
-	require.Equal(t, "session-2", response.Sessions[0].ID)
-	require.Equal(t, "session-1", response.Sessions[1].ID)
+	ids := make(map[string]bool)
+	for _, s := range response.Sessions {
+		ids[s.ID] = true
+	}
+	require.True(t, ids["utena-session-1"])
+	require.True(t, ids["other-session-2"])
 }
 
 func TestDaemon_ZellijSessionUpdate(t *testing.T) {
@@ -228,32 +212,13 @@ func findSessionByID(sessions []session.Session, id string) *session.Session {
 func TestDaemon_ZellijSessionUpdate_MarkDeadSessions(t *testing.T) {
 	_, router := setupTestRouter(t)
 
-	sess1 := &session.Session{
-		ID:          "old-session-1",
-		WorkspaceID: "ws-1",
-		IsActive:    true,
-		IsDead:      false,
-		LastUsedAt:  time.Now(),
-	}
-	sess2 := &session.Session{
-		ID:          "old-session-2",
-		WorkspaceID: "ws-1",
-		IsActive:    true,
-		IsDead:      false,
-		LastUsedAt:  time.Now(),
-	}
-
-	body1, err := json.Marshal(sess1)
-	require.NoError(t, err)
-	req1 := httptest.NewRequest("POST", "/sessions", bytes.NewReader(body1))
+	req1 := httptest.NewRequest("POST", "/sessions", bytes.NewReader([]byte(`{"name":"old-session-1","workspace_id":"ws-1"}`)))
 	req1.Header.Set("Content-Type", "application/json")
 	w1 := httptest.NewRecorder()
 	router.ServeHTTP(w1, req1)
 	require.Equal(t, http.StatusCreated, w1.Code)
 
-	body2, err := json.Marshal(sess2)
-	require.NoError(t, err)
-	req2 := httptest.NewRequest("POST", "/sessions", bytes.NewReader(body2))
+	req2 := httptest.NewRequest("POST", "/sessions", bytes.NewReader([]byte(`{"name":"old-session-2","workspace_id":"ws-1"}`)))
 	req2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
@@ -262,7 +227,7 @@ func TestDaemon_ZellijSessionUpdate_MarkDeadSessions(t *testing.T) {
 	updateReq := &zellij.UpdateSessionsRequest{
 		Sessions: []zellij.SessionUpdate{
 			{
-				Name:             "old-session-1",
+				Name:             "utena-old-session-1",
 				ConnectedClients: 1,
 			},
 			{
@@ -295,12 +260,12 @@ func TestDaemon_ZellijSessionUpdate_MarkDeadSessions(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sessionsResponse.Sessions, 3)
 
-	oldSession1 := findSessionByID(sessionsResponse.Sessions, "old-session-1")
+	oldSession1 := findSessionByID(sessionsResponse.Sessions, "utena-old-session-1")
 	require.NotNil(t, oldSession1)
 	require.True(t, oldSession1.IsAttached)
 	require.False(t, oldSession1.IsDead)
 
-	oldSession2 := findSessionByID(sessionsResponse.Sessions, "old-session-2")
+	oldSession2 := findSessionByID(sessionsResponse.Sessions, "utena-old-session-2")
 	require.NotNil(t, oldSession2)
 	require.True(t, oldSession2.IsDead)
 

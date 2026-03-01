@@ -150,56 +150,88 @@ func TestSessionRouter_ListSessionsByWorkspace(t *testing.T) {
 func TestSessionRouter_CreateSession(t *testing.T) {
 	router, sessionStore, _ := setupSessionRouter(t)
 
-	// Create request body
-	session := &Session{
-		ID:          "session-1",
-		WorkspaceID: "ws-1",
-		IsAttached:  true,
-		IsActive:    true,
-		LastUsedAt:  time.Now(),
-	}
-	body, err := json.Marshal(session)
-	require.NoError(t, err)
+	body := []byte(`{"name":"session-1","workspace_id":"ws-1"}`)
 
-	// Create request
 	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	// Execute
 	router.Routes().ServeHTTP(w, req)
 
-	// Assert
 	require.Equal(t, http.StatusCreated, w.Code)
 
-	// Verify session was created
-	retrieved, err := sessionStore.GetByID("session-1")
+	var resp SessionResponse
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	require.Equal(t, "session-1", retrieved.ID)
+	require.Equal(t, "utena-session-1", resp.ID)
+	require.Equal(t, "session-1", resp.Name)
+
+	retrieved, err := sessionStore.GetByID("utena-session-1")
+	require.NoError(t, err)
+	require.Equal(t, "utena-session-1", retrieved.ID)
 	require.Equal(t, "ws-1", retrieved.WorkspaceID)
+}
+
+func TestSessionRouter_CreateSession_WithName(t *testing.T) {
+	router, sessionStore, _ := setupSessionRouter(t)
+
+	body := []byte(`{"name":"main","workspace_id":"ws-1"}`)
+
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var resp SessionResponse
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	require.Equal(t, "utena-main", resp.ID)
+	require.Equal(t, "main", resp.Name)
+
+	retrieved, err := sessionStore.GetByID("utena-main")
+	require.NoError(t, err)
+	require.Equal(t, "main", retrieved.Name)
+}
+
+func TestSessionRouter_CreateSession_ExistingBranch(t *testing.T) {
+	router, sessionStore, _ := setupSessionRouter(t)
+
+	body := []byte(`{"workspace_id":"ws-1","branch":"main","branch_created":false,"create_worktree":false}`)
+
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var resp SessionResponse
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	require.Equal(t, "utena-main", resp.ID)
+	require.Equal(t, "main", resp.Name)
+
+	retrieved, err := sessionStore.GetByID("utena-main")
+	require.NoError(t, err)
+	require.Equal(t, "main", retrieved.Name)
+	require.Equal(t, "main", retrieved.Branch)
 }
 
 func TestSessionRouter_CreateSession_InvalidWorkspace(t *testing.T) {
 	router, _, _ := setupSessionRouter(t)
 
-	// Create request body with invalid workspace
-	session := &Session{
-		ID:          "session-1",
-		WorkspaceID: "nonexistent",
-		LastUsedAt:  time.Now(),
-	}
-	body, err := json.Marshal(session)
-	require.NoError(t, err)
+	body := []byte(`{"name":"session-1","workspace_id":"nonexistent"}`)
 
-	// Create request
 	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	// Execute
 	router.Routes().ServeHTTP(w, req)
 
-	// Assert - should return error
 	require.NotEqual(t, http.StatusCreated, w.Code)
 }
 
