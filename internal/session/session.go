@@ -20,6 +20,7 @@ type Session struct {
 	Branch        string    `json:"branch,omitempty"`
 	BaseBranch    string    `json:"base_branch,omitempty"`
 	BranchCreated bool      `json:"branch_created,omitempty"`
+	BranchName    string    `json:"branch_name,omitempty"`
 	WorktreePath  string    `json:"worktree_path,omitempty"`
 	IsAttached    bool      `json:"is_attached"`
 	IsActive      bool      `json:"is_active"`

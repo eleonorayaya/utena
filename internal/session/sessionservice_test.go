@@ -27,7 +27,7 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
+	service := NewSessionService(sessionStore, workspaceService, gitService, bus, "eqt/")
 	return service, sessionStore, workspaceStore
 }
 
@@ -293,7 +293,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
+	service := NewSessionService(sessionStore, workspaceService, gitService, bus, "eqt/")
 
 	session := &Session{
 		Name:          "my-feature",
@@ -309,6 +309,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	require.Equal(t, "git-repo-my-feature", session.ID)
 	expectedPath := filepath.Join(repoPath, ".worktrees", "git-repo-my-feature")
 	require.Equal(t, expectedPath, session.WorktreePath)
+	require.Equal(t, "eqt/my-feature", session.BranchName)
 
 	info, err := os.Stat(expectedPath)
 	require.NoError(t, err)
@@ -317,6 +318,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	retrieved, err := sessionStore.GetByID("git-repo-my-feature")
 	require.NoError(t, err)
 	require.Equal(t, expectedPath, retrieved.WorktreePath)
+	require.Equal(t, "eqt/my-feature", retrieved.BranchName)
 	require.Equal(t, "main", retrieved.BaseBranch)
 }
 
@@ -330,7 +332,7 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
+	service := NewSessionService(sessionStore, workspaceService, gitService, bus, "eqt/")
 
 	session := &Session{
 		Name:          "my-feature",
@@ -413,7 +415,7 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
+	service := NewSessionService(sessionStore, workspaceService, gitService, bus, "eqt/")
 
 	session := &Session{
 		Name:        "my-session",

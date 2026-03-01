@@ -35,7 +35,7 @@ func newApp(fs afero.Fs, cfg Config) *App {
 	bus := eventbus.NewEventBus()
 
 	workspaceModule := workspace.NewWorkspaceModule(fs, cfg.ConfigDir)
-	sessionModule := session.NewSessionModule(workspaceModule, bus, fs, cfg.ConfigDir)
+	sessionModule := session.NewSessionModule(workspaceModule, bus, fs, cfg.ConfigDir, cfg.BranchPrefix)
 
 	return &App{
 		Workspace: workspaceModule,
