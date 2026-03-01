@@ -1,9 +1,25 @@
-package tui
+package router
 
 import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 )
+
+type routerKeyMap struct {
+	Debug key.Binding
+}
+
+func (k routerKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Debug}
+}
+
+func (k routerKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{{k.Debug}}
+}
+
+var routerKeys = routerKeyMap{
+	Debug: key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "debug")),
+}
 
 type mergedKeyMap struct {
 	keymaps []help.KeyMap
@@ -23,20 +39,4 @@ func (m mergedKeyMap) FullHelp() [][]key.Binding {
 		groups = append(groups, km.FullHelp()...)
 	}
 	return groups
-}
-
-type appKeyMap struct {
-	Quit key.Binding
-}
-
-func (k appKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Quit}
-}
-
-func (k appKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Quit}}
-}
-
-var appKeys = appKeyMap{
-	Quit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 }
