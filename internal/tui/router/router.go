@@ -6,22 +6,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type routerKeyMap struct {
-	Debug key.Binding
-}
-
-func (k routerKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Debug}
-}
-
-func (k routerKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Debug}}
-}
-
-var routerKeys = routerKeyMap{
-	Debug: key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "debug")),
-}
-
 type Router struct {
 	views      map[View]ViewEntry
 	activeView View
@@ -97,24 +81,4 @@ func (r Router) View() string {
 
 func (r Router) Keys() help.KeyMap {
 	return mergedKeyMap{keymaps: []help.KeyMap{routerKeys, r.views[r.activeView].Keys()}}
-}
-
-type mergedKeyMap struct {
-	keymaps []help.KeyMap
-}
-
-func (m mergedKeyMap) ShortHelp() []key.Binding {
-	var bindings []key.Binding
-	for _, km := range m.keymaps {
-		bindings = append(bindings, km.ShortHelp()...)
-	}
-	return bindings
-}
-
-func (m mergedKeyMap) FullHelp() [][]key.Binding {
-	var groups [][]key.Binding
-	for _, km := range m.keymaps {
-		groups = append(groups, km.FullHelp()...)
-	}
-	return groups
 }
