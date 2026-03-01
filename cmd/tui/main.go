@@ -11,6 +11,7 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/shellinit"
 	"github.com/eleonorayaya/utena/internal/tui"
+	"github.com/eleonorayaya/utena/internal/tui/router"
 )
 
 var (
@@ -50,7 +51,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		resolvedLogPath, _ = filepath.Abs(logfilePath)
 	}
 
-	p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, pipe))
+	p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, pipe, router.SessionListView))
 	if _, err := p.Run(); err != nil {
 		return err
 	}
@@ -75,7 +76,7 @@ func todosCmd() *cobra.Command {
 				resolvedLogPath, _ = filepath.Abs(logfilePath)
 			}
 
-			p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, pipe, tui.WithInitialView(tui.TodoListView)))
+			p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, pipe, router.TodoListView))
 			if _, err := p.Run(); err != nil {
 				return err
 			}

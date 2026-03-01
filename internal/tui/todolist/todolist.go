@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/todo"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/router"
 )
 
 type Model struct {
@@ -97,9 +98,9 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 	switch {
 	case key.Matches(msg, keys.New):
-		return m, func() tea.Msg { return NewTodoMsg{} }, true
+		return m, router.NavigateTo(router.TodoFormView), true
 	case key.Matches(msg, keys.Back):
-		return m, func() tea.Msg { return BackMsg{} }, true
+		return m, router.Back(), true
 	case key.Matches(msg, keys.Delete):
 		item, ok := m.list.SelectedItem().(todoItem)
 		if !ok {

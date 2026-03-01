@@ -1,168 +1,115 @@
-# Refactor View Models into Subpackages
+# Move Navigation to Shared `router` Package, Make Router Generic
 
 ## Context
 
-All view models, keys, and messages currently live in the flat `internal/tui/` package. This mixes 8 distinct view models, 10 keymaps, and 5 cross-model messages into one namespace. Moving each view model into its own subpackage enforces one-model-per-file, colocates each model's keys and messages with it, and eliminates the shared `navigateMsg` / `view` enum coupling from child models.
+The router currently imports every view subpackage for two reasons: (1) to construct concrete models in `NewRouter`, and (2) to handle per-model navigation messages in the `Update` switch. Both can be eliminated. Navigation messages move to a shared `router` package (`NavigateToMsg`, `BackMsg`), and view construction moves to the app. The router becomes fully generic — it operates only on a `viewEntry` interface and `router.View` enum.
 
-## Package Layout
+## Plan
 
-```
-internal/tui/
-├── app.go                    App, AppOption, WithInitialView
-├── router.go                 Router, view enum, routerKeyMap
-├── model.go                  ViewModel interface, compile-time checks
-├── keys.go                   mergedKeyMap, appKeyMap
-├── sessionlist/
-│   ├── model.go              Model, sessionItem, timeAgo
-│   ├── keys.go               keys
-│   └── messages.go           NewSessionMsg, TodosMsg
-├── sessionform/
-│   ├── model.go              Model, step enum, defaultSessionName
-│   ├── keys.go               formKeys, mergedKeyMap (local copy)
-│   └── messages.go           BackMsg
-├── todolist/
-│   ├── model.go              Model, todoItem
-│   ├── keys.go               keys
-│   └── messages.go           NewTodoMsg, BackMsg
-├── todoform/
-│   ├── model.go              Model, step enum
-│   ├── keys.go               formKeys, inputKeys
-│   └── messages.go           BackMsg, DoneMsg
-├── workspacepicker/
-│   ├── model.go              Model, workspaceItem, AbbreviatePath
-│   ├── keys.go               keys
-│   └── messages.go           SelectedMsg, AddDirectoryMsg
-├── branchpicker/
-│   ├── model.go              Model, branchItem
-│   ├── keys.go               keys
-│   └── messages.go           SelectedMsg
-├── filepicker/
-│   ├── model.go              Model (aliases bubbles/filepicker as bubblefp)
-│   ├── keys.go               keys
-│   └── messages.go           DirectorySelectedMsg
-├── debug/
-│   ├── model.go              Model
-│   ├── keys.go               keys
-│   └── messages.go           BackMsg
-└── provider/                 (unchanged)
-```
+### 1. Create `internal/tui/router/router.go`
 
-## Design Decisions
-
-### No circular dependencies
-
-Subpackages never import the parent `tui` package. All cross-package communication happens through exported message types defined in the producing package.
-
-### Navigation without `navigateMsg`
-
-Currently all models emit `navigateMsg{target: someView}`, coupling them to the `view` enum in router.go. Instead, each model defines its own navigation message types:
-
-| Model | Messages | Replaces |
-|-------|----------|----------|
-| sessionlist | `NewSessionMsg{}`, `TodosMsg{}` | `navigateMsg{target: sessionFormView}`, `navigateMsg{target: TodoListView}` |
-| sessionform | `BackMsg{}` | `navigateMsg{target: sessionListView}` |
-| todolist | `NewTodoMsg{}`, `BackMsg{}` | `navigateMsg{target: todoFormView}`, `navigateMsg{target: sessionListView}` |
-| todoform | `BackMsg{}`, `DoneMsg{}` | `navigateMsg{target: TodoListView}` (two usages) |
-| debug | `BackMsg{}` | `navigateMsg{target: backView}` |
-
-The Router handles all of these in its Update, mapping them to internal view switches.
-
-### Picker messages move to picker packages
-
-| Current (tui package) | New location |
-|----------------------|--------------|
-| `workspaceSelectedMsg` | `workspacepicker.SelectedMsg` |
-| `addDirectoryRequestMsg` | `workspacepicker.AddDirectoryMsg` |
-| `branchSelectedMsg` | `branchpicker.SelectedMsg` |
-| `directorySelectedMsg` | `filepicker.DirectorySelectedMsg` |
-
-Forms import picker packages and handle these exported message types.
-
-### Naming convention
-
-Types are named `Model` within each package (e.g., `sessionlist.Model`). Constructors are `New()` (e.g., `sessionlist.New()`).
-
-### Shared utilities
-
-- **`mergedKeyMap`**: stays in parent `tui/keys.go` (used by App and Router). A local copy is defined in `sessionform/keys.go` (the only subpackage that needs it).
-- **`AbbreviatePath`**: moves to `workspacepicker/model.go` as exported function. Forms import it from there (they already import workspacepicker).
-- **`timeAgo`**: moves to `sessionlist/model.go` (only consumer).
-- **`formKeys`**: defined independently in `sessionform/keys.go` and `todoform/keys.go` (identical bindings, no shared import needed).
-
-### ViewModel interface
-
-Stays in `tui/model.go`. Compile-time checks import subpackages:
+The view enum (currently `view` in router.go) and two navigation message types + cmd constructors:
 
 ```go
-var (
-    _ ViewModel[Router]               = Router{}
-    _ ViewModel[sessionlist.Model]    = sessionlist.Model{}
-    _ ViewModel[sessionform.Model]    = sessionform.Model{}
-    // ...
+package router
+
+type View int
+
+const (
+    SessionListView View = iota
+    SessionFormView
+    TodoListView
+    TodoFormView
+    DebugView
 )
+
+type NavigateToMsg struct{ Target View }
+type BackMsg struct{}
+
+func NavigateTo(target View) tea.Cmd { ... }
+func Back() tea.Cmd { ... }
 ```
 
-## Router Changes
+### 2. Keep existing interface names
+
+- `viewEntry` stays as-is in `internal/tui/router.go` — the non-generic type-erased interface for the router map
+- `ViewModel[T]` stays as-is in `internal/tui/model.go` — the generic interface for compile-time checks
+- `viewAdapter[T]` stays as-is — bridges concrete models to `viewEntry`
+
+### 3. Make `NewRouter` accept the view map
 
 ```go
-type Router struct {
-    sessionList  sessionlist.Model
-    sessionForm  sessionform.Model
-    todoList     todolist.Model
-    todoForm     todoform.Model
-    debug        debug.Model
-    activeView   view
-    previousView view
+func NewRouter(views map[router.View]viewEntry, initialView router.View) Router
+```
+
+The app constructs the concrete view map and passes it in. The router no longer imports any view subpackage.
+
+### 4. Use a view stack for back navigation
+
+Replace the single `previousView` field with a stack. `NavigateToMsg` pushes, `BackMsg` pops. This correctly handles multi-level back (sessionList → todoList → todoForm → back → back).
+
+### 5. Simplify router's `Update` switch
+
+```go
+case router.NavigateToMsg:
+    return r.navigateTo(msg.Target)
+case router.BackMsg:
+    return r.navigateBack()
+```
+
+The `?` debug key still lives in the router's `OnKeyMsg` — it references `router.DebugView` from the shared enum (no view subpackage import needed).
+
+### 6. Update view subpackages
+
+Replace per-model navigation messages with `router.NavigateTo()`/`router.Back()`:
+
+| Package | Old | New |
+|---------|-----|-----|
+| sessionlist | `NewSessionMsg{}` | `router.NavigateTo(router.SessionFormView)` |
+| sessionlist | `TodosMsg{}` | `router.NavigateTo(router.TodoListView)` |
+| sessionform | `BackMsg{}` | `router.Back()` |
+| todolist | `NewTodoMsg{}` | `router.NavigateTo(router.TodoFormView)` |
+| todolist | `BackMsg{}` | `router.Back()` |
+| todoform | `BackMsg{}` | `router.Back()` |
+| todoform | `DoneMsg{}` | `router.Back()` |
+| debug | `BackMsg{}` | `router.Back()` |
+
+Delete empty `messages.go` files. Keep `messages.go` files that still have non-navigation messages (e.g., picker messages like `workspacepicker.SelectedMsg`).
+
+### 7. Move view construction to `app.go`
+
+`NewApp` builds the view map and passes it to `NewRouter`:
+
+```go
+views := map[router.View]viewEntry{
+    router.SessionListView: &viewAdapter[sessionlist.Model]{model: sessionlist.New()},
+    router.SessionFormView: &viewAdapter[sessionform.Model]{model: sessionform.New()},
+    router.TodoListView:    &viewAdapter[todolist.Model]{model: todolist.New()},
+    router.TodoFormView:    &viewAdapter[todoform.Model]{model: todoform.New()},
+    router.DebugView:       &viewAdapter[debug.Model]{model: debug.New(logPath, baseURL)},
 }
+r := NewRouter(views, router.SessionListView)
 ```
 
-Replace `navigateMsg` handling with per-model message handling:
-
-```go
-case sessionlist.NewSessionMsg:
-    return r.navigateTo(sessionFormView)
-case sessionlist.TodosMsg:
-    return r.navigateTo(TodoListView)
-case sessionform.BackMsg:
-    return r.navigateTo(sessionListView)
-case todolist.NewTodoMsg:
-    return r.navigateTo(todoFormView)
-case todolist.BackMsg:
-    return r.navigateTo(sessionListView)
-case todoform.BackMsg, todoform.DoneMsg:
-    return r.navigateTo(TodoListView)
-case debug.BackMsg:
-    r.activeView = r.previousView
-    return r, nil
-```
-
-### keys.go
-
-Only `mergedKeyMap` + `appKeyMap` remain (~30 lines). All other keymaps move to subpackages.
+`WithInitialView` changes param type to `router.View`. `cmd/tui/main.go` updates to use `router.TodoListView`.
 
 ## Files
 
-### New (8 subpackages × 3 files = 24 files)
-Listed in package layout above.
+### New
+- `internal/tui/router/router.go`
 
 ### Modified
-- `router.go` — import subpackages, handle subpackage message types
-- `model.go` — compile-time checks import subpackages
-- `keys.go` — remove all keymaps except mergedKeyMap + appKeyMap
-
-### Deleted
-- `messages.go`, `util.go`, `sessionlist.go`, `session_form.go`, `todolist.go`, `todo_form.go`, `workspace_picker.go`, `branchpicker.go`, `filepicker.go`, `debug.go`
-
-## Steps
-
-1. Create all 8 subpackage directories with model.go, keys.go, messages.go
-2. Update `keys.go` — keep only mergedKeyMap + appKeyMap
-3. Update `model.go` — compile-time checks reference subpackage types
-4. Update `router.go` — import subpackages, replace navigateMsg with per-model messages
-5. Delete `messages.go`, `util.go`, and all old model files
-6. Update `app.go` if needed (view enum stays in router.go, WithInitialView stays)
+- `internal/tui/router.go` — remove view enum, use `router.View`, accept map in NewRouter, stack-based back, simplified switch
+- `internal/tui/app.go` — construct view map, pass to NewRouter, `WithInitialView(router.View)`
+- `internal/tui/model.go` — update compile-time checks to use `router.View`
+- `internal/tui/sessionlist/sessionlist.go` + `messages.go`
+- `internal/tui/sessionform/sessionform.go` + `messages.go`
+- `internal/tui/todolist/todolist.go` + `messages.go`
+- `internal/tui/todoform/todoform.go` + `messages.go`
+- `internal/tui/debug/debug.go` + `messages.go`
+- `cmd/tui/main.go` — import router package, use `router.TodoListView`
 
 ## Verification
 
-- `task tui:build` compiles
-- `task test` passes
+- `task tui:build`
+- `task test`

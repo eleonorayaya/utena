@@ -5,36 +5,38 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/tui/debug"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/sessionform"
+	"github.com/eleonorayaya/utena/internal/tui/sessionlist"
+	"github.com/eleonorayaya/utena/internal/tui/todoform"
+	"github.com/eleonorayaya/utena/internal/tui/todolist"
 )
 
 type App struct {
 	provider provider.Provider
-	router   Router
+	router   router.Router
 	help     help.Model
 	width    int
 	height   int
 }
 
-type AppOption func(*App)
-
-func WithInitialView(v view) AppOption {
-	return func(a *App) {
-		a.router.activeView = v
-	}
-}
-
-func NewApp(logPath, port, pipeName string, opts ...AppOption) App {
+func NewApp(logPath, port, pipeName string, initialView router.View) App {
 	baseURL := fmt.Sprintf("http://localhost:%s", port)
-	a := App{
+	views := map[router.View]router.ViewEntry{
+		router.SessionListView: &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
+		router.SessionFormView: &router.ViewAdapter[sessionform.Model]{Model: sessionform.New()},
+		router.TodoListView:    &router.ViewAdapter[todolist.Model]{Model: todolist.New()},
+		router.TodoFormView:    &router.ViewAdapter[todoform.Model]{Model: todoform.New()},
+		router.DebugView:       &router.ViewAdapter[debug.Model]{Model: debug.New(logPath, baseURL)},
+	}
+
+	return App{
 		provider: provider.NewRootProvider(baseURL, pipeName),
-		router:   NewRouter(logPath, baseURL),
+		router:   router.New(views, initialView),
 		help:     help.New(),
 	}
-	for _, opt := range opts {
-		opt(&a)
-	}
-	return a
 }
 
 func (a App) Init() tea.Cmd {

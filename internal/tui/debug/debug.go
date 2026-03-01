@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/tui/router"
 )
 
 var debugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
@@ -45,7 +46,7 @@ func (m Model) OnWindowSizeMsg(_ tea.WindowSizeMsg) (Model, tea.Cmd) {
 
 func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if key.Matches(msg, keys.Back) {
-		return m, func() tea.Msg { return BackMsg{} }, true
+		return m, router.Back(), true
 	}
 	return m, nil, false
 }

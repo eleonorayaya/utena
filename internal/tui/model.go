@@ -5,6 +5,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
 	"github.com/eleonorayaya/utena/internal/tui/debug"
 	"github.com/eleonorayaya/utena/internal/tui/filepicker"
+	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionform"
 	"github.com/eleonorayaya/utena/internal/tui/sessionlist"
 	"github.com/eleonorayaya/utena/internal/tui/todoform"
@@ -19,7 +20,7 @@ type ViewModel[T any] interface {
 }
 
 var (
-	_ ViewModel[Router]                = Router{}
+	_ ViewModel[router.Router]         = router.Router{}
 	_ ViewModel[sessionlist.Model]     = sessionlist.Model{}
 	_ ViewModel[sessionform.Model]     = sessionform.Model{}
 	_ ViewModel[todolist.Model]        = todolist.Model{}

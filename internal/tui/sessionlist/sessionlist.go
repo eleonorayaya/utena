@@ -8,6 +8,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/router"
 )
 
 type Model struct {
@@ -87,9 +88,9 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 	switch {
 	case key.Matches(msg, keys.New):
-		return m, func() tea.Msg { return NewSessionMsg{} }, true
+		return m, router.NavigateTo(router.SessionFormView), true
 	case key.Matches(msg, keys.Todos):
-		return m, func() tea.Msg { return TodosMsg{} }, true
+		return m, router.NavigateTo(router.TodoListView), true
 	case key.Matches(msg, keys.Select):
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			if item.session.IsAttached {

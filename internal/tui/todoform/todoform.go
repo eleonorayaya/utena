@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/tui/filepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
@@ -100,7 +101,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
 		return m, cmd
 	case provider.TodoCreatedMsg:
-		return m, func() tea.Msg { return DoneMsg{} }
+		return m, router.Back()
 	case provider.ErrMsg:
 		m.nameErr = msg.Err.Error()
 		return m, nil
@@ -150,7 +151,7 @@ func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 		return m, cmd
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
-			return m, func() tea.Msg { return BackMsg{} }
+			return m, router.Back()
 		}
 	}
 

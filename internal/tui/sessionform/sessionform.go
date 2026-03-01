@@ -13,6 +13,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
 	"github.com/eleonorayaya/utena/internal/tui/filepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
@@ -149,7 +150,7 @@ func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
-			return m, func() tea.Msg { return BackMsg{} }
+			return m, router.Back()
 		}
 	}
 
