@@ -196,6 +196,11 @@ func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Ses
 		s.workspaceService.Touch(ctx, session.WorkspaceID)
 	}
 
+	s.eventBus.Publish(ctx, eventbus.Event{
+		Type: eventbus.SessionActivated,
+		Data: eventbus.SessionActivatedEvent{SessionName: name},
+	})
+
 	return session, nil
 }
 

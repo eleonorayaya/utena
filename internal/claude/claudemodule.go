@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 
+	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/afero"
 )
@@ -14,9 +15,9 @@ type ClaudeModule struct {
 	Router     *ClaudeRouter
 }
 
-func NewClaudeModule(fs afero.Fs, configDir string) *ClaudeModule {
+func NewClaudeModule(bus eventbus.EventBus, fs afero.Fs, configDir string) *ClaudeModule {
 	store := NewClaudeStore(fs, configDir)
-	service := NewClaudeService(store)
+	service := NewClaudeService(store, bus)
 	controller := NewClaudeController(service)
 	router := NewClaudeRouter(controller)
 

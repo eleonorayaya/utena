@@ -41,7 +41,7 @@ func newApp(fs afero.Fs, cfg Config) *App {
 		Workspace: workspaceModule,
 		Session:   sessionModule,
 		Zellij:    zellij.NewZellijModule(sessionModule, bus),
-		Claude:    claude.NewClaudeModule(fs, cfg.ConfigDir),
+		Claude:    claude.NewClaudeModule(bus, fs, cfg.ConfigDir),
 		Todo:      todo.NewTodoModule(workspaceModule, fs, cfg.ConfigDir),
 	}
 }
