@@ -12,6 +12,7 @@ type ClaudeSessionStatus string
 const (
 	StatusWorking        ClaudeSessionStatus = "working"
 	StatusNeedsAttention ClaudeSessionStatus = "needs_attention"
+	StatusReadyForReview ClaudeSessionStatus = "ready_for_review"
 	StatusCompleted      ClaudeSessionStatus = "completed"
 )
 

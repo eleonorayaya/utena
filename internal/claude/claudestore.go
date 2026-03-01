@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/spf13/afero"
 )
@@ -89,6 +90,24 @@ func (s *ClaudeStore) Upsert(session *ClaudeSession) error {
 	s.sessions[session.ID] = &copy
 	s.save()
 	return nil
+}
+
+func (s *ClaudeStore) UpdateStatusBySessionID(sessionID string, from, to ClaudeSessionStatus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	changed := false
+	for _, session := range s.sessions {
+		if session.SessionID == sessionID && session.Status == from {
+			session.Status = to
+			session.LastUpdatedAt = time.Now()
+			changed = true
+		}
+	}
+
+	if changed {
+		s.save()
+	}
 }
 
 func (s *ClaudeStore) Delete(id string) error {

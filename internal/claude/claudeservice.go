@@ -2,21 +2,37 @@ package claude
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/eleonorayaya/utena/internal/eventbus"
 )
 
 type ClaudeService struct {
-	store *ClaudeStore
+	store    *ClaudeStore
+	eventBus eventbus.EventBus
 }
 
-func NewClaudeService(store *ClaudeStore) *ClaudeService {
+func NewClaudeService(store *ClaudeStore, bus eventbus.EventBus) *ClaudeService {
 	return &ClaudeService{
-		store: store,
+		store:    store,
+		eventBus: bus,
 	}
 }
 
 func (s *ClaudeService) OnAppStart(ctx context.Context) error {
+	s.eventBus.Subscribe(eventbus.SessionActivated, s.handleSessionActivated)
+	return nil
+}
+
+func (s *ClaudeService) handleSessionActivated(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(eventbus.SessionActivatedEvent)
+	if !ok {
+		return fmt.Errorf("unexpected event data type: %T", event.Data)
+	}
+
+	s.store.UpdateStatusBySessionID(data.SessionName, StatusReadyForReview, StatusCompleted)
 	return nil
 }
 
@@ -30,7 +46,7 @@ func (s *ClaudeService) HandleHookEvent(ctx context.Context, req *HookEventReque
 		return s.upsertWithStatus(req, StatusWorking)
 
 	case "Stop":
-		return s.upsertWithStatus(req, StatusCompleted)
+		return s.upsertWithStatus(req, StatusReadyForReview)
 
 	case "Notification":
 		if req.NotificationType == "permission_prompt" {
@@ -39,7 +55,7 @@ func (s *ClaudeService) HandleHookEvent(ctx context.Context, req *HookEventReque
 		return nil
 
 	case "TaskCompleted":
-		return s.upsertWithStatus(req, StatusCompleted)
+		return s.upsertWithStatus(req, StatusReadyForReview)
 
 	case "SessionEnd":
 		err := s.store.Delete(req.ClaudeSessionID)

@@ -45,11 +45,14 @@ func aggregateClaudeStatus(sessions []claude.ClaudeSession) string {
 	}
 
 	hasNeedsAttention := false
+	hasReadyForReview := false
 	hasWorking := false
 	for _, cs := range sessions {
 		switch cs.Status {
 		case claude.StatusNeedsAttention:
 			hasNeedsAttention = true
+		case claude.StatusReadyForReview:
+			hasReadyForReview = true
 		case claude.StatusWorking:
 			hasWorking = true
 		}
@@ -60,6 +63,9 @@ func aggregateClaudeStatus(sessions []claude.ClaudeSession) string {
 	}
 	if hasWorking {
 		return "[working]"
+	}
+	if hasReadyForReview {
+		return "[ready for review]"
 	}
 	return "[done]"
 }
