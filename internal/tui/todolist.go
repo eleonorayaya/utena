@@ -105,9 +105,9 @@ func (m TodoListModel) Update(msg tea.Msg) (TodoListModel, tea.Cmd) {
 		}
 		switch {
 		case key.Matches(msg, todoListKeys.New):
-			return m, func() tea.Msg { return openTodoFormMsg{} }
+			return m, func() tea.Msg { return navigateMsg{target: todoFormView} }
 		case key.Matches(msg, todoListKeys.Back):
-			return m, func() tea.Msg { return returnToSessionsMsg{} }
+			return m, func() tea.Msg { return navigateMsg{target: sessionListView} }
 		case key.Matches(msg, todoListKeys.Delete):
 			item, ok := m.list.SelectedItem().(todoItem)
 			if !ok {

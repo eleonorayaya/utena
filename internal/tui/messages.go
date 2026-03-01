@@ -59,13 +59,9 @@ type addWorkspaceIntentMsg struct {
 	asRoot bool
 }
 
-type sessionFormCancelledMsg struct{}
-type todoFormCancelledMsg struct{}
-
-type openSessionFormMsg struct{}
-type openTodosViewMsg struct{}
-type openTodoFormMsg struct{}
-type returnToSessionsMsg struct{}
+type navigateMsg struct {
+	target view
+}
 
 type workspaceSelectedMsg struct {
 	workspace workspace.Workspace

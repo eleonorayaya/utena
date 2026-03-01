@@ -12,7 +12,6 @@ import (
 
 var debugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
-type closeDebugMsg struct{}
 
 type DebugModel struct {
 	logPath string
@@ -29,7 +28,7 @@ func (m DebugModel) Keys() help.KeyMap {
 func (m DebugModel) Update(msg tea.Msg) (DebugModel, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		if key.Matches(msg, debugKeys.Back) {
-			return m, func() tea.Msg { return closeDebugMsg{} }
+			return m, func() tea.Msg { return navigateMsg{target: backView} }
 		}
 	}
 	return m, nil

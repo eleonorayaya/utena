@@ -14,6 +14,7 @@ const (
 	TodoListView
 	todoFormView
 	debugView
+	backView view = -1
 )
 
 type App struct {
@@ -88,33 +89,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-	case closeDebugMsg:
-		a.activeView = a.previousView
-		return a, nil
-
-	case openSessionFormMsg:
-		a.activeView = sessionFormView
-		return a, a.sessionForm.Init()
-
-	case openTodosViewMsg:
-		a.activeView = TodoListView
-		return a, tea.Batch(a.todoList.Init(), fetchTodos())
-
-	case openTodoFormMsg:
-		a.activeView = todoFormView
-		return a, a.todoForm.Init()
-
-	case returnToSessionsMsg:
-		a.activeView = sessionListView
-		return a, tea.Batch(a.sessionList.Init(), a.sessions.Init())
-
-	case sessionFormCancelledMsg:
-		a.activeView = sessionListView
-		return a, a.sessionList.Init()
-
-	case todoFormCancelledMsg:
-		a.activeView = TodoListView
-		return a, a.todoList.Init()
+	case navigateMsg:
+		return a.onNavigate(msg)
 
 	case pipeSentMsg:
 		return a, tea.Quit
@@ -144,6 +120,26 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	return a, tea.Batch(cmds...)
+}
+
+func (a App) onNavigate(msg navigateMsg) (tea.Model, tea.Cmd) {
+	if msg.target == backView {
+		a.activeView = a.previousView
+		return a, nil
+	}
+	a.previousView = a.activeView
+	a.activeView = msg.target
+	switch msg.target {
+	case sessionListView:
+		return a, tea.Batch(a.sessionList.Init(), a.sessions.Init())
+	case sessionFormView:
+		return a, a.sessionForm.Init()
+	case TodoListView:
+		return a, tea.Batch(a.todoList.Init(), fetchTodos())
+	case todoFormView:
+		return a, a.todoForm.Init()
+	}
+	return a, nil
 }
 
 func (a App) onWindowSizeMsg(wsm tea.WindowSizeMsg) (tea.Model, tea.Cmd) {

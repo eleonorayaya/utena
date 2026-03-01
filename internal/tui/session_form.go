@@ -136,7 +136,7 @@ func (m SessionFormModel) updateWorkspacePicker(msg tea.Msg) (SessionFormModel, 
 
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
-			return m, func() tea.Msg { return sessionFormCancelledMsg{} }
+			return m, func() tea.Msg { return navigateMsg{target: sessionListView} }
 		}
 	}
 

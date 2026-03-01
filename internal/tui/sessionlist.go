@@ -127,9 +127,9 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 		}
 		switch {
 		case key.Matches(msg, sessionListKeys.New):
-			return m, func() tea.Msg { return openSessionFormMsg{} }
+			return m, func() tea.Msg { return navigateMsg{target: sessionFormView} }
 		case key.Matches(msg, sessionListKeys.Todos):
-			return m, func() tea.Msg { return openTodosViewMsg{} }
+			return m, func() tea.Msg { return navigateMsg{target: TodoListView} }
 		case key.Matches(msg, sessionListKeys.Select):
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {
 				if item.session.IsAttached {

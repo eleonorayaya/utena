@@ -99,7 +99,7 @@ func (m TodoFormModel) Update(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 		return m, cmd
 	}
 	if _, ok := msg.(todoCreatedMsg); ok {
-		return m, func() tea.Msg { return todoFormCancelledMsg{} }
+		return m, func() tea.Msg { return navigateMsg{target: TodoListView} }
 	}
 	if msg, ok := msg.(errMsg); ok {
 		m.nameErr = msg.err.Error()
@@ -139,7 +139,7 @@ func (m TodoFormModel) updateWorkspacePicker(msg tea.Msg) (TodoFormModel, tea.Cm
 		return m, m.filePicker.Init()
 	case tea.KeyMsg:
 		if key.Matches(msg, workspacePickerKeys.Back) {
-			return m, func() tea.Msg { return todoFormCancelledMsg{} }
+			return m, func() tea.Msg { return navigateMsg{target: TodoListView} }
 		}
 	}
 
