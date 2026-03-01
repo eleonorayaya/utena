@@ -26,7 +26,7 @@ func setupZellijService(t *testing.T) (*ZellijService, *session.SessionService, 
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	sessionService := session.NewSessionService(sessionStore, workspaceService, gitService, bus)
+	sessionService := session.NewSessionService(sessionStore, workspaceService, gitService, bus, "eqt/")
 	err := sessionService.OnAppStart(ctx)
 	require.NoError(t, err)
 

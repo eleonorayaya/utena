@@ -27,7 +27,7 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, bus)
+	service := NewSessionService(sessionStore, workspaceService, gitService, bus, "eqt/")
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 

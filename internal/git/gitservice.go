@@ -52,9 +52,9 @@ func (s *GitService) Pull(ctx context.Context, repoPath string, branch string) e
 	return nil
 }
 
-func (s *GitService) CreateWorktree(ctx context.Context, repoPath string, name string, baseBranch string) (string, error) {
+func (s *GitService) CreateWorktree(ctx context.Context, repoPath string, name string, branchName string, baseBranch string) (string, error) {
 	worktreePath := filepath.Join(repoPath, ".worktrees", name)
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", "-b", name, worktreePath, baseBranch)
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, baseBranch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
 	}

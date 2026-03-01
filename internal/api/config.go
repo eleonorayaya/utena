@@ -8,9 +8,10 @@ import (
 )
 
 type Config struct {
-	Port       int
-	ConfigDir  string
-	PrettyLogs bool
+	Port         int
+	ConfigDir    string
+	PrettyLogs   bool
+	BranchPrefix string
 }
 
 func LoadConfig(args []string) (Config, error) {
@@ -26,6 +27,7 @@ func LoadConfig(args []string) (Config, error) {
 	fs.IntVar(&cfg.Port, "port", 3333, "port to listen on")
 	fs.StringVar(&cfg.ConfigDir, "config-dir", defaultConfigDir, "path to config directory")
 	fs.BoolVar(&cfg.PrettyLogs, "pretty-logs", false, "enable pretty log output")
+	fs.StringVar(&cfg.BranchPrefix, "branch-prefix", "eqt/", "prefix for git branches created with worktrees")
 
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -39,6 +41,9 @@ func LoadConfig(args []string) (Config, error) {
 	}
 	if os.Getenv("UTENA_LOG_PRETTY") == "true" {
 		cfg.PrettyLogs = true
+	}
+	if v := os.Getenv("UTENA_BRANCH_PREFIX"); v != "" {
+		cfg.BranchPrefix = v
 	}
 
 	return cfg, nil

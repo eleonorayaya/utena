@@ -18,14 +18,16 @@ type SessionService struct {
 	workspaceService *workspace.WorkspaceService
 	gitService       *git.GitService
 	eventBus         eventbus.EventBus
+	branchPrefix     string
 }
 
-func NewSessionService(store *SessionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, bus eventbus.EventBus) *SessionService {
+func NewSessionService(store *SessionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, bus eventbus.EventBus, branchPrefix string) *SessionService {
 	return &SessionService{
 		store:            store,
 		workspaceService: workspaceService,
 		gitService:       gitService,
 		eventBus:         bus,
+		branchPrefix:     branchPrefix,
 	}
 }
 
@@ -113,12 +115,14 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 		}
 
 		if session.BranchCreated {
-			worktreePath, err := s.gitService.CreateWorktree(ctx, ws.Path, session.ID, session.BaseBranch)
+			branchName := s.branchPrefix + session.Name
+			worktreePath, err := s.gitService.CreateWorktree(ctx, ws.Path, session.ID, branchName, session.BaseBranch)
 			if err != nil {
 				return fmt.Errorf("failed to create worktree: %w", err)
 			}
 			session.WorktreePath = worktreePath
-			session.Branch = session.ID
+			session.BranchName = branchName
+			session.Branch = branchName
 		} else if session.Branch != "" {
 			worktreePath, err := s.gitService.CheckoutWorktree(ctx, ws.Path, session.Branch)
 			if err != nil {
@@ -253,11 +257,17 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string, deleteBra
 					cleanup.WorktreeRemoved = true
 				}
 			}
-			if deleteBranch && session.Branch != "" {
-				if brErr := s.gitService.DeleteBranch(ctx, ws.Path, session.Branch); brErr != nil {
-					slog.Warn("failed to delete branch", "error", brErr)
-				} else {
-					cleanup.BranchDeleted = true
+			if deleteBranch {
+				branchToDelete := session.BranchName
+				if branchToDelete == "" {
+					branchToDelete = session.Branch
+				}
+				if branchToDelete != "" {
+					if brErr := s.gitService.DeleteBranch(ctx, ws.Path, branchToDelete); brErr != nil {
+						slog.Warn("failed to delete branch", "error", brErr)
+					} else {
+						cleanup.BranchDeleted = true
+					}
 				}
 			}
 		} else {
