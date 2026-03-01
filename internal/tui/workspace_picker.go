@@ -41,6 +41,10 @@ func (m *WorkspacePickerModel) SetSize(width, height int) {
 	m.list.SetHeight(height)
 }
 
+func (m WorkspacePickerModel) Init() (WorkspacePickerModel, tea.Cmd) {
+	return m, nil
+}
+
 func (m WorkspacePickerModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (WorkspacePickerModel, tea.Cmd) {
 	m.list.SetWidth(msg.Width)
 	m.list.SetHeight(msg.Height)

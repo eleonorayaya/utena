@@ -54,6 +54,23 @@ func NewRouter(logPath string) Router {
 	}
 }
 
+func (r Router) Init() (Router, tea.Cmd) {
+	var cmd tea.Cmd
+	switch r.activeView {
+	case sessionListView:
+		r.sessionList, cmd = r.sessionList.Init()
+	case sessionFormView:
+		r.sessionForm, cmd = r.sessionForm.Init()
+	case TodoListView:
+		r.todoList, cmd = r.todoList.Init()
+	case todoFormView:
+		r.todoForm, cmd = r.todoForm.Init()
+	case debugView:
+		r.debug, cmd = r.debug.Init()
+	}
+	return r, cmd
+}
+
 func (r Router) Update(msg tea.Msg) (Router, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -102,17 +119,7 @@ func (r Router) onNavigate(msg navigateMsg) (Router, tea.Cmd) {
 	}
 	r.previousView = r.activeView
 	r.activeView = msg.target
-	switch msg.target {
-	case sessionListView:
-		return r, tea.Batch(r.sessionList.Init(), fetchSessions(), fetchClaudeSessions())
-	case sessionFormView:
-		return r, r.sessionForm.Init()
-	case TodoListView:
-		return r, tea.Batch(r.todoList.Init(), fetchTodos())
-	case todoFormView:
-		return r, r.todoForm.Init()
-	}
-	return r, nil
+	return r.Init()
 }
 
 func (r Router) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Router, tea.Cmd) {

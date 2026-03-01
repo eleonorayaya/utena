@@ -41,11 +41,8 @@ func NewTodoListModel() TodoListModel {
 	return TodoListModel{list: l}
 }
 
-func (m TodoListModel) Init() tea.Cmd {
-	return tea.Batch(
-		func() tea.Msg { return requestTodosStateMsg{} },
-		func() tea.Msg { return requestWorkspacesStateMsg{} },
-	)
+func (m TodoListModel) Init() (TodoListModel, tea.Cmd) {
+	return m, tea.Batch(fetchTodos(), fetchWorkspaces())
 }
 
 func (m TodoListModel) Filtering() bool {

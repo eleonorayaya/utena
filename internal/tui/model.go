@@ -3,6 +3,7 @@ package tui
 import tea "github.com/charmbracelet/bubbletea"
 
 type ViewModel[T any] interface {
+	Init() (T, tea.Cmd)
 	OnWindowSizeMsg(tea.WindowSizeMsg) (T, tea.Cmd)
 	OnKeyMsg(tea.KeyMsg) (T, tea.Cmd, bool)
 }

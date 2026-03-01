@@ -6,21 +6,19 @@ import (
 )
 
 type App struct {
-	sessions    SessionsProvider
-	workspaces  WorkspacesProvider
-	todos       TodosProvider
-	router      Router
-	help        help.Model
-	initialView view
-	width       int
-	height      int
+	sessions   SessionsProvider
+	workspaces WorkspacesProvider
+	todos      TodosProvider
+	router     Router
+	help       help.Model
+	width      int
+	height     int
 }
 
 type AppOption func(*App)
 
 func WithInitialView(v view) AppOption {
 	return func(a *App) {
-		a.initialView = v
 		a.router.activeView = v
 	}
 }
@@ -40,14 +38,8 @@ func NewApp(logPath string, opts ...AppOption) App {
 }
 
 func (a App) Init() tea.Cmd {
-	cmds := []tea.Cmd{
-		a.sessions.Init(),
-		fetchWorkspaces(),
-	}
-	if a.initialView == TodoListView {
-		cmds = append(cmds, fetchTodos())
-	}
-	return tea.Batch(cmds...)
+	_, cmd := a.router.Init()
+	return cmd
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

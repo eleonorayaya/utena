@@ -34,6 +34,10 @@ func (m DebugModel) Update(msg tea.Msg) (DebugModel, tea.Cmd) {
 	return m, nil
 }
 
+func (m DebugModel) Init() (DebugModel, tea.Cmd) {
+	return m, nil
+}
+
 func (m DebugModel) OnWindowSizeMsg(_ tea.WindowSizeMsg) (DebugModel, tea.Cmd) {
 	return m, nil
 }

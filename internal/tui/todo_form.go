@@ -63,7 +63,7 @@ func (m *TodoFormModel) SetSize(width, height int) {
 	m.filePicker.SetSize(width, height)
 }
 
-func (m *TodoFormModel) Init() tea.Cmd {
+func (m TodoFormModel) Init() (TodoFormModel, tea.Cmd) {
 	m.activeStep = todoWorkspacePickerStep
 	m.selectedWorkspace = nil
 	m.selectedDirPath = ""
@@ -71,7 +71,7 @@ func (m *TodoFormModel) Init() tea.Cmd {
 	m.nameErr = ""
 	m.nameInput.SetValue("")
 	m.descInput.SetValue("")
-	return func() tea.Msg { return requestWorkspacesStateMsg{} }
+	return m, fetchWorkspaces()
 }
 
 func (m TodoFormModel) Keys() help.KeyMap {
@@ -142,7 +142,9 @@ func (m TodoFormModel) updateWorkspacePicker(msg tea.Msg) (TodoFormModel, tea.Cm
 		m.filePicker = NewFilePickerModel()
 		m.filePicker.SetSize(m.width, m.height)
 		m.activeStep = todoFilePickerStep
-		return m, m.filePicker.Init()
+		var cmd tea.Cmd
+		m.filePicker, cmd = m.filePicker.Init()
+		return m, cmd
 	case tea.KeyMsg:
 		if key.Matches(msg, workspacePickerKeys.Back) {
 			return m, func() tea.Msg { return navigateMsg{target: TodoListView} }

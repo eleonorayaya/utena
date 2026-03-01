@@ -32,6 +32,10 @@ func (m *BranchPickerModel) SetSize(width, height int) {
 	m.list.SetHeight(height)
 }
 
+func (m BranchPickerModel) Init() (BranchPickerModel, tea.Cmd) {
+	return m, nil
+}
+
 func (m BranchPickerModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (BranchPickerModel, tea.Cmd) {
 	m.list.SetWidth(msg.Width)
 	m.list.SetHeight(msg.Height)

@@ -52,8 +52,8 @@ func NewSessionListModel() SessionListModel {
 	return SessionListModel{list: l}
 }
 
-func (m SessionListModel) Init() tea.Cmd {
-	return func() tea.Msg { return requestSessionsStateMsg{} }
+func (m SessionListModel) Init() (SessionListModel, tea.Cmd) {
+	return m, tea.Batch(fetchSessions(), fetchClaudeSessions())
 }
 
 func (m SessionListModel) Filtering() bool {

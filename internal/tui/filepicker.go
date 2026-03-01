@@ -41,8 +41,8 @@ func (m FilePickerModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (FilePickerModel
 	return m, nil
 }
 
-func (m FilePickerModel) Init() tea.Cmd {
-	return m.picker.Init()
+func (m FilePickerModel) Init() (FilePickerModel, tea.Cmd) {
+	return m, m.picker.Init()
 }
 
 func (m FilePickerModel) Keys() help.KeyMap {

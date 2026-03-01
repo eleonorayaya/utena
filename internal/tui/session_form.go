@@ -51,14 +51,14 @@ func NewSessionFormModel() SessionFormModel {
 	}
 }
 
-func (m *SessionFormModel) Init() tea.Cmd {
+func (m SessionFormModel) Init() (SessionFormModel, tea.Cmd) {
 	m.activeStep = sessionWorkspacePickerStep
 	m.selectedWorkspace = workspace.Workspace{}
 	m.selectedBranch = ""
 	m.selectedDirPath = ""
 	m.nameErr = ""
 	m.nameInput.SetValue("")
-	return func() tea.Msg { return requestWorkspacesStateMsg{} }
+	return m, fetchWorkspaces()
 }
 
 func (m *SessionFormModel) SetSize(width, height int) {
@@ -139,7 +139,9 @@ func (m SessionFormModel) updateWorkspacePicker(msg tea.Msg) (SessionFormModel, 
 		m.activeStep = sessionFilePickerStep
 		m.filePicker = NewFilePickerModel()
 		m.filePicker.SetSize(m.width, m.height)
-		return m, m.filePicker.Init()
+		var cmd tea.Cmd
+		m.filePicker, cmd = m.filePicker.Init()
+		return m, cmd
 
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
