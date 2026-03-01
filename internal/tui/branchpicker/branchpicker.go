@@ -1,4 +1,4 @@
-package tui
+package branchpicker
 
 import (
 	"github.com/charmbracelet/bubbles/help"
@@ -8,46 +8,38 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 )
 
-type branchItem struct {
-	name string
-}
-
-func (i branchItem) Title() string       { return i.name }
-func (i branchItem) Description() string { return "" }
-func (i branchItem) FilterValue() string { return i.name }
-
-type BranchPickerModel struct {
+type Model struct {
 	list list.Model
 }
 
-func NewBranchPickerModel() BranchPickerModel {
+func New() Model {
 	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Select base branch"
 	l.KeyMap.Quit.SetEnabled(false)
 	l.SetShowHelp(false)
-	return BranchPickerModel{list: l}
+	return Model{list: l}
 }
 
-func (m *BranchPickerModel) SetSize(width, height int) {
+func (m *Model) SetSize(width, height int) {
 	m.list.SetWidth(width)
 	m.list.SetHeight(height)
 }
 
-func (m BranchPickerModel) Init() (BranchPickerModel, tea.Cmd) {
+func (m Model) Init() (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m BranchPickerModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (BranchPickerModel, tea.Cmd) {
+func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.list.SetWidth(msg.Width)
 	m.list.SetHeight(msg.Height)
 	return m, nil
 }
 
-func (m BranchPickerModel) Keys() help.KeyMap {
-	return branchPickerKeys
+func (m Model) Keys() help.KeyMap {
+	return Keys
 }
 
-func (m BranchPickerModel) Update(msg tea.Msg) (BranchPickerModel, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case provider.BranchesLoadedMsg:
 		items := make([]list.Item, len(msg.Branches))
@@ -70,21 +62,21 @@ func (m BranchPickerModel) Update(msg tea.Msg) (BranchPickerModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m BranchPickerModel) OnKeyMsg(msg tea.KeyMsg) (BranchPickerModel, tea.Cmd, bool) {
+func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if m.list.FilterState() == list.Filtering {
 		return m, nil, false
 	}
-	if key.Matches(msg, branchPickerKeys.Select) {
+	if key.Matches(msg, Keys.Select) {
 		if item, ok := m.list.SelectedItem().(branchItem); ok {
 			branch := item.name
 			return m, func() tea.Msg {
-				return branchSelectedMsg{branch: branch}
+				return SelectedMsg{Branch: branch}
 			}, true
 		}
 	}
 	return m, nil, false
 }
 
-func (m BranchPickerModel) View() string {
+func (m Model) View() string {
 	return m.list.View()
 }

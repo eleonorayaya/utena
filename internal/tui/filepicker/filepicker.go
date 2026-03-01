@@ -1,55 +1,55 @@
-package tui
+package filepicker
 
 import (
 	"os"
 
-	"github.com/charmbracelet/bubbles/filepicker"
+	bubblefp "github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type FilePickerModel struct {
-	picker filepicker.Model
+type Model struct {
+	picker bubblefp.Model
 	width  int
 	height int
 }
 
-func NewFilePickerModel() FilePickerModel {
-	fp := filepicker.New()
+func New() Model {
+	fp := bubblefp.New()
 	fp.DirAllowed = false
 	fp.FileAllowed = false
 	fp.ShowHidden = false
 	homeDir, _ := os.UserHomeDir()
 	fp.CurrentDirectory = homeDir
 
-	return FilePickerModel{
+	return Model{
 		picker: fp,
 	}
 }
 
-func (m *FilePickerModel) SetSize(width, height int) {
+func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 	m.picker.SetHeight(height)
 }
 
-func (m FilePickerModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (FilePickerModel, tea.Cmd) {
+func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 	m.picker.SetHeight(msg.Height - 4)
 	return m, nil
 }
 
-func (m FilePickerModel) Init() (FilePickerModel, tea.Cmd) {
+func (m Model) Init() (Model, tea.Cmd) {
 	return m, m.picker.Init()
 }
 
-func (m FilePickerModel) Keys() help.KeyMap {
-	return filePickerKeys
+func (m Model) Keys() help.KeyMap {
+	return Keys
 }
 
-func (m FilePickerModel) Update(msg tea.Msg) (FilePickerModel, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		m, cmd, handled := m.OnKeyMsg(msg)
 		if handled {
@@ -62,19 +62,19 @@ func (m FilePickerModel) Update(msg tea.Msg) (FilePickerModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m FilePickerModel) OnKeyMsg(msg tea.KeyMsg) (FilePickerModel, tea.Cmd, bool) {
-	if key.Matches(msg, filePickerKeys.SelectDir) {
+func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	if key.Matches(msg, Keys.SelectDir) {
 		return m, func() tea.Msg {
-			return directorySelectedMsg{path: m.picker.CurrentDirectory}
+			return DirectorySelectedMsg{Path: m.picker.CurrentDirectory}
 		}, true
 	}
-	if key.Matches(msg, filePickerKeys.ToggleHidden) {
+	if key.Matches(msg, Keys.ToggleHidden) {
 		m.picker.ShowHidden = !m.picker.ShowHidden
 		return m, m.picker.Init(), true
 	}
 	return m, nil, false
 }
 
-func (m FilePickerModel) View() string {
+func (m Model) View() string {
 	return m.picker.View()
 }

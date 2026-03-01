@@ -1,4 +1,4 @@
-package tui
+package sessionform
 
 import (
 	"fmt"
@@ -10,31 +10,34 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
+	"github.com/eleonorayaya/utena/internal/tui/filepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
 var (
-	sfErrStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	sfPromptStyle = lipgloss.NewStyle().Bold(true)
-	sfPathStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	promptStyle = lipgloss.NewStyle().Bold(true)
+	pathStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
 )
 
-type sessionFormStep int
+type step int
 
 const (
-	sessionWorkspacePickerStep sessionFormStep = iota
-	sessionFilePickerStep
-	sessionDirTypeChoiceStep
-	sessionBranchPickerStep
-	sessionNameInputStep
+	workspacePickerStep step = iota
+	filePickerStep
+	dirTypeChoiceStep
+	branchPickerStep
+	nameInputStep
 )
 
-type SessionFormModel struct {
-	activeStep        sessionFormStep
-	workspacePicker   WorkspacePickerModel
-	filePicker        FilePickerModel
-	branchPicker      BranchPickerModel
+type Model struct {
+	activeStep        step
+	workspacePicker   workspacepicker.Model
+	filePicker        filepicker.Model
+	branchPicker      branchpicker.Model
 	nameInput         textinput.Model
 	selectedWorkspace workspace.Workspace
 	selectedBranch    string
@@ -43,17 +46,17 @@ type SessionFormModel struct {
 	width, height     int
 }
 
-func NewSessionFormModel() SessionFormModel {
-	return SessionFormModel{
-		activeStep:      sessionWorkspacePickerStep,
-		workspacePicker: NewWorkspacePickerModel("Select workspace", false),
-		branchPicker:    NewBranchPickerModel(),
+func New() Model {
+	return Model{
+		activeStep:      workspacePickerStep,
+		workspacePicker: workspacepicker.New("Select workspace", false),
+		branchPicker:    branchpicker.New(),
 		nameInput:       textinput.New(),
 	}
 }
 
-func (m SessionFormModel) Init() (SessionFormModel, tea.Cmd) {
-	m.activeStep = sessionWorkspacePickerStep
+func (m Model) Init() (Model, tea.Cmd) {
+	m.activeStep = workspacePickerStep
 	m.selectedWorkspace = workspace.Workspace{}
 	m.selectedBranch = ""
 	m.selectedDirPath = ""
@@ -62,7 +65,7 @@ func (m SessionFormModel) Init() (SessionFormModel, tea.Cmd) {
 	return m, provider.FetchWorkspaces()
 }
 
-func (m *SessionFormModel) SetSize(width, height int) {
+func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 	m.workspacePicker.SetSize(width, height)
@@ -70,22 +73,22 @@ func (m *SessionFormModel) SetSize(width, height int) {
 	m.branchPicker.SetSize(width, height)
 }
 
-func (m SessionFormModel) Keys() help.KeyMap {
+func (m Model) Keys() help.KeyMap {
 	switch m.activeStep {
-	case sessionWorkspacePickerStep:
-		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, workspacePickerKeys}}
-	case sessionFilePickerStep:
-		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, filePickerKeys}}
-	case sessionBranchPickerStep:
-		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, branchPickerKeys}}
-	case sessionDirTypeChoiceStep:
+	case workspacePickerStep:
+		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, workspacepicker.Keys}}
+	case filePickerStep:
+		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, filepicker.Keys}}
+	case branchPickerStep:
+		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, branchpicker.Keys}}
+	case dirTypeChoiceStep:
 		return formKeys
 	default:
 		return formKeys
 	}
 }
 
-func (m SessionFormModel) Update(msg tea.Msg) (SessionFormModel, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.OnWindowSizeMsg(msg)
@@ -99,46 +102,46 @@ func (m SessionFormModel) Update(msg tea.Msg) (SessionFormModel, tea.Cmd) {
 	}
 
 	switch m.activeStep {
-	case sessionWorkspacePickerStep:
+	case workspacePickerStep:
 		return m.updateWorkspacePicker(msg)
-	case sessionFilePickerStep:
+	case filePickerStep:
 		return m.updateFilePicker(msg)
-	case sessionDirTypeChoiceStep:
+	case dirTypeChoiceStep:
 		return m.updateDirTypeChoice(msg)
-	case sessionBranchPickerStep:
+	case branchPickerStep:
 		return m.updateBranchPicker(msg)
-	case sessionNameInputStep:
+	case nameInputStep:
 		return m.updateNameInput(msg)
 	}
 	return m, nil
 }
 
-func (m SessionFormModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (SessionFormModel, tea.Cmd) {
+func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.SetSize(msg.Width, msg.Height)
 	return m, nil
 }
 
-func (m SessionFormModel) OnKeyMsg(_ tea.KeyMsg) (SessionFormModel, tea.Cmd, bool) {
+func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m SessionFormModel) updateWorkspacePicker(msg tea.Msg) (SessionFormModel, tea.Cmd) {
+func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspaceSelectedMsg:
-		m.selectedWorkspace = msg.workspace
-		if msg.workspace.IsGitRepo {
-			m.activeStep = sessionBranchPickerStep
-			m.branchPicker = NewBranchPickerModel()
+	case workspacepicker.SelectedMsg:
+		m.selectedWorkspace = msg.Workspace
+		if msg.Workspace.IsGitRepo {
+			m.activeStep = branchPickerStep
+			m.branchPicker = branchpicker.New()
 			m.branchPicker.SetSize(m.width, m.height)
-			return m, provider.RequestBranches(msg.workspace.ID)
+			return m, provider.RequestBranches(msg.Workspace.ID)
 		}
-		m.activeStep = sessionNameInputStep
+		m.activeStep = nameInputStep
 		m.initNameInput()
 		return m, m.nameInput.Focus()
 
-	case addDirectoryRequestMsg:
-		m.activeStep = sessionFilePickerStep
-		m.filePicker = NewFilePickerModel()
+	case workspacepicker.AddDirectoryMsg:
+		m.activeStep = filePickerStep
+		m.filePicker = filepicker.New()
 		m.filePicker.SetSize(m.width, m.height)
 		var cmd tea.Cmd
 		m.filePicker, cmd = m.filePicker.Init()
@@ -146,7 +149,7 @@ func (m SessionFormModel) updateWorkspacePicker(msg tea.Msg) (SessionFormModel, 
 
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
-			return m, func() tea.Msg { return navigateMsg{target: sessionListView} }
+			return m, func() tea.Msg { return BackMsg{} }
 		}
 	}
 
@@ -155,16 +158,16 @@ func (m SessionFormModel) updateWorkspacePicker(msg tea.Msg) (SessionFormModel, 
 	return m, cmd
 }
 
-func (m SessionFormModel) updateFilePicker(msg tea.Msg) (SessionFormModel, tea.Cmd) {
+func (m Model) updateFilePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case directorySelectedMsg:
-		m.selectedDirPath = msg.path
-		m.activeStep = sessionDirTypeChoiceStep
+	case filepicker.DirectorySelectedMsg:
+		m.selectedDirPath = msg.Path
+		m.activeStep = dirTypeChoiceStep
 		return m, nil
 
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
-			m.activeStep = sessionWorkspacePickerStep
+			m.activeStep = workspacePickerStep
 			return m, nil
 		}
 	}
@@ -174,34 +177,34 @@ func (m SessionFormModel) updateFilePicker(msg tea.Msg) (SessionFormModel, tea.C
 	return m, cmd
 }
 
-func (m SessionFormModel) updateDirTypeChoice(msg tea.Msg) (SessionFormModel, tea.Cmd) {
+func (m Model) updateDirTypeChoice(msg tea.Msg) (Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "w":
-			m.activeStep = sessionWorkspacePickerStep
+			m.activeStep = workspacePickerStep
 			return m, provider.AddWorkspace(m.selectedDirPath, false)
 		case "r":
-			m.activeStep = sessionWorkspacePickerStep
+			m.activeStep = workspacePickerStep
 			return m, provider.AddWorkspace(m.selectedDirPath, true)
 		case "esc":
-			m.activeStep = sessionFilePickerStep
+			m.activeStep = filePickerStep
 			return m, nil
 		}
 	}
 	return m, nil
 }
 
-func (m SessionFormModel) updateBranchPicker(msg tea.Msg) (SessionFormModel, tea.Cmd) {
+func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case branchSelectedMsg:
-		m.selectedBranch = msg.branch
-		m.activeStep = sessionNameInputStep
+	case branchpicker.SelectedMsg:
+		m.selectedBranch = msg.Branch
+		m.activeStep = nameInputStep
 		m.initNameInput()
 		return m, m.nameInput.Focus()
 
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
-			m.activeStep = sessionWorkspacePickerStep
+			m.activeStep = workspacePickerStep
 			return m, provider.RequestWorkspacesState()
 		}
 	}
@@ -211,7 +214,7 @@ func (m SessionFormModel) updateBranchPicker(msg tea.Msg) (SessionFormModel, tea
 	return m, cmd
 }
 
-func (m SessionFormModel) updateNameInput(msg tea.Msg) (SessionFormModel, tea.Cmd) {
+func (m Model) updateNameInput(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -227,11 +230,11 @@ func (m SessionFormModel) updateNameInput(msg tea.Msg) (SessionFormModel, tea.Cm
 			return m, provider.CreateSession(name, m.selectedWorkspace.ID, m.selectedBranch, m.selectedWorkspace.Path)
 		case key.Matches(msg, formKeys.Back):
 			if m.selectedWorkspace.IsGitRepo {
-				m.activeStep = sessionBranchPickerStep
+				m.activeStep = branchPickerStep
 				m.nameErr = ""
 				return m, nil
 			}
-			m.activeStep = sessionWorkspacePickerStep
+			m.activeStep = workspacePickerStep
 			m.nameErr = ""
 			return m, nil
 		}
@@ -242,7 +245,7 @@ func (m SessionFormModel) updateNameInput(msg tea.Msg) (SessionFormModel, tea.Cm
 	return m, cmd
 }
 
-func (m *SessionFormModel) initNameInput() {
+func (m *Model) initNameInput() {
 	ti := textinput.New()
 	ti.Prompt = "Session name: "
 	ti.Placeholder = defaultSessionName(m.selectedWorkspace.Name)
@@ -250,24 +253,24 @@ func (m *SessionFormModel) initNameInput() {
 	m.nameErr = ""
 }
 
-func (m SessionFormModel) View() string {
+func (m Model) View() string {
 	switch m.activeStep {
-	case sessionFilePickerStep:
+	case filePickerStep:
 		return m.filePicker.View()
-	case sessionDirTypeChoiceStep:
-		return sfPromptStyle.Render("Add: ") + sfPathStyle.Render(abbreviatePath(m.selectedDirPath)) +
+	case dirTypeChoiceStep:
+		return promptStyle.Render("Add: ") + pathStyle.Render(workspacepicker.AbbreviatePath(m.selectedDirPath)) +
 			"\n\n" +
 			"  w  add as workspace\n" +
 			"  r  add as root (scan subdirectories)\n\n" +
 			"  esc: back"
-	case sessionBranchPickerStep:
+	case branchPickerStep:
 		return m.branchPicker.View()
-	case sessionNameInputStep:
+	case nameInputStep:
 		var b strings.Builder
 		fmt.Fprintf(&b, "Workspace: %s\n\n", m.selectedWorkspace.Name)
 		b.WriteString(m.nameInput.View())
 		if m.nameErr != "" {
-			b.WriteString("\n" + sfErrStyle.Render(m.nameErr))
+			b.WriteString("\n" + errStyle.Render(m.nameErr))
 		}
 		return b.String()
 	default:

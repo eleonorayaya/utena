@@ -1,4 +1,4 @@
-package tui
+package sessionlist
 
 import (
 	"github.com/charmbracelet/bubbles/help"
@@ -10,87 +10,33 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 )
 
-type sessionItem struct {
-	session      session.Session
-	claudeStatus string
-}
-
-func (i sessionItem) Title() string {
-	title := i.session.ID
-	if i.session.IsAttached {
-		title += " (attached)"
-	}
-	if i.claudeStatus != "" {
-		title += " " + i.claudeStatus
-	}
-	return title
-}
-
-func (i sessionItem) Description() string {
-	name := i.session.WorkspaceName
-	if name == "" {
-		name = "no workspace"
-	}
-	if !i.session.LastUsedAt.IsZero() {
-		return name + " · " + timeAgo(i.session.LastUsedAt)
-	}
-	return name
-}
-
-func (i sessionItem) FilterValue() string { return i.session.ID }
-
-type SessionListModel struct {
+type Model struct {
 	list            list.Model
 	sessions        []session.Session
 	claudeSessions  map[string][]claude.ClaudeSession
 	pendingDeleteID string
 }
 
-func NewSessionListModel() SessionListModel {
+func New() Model {
 	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Sessions"
 	l.SetShowHelp(false)
-	return SessionListModel{list: l}
+	return Model{list: l}
 }
 
-func (m SessionListModel) Init() (SessionListModel, tea.Cmd) {
+func (m Model) Init() (Model, tea.Cmd) {
 	return m, provider.FetchSessions()
 }
 
-func (m SessionListModel) Filtering() bool {
+func (m Model) Filtering() bool {
 	return m.list.FilterState() == list.Filtering
 }
 
-func (m SessionListModel) Keys() help.KeyMap {
-	return sessionListKeys
+func (m Model) Keys() help.KeyMap {
+	return keys
 }
 
-func aggregateClaudeStatus(sessions []claude.ClaudeSession) string {
-	if len(sessions) == 0 {
-		return ""
-	}
-
-	hasNeedsAttention := false
-	hasWorking := false
-	for _, cs := range sessions {
-		switch cs.Status {
-		case claude.StatusNeedsAttention:
-			hasNeedsAttention = true
-		case claude.StatusWorking:
-			hasWorking = true
-		}
-	}
-
-	if hasNeedsAttention {
-		return "[needs attention]"
-	}
-	if hasWorking {
-		return "[working]"
-	}
-	return "[done]"
-}
-
-func (m *SessionListModel) rebuildItems() tea.Cmd {
+func (m *Model) rebuildItems() tea.Cmd {
 	var items []list.Item
 	for _, s := range m.sessions {
 		if s.IsDead || s.IsDeleted {
@@ -102,7 +48,7 @@ func (m *SessionListModel) rebuildItems() tea.Cmd {
 	return m.list.SetItems(items)
 }
 
-func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.OnWindowSizeMsg(msg)
@@ -126,32 +72,32 @@ func (m SessionListModel) Update(msg tea.Msg) (SessionListModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m SessionListModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (SessionListModel, tea.Cmd) {
+func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.list.SetWidth(msg.Width)
 	m.list.SetHeight(msg.Height)
 	return m, nil
 }
 
-func (m SessionListModel) OnKeyMsg(msg tea.KeyMsg) (SessionListModel, tea.Cmd, bool) {
+func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if m.list.FilterState() == list.Filtering {
 		return m, nil, false
 	}
-	if !key.Matches(msg, sessionListKeys.Close) {
+	if !key.Matches(msg, keys.Close) {
 		m.pendingDeleteID = ""
 	}
 	switch {
-	case key.Matches(msg, sessionListKeys.New):
-		return m, func() tea.Msg { return navigateMsg{target: sessionFormView} }, true
-	case key.Matches(msg, sessionListKeys.Todos):
-		return m, func() tea.Msg { return navigateMsg{target: TodoListView} }, true
-	case key.Matches(msg, sessionListKeys.Select):
+	case key.Matches(msg, keys.New):
+		return m, func() tea.Msg { return NewSessionMsg{} }, true
+	case key.Matches(msg, keys.Todos):
+		return m, func() tea.Msg { return TodosMsg{} }, true
+	case key.Matches(msg, keys.Select):
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			if item.session.IsAttached {
 				return m, m.list.NewStatusMessage("already attached to this session"), true
 			}
 			return m, provider.ActivateSession(item.session.ID), true
 		}
-	case key.Matches(msg, sessionListKeys.Close):
+	case key.Matches(msg, keys.Close):
 		item, ok := m.list.SelectedItem().(sessionItem)
 		if !ok {
 			return m, nil, false
@@ -170,6 +116,6 @@ func (m SessionListModel) OnKeyMsg(msg tea.KeyMsg) (SessionListModel, tea.Cmd, b
 	return m, nil, false
 }
 
-func (m SessionListModel) View() string {
+func (m Model) View() string {
 	return m.list.View()
 }

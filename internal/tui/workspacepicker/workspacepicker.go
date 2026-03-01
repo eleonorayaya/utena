@@ -1,9 +1,6 @@
-package tui
+package workspacepicker
 
 import (
-	"os"
-	"strings"
-
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -12,51 +9,43 @@ import (
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
-type workspaceItem struct {
-	workspace workspace.Workspace
-}
-
-func (i workspaceItem) Title() string       { return i.workspace.Name }
-func (i workspaceItem) Description() string { return abbreviatePath(i.workspace.Path) }
-func (i workspaceItem) FilterValue() string { return i.workspace.Name }
-
-type WorkspacePickerModel struct {
+type Model struct {
 	list              list.Model
 	sortActiveFirst   bool
 	activeWorkspaceID string
 }
 
-func NewWorkspacePickerModel(title string, sortActiveFirst bool) WorkspacePickerModel {
+func New(title string, sortActiveFirst bool) Model {
 	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
 	l.Title = title
 	l.KeyMap.Quit.SetEnabled(false)
 	l.SetShowHelp(false)
-	return WorkspacePickerModel{
+	return Model{
 		list:            l,
 		sortActiveFirst: sortActiveFirst,
 	}
 }
 
-func (m *WorkspacePickerModel) SetSize(width, height int) {
+func (m *Model) SetSize(width, height int) {
 	m.list.SetWidth(width)
 	m.list.SetHeight(height)
 }
 
-func (m WorkspacePickerModel) Init() (WorkspacePickerModel, tea.Cmd) {
+func (m Model) Init() (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m WorkspacePickerModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (WorkspacePickerModel, tea.Cmd) {
+func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.list.SetWidth(msg.Width)
 	m.list.SetHeight(msg.Height)
 	return m, nil
 }
 
-func (m WorkspacePickerModel) Keys() help.KeyMap {
-	return workspacePickerKeys
+func (m Model) Keys() help.KeyMap {
+	return Keys
 }
 
-func (m WorkspacePickerModel) Update(msg tea.Msg) (WorkspacePickerModel, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case provider.WorkspacesStateUpdatedMsg:
 		m.activeWorkspaceID = msg.ActiveWorkspaceID
@@ -95,35 +84,24 @@ func (m WorkspacePickerModel) Update(msg tea.Msg) (WorkspacePickerModel, tea.Cmd
 	return m, cmd
 }
 
-func (m WorkspacePickerModel) OnKeyMsg(msg tea.KeyMsg) (WorkspacePickerModel, tea.Cmd, bool) {
+func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if m.list.FilterState() == list.Filtering {
 		return m, nil, false
 	}
 	switch {
-	case key.Matches(msg, workspacePickerKeys.Select):
+	case key.Matches(msg, Keys.Select):
 		if item, ok := m.list.SelectedItem().(workspaceItem); ok {
 			ws := item.workspace
 			return m, func() tea.Msg {
-				return workspaceSelectedMsg{workspace: ws}
+				return SelectedMsg{Workspace: ws}
 			}, true
 		}
-	case key.Matches(msg, workspacePickerKeys.AddDir):
-		return m, func() tea.Msg { return addDirectoryRequestMsg{} }, true
+	case key.Matches(msg, Keys.AddDir):
+		return m, func() tea.Msg { return AddDirectoryMsg{} }, true
 	}
 	return m, nil, false
 }
 
-func (m WorkspacePickerModel) View() string {
+func (m Model) View() string {
 	return m.list.View()
-}
-
-func abbreviatePath(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	if strings.HasPrefix(path, home) {
-		return "~" + path[len(home):]
-	}
-	return path
 }

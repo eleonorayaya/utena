@@ -1,4 +1,4 @@
-package tui
+package debug
 
 import (
 	"fmt"
@@ -12,20 +12,20 @@ import (
 
 var debugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
-type DebugModel struct {
+type Model struct {
 	logPath   string
 	daemonURL string
 }
 
-func NewDebugModel(logPath, daemonURL string) DebugModel {
-	return DebugModel{logPath: logPath, daemonURL: daemonURL}
+func New(logPath, daemonURL string) Model {
+	return Model{logPath: logPath, daemonURL: daemonURL}
 }
 
-func (m DebugModel) Keys() help.KeyMap {
-	return debugKeys
+func (m Model) Keys() help.KeyMap {
+	return keys
 }
 
-func (m DebugModel) Update(msg tea.Msg) (DebugModel, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		m, cmd, handled := m.OnKeyMsg(msg)
 		if handled {
@@ -35,22 +35,22 @@ func (m DebugModel) Update(msg tea.Msg) (DebugModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m DebugModel) Init() (DebugModel, tea.Cmd) {
+func (m Model) Init() (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m DebugModel) OnWindowSizeMsg(_ tea.WindowSizeMsg) (DebugModel, tea.Cmd) {
+func (m Model) OnWindowSizeMsg(_ tea.WindowSizeMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m DebugModel) OnKeyMsg(msg tea.KeyMsg) (DebugModel, tea.Cmd, bool) {
-	if key.Matches(msg, debugKeys.Back) {
-		return m, func() tea.Msg { return navigateMsg{target: backView} }, true
+func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	if key.Matches(msg, keys.Back) {
+		return m, func() tea.Msg { return BackMsg{} }, true
 	}
 	return m, nil, false
 }
 
-func (m DebugModel) View() string {
+func (m Model) View() string {
 	var b strings.Builder
 	b.WriteString(debugStyle.Render("Debug Info") + "\n\n")
 

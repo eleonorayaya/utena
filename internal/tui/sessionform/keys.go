@@ -1,4 +1,4 @@
-package tui
+package sessionform
 
 import (
 	"github.com/charmbracelet/bubbles/help"
@@ -25,18 +25,20 @@ func (m mergedKeyMap) FullHelp() [][]key.Binding {
 	return groups
 }
 
-type appKeyMap struct {
-	Quit key.Binding
+type formKeyMap struct {
+	Submit key.Binding
+	Back   key.Binding
 }
 
-func (k appKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Quit}
+func (k formKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Submit, k.Back}
 }
 
-func (k appKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Quit}}
+func (k formKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{{k.Submit, k.Back}}
 }
 
-var appKeys = appKeyMap{
-	Quit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+var formKeys = formKeyMap{
+	Submit: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "create")),
+	Back:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 }

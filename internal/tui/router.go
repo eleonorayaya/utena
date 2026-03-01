@@ -4,6 +4,11 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/tui/debug"
+	"github.com/eleonorayaya/utena/internal/tui/sessionform"
+	"github.com/eleonorayaya/utena/internal/tui/sessionlist"
+	"github.com/eleonorayaya/utena/internal/tui/todoform"
+	"github.com/eleonorayaya/utena/internal/tui/todolist"
 )
 
 type view int
@@ -14,7 +19,6 @@ const (
 	TodoListView
 	todoFormView
 	debugView
-	backView view = -1
 )
 
 type routerKeyMap struct {
@@ -34,11 +38,11 @@ var routerKeys = routerKeyMap{
 }
 
 type Router struct {
-	sessionList  SessionListModel
-	sessionForm  SessionFormModel
-	todoList     TodoListModel
-	todoForm     TodoFormModel
-	debug        DebugModel
+	sessionList  sessionlist.Model
+	sessionForm  sessionform.Model
+	todoList     todolist.Model
+	todoForm     todoform.Model
+	debug        debug.Model
 	activeView   view
 	previousView view
 }
@@ -46,11 +50,11 @@ type Router struct {
 func NewRouter(logPath, daemonURL string) Router {
 	return Router{
 		activeView:  sessionListView,
-		sessionList: NewSessionListModel(),
-		sessionForm: NewSessionFormModel(),
-		todoList:    NewTodoListModel(),
-		todoForm:    NewTodoFormModel(),
-		debug:       NewDebugModel(logPath, daemonURL),
+		sessionList: sessionlist.New(),
+		sessionForm: sessionform.New(),
+		todoList:    todolist.New(),
+		todoForm:    todoform.New(),
+		debug:       debug.New(logPath, daemonURL),
 	}
 }
 
@@ -80,8 +84,23 @@ func (r Router) Update(msg tea.Msg) (Router, tea.Cmd) {
 		if handled {
 			return r, cmd
 		}
-	case navigateMsg:
-		return r.onNavigate(msg)
+	case sessionlist.NewSessionMsg:
+		return r.navigateTo(sessionFormView)
+	case sessionlist.TodosMsg:
+		return r.navigateTo(TodoListView)
+	case sessionform.BackMsg:
+		return r.navigateTo(sessionListView)
+	case todolist.NewTodoMsg:
+		return r.navigateTo(todoFormView)
+	case todolist.BackMsg:
+		return r.navigateTo(sessionListView)
+	case todoform.BackMsg:
+		return r.navigateTo(TodoListView)
+	case todoform.DoneMsg:
+		return r.navigateTo(TodoListView)
+	case debug.BackMsg:
+		r.activeView = r.previousView
+		return r, nil
 	}
 	return r.routeToActiveView(msg)
 }
@@ -112,13 +131,9 @@ func (r Router) routeToActiveView(msg tea.Msg) (Router, tea.Cmd) {
 	return r, cmd
 }
 
-func (r Router) onNavigate(msg navigateMsg) (Router, tea.Cmd) {
-	if msg.target == backView {
-		r.activeView = r.previousView
-		return r, nil
-	}
+func (r Router) navigateTo(target view) (Router, tea.Cmd) {
 	r.previousView = r.activeView
-	r.activeView = msg.target
+	r.activeView = target
 	return r.Init()
 }
 

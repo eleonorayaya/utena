@@ -1,4 +1,4 @@
-package tui
+package todoform
 
 import (
 	"github.com/charmbracelet/bubbles/help"
@@ -6,29 +6,31 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/tui/filepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
 var (
-	todoFormErrStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	todoFormPromptStyle = lipgloss.NewStyle().Bold(true)
-	todoFormPathStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	promptStyle = lipgloss.NewStyle().Bold(true)
+	pathStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
 )
 
-type todoFormStep int
+type step int
 
 const (
-	todoWorkspacePickerStep todoFormStep = iota
-	todoFilePickerStep
-	todoDirTypeChoiceStep
-	todoNameInputStep
+	workspacePickerStep step = iota
+	filePickerStep
+	dirTypeChoiceStep
+	nameInputStep
 )
 
-type TodoFormModel struct {
-	activeStep        todoFormStep
-	workspacePicker   WorkspacePickerModel
-	filePicker        FilePickerModel
+type Model struct {
+	activeStep        step
+	workspacePicker   workspacepicker.Model
+	filePicker        filepicker.Model
 	nameInput         textinput.Model
 	descInput         textinput.Model
 	focusIndex        int
@@ -39,7 +41,7 @@ type TodoFormModel struct {
 	width, height     int
 }
 
-func NewTodoFormModel() TodoFormModel {
+func New() Model {
 	nameInput := textinput.New()
 	nameInput.Prompt = "Name: "
 	nameInput.Placeholder = "todo name"
@@ -49,23 +51,23 @@ func NewTodoFormModel() TodoFormModel {
 	descInput.Prompt = "Description: "
 	descInput.Placeholder = "optional description"
 
-	return TodoFormModel{
-		activeStep:      todoWorkspacePickerStep,
-		workspacePicker: NewWorkspacePickerModel("Select workspace for todo", true),
+	return Model{
+		activeStep:      workspacePickerStep,
+		workspacePicker: workspacepicker.New("Select workspace for todo", true),
 		nameInput:       nameInput,
 		descInput:       descInput,
 	}
 }
 
-func (m *TodoFormModel) SetSize(width, height int) {
+func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 	m.workspacePicker.SetSize(width, height)
 	m.filePicker.SetSize(width, height)
 }
 
-func (m TodoFormModel) Init() (TodoFormModel, tea.Cmd) {
-	m.activeStep = todoWorkspacePickerStep
+func (m Model) Init() (Model, tea.Cmd) {
+	m.activeStep = workspacePickerStep
 	m.selectedWorkspace = nil
 	m.selectedDirPath = ""
 	m.focusIndex = 0
@@ -75,20 +77,20 @@ func (m TodoFormModel) Init() (TodoFormModel, tea.Cmd) {
 	return m, provider.FetchWorkspaces()
 }
 
-func (m TodoFormModel) Keys() help.KeyMap {
+func (m Model) Keys() help.KeyMap {
 	switch m.activeStep {
-	case todoWorkspacePickerStep:
-		return workspacePickerKeys
-	case todoFilePickerStep:
-		return filePickerKeys
-	case todoNameInputStep:
-		return todoFormInputKeys
+	case workspacePickerStep:
+		return workspacepicker.Keys
+	case filePickerStep:
+		return filepicker.Keys
+	case nameInputStep:
+		return inputKeys
 	default:
 		return formKeys
 	}
 }
 
-func (m TodoFormModel) Update(msg tea.Msg) (TodoFormModel, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.OnWindowSizeMsg(msg)
@@ -98,40 +100,40 @@ func (m TodoFormModel) Update(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
 		return m, cmd
 	case provider.TodoCreatedMsg:
-		return m, func() tea.Msg { return navigateMsg{target: TodoListView} }
+		return m, func() tea.Msg { return DoneMsg{} }
 	case provider.ErrMsg:
 		m.nameErr = msg.Err.Error()
 		return m, nil
 	}
 
 	switch m.activeStep {
-	case todoWorkspacePickerStep:
+	case workspacePickerStep:
 		return m.updateWorkspacePicker(msg)
-	case todoFilePickerStep:
+	case filePickerStep:
 		return m.updateFilePicker(msg)
-	case todoDirTypeChoiceStep:
+	case dirTypeChoiceStep:
 		return m.updateDirTypeChoice(msg)
-	case todoNameInputStep:
+	case nameInputStep:
 		return m.updateNameInput(msg)
 	}
 	return m, nil
 }
 
-func (m TodoFormModel) OnWindowSizeMsg(msg tea.WindowSizeMsg) (TodoFormModel, tea.Cmd) {
+func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.SetSize(msg.Width, msg.Height)
 	return m, nil
 }
 
-func (m TodoFormModel) OnKeyMsg(_ tea.KeyMsg) (TodoFormModel, tea.Cmd, bool) {
+func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m TodoFormModel) updateWorkspacePicker(msg tea.Msg) (TodoFormModel, tea.Cmd) {
+func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case workspaceSelectedMsg:
-		ws := msg.workspace
+	case workspacepicker.SelectedMsg:
+		ws := msg.Workspace
 		m.selectedWorkspace = &ws
-		m.activeStep = todoNameInputStep
+		m.activeStep = nameInputStep
 		m.focusIndex = 0
 		m.nameInput.Focus()
 		m.descInput.Blur()
@@ -139,16 +141,16 @@ func (m TodoFormModel) updateWorkspacePicker(msg tea.Msg) (TodoFormModel, tea.Cm
 		m.descInput.SetValue("")
 		m.nameErr = ""
 		return m, textinput.Blink
-	case addDirectoryRequestMsg:
-		m.filePicker = NewFilePickerModel()
+	case workspacepicker.AddDirectoryMsg:
+		m.filePicker = filepicker.New()
 		m.filePicker.SetSize(m.width, m.height)
-		m.activeStep = todoFilePickerStep
+		m.activeStep = filePickerStep
 		var cmd tea.Cmd
 		m.filePicker, cmd = m.filePicker.Init()
 		return m, cmd
 	case tea.KeyMsg:
-		if key.Matches(msg, workspacePickerKeys.Back) {
-			return m, func() tea.Msg { return navigateMsg{target: TodoListView} }
+		if key.Matches(msg, formKeys.Back) {
+			return m, func() tea.Msg { return BackMsg{} }
 		}
 	}
 
@@ -157,15 +159,15 @@ func (m TodoFormModel) updateWorkspacePicker(msg tea.Msg) (TodoFormModel, tea.Cm
 	return m, cmd
 }
 
-func (m TodoFormModel) updateFilePicker(msg tea.Msg) (TodoFormModel, tea.Cmd) {
+func (m Model) updateFilePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case directorySelectedMsg:
-		m.selectedDirPath = msg.path
-		m.activeStep = todoDirTypeChoiceStep
+	case filepicker.DirectorySelectedMsg:
+		m.selectedDirPath = msg.Path
+		m.activeStep = dirTypeChoiceStep
 		return m, nil
 	case tea.KeyMsg:
-		if key.Matches(msg, filePickerKeys.Back) {
-			m.activeStep = todoWorkspacePickerStep
+		if key.Matches(msg, formKeys.Back) {
+			m.activeStep = workspacePickerStep
 			return m, nil
 		}
 	}
@@ -175,27 +177,27 @@ func (m TodoFormModel) updateFilePicker(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m TodoFormModel) updateDirTypeChoice(msg tea.Msg) (TodoFormModel, tea.Cmd) {
+func (m Model) updateDirTypeChoice(msg tea.Msg) (Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "w":
-			m.activeStep = todoWorkspacePickerStep
+			m.activeStep = workspacePickerStep
 			return m, provider.AddWorkspace(m.selectedDirPath, false)
 		case "r":
-			m.activeStep = todoWorkspacePickerStep
+			m.activeStep = workspacePickerStep
 			return m, provider.AddWorkspace(m.selectedDirPath, true)
 		case "esc":
-			m.activeStep = todoFilePickerStep
+			m.activeStep = filePickerStep
 			return m, nil
 		}
 	}
 	return m, nil
 }
 
-func (m TodoFormModel) updateNameInput(msg tea.Msg) (TodoFormModel, tea.Cmd) {
+func (m Model) updateNameInput(msg tea.Msg) (Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch {
-		case key.Matches(msg, todoFormInputKeys.Submit):
+		case key.Matches(msg, inputKeys.Submit):
 			name := m.nameInput.Value()
 			if name == "" {
 				m.nameErr = "name is required"
@@ -208,10 +210,10 @@ func (m TodoFormModel) updateNameInput(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 				wsID = m.selectedWorkspace.ID
 			}
 			return m, provider.CreateTodo(name, desc, wsID)
-		case key.Matches(msg, todoFormInputKeys.Back):
-			m.activeStep = todoWorkspacePickerStep
+		case key.Matches(msg, inputKeys.Back):
+			m.activeStep = workspacePickerStep
 			return m, provider.RequestWorkspacesState()
-		case key.Matches(msg, todoFormInputKeys.NextTab):
+		case key.Matches(msg, inputKeys.NextTab):
 			if m.focusIndex == 0 {
 				m.focusIndex = 1
 				m.nameInput.Blur()
@@ -237,26 +239,26 @@ func (m TodoFormModel) updateNameInput(msg tea.Msg) (TodoFormModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m TodoFormModel) View() string {
+func (m Model) View() string {
 	switch m.activeStep {
-	case todoFilePickerStep:
+	case filePickerStep:
 		return m.filePicker.View()
-	case todoDirTypeChoiceStep:
-		return todoFormPromptStyle.Render("Add: ") + todoFormPathStyle.Render(abbreviatePath(m.selectedDirPath)) +
+	case dirTypeChoiceStep:
+		return promptStyle.Render("Add: ") + pathStyle.Render(workspacepicker.AbbreviatePath(m.selectedDirPath)) +
 			"\n\n" +
 			"  w  add as workspace\n" +
 			"  r  add as root\n\n" +
 			"  esc: back"
-	case todoNameInputStep:
+	case nameInputStep:
 		wsName := ""
 		if m.selectedWorkspace != nil {
 			wsName = m.selectedWorkspace.Name
 		}
-		view := todoFormPromptStyle.Render("Workspace: ") + wsName + "\n\n"
+		view := promptStyle.Render("Workspace: ") + wsName + "\n\n"
 		view += m.nameInput.View() + "\n"
 		view += m.descInput.View() + "\n"
 		if m.nameErr != "" {
-			view += todoFormErrStyle.Render(m.nameErr)
+			view += errStyle.Render(m.nameErr)
 		}
 		return view
 	default:
