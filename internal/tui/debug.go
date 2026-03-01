@@ -12,7 +12,6 @@ import (
 
 var debugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
-
 type DebugModel struct {
 	logPath string
 }
