@@ -307,7 +307,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "git-repo-my-feature", session.ID)
-	expectedPath := filepath.Join(repoPath, ".worktrees", "git-repo-my-feature")
+	expectedPath := filepath.Join(repoPath, ".worktrees", "my-feature")
 	require.Equal(t, expectedPath, session.WorktreePath)
 	require.Equal(t, "eqt/my-feature", session.BranchName)
 

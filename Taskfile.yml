@@ -1,9 +1,6 @@
 version: '3'
 
 includes:
-  plugin:
-    taskfile: zellij-plugin/Taskfile.yml
-    dir: ./zellij-plugin
   daemon:
     taskfile: Taskfile.daemon.yml
   tui:
@@ -14,8 +11,6 @@ vars:
     sh: printf '%s' "$(pwd)" | cksum | awk '{print 3333 + ($1 % 667)}'
   DEV_DATA_DIR:
     sh: echo "$HOME/.config/utena/{{.DEV_PORT}}"
-  DEV_PIPE_NAME: 'utena-commands-{{.DEV_PORT}}'
-  DEV_TUI_PATH: '{{.ROOT_DIR}}/out/tui'
 
 tasks:
   go:fmt:
@@ -35,18 +30,21 @@ tasks:
   fmt:
     cmds:
       - task: go:fmt
-      - task: plugin:fmt
+  tmux:install:
+    cmds:
+      - mkdir -p ~/.config/tmux/plugins/utena-tmux
+      - cp -r plugins/utena-tmux/ ~/.config/tmux/plugins/utena-tmux/
+
   install:
     cmds:
       - task: daemon:install
-      - task: plugin:install
       - task: tui:install
+      - task: tmux:install
 
   dev:
     cmds:
       - mkdir -p "{{.DEV_DATA_DIR}}"
-      - echo "Dev environment{{":"}} port={{.DEV_PORT}} pipe={{.DEV_PIPE_NAME}} data={{.DEV_DATA_DIR}}"
-      - zellij action new-tab --layout dev.kdl --name dev
+      - echo "Dev environment{{":"}} port={{.DEV_PORT}} data={{.DEV_DATA_DIR}}"
 
   dev:daemon:
     cmds:
@@ -54,40 +52,9 @@ tasks:
         vars:
           UTENA_PORT: '{{.DEV_PORT}}'
           UTENA_DATA_DIR: '{{.DEV_DATA_DIR}}'
-          UTENA_PIPE_NAME: '{{.DEV_PIPE_NAME}}'
 
   dev:tui:
     cmds:
       - task: tui:build
         vars:
           UTENA_PORT: '{{.DEV_PORT}}'
-          UTENA_PIPE_NAME: '{{.DEV_PIPE_NAME}}'
-
-  dev:plugin:build:
-    cmds:
-      - task: plugin:build
-        vars:
-          UTENA_PORT: '{{.DEV_PORT}}'
-          UTENA_DATA_DIR: '{{.DEV_DATA_DIR}}'
-          UTENA_PIPE_NAME: '{{.DEV_PIPE_NAME}}'
-          UTENA_TUI_PATH: '{{.DEV_TUI_PATH}}'
-
-  dev:plugin:dev:
-    cmds:
-      - task: plugin:dev
-        vars:
-          UTENA_PORT: '{{.DEV_PORT}}'
-          UTENA_DATA_DIR: '{{.DEV_DATA_DIR}}'
-          UTENA_PIPE_NAME: '{{.DEV_PIPE_NAME}}'
-          UTENA_TUI_PATH: '{{.DEV_TUI_PATH}}'
-
-  dev:plugin:logs:
-    cmds:
-      - touch "{{.DEV_DATA_DIR}}/plugin.log"
-      - tail -f "{{.DEV_DATA_DIR}}/plugin.log"
-
-  dev:plugin:open:
-    cmds:
-      - task: plugin:open
-        vars:
-          UTENA_PIPE_NAME: '{{.DEV_PIPE_NAME}}'

@@ -40,6 +40,20 @@ func (s *SessionStore) GetByID(id string) (*Session, error) {
 	return &copy, nil
 }
 
+func (s *SessionStore) GetByTmuxName(tmuxName string) (*Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, session := range s.sessions {
+		if session.TmuxSessionName == tmuxName {
+			copy := *session
+			return &copy, nil
+		}
+	}
+
+	return nil, ErrSessionNotFound
+}
+
 func (s *SessionStore) List() []Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -167,6 +181,9 @@ func (s *SessionStore) OnAppStart(ctx context.Context) error {
 	for _, session := range s.sessions {
 		if session.Name == "" {
 			session.Name = session.ID
+		}
+		if session.TmuxSessionName == "" {
+			session.TmuxSessionName = SanitizeForTmux(session.ID)
 		}
 	}
 

@@ -13,14 +13,7 @@ import (
 func BuildServer(app *App, cfg Config) *http.Server {
 	r := chi.NewRouter()
 
-	httplogOpts := &httplog.Options{
-		LogExtraAttrs: func(r *http.Request, _ string, _ int) []slog.Attr {
-			if s := r.Header.Get("X-Zellij-Session"); s != "" {
-				return []slog.Attr{slog.String("zellij_session", s)}
-			}
-			return nil
-		},
-	}
+	httplogOpts := &httplog.Options{}
 	if cfg.PrettyLogs {
 		httplogOpts.Schema = httplog.SchemaECS.Concise(true)
 	}

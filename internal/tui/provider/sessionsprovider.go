@@ -81,9 +81,7 @@ type claudeSessionsLoadedMsg struct {
 }
 
 type sessionActivatedMsg struct {
-	name          string
-	pipeCommand   string
-	workspacePath string
+	tmuxSessionName string
 }
 
 type sessionCreatedMsg struct {
@@ -158,14 +156,7 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 	case activateSessionMsg:
 		name := msg.name
 		return p, func() tea.Msg {
-			result := p.client.activateSession(name)()
-			if activated, ok := result.(sessionActivatedMsg); ok {
-				return sessionActivatedMsg{
-					name:        activated.name,
-					pipeCommand: "switch_session",
-				}
-			}
-			return result
+			return p.client.activateSession(name)()
 		}
 
 	case reviveSessionIntentMsg:
@@ -175,31 +166,17 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 			if err, ok := reviveResult.(ErrMsg); ok {
 				return err
 			}
-			revived, ok := reviveResult.(sessionRevivedMsg)
-			if !ok {
+			if _, ok := reviveResult.(sessionRevivedMsg); !ok {
 				return ErrMsg{Err: fmt.Errorf("unexpected result from reviveSession")}
 			}
-			wp := revived.workspacePath
-			if revived.worktreePath != "" {
-				wp = revived.worktreePath
-			}
 
-			activateResult := p.client.activateSession(name)()
-			if err, ok := activateResult.(ErrMsg); ok {
-				return err
-			}
-			return sessionActivatedMsg{
-				name:          name,
-				pipeCommand:   "create_session",
-				workspacePath: wp,
-			}
+			return p.client.activateSession(name)()
 		}
 
 	case createSessionIntentMsg:
 		name := msg.name
 		workspaceID := msg.workspaceID
 		branch := msg.branch
-		workspacePath := msg.workspacePath
 		branchCreated := msg.branchCreated
 		return p, func() tea.Msg {
 			createResult := p.client.createSession(name, workspaceID, branch, branchCreated)()
@@ -211,24 +188,12 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 				return ErrMsg{Err: fmt.Errorf("unexpected result from createSession")}
 			}
 			sessionID := created.id
-			wp := workspacePath
-			if created.worktreePath != "" {
-				wp = created.worktreePath
-			}
 
-			activateResult := p.client.activateSession(sessionID)()
-			if err, ok := activateResult.(ErrMsg); ok {
-				return err
-			}
-			return sessionActivatedMsg{
-				name:          sessionID,
-				pipeCommand:   "create_session",
-				workspacePath: wp,
-			}
+			return p.client.activateSession(sessionID)()
 		}
 
 	case sessionActivatedMsg:
-		return p, p.client.sendZellijPipe(msg.pipeCommand, msg.name, msg.workspacePath)
+		return p, p.client.switchTmuxSession(msg.tmuxSessionName)
 
 	case deleteSessionIntentMsg:
 		return p, p.client.deleteSession(msg.id)

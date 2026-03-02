@@ -10,7 +10,6 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/workspace"
-	"github.com/eleonorayaya/utena/internal/zellij"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 )
@@ -143,61 +142,41 @@ func TestDaemon_ListSessions(t *testing.T) {
 	require.True(t, ids["other-session-2"])
 }
 
-func TestDaemon_ZellijSessionUpdate(t *testing.T) {
+func TestDaemon_TmuxHookSessionCreated(t *testing.T) {
 	_, router := setupTestRouter(t)
 
-	updateReq := &zellij.UpdateSessionsRequest{
-		Sessions: []zellij.SessionUpdate{
-			{
-				Name:             "main-session",
-				ConnectedClients: 1,
-			},
-			{
-				Name:             "background-session",
-				ConnectedClients: 0,
-			},
-		},
-	}
-
-	body, err := json.Marshal(updateReq)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest("PUT", "/zellij/sessions", bytes.NewReader(body))
+	body := []byte(`{"name":"test-session","workspace_id":"ws-1"}`)
+	req := httptest.NewRequest("POST", "/sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
 	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
 
+	hookBody := []byte(`{"session_name":"utena-test-session"}`)
+	req = httptest.NewRequest("PUT", "/tmux/hooks/session-created", bytes.NewReader(hookBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var response map[string]string
-	err = json.Unmarshal(w.Body.Bytes(), &response)
+	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Equal(t, "ok", response["status"])
 
 	req = httptest.NewRequest("GET", "/sessions", nil)
 	w = httptest.NewRecorder()
-
 	router.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
 
 	var sessionsResponse session.SessionListResponse
 	err = json.Unmarshal(w.Body.Bytes(), &sessionsResponse)
 	require.NoError(t, err)
-	require.Len(t, sessionsResponse.Sessions, 2)
+	require.Len(t, sessionsResponse.Sessions, 1)
 
-	mainSession := findSessionByID(sessionsResponse.Sessions, "main-session")
-	require.NotNil(t, mainSession)
-	require.True(t, mainSession.IsAttached)
-	require.True(t, mainSession.IsActive)
-	require.False(t, mainSession.IsDead)
-
-	bgSession := findSessionByID(sessionsResponse.Sessions, "background-session")
-	require.NotNil(t, bgSession)
-	require.False(t, bgSession.IsAttached)
-	require.True(t, bgSession.IsActive)
-	require.False(t, bgSession.IsDead)
+	sess := findSessionByID(sessionsResponse.Sessions, "utena-test-session")
+	require.NotNil(t, sess)
+	require.True(t, sess.IsActive)
+	require.False(t, sess.IsDead)
 }
 
 func findSessionByID(sessions []session.Session, id string) *session.Session {
@@ -209,68 +188,35 @@ func findSessionByID(sessions []session.Session, id string) *session.Session {
 	return nil
 }
 
-func TestDaemon_ZellijSessionUpdate_MarkDeadSessions(t *testing.T) {
+func TestDaemon_TmuxHookSessionClosed(t *testing.T) {
 	_, router := setupTestRouter(t)
 
-	req1 := httptest.NewRequest("POST", "/sessions", bytes.NewReader([]byte(`{"name":"old-session-1","workspace_id":"ws-1"}`)))
-	req1.Header.Set("Content-Type", "application/json")
-	w1 := httptest.NewRecorder()
-	router.ServeHTTP(w1, req1)
-	require.Equal(t, http.StatusCreated, w1.Code)
-
-	req2 := httptest.NewRequest("POST", "/sessions", bytes.NewReader([]byte(`{"name":"old-session-2","workspace_id":"ws-1"}`)))
-	req2.Header.Set("Content-Type", "application/json")
-	w2 := httptest.NewRecorder()
-	router.ServeHTTP(w2, req2)
-	require.Equal(t, http.StatusCreated, w2.Code)
-
-	updateReq := &zellij.UpdateSessionsRequest{
-		Sessions: []zellij.SessionUpdate{
-			{
-				Name:             "utena-old-session-1",
-				ConnectedClients: 1,
-			},
-			{
-				Name:             "new-session",
-				ConnectedClients: 0,
-			},
-		},
-	}
-
-	body, err := json.Marshal(updateReq)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest("PUT", "/zellij/sessions", bytes.NewReader(body))
+	body := []byte(`{"name":"test-session","workspace_id":"ws-1"}`)
+	req := httptest.NewRequest("POST", "/sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
 	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
 
+	hookBody := []byte(`{"session_name":"utena-test-session"}`)
+	req = httptest.NewRequest("PUT", "/tmux/hooks/session-closed", bytes.NewReader(hookBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	req = httptest.NewRequest("GET", "/sessions", nil)
 	w = httptest.NewRecorder()
-
 	router.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code)
-
 	var sessionsResponse session.SessionListResponse
-	err = json.Unmarshal(w.Body.Bytes(), &sessionsResponse)
+	err := json.Unmarshal(w.Body.Bytes(), &sessionsResponse)
 	require.NoError(t, err)
-	require.Len(t, sessionsResponse.Sessions, 3)
+	require.Len(t, sessionsResponse.Sessions, 1)
 
-	oldSession1 := findSessionByID(sessionsResponse.Sessions, "utena-old-session-1")
-	require.NotNil(t, oldSession1)
-	require.True(t, oldSession1.IsAttached)
-	require.False(t, oldSession1.IsDead)
-
-	oldSession2 := findSessionByID(sessionsResponse.Sessions, "utena-old-session-2")
-	require.NotNil(t, oldSession2)
-	require.True(t, oldSession2.IsDead)
-
-	newSession := findSessionByID(sessionsResponse.Sessions, "new-session")
-	require.NotNil(t, newSession)
-	require.False(t, newSession.IsAttached)
-	require.False(t, newSession.IsDead)
+	sess := findSessionByID(sessionsResponse.Sessions, "utena-test-session")
+	require.NotNil(t, sess)
+	require.True(t, sess.IsDead)
+	require.False(t, sess.IsActive)
+	require.False(t, sess.IsAttached)
 }

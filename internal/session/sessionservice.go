@@ -74,6 +74,10 @@ func (s *SessionService) GetSession(ctx context.Context, id string) (*Session, e
 	return s.store.GetByID(id)
 }
 
+func (s *SessionService) GetSessionByTmuxName(ctx context.Context, tmuxName string) (*Session, error) {
+	return s.store.GetByTmuxName(tmuxName)
+}
+
 func (s *SessionService) CreateSession(ctx context.Context, session *Session, createWorktree bool) error {
 	var ws *workspace.Workspace
 	if session.WorkspaceID != "" {
@@ -102,6 +106,8 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 		return fmt.Errorf("session name or branch is required")
 	}
 
+	session.TmuxSessionName = SanitizeForTmux(session.ID)
+
 	if ws != nil && ws.IsGitRepo && createWorktree {
 		pullBranch := session.BaseBranch
 		if !session.BranchCreated && session.Branch != "" {
@@ -116,7 +122,7 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 
 		if session.BranchCreated {
 			branchName := s.branchPrefix + session.Name
-			worktreePath, err := s.gitService.CreateWorktree(ctx, ws.Path, session.ID, branchName, session.BaseBranch)
+			worktreePath, err := s.gitService.CreateWorktree(ctx, ws.Path, session.Name, branchName, session.BaseBranch)
 			if err != nil {
 				return fmt.Errorf("failed to create worktree: %w", err)
 			}
@@ -143,6 +149,23 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 	if session.WorkspaceID != "" {
 		s.workspaceService.Touch(ctx, session.WorkspaceID)
 	}
+
+	startDir := ""
+	if session.WorktreePath != "" {
+		startDir = session.WorktreePath
+	} else if session.WorkspaceID != "" {
+		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
+		if err == nil {
+			startDir = ws.Path
+		}
+	}
+	s.eventBus.Publish(ctx, eventbus.Event{
+		Type: eventbus.SessionCreateRequested,
+		Data: eventbus.SessionCreateRequestedEvent{
+			SessionName:   session.ID,
+			WorkspacePath: startDir,
+		},
+	})
 
 	return nil
 }
@@ -231,6 +254,18 @@ func (s *SessionService) ReviveSession(ctx context.Context, name string) (*Reviv
 	if err := s.store.Update(session); err != nil {
 		return nil, err
 	}
+
+	startDir := workspacePath
+	if session.WorktreePath != "" {
+		startDir = session.WorktreePath
+	}
+	s.eventBus.Publish(ctx, eventbus.Event{
+		Type: eventbus.SessionRevived,
+		Data: eventbus.SessionRevivedEvent{
+			SessionName:   session.ID,
+			WorkspacePath: startDir,
+		},
+	})
 
 	return &ReviveResult{Session: session, WorkspacePath: workspacePath}, nil
 }

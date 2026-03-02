@@ -12,8 +12,8 @@ type rootProvider struct {
 	todos      todosProvider
 }
 
-func NewRootProvider(baseURL, pipeName string) Provider {
-	c := newClient(baseURL, pipeName)
+func NewRootProvider(baseURL string) Provider {
+	c := newClient(baseURL)
 	return rootProvider{
 		sessions:   newSessionsProvider(c),
 		workspaces: newWorkspacesProvider(c),

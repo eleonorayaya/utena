@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -22,14 +21,12 @@ import (
 type client struct {
 	httpClient *http.Client
 	baseURL    string
-	pipeName   string
 }
 
-func newClient(baseURL, pipeName string) *client {
+func newClient(baseURL string) *client {
 	return &client{
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 		baseURL:    baseURL,
-		pipeName:   pipeName,
 	}
 }
 
@@ -159,7 +156,12 @@ func (c *client) activateSession(name string) tea.Cmd {
 			return parseAPIError(res, "activate session")
 		}
 
-		return sessionActivatedMsg{name: name}
+		var resp struct {
+			TmuxSessionName string `json:"tmux_session_name"`
+		}
+		json.NewDecoder(res.Body).Decode(&resp)
+
+		return sessionActivatedMsg{tmuxSessionName: resp.TmuxSessionName}
 	}
 }
 
@@ -359,33 +361,12 @@ func (c *client) deleteTodo(id string) tea.Cmd {
 	}
 }
 
-func (c *client) sendZellijPipe(command, sessionName, workspacePath string) tea.Cmd {
+func (c *client) switchTmuxSession(name string) tea.Cmd {
 	return func() tea.Msg {
-		payload := map[string]interface{}{
-			"command": command,
+		cmd := exec.Command("tmux", "switch-client", "-t", name)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("[ERROR] tmux switch-client failed: %v output: %s", err, string(output))
 		}
-		if sessionName != "" {
-			payload["session_name"] = sessionName
-		}
-		if workspacePath != "" {
-			payload["workspace_path"] = workspacePath
-		}
-
-		jsonPayload, err := json.Marshal(payload)
-		if err != nil {
-			log.Printf("[ERROR] marshal pipe command: %v", err)
-			return tea.Quit()
-		}
-
-		log.Printf("[INFO] sending zellij pipe: %s", string(jsonPayload))
-
-		cmd := exec.Command("zellij", "pipe", "--name", c.pipeName)
-		cmd.Stdin = strings.NewReader(string(jsonPayload))
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			log.Printf("[ERROR] zellij pipe failed: %v output: %s", err, string(output))
-		}
-
 		return tea.Quit()
 	}
 }

@@ -15,20 +15,18 @@ import (
 )
 
 var (
-	defaultPort     = "3333"
-	defaultPipeName = "utena-commands"
+	defaultPort = "3333"
 )
 
 func main() {
 	rootCmd := &cobra.Command{
 		Use:          "utena",
-		Short:        "Utena workspace manager for Zellij",
+		Short:        "Utena workspace manager for tmux",
 		SilenceUsage: true,
 		RunE:         runTUI,
 	}
 
 	rootCmd.Flags().String("port", defaultPort, "daemon port")
-	rootCmd.Flags().String("pipe-name", defaultPipeName, "zellij pipe name")
 
 	rootCmd.AddCommand(shellInitCmd())
 	rootCmd.AddCommand(todosCmd())
@@ -40,7 +38,6 @@ func main() {
 
 func runTUI(cmd *cobra.Command, args []string) error {
 	port, _ := cmd.Flags().GetString("port")
-	pipe, _ := cmd.Flags().GetString("pipe-name")
 
 	var resolvedLogPath string
 	logfilePath := os.Getenv("BUBBLETEA_LOG")
@@ -51,7 +48,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		resolvedLogPath, _ = filepath.Abs(logfilePath)
 	}
 
-	p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, pipe, router.SessionListView))
+	p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, router.SessionListView))
 	if _, err := p.Run(); err != nil {
 		return err
 	}
@@ -65,7 +62,6 @@ func todosCmd() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
-			pipe, _ := cmd.Root().Flags().GetString("pipe-name")
 
 			var resolvedLogPath string
 			logfilePath := os.Getenv("BUBBLETEA_LOG")
@@ -76,7 +72,7 @@ func todosCmd() *cobra.Command {
 				resolvedLogPath, _ = filepath.Abs(logfilePath)
 			}
 
-			p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, pipe, router.TodoListView))
+			p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, router.TodoListView))
 			if _, err := p.Run(); err != nil {
 				return err
 			}
