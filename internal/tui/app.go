@@ -22,7 +22,7 @@ type App struct {
 	height   int
 }
 
-func NewApp(logPath, port, pipeName string, initialView router.View) App {
+func NewApp(logPath, port string, initialView router.View) App {
 	baseURL := fmt.Sprintf("http://localhost:%s", port)
 	views := map[router.View]router.ViewEntry{
 		router.SessionListView: &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
@@ -33,7 +33,7 @@ func NewApp(logPath, port, pipeName string, initialView router.View) App {
 	}
 
 	return App{
-		provider: provider.NewRootProvider(baseURL, pipeName),
+		provider: provider.NewRootProvider(baseURL),
 		router:   router.New(views, initialView),
 		help:     help.New(),
 	}

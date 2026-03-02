@@ -1,6 +1,6 @@
 # Utena
 
-A workspace management system for Zellij, consisting of a daemon API server, TUI client, and Zellij plugin.
+A workspace management system for tmux, consisting of a daemon API server, TUI client, and TPM plugin.
 
 ## Documentation
 
@@ -19,10 +19,19 @@ A workspace management system for Zellij, consisting of a daemon API server, TUI
 #### Install
 
 ```bash
-task tui:deploy      # builds and copies to /usr/local/bin/utena
-task daemon:build    # builds daemon to ./out/daemon
-task plugin:deploy   # builds and deploys the Zellij plugin
+task tui:install     # builds and copies to /usr/local/bin/utena
+task daemon:install  # builds and installs daemon
 ```
+
+#### TPM Plugin
+
+Add to your `.tmux.conf`:
+
+```
+set -g @plugin 'path/to/utena/plugins/utena-tmux'
+```
+
+This registers tmux hooks for session state sync and binds `prefix + p` to open the utena TUI in a popup.
 
 #### Shell initialization
 
@@ -32,7 +41,7 @@ Add to your `.zshrc` (or `.bashrc`):
 eval "$(utena shell-init)"
 ```
 
-This sets up environment variables needed for utena integrations (like Claude Code status tracking) when running inside Zellij.
+This sets up environment variables needed for utena integrations (like Claude Code status tracking) when running inside tmux.
 
 #### Claude Code integration
 
@@ -40,13 +49,9 @@ Utena can track Claude Code session status (working, needs attention, completed)
 
 1. Install the `utena-claude` plugin in Claude Code — point it at this repo's `.claude-plugin/marketplace.json`
 2. Ensure `eval "$(utena shell-init)"` is in your shell profile (see above)
-3. Start the daemon and use Claude Code inside a Zellij session managed by utena — the TUI will show Claude's status next to each session
+3. Start the daemon and use Claude Code inside a tmux session managed by utena — the TUI will show Claude's status next to each session
 
 ## Libraries
-
-### Zellij
-- [Zellij Plugin API](https://zellij.dev/documentation/plugin-api.html)
-- [Zellij Tile Rust Crate](https://docs.rs/zellij-tile/latest/zellij_tile/index.html)
 
 ### Bubble Tea
 - [Examples](https://github.com/charmbracelet/bubbletea/tree/main/examples)

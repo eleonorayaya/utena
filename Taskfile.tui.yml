@@ -11,7 +11,6 @@ tasks:
     vars:
       LDFLAGS: >-
         -X main.defaultPort={{.UTENA_PORT | default "3333"}}
-        -X main.defaultPipeName={{.UTENA_PIPE_NAME | default "utena-commands"}}
     cmds:
       - go build -ldflags '{{.LDFLAGS}}' -o out/tui cmd/tui/main.go
   install:

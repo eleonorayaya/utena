@@ -8,9 +8,9 @@ import (
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/todo"
 	"github.com/eleonorayaya/utena/internal/workspace"
-	"github.com/eleonorayaya/utena/internal/zellij"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/afero"
 )
@@ -18,7 +18,7 @@ import (
 type App struct {
 	Workspace *workspace.WorkspaceModule
 	Session   *session.SessionModule
-	Zellij    *zellij.ZellijModule
+	Tmux      *tmux.TmuxModule
 	Claude    *claude.ClaudeModule
 	Todo      *todo.TodoModule
 }
@@ -40,7 +40,7 @@ func newApp(fs afero.Fs, cfg Config) *App {
 	return &App{
 		Workspace: workspaceModule,
 		Session:   sessionModule,
-		Zellij:    zellij.NewZellijModule(sessionModule, bus),
+		Tmux:      tmux.NewTmuxModule(sessionModule, bus),
 		Claude:    claude.NewClaudeModule(bus, fs, cfg.ConfigDir),
 		Todo:      todo.NewTodoModule(workspaceModule, fs, cfg.ConfigDir),
 	}
@@ -85,7 +85,7 @@ func (a *App) modules() []moduleEntry {
 	return []moduleEntry{
 		{"workspace", "/workspaces", a.Workspace},
 		{"session", "/sessions", a.Session},
-		{"zellij", "/zellij", a.Zellij},
+		{"tmux", "/tmux", a.Tmux},
 		{"claude", "/claude", a.Claude},
 		{"todo", "/todos", a.Todo},
 	}

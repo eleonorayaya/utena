@@ -13,27 +13,28 @@ var ErrSessionNotDead = errors.New("session is not dead")
 var ErrSessionDead = errors.New("cannot activate dead session")
 
 type Session struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name,omitempty"`
-	WorkspaceID   string    `json:"workspace_id"`
-	WorkspaceName string    `json:"workspace_name,omitempty"`
-	Branch        string    `json:"branch,omitempty"`
-	BaseBranch    string    `json:"base_branch,omitempty"`
-	BranchCreated bool      `json:"branch_created,omitempty"`
-	BranchName    string    `json:"branch_name,omitempty"`
-	WorktreePath  string    `json:"worktree_path,omitempty"`
-	IsAttached    bool      `json:"is_attached"`
-	IsActive      bool      `json:"is_active"`
-	IsDead        bool      `json:"is_dead"`
-	IsDeleted     bool      `json:"is_deleted"`
-	Cleanup       *Cleanup  `json:"cleanup,omitempty"`
-	LastUsedAt    time.Time `json:"last_used_at"`
+	ID              string    `json:"id"`
+	TmuxSessionName string    `json:"tmux_session_name,omitempty"`
+	Name            string    `json:"name,omitempty"`
+	WorkspaceID     string    `json:"workspace_id"`
+	WorkspaceName   string    `json:"workspace_name,omitempty"`
+	Branch          string    `json:"branch,omitempty"`
+	BaseBranch      string    `json:"base_branch,omitempty"`
+	BranchCreated   bool      `json:"branch_created,omitempty"`
+	BranchName      string    `json:"branch_name,omitempty"`
+	WorktreePath    string    `json:"worktree_path,omitempty"`
+	IsAttached      bool      `json:"is_attached"`
+	IsActive        bool      `json:"is_active"`
+	IsDead          bool      `json:"is_dead"`
+	IsDeleted       bool      `json:"is_deleted"`
+	Cleanup         *Cleanup  `json:"cleanup,omitempty"`
+	LastUsedAt      time.Time `json:"last_used_at"`
 }
 
 type Cleanup struct {
-	ZellijSessionKilled bool `json:"zellij_session_killed"`
-	WorktreeRemoved     bool `json:"worktree_removed"`
-	BranchDeleted       bool `json:"branch_deleted"`
+	TmuxSessionKilled bool `json:"tmux_session_killed"`
+	WorktreeRemoved   bool `json:"worktree_removed"`
+	BranchDeleted     bool `json:"branch_deleted"`
 }
 
 func BuildSessionID(workspaceName, name string) string {
@@ -43,4 +44,8 @@ func BuildSessionID(workspaceName, name string) string {
 
 func sanitizeBranchName(branch string) string {
 	return strings.ReplaceAll(branch, "/", "-")
+}
+
+func SanitizeForTmux(name string) string {
+	return strings.ReplaceAll(name, ".", "_")
 }
