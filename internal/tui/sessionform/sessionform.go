@@ -31,6 +31,7 @@ const (
 	filePickerStep
 	dirTypeChoiceStep
 	branchPickerStep
+	branchModeStep
 	nameInputStep
 )
 
@@ -43,6 +44,7 @@ type Model struct {
 	selectedWorkspace workspace.Workspace
 	selectedBranch    string
 	selectedDirPath   string
+	branchCreated     bool
 	nameErr           string
 	width, height     int
 }
@@ -82,7 +84,7 @@ func (m Model) Keys() help.KeyMap {
 		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, filepicker.Keys}}
 	case branchPickerStep:
 		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, branchpicker.Keys}}
-	case dirTypeChoiceStep:
+	case dirTypeChoiceStep, branchModeStep:
 		return formKeys
 	default:
 		return formKeys
@@ -111,6 +113,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.updateDirTypeChoice(msg)
 	case branchPickerStep:
 		return m.updateBranchPicker(msg)
+	case branchModeStep:
+		return m.updateBranchMode(msg)
 	case nameInputStep:
 		return m.updateNameInput(msg)
 	}
@@ -199,9 +203,8 @@ func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case branchpicker.SelectedMsg:
 		m.selectedBranch = msg.Branch
-		m.activeStep = nameInputStep
-		m.initNameInput()
-		return m, m.nameInput.Focus()
+		m.activeStep = branchModeStep
+		return m, nil
 
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
@@ -213,6 +216,25 @@ func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.branchPicker, cmd = m.branchPicker.Update(msg)
 	return m, cmd
+}
+
+func (m Model) updateBranchMode(msg tea.Msg) (Model, tea.Cmd) {
+	if msg, ok := msg.(tea.KeyMsg); ok {
+		switch msg.String() {
+		case "n":
+			m.branchCreated = true
+			m.activeStep = nameInputStep
+			m.initNameInput()
+			return m, m.nameInput.Focus()
+		case "e":
+			m.branchCreated = false
+			return m, provider.CreateSession("", m.selectedWorkspace.ID, m.selectedBranch, m.selectedWorkspace.Path, false)
+		case "esc":
+			m.activeStep = branchPickerStep
+			return m, nil
+		}
+	}
+	return m, nil
 }
 
 func (m Model) updateNameInput(msg tea.Msg) (Model, tea.Cmd) {
@@ -228,10 +250,10 @@ func (m Model) updateNameInput(msg tea.Msg) (Model, tea.Cmd) {
 				m.nameErr = err.Error()
 				return m, nil
 			}
-			return m, provider.CreateSession(name, m.selectedWorkspace.ID, m.selectedBranch, m.selectedWorkspace.Path)
+			return m, provider.CreateSession(name, m.selectedWorkspace.ID, m.selectedBranch, m.selectedWorkspace.Path, m.branchCreated)
 		case key.Matches(msg, formKeys.Back):
 			if m.selectedWorkspace.IsGitRepo {
-				m.activeStep = branchPickerStep
+				m.activeStep = branchModeStep
 				m.nameErr = ""
 				return m, nil
 			}
@@ -266,6 +288,12 @@ func (m Model) View() string {
 			"  esc: back"
 	case branchPickerStep:
 		return m.branchPicker.View()
+	case branchModeStep:
+		return promptStyle.Render("Branch: ") + pathStyle.Render(m.selectedBranch) +
+			"\n\n" +
+			"  n  New branch from " + pathStyle.Render(m.selectedBranch) + "\n" +
+			"  e  Use existing branch " + pathStyle.Render(m.selectedBranch) + "\n\n" +
+			"  esc: back"
 	case nameInputStep:
 		var b strings.Builder
 		fmt.Fprintf(&b, "Workspace: %s\n\n", m.selectedWorkspace.Name)
