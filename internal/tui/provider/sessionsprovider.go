@@ -25,13 +25,14 @@ func ActivateSession(name string) tea.Cmd {
 	return func() tea.Msg { return activateSessionMsg{name: name} }
 }
 
-func CreateSession(name, workspaceID, branch, workspacePath string) tea.Cmd {
+func CreateSession(name, workspaceID, branch, workspacePath string, branchCreated bool) tea.Cmd {
 	return func() tea.Msg {
 		return createSessionIntentMsg{
 			name:          name,
 			workspaceID:   workspaceID,
 			branch:        branch,
 			workspacePath: workspacePath,
+			branchCreated: branchCreated,
 		}
 	}
 }
@@ -56,6 +57,7 @@ type createSessionIntentMsg struct {
 	workspaceID   string
 	branch        string
 	workspacePath string
+	branchCreated bool
 }
 
 type reviveSessionIntentMsg struct {
@@ -198,8 +200,9 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		workspaceID := msg.workspaceID
 		branch := msg.branch
 		workspacePath := msg.workspacePath
+		branchCreated := msg.branchCreated
 		return p, func() tea.Msg {
-			createResult := p.client.createSession(name, workspaceID, branch)()
+			createResult := p.client.createSession(name, workspaceID, branch, branchCreated)()
 			if err, ok := createResult.(ErrMsg); ok {
 				return err
 			}
