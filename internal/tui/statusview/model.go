@@ -3,7 +3,6 @@ package statusview
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -98,6 +97,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.currentTmuxSession != "" {
 			cmds = append(cmds, provider.FetchWindows(m.currentTmuxSession))
 		}
+		if m.paneID != "" {
+			cmd := m.syncFocusState()
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 		return m, tea.Batch(cmds...)
 
 	case provider.SessionsStateUpdatedMsg:
@@ -108,18 +113,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case provider.WindowsStateUpdatedMsg:
 		m.windows = msg.Windows
 		return m, nil
-
-	case tea.FocusMsg:
-		m.expanded = true
-		return m, router.SetHelpVisible(true)
-
-	case tea.BlurMsg:
-		m.expanded = false
-		if m.paneID != "" {
-			exec.Command("tmux", "resize-pane", "-y", "1", "-t", m.paneID).Run()
-			exec.Command("tmux", "select-pane", "-d", "-t", m.paneID).Run()
-		}
-		return m, router.SetHelpVisible(false)
 
 	case tea.KeyMsg:
 		if m.expanded {
@@ -151,13 +144,44 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, keys.Collapse):
 		m.expanded = false
-		if m.paneID != "" {
-			exec.Command("tmux", "resize-pane", "-y", "1", "-t", m.paneID).Run()
-			exec.Command("tmux", "select-pane", "-d", "-t", m.paneID).Run()
-		}
+		m.collapsePane()
 		return m, router.SetHelpVisible(false)
 	}
 	return m, nil
+}
+
+func (m *Model) syncFocusState() tea.Cmd {
+	t, err := gotmux.DefaultTmux()
+	if err != nil {
+		return nil
+	}
+	output, err := t.Command("display-message", "-p", "-t", m.paneID, "#{pane_active}")
+	if err != nil {
+		return nil
+	}
+	active := strings.TrimSpace(output) == "1"
+	if active && !m.expanded {
+		m.expanded = true
+		return router.SetHelpVisible(true)
+	}
+	if !active && m.expanded {
+		m.expanded = false
+		m.collapsePane()
+		return router.SetHelpVisible(false)
+	}
+	return nil
+}
+
+func (m Model) collapsePane() {
+	if m.paneID == "" {
+		return
+	}
+	t, err := gotmux.DefaultTmux()
+	if err != nil {
+		return
+	}
+	t.Command("resize-pane", "-y", "1", "-t", m.paneID)
+	t.Command("select-pane", "-d", "-t", m.paneID)
 }
 
 func (m Model) activeSessions() []session.Session {
