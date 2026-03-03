@@ -3,6 +3,9 @@ version: '3'
 env:
   BUBBLETEA_LOG: tui.log
 
+vars:
+  TUI_BIN: '{{.HOME}}/.local/bin/utena'
+
 tasks:
   build:
     sources:
@@ -17,7 +20,8 @@ tasks:
     deps:
       - build
     cmds:
-      - cp ./out/tui /usr/local/bin/utena
+      - mkdir -p {{dir .TUI_BIN}}
+      - cp ./out/tui {{shellQuote .TUI_BIN}}
   run:
     deps:
       - build

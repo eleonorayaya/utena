@@ -1,3 +1,5 @@
+github.com/GianlucaP106/gotmux v0.5.0 h1:kpZsrBPtJFjAvVRfeLwm8cE+7yr4NiMPEaYsTKYGwP8=
+github.com/GianlucaP106/gotmux v0.5.0/go.mod h1:qOsZ+exnCbgv3KJ84VaBo4Q7mXs/W23CW4fyoXAgKe4=
 github.com/ajg/form v1.5.1 h1:t9c7v8JUKu/XxOGBU0yjNpaMloxGEJhUkqFRq0ibGeU=
 github.com/ajg/form v1.5.1/go.mod h1:uL1WgH+h2mgNtvBq0339dVnzXdBETtL2LeUXaIv25UY=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=

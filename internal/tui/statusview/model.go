@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GianlucaP106/gotmux/gotmux"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -44,9 +45,12 @@ func New() Model {
 	paneID := os.Getenv("TMUX_PANE")
 	var currentSession string
 	if paneID != "" {
-		out, err := exec.Command("tmux", "display-message", "-p", "-t", paneID, "#{session_name}").Output()
+		t, err := gotmux.DefaultTmux()
 		if err == nil {
-			currentSession = strings.TrimSpace(string(out))
+			output, err := t.Command("display-message", "-p", "-t", paneID, "#{session_name}")
+			if err == nil {
+				currentSession = strings.TrimSpace(output)
+			}
 		}
 	}
 	return Model{

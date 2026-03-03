@@ -15,6 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type mockTmuxManager struct{}
+
+func (m *mockTmuxManager) CreateSession(name, startDir string) error { return nil }
+func (m *mockTmuxManager) KillSession(name string) error             { return nil }
+func (m *mockTmuxManager) HasSession(name string) bool               { return false }
+func (m *mockTmuxManager) ListSessionNames() ([]string, error)       { return nil, nil }
+
 func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore) {
 	t.Helper()
 
@@ -27,7 +34,7 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, &mockTmuxManager{}, bus, "eqt/")
 	return service, sessionStore, workspaceStore
 }
 
@@ -293,7 +300,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, &mockTmuxManager{}, bus, "eqt/")
 
 	session := &Session{
 		Name:          "my-feature",
@@ -307,7 +314,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "git-repo-my-feature", session.ID)
-	expectedPath := filepath.Join(repoPath, ".worktrees", "my-feature")
+	expectedPath := filepath.Join(repoPath, ".worktrees", "eqt-my-feature")
 	require.Equal(t, expectedPath, session.WorktreePath)
 	require.Equal(t, "eqt/my-feature", session.BranchName)
 
@@ -332,7 +339,7 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, &mockTmuxManager{}, bus, "eqt/")
 
 	session := &Session{
 		Name:          "my-feature",
@@ -415,7 +422,7 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, &mockTmuxManager{}, bus, "eqt/")
 
 	session := &Session{
 		Name:        "my-session",
@@ -452,10 +459,11 @@ func TestSessionService_ActivateSession_TouchesWorkspace(t *testing.T) {
 	service, sessionStore, workspaceStore := setupSessionService(t)
 
 	session := &Session{
-		ID:          "session-1",
-		Name:        "session-1",
-		WorkspaceID: "ws-1",
-		LastUsedAt:  time.Now().Add(-1 * time.Hour),
+		ID:              "session-1",
+		Name:            "session-1",
+		TmuxSessionName: "session-1",
+		WorkspaceID:     "ws-1",
+		LastUsedAt:      time.Now().Add(-1 * time.Hour),
 	}
 	sessionStore.Add(session)
 
@@ -466,4 +474,25 @@ func TestSessionService_ActivateSession_TouchesWorkspace(t *testing.T) {
 	ws, err := workspaceStore.GetByID("ws-1")
 	require.NoError(t, err)
 	require.False(t, ws.LastUsedAt.IsZero())
+}
+
+func TestSessionService_ActivateSession_AutoRevivesDeadSession(t *testing.T) {
+	service, sessionStore, _ := setupSessionService(t)
+
+	session := &Session{
+		ID:              "dead-session",
+		Name:            "dead-session",
+		TmuxSessionName: "dead-session",
+		WorkspaceID:     "ws-1",
+		IsDead:          true,
+		LastUsedAt:      time.Now(),
+	}
+	sessionStore.Add(session)
+
+	ctx := context.Background()
+	result, err := service.ActivateSession(ctx, "dead-session")
+	require.NoError(t, err)
+	require.False(t, result.IsDead)
+	require.True(t, result.IsActive)
+	require.True(t, result.IsAttached)
 }
