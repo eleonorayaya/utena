@@ -12,14 +12,16 @@ import (
 )
 
 type TmuxService struct {
-	sessionService *session.SessionService
-	eventBus       eventbus.EventBus
+	sessionService   *session.SessionService
+	eventBus         eventbus.EventBus
+	windowsBySession map[string][]Window
 }
 
 func NewTmuxService(sessionService *session.SessionService, bus eventbus.EventBus) *TmuxService {
 	return &TmuxService{
-		sessionService: sessionService,
-		eventBus:       bus,
+		sessionService:   sessionService,
+		eventBus:         bus,
+		windowsBySession: make(map[string][]Window),
 	}
 }
 
@@ -111,6 +113,7 @@ func (t *TmuxService) HandleSessionClosed(ctx context.Context, tmuxName string) 
 	sess.IsDead = true
 	sess.IsActive = false
 	sess.IsAttached = false
+	delete(t.windowsBySession, tmuxName)
 	return t.sessionService.UpdateSession(ctx, sess)
 }
 
@@ -161,4 +164,12 @@ func (t *TmuxService) HandleClientDetached(ctx context.Context, tmuxName string)
 
 	sess.IsAttached = false
 	return t.sessionService.UpdateSession(ctx, sess)
+}
+
+func (t *TmuxService) SyncWindows(ctx context.Context, tmuxName string, windows []Window) {
+	t.windowsBySession[tmuxName] = windows
+}
+
+func (t *TmuxService) GetWindows(ctx context.Context, tmuxName string) []Window {
+	return t.windowsBySession[tmuxName]
 }

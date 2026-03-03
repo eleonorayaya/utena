@@ -53,3 +53,24 @@ func (c *TmuxController) HandleHook(w http.ResponseWriter, r *http.Request) {
 
 	render.JSON(w, r, map[string]string{"status": "ok"})
 }
+
+func (c *TmuxController) HandleSyncWindows(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	req := &SyncWindowsRequest{}
+	if err := render.Bind(r, req); err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
+
+	c.service.SyncWindows(ctx, req.SessionName, req.Windows)
+	render.JSON(w, r, map[string]string{"status": "ok"})
+}
+
+func (c *TmuxController) HandleGetWindows(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	sessionName := chi.URLParam(r, "sessionName")
+
+	windows := c.service.GetWindows(ctx, sessionName)
+	render.JSON(w, r, windows)
+}

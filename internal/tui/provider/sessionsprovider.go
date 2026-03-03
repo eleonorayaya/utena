@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tmux"
 )
 
 type SessionsStateUpdatedMsg struct {
@@ -13,8 +14,16 @@ type SessionsStateUpdatedMsg struct {
 	ClaudeSessions map[string][]claude.ClaudeSession
 }
 
+type WindowsStateUpdatedMsg struct {
+	Windows []tmux.Window
+}
+
 func FetchSessions() tea.Cmd {
 	return func() tea.Msg { return fetchSessionsIntentMsg{} }
+}
+
+func FetchWindows(sessionName string) tea.Cmd {
+	return func() tea.Msg { return fetchWindowsIntentMsg{sessionName: sessionName} }
 }
 
 func RequestSessionsState() tea.Cmd {
@@ -66,6 +75,14 @@ type reviveSessionIntentMsg struct {
 
 type deleteSessionIntentMsg struct {
 	id string
+}
+
+type fetchWindowsIntentMsg struct {
+	sessionName string
+}
+
+type windowsLoadedMsg struct {
+	windows []tmux.Window
 }
 
 type setActiveWorkspaceMsg struct {
@@ -149,6 +166,14 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 
 	case fetchSessionsIntentMsg:
 		return p, tea.Batch(p.client.fetchSessions(), p.client.fetchClaudeSessions())
+
+	case fetchWindowsIntentMsg:
+		return p, p.client.fetchWindows(msg.sessionName)
+
+	case windowsLoadedMsg:
+		return p, func() tea.Msg {
+			return WindowsStateUpdatedMsg{Windows: msg.windows}
+		}
 
 	case requestSessionsStateMsg:
 		return p, p.emitState()
