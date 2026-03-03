@@ -16,6 +16,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/router"
 )
 
 var (
@@ -67,6 +68,9 @@ func (m Model) Init() (Model, tea.Cmd) {
 	if m.currentTmuxSession != "" {
 		cmds = append(cmds, provider.FetchWindows(m.currentTmuxSession))
 	}
+	if !m.expanded {
+		cmds = append(cmds, router.SetHelpVisible(false))
+	}
 	return m, tea.Batch(cmds...)
 }
 
@@ -107,7 +111,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case tea.FocusMsg:
 		m.expanded = true
-		return m, nil
+		return m, router.SetHelpVisible(true)
 
 	case tea.BlurMsg:
 		m.expanded = false
@@ -115,7 +119,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			exec.Command("tmux", "resize-pane", "-y", "1", "-t", m.paneID).Run()
 			exec.Command("tmux", "select-pane", "-d", "-t", m.paneID).Run()
 		}
-		return m, nil
+		return m, router.SetHelpVisible(false)
 
 	case tea.KeyMsg:
 		if m.expanded {
@@ -151,7 +155,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			exec.Command("tmux", "resize-pane", "-y", "1", "-t", m.paneID).Run()
 			exec.Command("tmux", "select-pane", "-d", "-t", m.paneID).Run()
 		}
-		return m, nil
+		return m, router.SetHelpVisible(false)
 	}
 	return m, nil
 }
@@ -229,9 +233,6 @@ func (m Model) expandedView() string {
 		}
 		lines = append(lines, entry)
 	}
-
-	helpLine := dimStyle.Render("j/k navigate · enter switch · esc collapse")
-	lines = append(lines, helpLine)
 
 	return strings.Join(lines, "\n")
 }

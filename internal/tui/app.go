@@ -18,7 +18,7 @@ import (
 type App struct {
 	provider provider.Provider
 	router   router.Router
-	help     help.Model
+	help     helpModel
 	width    int
 	height   int
 }
@@ -37,7 +37,7 @@ func NewApp(logPath, port string, initialView router.View) App {
 	return App{
 		provider: provider.NewRootProvider(baseURL),
 		router:   router.New(views, initialView),
-		help:     help.New(),
+		help:     newHelpModel(initialView != router.StatusView),
 	}
 }
 
@@ -56,6 +56,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	a.help = a.help.Update(msg)
+
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	a.provider, cmd = a.provider.Update(msg)
@@ -70,7 +72,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a App) OnWindowSizeMsg(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	a.width = msg.Width
 	a.height = msg.Height
-	adjusted := tea.WindowSizeMsg{Width: msg.Width, Height: msg.Height - 2}
+	adjusted := tea.WindowSizeMsg{Width: msg.Width, Height: msg.Height - a.help.HeightCost()}
 	var cmd tea.Cmd
 	a.router, cmd = a.router.Update(adjusted)
 	return a, cmd
