@@ -21,4 +21,4 @@ tmux set-hook -g after-select-window "run-shell '${script_dir}/sync-windows.sh \
 tmux bind-key p display-popup -E -w 80% -h 80% "utena"
 tmux bind-key s run-shell "${script_dir}/toggle-status.sh"
 
-run-shell "${script_dir}/create-status-panes.sh"
+tmux run-shell "${script_dir}/create-status-panes.sh"
