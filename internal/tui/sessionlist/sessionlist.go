@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
+	ulist "github.com/eleonorayaya/utena/internal/tui/list"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 )
@@ -20,9 +21,8 @@ type Model struct {
 }
 
 func New() Model {
-	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
-	l.Title = "Sessions"
-	l.SetShowHelp(false)
+	l := ulist.New("Sessions")
+	l.KeyMap.Quit.SetEnabled(true)
 	return Model{list: l}
 }
 

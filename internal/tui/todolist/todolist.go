@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/todo"
+	ulist "github.com/eleonorayaya/utena/internal/tui/list"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 )
@@ -19,11 +20,7 @@ type Model struct {
 }
 
 func New() Model {
-	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
-	l.Title = "Todos"
-	l.KeyMap.Quit.SetEnabled(false)
-	l.SetShowHelp(false)
-	return Model{list: l}
+	return Model{list: ulist.New("Todos")}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {

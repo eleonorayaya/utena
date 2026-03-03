@@ -5,6 +5,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	ulist "github.com/eleonorayaya/utena/internal/tui/list"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
@@ -16,12 +17,8 @@ type Model struct {
 }
 
 func New(title string, sortActiveFirst bool) Model {
-	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
-	l.Title = title
-	l.KeyMap.Quit.SetEnabled(false)
-	l.SetShowHelp(false)
 	return Model{
-		list:            l,
+		list:            ulist.New(title),
 		sortActiveFirst: sortActiveFirst,
 	}
 }
