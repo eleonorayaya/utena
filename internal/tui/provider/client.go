@@ -8,9 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os/exec"
 	"time"
 
+	"github.com/GianlucaP106/gotmux/gotmux"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
@@ -388,9 +388,13 @@ func (c *client) deleteTodo(id string) tea.Cmd {
 
 func (c *client) switchTmuxSession(name string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := exec.Command("tmux", "switch-client", "-t", name)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("[ERROR] tmux switch-client failed: %v output: %s", err, string(output))
+		t, err := gotmux.DefaultTmux()
+		if err != nil {
+			log.Printf("[ERROR] gotmux init failed: %v", err)
+			return tea.Quit()
+		}
+		if err := t.SwitchClient(&gotmux.SwitchClientOptions{TargetSession: name}); err != nil {
+			log.Printf("[ERROR] tmux switch-client failed: %v", err)
 		}
 		return tea.Quit()
 	}

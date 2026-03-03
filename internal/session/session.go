@@ -37,15 +37,15 @@ type Cleanup struct {
 	BranchDeleted     bool `json:"branch_deleted"`
 }
 
+func SanitizeID(name string) string {
+	r := strings.NewReplacer(
+		" ", "-",
+		".", "_",
+		"/", "-",
+	)
+	return strings.ToLower(r.Replace(name))
+}
+
 func BuildSessionID(workspaceName, name string) string {
-	sanitized := strings.ToLower(strings.ReplaceAll(workspaceName, " ", "-"))
-	return sanitized + "-" + name
-}
-
-func sanitizeBranchName(branch string) string {
-	return strings.ReplaceAll(branch, "/", "-")
-}
-
-func SanitizeForTmux(name string) string {
-	return strings.ReplaceAll(name, ".", "_")
+	return SanitizeID(workspaceName + "-" + name)
 }

@@ -3,6 +3,7 @@ module github.com/eleonorayaya/utena
 go 1.25.5
 
 require (
+	github.com/GianlucaP106/gotmux v0.5.0
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0

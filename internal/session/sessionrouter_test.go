@@ -27,7 +27,7 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, &mockTmuxManager{}, bus, "eqt/")
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
@@ -377,20 +377,20 @@ func TestSessionRouter_ReviveSession_InvalidWorkspace(t *testing.T) {
 	require.True(t, retrieved.IsDead)
 }
 
-func TestSessionRouter_ActivateSession_RejectsDeadSession(t *testing.T) {
+func TestSessionRouter_ActivateSession_AutoRevivesDeadSession(t *testing.T) {
 	router, sessionStore, _ := setupSessionRouter(t)
 
-	sessionStore.Add(&Session{ID: "dead-session", WorkspaceID: "ws-1", IsDead: true, LastUsedAt: time.Now()})
+	sessionStore.Add(&Session{ID: "dead-session", TmuxSessionName: "dead-session", WorkspaceID: "ws-1", IsDead: true, LastUsedAt: time.Now()})
 
 	req := httptest.NewRequest("PUT", "/dead-session/activate", nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Equal(t, http.StatusOK, w.Code)
 
 	retrieved, err := sessionStore.GetByID("dead-session")
 	require.NoError(t, err)
-	require.True(t, retrieved.IsDead)
-	require.False(t, retrieved.IsAttached)
+	require.False(t, retrieved.IsDead)
+	require.True(t, retrieved.IsAttached)
 }

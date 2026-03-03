@@ -97,9 +97,9 @@ func TestGitService_CreateWorktree(t *testing.T) {
 	repo := initTestRepo(t)
 
 	svc := NewGitService()
-	worktreePath, err := svc.CreateWorktree(context.Background(), repo, "my-feature", "eqt/my-feature", "main")
+	worktreePath, err := svc.CreateWorktree(context.Background(), repo, "eqt/my-feature", "main")
 	require.NoError(t, err)
-	require.Equal(t, filepath.Join(repo, ".worktrees", "my-feature"), worktreePath)
+	require.Equal(t, filepath.Join(repo, ".worktrees", "eqt-my-feature"), worktreePath)
 
 	info, err := os.Stat(worktreePath)
 	require.NoError(t, err)
@@ -114,10 +114,10 @@ func TestGitService_CreateWorktree_DuplicateName(t *testing.T) {
 	repo := initTestRepo(t)
 
 	svc := NewGitService()
-	_, err := svc.CreateWorktree(context.Background(), repo, "my-feature", "eqt/my-feature", "main")
+	_, err := svc.CreateWorktree(context.Background(), repo, "eqt/my-feature", "main")
 	require.NoError(t, err)
 
-	_, err = svc.CreateWorktree(context.Background(), repo, "my-feature", "eqt/my-feature", "main")
+	_, err = svc.CreateWorktree(context.Background(), repo, "eqt/my-feature", "main")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "git worktree add failed")
 }
@@ -126,7 +126,7 @@ func TestGitService_CreateWorktree_InvalidBaseBranch(t *testing.T) {
 	repo := initTestRepo(t)
 
 	svc := NewGitService()
-	_, err := svc.CreateWorktree(context.Background(), repo, "my-feature", "eqt/my-feature", "nonexistent")
+	_, err := svc.CreateWorktree(context.Background(), repo, "eqt/my-feature", "nonexistent")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "git worktree add failed")
 }

@@ -183,7 +183,7 @@ func (s *SessionStore) OnAppStart(ctx context.Context) error {
 			session.Name = session.ID
 		}
 		if session.TmuxSessionName == "" {
-			session.TmuxSessionName = SanitizeForTmux(session.ID)
+			session.TmuxSessionName = session.ID
 		}
 	}
 

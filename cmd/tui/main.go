@@ -15,7 +15,8 @@ import (
 )
 
 var (
-	defaultPort = "3333"
+	defaultPort   = "3333"
+	defaultLogDir = filepath.Join(os.Getenv("HOME"), "Library", "Logs", "utena")
 )
 
 func main() {
@@ -37,17 +38,22 @@ func main() {
 	}
 }
 
+func setupLogging() string {
+	logfilePath := os.Getenv("BUBBLETEA_LOG")
+	if logfilePath == "" {
+		os.MkdirAll(defaultLogDir, 0755)
+		logfilePath = filepath.Join(defaultLogDir, "tui.log")
+	}
+	if _, err := tea.LogToFile(logfilePath, "utena"); err != nil {
+		log.Fatal(err)
+	}
+	resolvedLogPath, _ := filepath.Abs(logfilePath)
+	return resolvedLogPath
+}
+
 func runTUI(cmd *cobra.Command, args []string) error {
 	port, _ := cmd.Flags().GetString("port")
-
-	var resolvedLogPath string
-	logfilePath := os.Getenv("BUBBLETEA_LOG")
-	if logfilePath != "" {
-		if _, err := tea.LogToFile(logfilePath, "utena"); err != nil {
-			log.Fatal(err)
-		}
-		resolvedLogPath, _ = filepath.Abs(logfilePath)
-	}
+	resolvedLogPath := setupLogging()
 
 	p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, router.SessionListView))
 	if _, err := p.Run(); err != nil {
@@ -63,15 +69,7 @@ func todosCmd() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
-
-			var resolvedLogPath string
-			logfilePath := os.Getenv("BUBBLETEA_LOG")
-			if logfilePath != "" {
-				if _, err := tea.LogToFile(logfilePath, "utena"); err != nil {
-					log.Fatal(err)
-				}
-				resolvedLogPath, _ = filepath.Abs(logfilePath)
-			}
+			resolvedLogPath := setupLogging()
 
 			p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, router.TodoListView))
 			if _, err := p.Run(); err != nil {
@@ -90,15 +88,7 @@ func statusCmd() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
-
-			var resolvedLogPath string
-			logfilePath := os.Getenv("BUBBLETEA_LOG")
-			if logfilePath != "" {
-				if _, err := tea.LogToFile(logfilePath, "utena"); err != nil {
-					log.Fatal(err)
-				}
-				resolvedLogPath, _ = filepath.Abs(logfilePath)
-			}
+			resolvedLogPath := setupLogging()
 
 			p := tea.NewProgram(
 				tui.NewApp(resolvedLogPath, port, router.StatusView),

@@ -1,21 +1,19 @@
 package eventbus
 
 const (
-	SessionCreateRequested = "session.create_requested"
-	SessionActivated       = "session.activated"
-	SessionRevived         = "session.revived"
+	TmuxSessionCreated       = "tmux.session_created"
+	TmuxSessionClosed        = "tmux.session_closed"
+	TmuxClientSessionChanged = "tmux.client_session_changed"
+	TmuxClientAttached       = "tmux.client_attached"
+	TmuxClientDetached       = "tmux.client_detached"
+
+	SessionActivated = "session.activated"
 )
 
-type SessionCreateRequestedEvent struct {
-	SessionName   string
-	WorkspacePath string
+type TmuxHookEvent struct {
+	TmuxSessionName string
 }
 
 type SessionActivatedEvent struct {
 	SessionName string
-}
-
-type SessionRevivedEvent struct {
-	SessionName   string
-	WorkspacePath string
 }

@@ -35,12 +35,13 @@ func newApp(fs afero.Fs, cfg Config) *App {
 	bus := eventbus.NewEventBus()
 
 	workspaceModule := workspace.NewWorkspaceModule(fs, cfg.ConfigDir)
-	sessionModule := session.NewSessionModule(workspaceModule, bus, fs, cfg.ConfigDir, cfg.BranchPrefix)
+	tmuxModule := tmux.NewTmuxModule(bus)
+	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, fs, cfg.ConfigDir, cfg.BranchPrefix)
 
 	return &App{
 		Workspace: workspaceModule,
 		Session:   sessionModule,
-		Tmux:      tmux.NewTmuxModule(sessionModule, bus),
+		Tmux:      tmuxModule,
 		Claude:    claude.NewClaudeModule(bus, fs, cfg.ConfigDir),
 		Todo:      todo.NewTodoModule(workspaceModule, fs, cfg.ConfigDir),
 	}
@@ -84,8 +85,8 @@ type moduleEntry struct {
 func (a *App) modules() []moduleEntry {
 	return []moduleEntry{
 		{"workspace", "/workspaces", a.Workspace},
-		{"session", "/sessions", a.Session},
 		{"tmux", "/tmux", a.Tmux},
+		{"session", "/sessions", a.Session},
 		{"claude", "/claude", a.Claude},
 		{"todo", "/todos", a.Todo},
 	}

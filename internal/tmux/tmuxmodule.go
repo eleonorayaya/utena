@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
-	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -14,8 +13,8 @@ type TmuxModule struct {
 	Router     *TmuxRouter
 }
 
-func NewTmuxModule(sessionModule *session.SessionModule, bus eventbus.EventBus) *TmuxModule {
-	service := NewTmuxService(sessionModule.Service, bus)
+func NewTmuxModule(bus eventbus.EventBus) *TmuxModule {
+	service := NewTmuxService(bus)
 	controller := NewTmuxController(service)
 	router := NewTmuxRouter(controller)
 	return &TmuxModule{Service: service, Controller: controller, Router: router}
