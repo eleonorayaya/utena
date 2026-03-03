@@ -12,3 +12,9 @@ curl -s -X PUT -H "Content-Type: application/json" \
 if [ "$EVENT" = "session-created" ] || [ "$EVENT" = "client-session-changed" ]; then
     "$SCRIPT_DIR/sync-windows.sh" "$SESSION_NAME"
 fi
+
+if [ "$EVENT" = "session-created" ]; then
+    tmux list-windows -t "$SESSION_NAME" -F '#{window_id}' 2>/dev/null | while read -r window_id; do
+        "$SCRIPT_DIR/status-pane.sh" "$SESSION_NAME" "$window_id"
+    done
+fi
