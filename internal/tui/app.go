@@ -10,6 +10,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionform"
 	"github.com/eleonorayaya/utena/internal/tui/sessionlist"
+	"github.com/eleonorayaya/utena/internal/tui/statusview"
 	"github.com/eleonorayaya/utena/internal/tui/todoform"
 	"github.com/eleonorayaya/utena/internal/tui/todolist"
 )
@@ -30,6 +31,7 @@ func NewApp(logPath, port string, initialView router.View) App {
 		router.TodoListView:    &router.ViewAdapter[todolist.Model]{Model: todolist.New()},
 		router.TodoFormView:    &router.ViewAdapter[todoform.Model]{Model: todoform.New()},
 		router.DebugView:       &router.ViewAdapter[debug.Model]{Model: debug.New(logPath, baseURL)},
+		router.StatusView:      &router.ViewAdapter[statusview.Model]{Model: statusview.New()},
 	}
 
 	return App{

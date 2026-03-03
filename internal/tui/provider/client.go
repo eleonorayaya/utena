@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/todo"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
@@ -307,6 +308,30 @@ func (c *client) fetchTodos() tea.Cmd {
 		}
 
 		return todosLoadedMsg{todos: resp.Todos}
+	}
+}
+
+func (c *client) fetchWindows(sessionName string) tea.Cmd {
+	return func() tea.Msg {
+		res, err := c.httpClient.Get(c.baseURL + "/tmux/windows/" + sessionName)
+		if err != nil {
+			log.Printf("[ERROR] fetch windows: %v", err)
+			return windowsLoadedMsg{}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			log.Printf("[ERROR] fetch windows: status %d", res.StatusCode)
+			return windowsLoadedMsg{}
+		}
+
+		var windows []tmux.Window
+		if err := json.NewDecoder(res.Body).Decode(&windows); err != nil {
+			log.Printf("[ERROR] decode windows: %v", err)
+			return windowsLoadedMsg{}
+		}
+
+		return windowsLoadedMsg{windows: windows}
 	}
 }
 

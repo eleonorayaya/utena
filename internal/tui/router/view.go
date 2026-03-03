@@ -8,4 +8,5 @@ const (
 	TodoListView
 	TodoFormView
 	DebugView
+	StatusView
 )

@@ -30,6 +30,7 @@ func main() {
 
 	rootCmd.AddCommand(shellInitCmd())
 	rootCmd.AddCommand(todosCmd())
+	rootCmd.AddCommand(statusCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -73,6 +74,36 @@ func todosCmd() *cobra.Command {
 			}
 
 			p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, router.TodoListView))
+			if _, err := p.Run(); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	return cmd
+}
+
+func statusCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "status",
+		Short:        "Open status bar view",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			port, _ := cmd.Root().Flags().GetString("port")
+
+			var resolvedLogPath string
+			logfilePath := os.Getenv("BUBBLETEA_LOG")
+			if logfilePath != "" {
+				if _, err := tea.LogToFile(logfilePath, "utena"); err != nil {
+					log.Fatal(err)
+				}
+				resolvedLogPath, _ = filepath.Abs(logfilePath)
+			}
+
+			p := tea.NewProgram(
+				tui.NewApp(resolvedLogPath, port, router.StatusView),
+				tea.WithReportFocus(),
+			)
 			if _, err := p.Run(); err != nil {
 				return err
 			}
