@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-STATUS_PANE=$(tmux list-panes -F '#{pane_id} #{pane_height} #{@utena-status}' 2>/dev/null | grep ' 1$' | head -1)
+STATUS_PANES=$(tmux list-panes -F '#{pane_id} #{pane_height} #{@utena-status}' 2>/dev/null | grep ' 1$')
 
-if [ -z "$STATUS_PANE" ]; then
+if [ -z "$STATUS_PANES" ]; then
     exit 0
 fi
 
-PANE_ID=$(echo "$STATUS_PANE" | awk '{print $1}')
-PANE_HEIGHT=$(echo "$STATUS_PANE" | awk '{print $2}')
+FIRST_PANE=$(echo "$STATUS_PANES" | head -1)
+PANE_ID=$(echo "$FIRST_PANE" | awk '{print $1}')
+PANE_HEIGHT=$(echo "$FIRST_PANE" | awk '{print $2}')
+
+echo "$STATUS_PANES" | tail -n +2 | while read -r line; do
+    extra_id=$(echo "$line" | awk '{print $1}')
+    tmux kill-pane -t "$extra_id" 2>/dev/null
+done
 
 if [ "$PANE_HEIGHT" -le 1 ]; then
     tmux resize-pane -t "$PANE_ID" -y 8
