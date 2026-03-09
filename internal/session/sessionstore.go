@@ -37,6 +37,22 @@ func (s *SessionStore) GetByID(id string) (*Session, error) {
 	}
 
 	copy := *session
+	if session.Resources != nil {
+		resCopy := *session.Resources
+		if session.Resources.Branch != nil {
+			brCopy := *session.Resources.Branch
+			resCopy.Branch = &brCopy
+		}
+		if session.Resources.Worktree != nil {
+			wtCopy := *session.Resources.Worktree
+			resCopy.Worktree = &wtCopy
+		}
+		if session.Resources.Tmux != nil {
+			tmCopy := *session.Resources.Tmux
+			resCopy.Tmux = &tmCopy
+		}
+		copy.Resources = &resCopy
+	}
 	return &copy, nil
 }
 
@@ -163,30 +179,89 @@ func (s *SessionStore) Delete(id string) error {
 	return nil
 }
 
+type legacySession struct {
+	Session
+	IsActive      bool     `json:"is_active"`
+	IsDead        bool     `json:"is_dead"`
+	IsDeleted     bool     `json:"is_deleted"`
+	BranchName    string   `json:"branch_name,omitempty"`
+	WorkspaceName string   `json:"workspace_name,omitempty"`
+	Cleanup       *Cleanup `json:"cleanup,omitempty"`
+}
+
+type Cleanup struct {
+	TmuxSessionKilled bool `json:"tmux_session_killed"`
+	WorktreeRemoved   bool `json:"worktree_removed"`
+	BranchDeleted     bool `json:"branch_deleted"`
+}
+
 func (s *SessionStore) OnAppStart(ctx context.Context) error {
 	data, err := afero.ReadFile(s.fs, s.sessionsPath())
 	if err != nil {
 		return nil
 	}
 
-	loaded := make(map[string]*Session)
-	if err := json.Unmarshal(data, &loaded); err != nil {
+	legacy := make(map[string]*legacySession)
+	if err := json.Unmarshal(data, &legacy); err != nil {
 		return nil
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sessions = loaded
 
-	for _, session := range s.sessions {
-		if session.Name == "" {
-			session.Name = session.ID
+	s.sessions = make(map[string]*Session, len(legacy))
+	for id, ls := range legacy {
+		sess := &ls.Session
+		sess.ID = id
+
+		if sess.Name == "" {
+			sess.Name = sess.ID
 		}
-		if session.TmuxSessionName == "" {
-			session.TmuxSessionName = session.ID
+		if sess.TmuxSessionName == "" {
+			sess.TmuxSessionName = sess.ID
 		}
+
+		if ls.BranchName != "" && sess.Branch == "" {
+			sess.Branch = ls.BranchName
+		}
+
+		if sess.Status == "" {
+			switch {
+			case ls.IsDeleted:
+				sess.Status = StatusDeleted
+			case ls.IsDead:
+				sess.Status = StatusBroken
+			default:
+				sess.Status = StatusReady
+			}
+		}
+
+		if sess.Resources == nil {
+			res := &Resources{}
+			if sess.Branch != "" {
+				status := ResourceReady
+				if sess.Status == StatusBroken {
+					status = ResourceReady
+				}
+				res.Branch = &ResourceState{Status: status}
+			}
+			if sess.WorktreePath != "" {
+				res.Worktree = &ResourceState{Status: ResourceReady}
+			}
+			tmuxStatus := ResourceReady
+			if sess.Status == StatusBroken {
+				tmuxStatus = ResourceRemoved
+			} else if sess.Status == StatusDeleted {
+				tmuxStatus = ResourceRemoved
+			}
+			res.Tmux = &ResourceState{Status: tmuxStatus}
+			sess.Resources = res
+		}
+
+		s.sessions[id] = sess
 	}
 
+	s.save()
 	return nil
 }
 

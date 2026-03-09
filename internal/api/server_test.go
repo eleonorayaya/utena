@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -31,6 +32,24 @@ func setupTestRouter(t *testing.T) (*App, chi.Router) {
 	return app, server.Handler.(*chi.Mux)
 }
 
+func waitForSessionStatus(t *testing.T, router chi.Router, id string, status session.SessionStatus, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		req := httptest.NewRequest("GET", "/sessions/"+id, nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code == http.StatusOK {
+			var resp session.SessionResponse
+			if json.Unmarshal(w.Body.Bytes(), &resp) == nil && resp.Status == status {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("session %q did not reach status %q within %v", id, status, timeout)
+}
+
 func TestDaemon_ListWorkspaces(t *testing.T) {
 	_, router := setupTestRouter(t)
 
@@ -46,7 +65,6 @@ func TestDaemon_ListWorkspaces(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, response.Workspaces, 2)
 
-	// Verify hard-coded workspaces
 	ids := make(map[string]bool)
 	for _, ws := range response.Workspaces {
 		ids[ws.ID] = true
@@ -83,13 +101,16 @@ func TestDaemon_CreateAndGetSession(t *testing.T) {
 
 	router.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusCreated, w.Code)
+	require.Equal(t, http.StatusAccepted, w.Code)
 
 	var createResp session.SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &createResp)
 	require.NoError(t, err)
 	require.Equal(t, "utena-test-session-1", createResp.ID)
 	require.Equal(t, "test-session-1", createResp.Name)
+	require.Equal(t, session.StatusCreating, createResp.Status)
+
+	waitForSessionStatus(t, router, "utena-test-session-1", session.StatusReady, 2*time.Second)
 
 	req = httptest.NewRequest("GET", "/sessions/utena-test-session-1", nil)
 	w = httptest.NewRecorder()
@@ -119,8 +140,11 @@ func TestDaemon_ListSessions(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
-		require.Equal(t, http.StatusCreated, w.Code)
+		require.Equal(t, http.StatusAccepted, w.Code)
 	}
+
+	waitForSessionStatus(t, router, "utena-session-1", session.StatusReady, 2*time.Second)
+	waitForSessionStatus(t, router, "other-session-2", session.StatusReady, 2*time.Second)
 
 	req := httptest.NewRequest("GET", "/sessions", nil)
 	w := httptest.NewRecorder()
@@ -150,7 +174,9 @@ func TestDaemon_TmuxHookSessionCreated(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	waitForSessionStatus(t, router, "utena-test-session", session.StatusReady, 2*time.Second)
 
 	hookBody := []byte(`{"session_name":"utena-test-session"}`)
 	req = httptest.NewRequest("PUT", "/tmux/hooks/session-created", bytes.NewReader(hookBody))
@@ -175,8 +201,7 @@ func TestDaemon_TmuxHookSessionCreated(t *testing.T) {
 
 	sess := findSessionByID(sessionsResponse.Sessions, "utena-test-session")
 	require.NotNil(t, sess)
-	require.True(t, sess.IsActive)
-	require.False(t, sess.IsDead)
+	require.Equal(t, session.StatusReady, sess.Status)
 }
 
 func findSessionByID(sessions []session.Session, id string) *session.Session {
@@ -196,7 +221,9 @@ func TestDaemon_TmuxHookSessionClosed(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code)
+	require.Equal(t, http.StatusAccepted, w.Code)
+
+	waitForSessionStatus(t, router, "utena-test-session", session.StatusReady, 2*time.Second)
 
 	hookBody := []byte(`{"session_name":"utena-test-session"}`)
 	req = httptest.NewRequest("PUT", "/tmux/hooks/session-closed", bytes.NewReader(hookBody))
@@ -216,7 +243,6 @@ func TestDaemon_TmuxHookSessionClosed(t *testing.T) {
 
 	sess := findSessionByID(sessionsResponse.Sessions, "utena-test-session")
 	require.NotNil(t, sess)
-	require.True(t, sess.IsDead)
-	require.False(t, sess.IsActive)
+	require.Equal(t, session.StatusBroken, sess.Status)
 	require.False(t, sess.IsAttached)
 }

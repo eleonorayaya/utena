@@ -46,8 +46,8 @@ func CreateSession(name, workspaceID, branch, workspacePath string, branchCreate
 	}
 }
 
-func ReviveSession(name string) tea.Cmd {
-	return func() tea.Msg { return reviveSessionIntentMsg{name: name} }
+func RepairSession(id string) tea.Cmd {
+	return func() tea.Msg { return repairSessionIntentMsg{id: id} }
 }
 
 func DeleteSession(id string) tea.Cmd {
@@ -69,8 +69,8 @@ type createSessionIntentMsg struct {
 	branchCreated bool
 }
 
-type reviveSessionIntentMsg struct {
-	name string
+type repairSessionIntentMsg struct {
+	id string
 }
 
 type deleteSessionIntentMsg struct {
@@ -102,14 +102,12 @@ type sessionActivatedMsg struct {
 }
 
 type sessionCreatedMsg struct {
-	id           string
-	worktreePath string
+	id     string
+	status session.SessionStatus
 }
 
-type sessionRevivedMsg struct {
-	name          string
-	workspacePath string
-	worktreePath  string
+type sessionRepairedMsg struct {
+	id string
 }
 
 type sessionDeletedMsg struct {
@@ -117,9 +115,10 @@ type sessionDeletedMsg struct {
 }
 
 type sessionsProvider struct {
-	client         *client
-	sessions       []session.Session
-	claudeSessions map[string][]claude.ClaudeSession
+	client           *client
+	sessions         []session.Session
+	claudeSessions   map[string][]claude.ClaudeSession
+	pendingSessionID string
 }
 
 func newSessionsProvider(c *client) sessionsProvider {
@@ -151,11 +150,43 @@ func (p sessionsProvider) deriveActiveWorkspace() tea.Cmd {
 	}
 }
 
+func (p sessionsProvider) checkPendingSession() tea.Cmd {
+	if p.pendingSessionID == "" {
+		return nil
+	}
+	pendingID := p.pendingSessionID
+	for _, s := range p.sessions {
+		if s.ID == pendingID {
+			switch s.Status {
+			case session.StatusReady:
+				return ActivateSession(pendingID)
+			case session.StatusBroken:
+				errMsg := "session creation failed"
+				if s.Resources != nil {
+					if e := s.Resources.FirstError(); e != "" {
+						errMsg = e
+					}
+				}
+				return func() tea.Msg {
+					return ErrMsg{Err: fmt.Errorf("%s", errMsg)}
+				}
+			}
+			break
+		}
+	}
+	return nil
+}
+
 func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionsLoadedMsg:
 		p.sessions = msg.sessions
-		return p, tea.Batch(p.emitState(), p.deriveActiveWorkspace())
+		cmds := []tea.Cmd{p.emitState(), p.deriveActiveWorkspace()}
+		if pendingCmd := p.checkPendingSession(); pendingCmd != nil {
+			p.pendingSessionID = ""
+			cmds = append(cmds, pendingCmd)
+		}
+		return p, tea.Batch(cmds...)
 
 	case claudeSessionsLoadedMsg:
 		p.claudeSessions = make(map[string][]claude.ClaudeSession)
@@ -184,19 +215,13 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 			return p.client.activateSession(name)()
 		}
 
-	case reviveSessionIntentMsg:
-		name := msg.name
-		return p, func() tea.Msg {
-			reviveResult := p.client.reviveSession(name)()
-			if err, ok := reviveResult.(ErrMsg); ok {
-				return err
-			}
-			if _, ok := reviveResult.(sessionRevivedMsg); !ok {
-				return ErrMsg{Err: fmt.Errorf("unexpected result from reviveSession")}
-			}
+	case repairSessionIntentMsg:
+		id := msg.id
+		return p, p.client.repairSession(id)
 
-			return p.client.activateSession(name)()
-		}
+	case sessionRepairedMsg:
+		p.pendingSessionID = msg.id
+		return p, p.client.fetchSessions()
 
 	case createSessionIntentMsg:
 		name := msg.name
@@ -212,12 +237,15 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 			if !ok {
 				return ErrMsg{Err: fmt.Errorf("unexpected result from createSession")}
 			}
-			sessionID := created.id
-
-			return p.client.activateSession(sessionID)()
+			return created
 		}
 
+	case sessionCreatedMsg:
+		p.pendingSessionID = msg.id
+		return p, p.client.fetchSessions()
+
 	case sessionActivatedMsg:
+		p.pendingSessionID = ""
 		return p, p.client.switchTmuxSession(msg.tmuxSessionName)
 
 	case deleteSessionIntentMsg:

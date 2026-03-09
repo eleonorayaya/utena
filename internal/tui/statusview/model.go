@@ -187,7 +187,7 @@ func (m Model) collapsePane() {
 func (m Model) activeSessions() []session.Session {
 	var result []session.Session
 	for _, s := range m.sessions {
-		if !s.IsDeleted && !s.IsDead {
+		if s.Status == session.StatusReady || s.Status == session.StatusCreating {
 			result = append(result, s)
 		}
 	}

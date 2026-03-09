@@ -9,6 +9,7 @@ import (
 
 type SessionResponse struct {
 	*Session
+	WorkspaceName string `json:"workspace_name,omitempty"`
 	WorkspacePath string `json:"workspace_path,omitempty"`
 }
 
@@ -16,20 +17,7 @@ func NewSessionResponse(session *Session) *SessionResponse {
 	return &SessionResponse{Session: session}
 }
 
-type ReviveResult struct {
-	Session       *Session
-	WorkspacePath string
-}
-
-func NewReviveResponse(result *ReviveResult) *SessionResponse {
-	return &SessionResponse{
-		Session:       result.Session,
-		WorkspacePath: result.WorkspacePath,
-	}
-}
-
 func (sr *SessionResponse) Render(w http.ResponseWriter, r *http.Request) error {
-
 	return nil
 }
 
@@ -42,7 +30,6 @@ func NewSessionListResponse(sessions []Session) *SessionListResponse {
 }
 
 func (slr *SessionListResponse) Render(w http.ResponseWriter, r *http.Request) error {
-
 	return nil
 }
 
@@ -79,10 +66,8 @@ type UpdateSessionRequest struct {
 }
 
 func (u *UpdateSessionRequest) Bind(r *http.Request) error {
-
 	if u.Session == nil {
 		return errors.New("session cannot be nil")
 	}
-
 	return ValidateSession(u.Session)
 }

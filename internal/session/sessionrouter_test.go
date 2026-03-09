@@ -37,21 +37,17 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 func TestSessionRouter_ListSessions(t *testing.T) {
 	router, sessionStore, _ := setupSessionRouter(t)
 
-	// Add test sessions
 	now := time.Now()
-	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", LastUsedAt: now}
-	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", LastUsedAt: now}
+	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
+	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 
-	// Create request
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
 
-	// Execute
 	router.Routes().ServeHTTP(w, req)
 
-	// Assert
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var response SessionListResponse
@@ -59,7 +55,6 @@ func TestSessionRouter_ListSessions(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, response.Sessions, 2)
 
-	// Verify session IDs
 	ids := make(map[string]bool)
 	for _, session := range response.Sessions {
 		ids[session.ID] = true
@@ -71,24 +66,20 @@ func TestSessionRouter_ListSessions(t *testing.T) {
 func TestSessionRouter_GetSessionByID(t *testing.T) {
 	router, sessionStore, _ := setupSessionRouter(t)
 
-	// Add test session
 	session := &Session{
 		ID:          "session-1",
 		WorkspaceID: "ws-1",
 		IsAttached:  true,
-		IsActive:    true,
+		Status:      StatusReady,
 		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
-	// Create request
 	req := httptest.NewRequest("GET", "/session-1", nil)
 	w := httptest.NewRecorder()
 
-	// Execute
 	router.Routes().ServeHTTP(w, req)
 
-	// Assert
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var response SessionResponse
@@ -97,43 +88,36 @@ func TestSessionRouter_GetSessionByID(t *testing.T) {
 	require.Equal(t, "session-1", response.ID)
 	require.Equal(t, "ws-1", response.WorkspaceID)
 	require.True(t, response.IsAttached)
-	require.True(t, response.IsActive)
+	require.Equal(t, StatusReady, response.Status)
 }
 
 func TestSessionRouter_GetSessionByID_NotFound(t *testing.T) {
 	router, _, _ := setupSessionRouter(t)
 
-	// Create request
 	req := httptest.NewRequest("GET", "/nonexistent", nil)
 	w := httptest.NewRecorder()
 
-	// Execute
 	router.Routes().ServeHTTP(w, req)
 
-	// Assert
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestSessionRouter_ListSessionsByWorkspace(t *testing.T) {
 	router, sessionStore, _ := setupSessionRouter(t)
 
-	// Add test sessions
 	now := time.Now()
-	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", LastUsedAt: now}
-	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", LastUsedAt: now}
-	session3 := &Session{ID: "session-3", WorkspaceID: "ws-1", LastUsedAt: now}
+	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
+	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
+	session3 := &Session{ID: "session-3", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 	sessionStore.Add(session3)
 
-	// Create request
 	req := httptest.NewRequest("GET", "/workspace/ws-1", nil)
 	w := httptest.NewRecorder()
 
-	// Execute
 	router.Routes().ServeHTTP(w, req)
 
-	// Assert
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var response SessionListResponse
@@ -141,7 +125,6 @@ func TestSessionRouter_ListSessionsByWorkspace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, response.Sessions, 2)
 
-	// Verify only ws-1 sessions returned
 	for _, session := range response.Sessions {
 		require.Equal(t, "ws-1", session.WorkspaceID)
 	}
@@ -158,13 +141,16 @@ func TestSessionRouter_CreateSession(t *testing.T) {
 
 	router.Routes().ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusCreated, w.Code)
+	require.Equal(t, http.StatusAccepted, w.Code)
 
 	var resp SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	require.Equal(t, "utena-session-1", resp.ID)
 	require.Equal(t, "session-1", resp.Name)
+	require.Equal(t, StatusCreating, resp.Status)
+
+	waitForStatus(t, sessionStore, "utena-session-1", StatusReady, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID("utena-session-1")
 	require.NoError(t, err)
@@ -183,13 +169,15 @@ func TestSessionRouter_CreateSession_WithName(t *testing.T) {
 
 	router.Routes().ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusCreated, w.Code)
+	require.Equal(t, http.StatusAccepted, w.Code)
 
 	var resp SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	require.Equal(t, "utena-main", resp.ID)
 	require.Equal(t, "main", resp.Name)
+
+	waitForStatus(t, sessionStore, "utena-main", StatusReady, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID("utena-main")
 	require.NoError(t, err)
@@ -207,13 +195,15 @@ func TestSessionRouter_CreateSession_ExistingBranch(t *testing.T) {
 
 	router.Routes().ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusCreated, w.Code)
+	require.Equal(t, http.StatusAccepted, w.Code)
 
 	var resp SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	require.Equal(t, "utena-main", resp.ID)
 	require.Equal(t, "main", resp.Name)
+
+	waitForStatus(t, sessionStore, "utena-main", StatusReady, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID("utena-main")
 	require.NoError(t, err)
@@ -232,39 +222,33 @@ func TestSessionRouter_CreateSession_InvalidWorkspace(t *testing.T) {
 
 	router.Routes().ServeHTTP(w, req)
 
-	require.NotEqual(t, http.StatusCreated, w.Code)
+	require.NotEqual(t, http.StatusAccepted, w.Code)
 }
 
 func TestSessionRouter_UpdateSession(t *testing.T) {
 	router, sessionStore, _ := setupSessionRouter(t)
 
-	// Add initial session
 	session := &Session{
 		ID:          "session-1",
 		WorkspaceID: "ws-1",
 		IsAttached:  false,
-		IsActive:    true,
+		Status:      StatusReady,
 		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
-	// Update session
 	session.IsAttached = true
 	body, err := json.Marshal(session)
 	require.NoError(t, err)
 
-	// Create request
 	req := httptest.NewRequest("PUT", "/session-1", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	// Execute
 	router.Routes().ServeHTTP(w, req)
 
-	// Assert
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// Verify update
 	retrieved, err := sessionStore.GetByID("session-1")
 	require.NoError(t, err)
 	require.True(t, retrieved.IsAttached)
@@ -273,32 +257,40 @@ func TestSessionRouter_UpdateSession(t *testing.T) {
 func TestSessionRouter_DeleteSession(t *testing.T) {
 	router, sessionStore, _ := setupSessionRouter(t)
 
-	// Add test session
-	session := &Session{ID: "session-1", WorkspaceID: "ws-1", LastUsedAt: time.Now()}
+	session := &Session{
+		ID:          "session-1",
+		WorkspaceID: "ws-1",
+		Status:      StatusReady,
+		Resources:   &Resources{Tmux: &ResourceState{Status: ResourceReady}},
+		LastUsedAt:  time.Now(),
+	}
 	sessionStore.Add(session)
 
-	// Create request
 	req := httptest.NewRequest("DELETE", "/session-1", nil)
 	w := httptest.NewRecorder()
 
-	// Execute
 	router.Routes().ServeHTTP(w, req)
 
-	// Assert
 	require.Equal(t, http.StatusNoContent, w.Code)
 
 	retrieved, err := sessionStore.GetByID("session-1")
 	require.NoError(t, err)
-	require.True(t, retrieved.IsDeleted)
-	require.NotNil(t, retrieved.Cleanup)
+	require.Equal(t, StatusDeleted, retrieved.Status)
+	require.NotNil(t, retrieved.Resources)
 }
 
-func TestSessionRouter_ReviveSession(t *testing.T) {
+func TestSessionRouter_RepairSession(t *testing.T) {
 	router, sessionStore, _ := setupSessionRouter(t)
 
-	sessionStore.Add(&Session{ID: "dead-session", WorkspaceID: "ws-1", IsDead: true, LastUsedAt: time.Now()})
+	sessionStore.Add(&Session{
+		ID:          "broken-session",
+		WorkspaceID: "ws-1",
+		Status:      StatusBroken,
+		Resources:   &Resources{Tmux: &ResourceState{Status: ResourceRemoved}},
+		LastUsedAt:  time.Now(),
+	})
 
-	req := httptest.NewRequest("PUT", "/dead-session/revive", nil)
+	req := httptest.NewRequest("PUT", "/broken-session/repair", nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -308,38 +300,14 @@ func TestSessionRouter_ReviveSession(t *testing.T) {
 	var response SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	require.Equal(t, "dead-session", response.ID)
-	require.False(t, response.IsDead)
-	require.Equal(t, "/tmp/utena", response.WorkspacePath)
-
-	retrieved, err := sessionStore.GetByID("dead-session")
-	require.NoError(t, err)
-	require.False(t, retrieved.IsDead)
+	require.Equal(t, "broken-session", response.ID)
+	require.Equal(t, StatusCreating, response.Status)
 }
 
-func TestSessionRouter_ReviveSession_NoWorkspace(t *testing.T) {
-	router, sessionStore, _ := setupSessionRouter(t)
-
-	sessionStore.Add(&Session{ID: "dead-no-ws", IsDead: true, LastUsedAt: time.Now()})
-
-	req := httptest.NewRequest("PUT", "/dead-no-ws/revive", nil)
-	w := httptest.NewRecorder()
-
-	router.Routes().ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var response SessionResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
-	require.False(t, response.IsDead)
-	require.Empty(t, response.WorkspacePath)
-}
-
-func TestSessionRouter_ReviveSession_NotFound(t *testing.T) {
+func TestSessionRouter_RepairSession_NotFound(t *testing.T) {
 	router, _, _ := setupSessionRouter(t)
 
-	req := httptest.NewRequest("PUT", "/nonexistent/revive", nil)
+	req := httptest.NewRequest("PUT", "/nonexistent/repair", nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -347,50 +315,41 @@ func TestSessionRouter_ReviveSession_NotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
-func TestSessionRouter_ReviveSession_NotDead(t *testing.T) {
+func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
 	router, sessionStore, _ := setupSessionRouter(t)
 
-	sessionStore.Add(&Session{ID: "alive-session", WorkspaceID: "ws-1", IsDead: false, LastUsedAt: time.Now()})
+	sessionStore.Add(&Session{
+		ID:          "alive-session",
+		WorkspaceID: "ws-1",
+		Status:      StatusReady,
+		Resources:   &Resources{Tmux: &ResourceState{Status: ResourceReady}},
+		LastUsedAt:  time.Now(),
+	})
 
-	req := httptest.NewRequest("PUT", "/alive-session/revive", nil)
-	w := httptest.NewRecorder()
-
-	router.Routes().ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSessionRouter_ReviveSession_InvalidWorkspace(t *testing.T) {
-	router, sessionStore, _ := setupSessionRouter(t)
-
-	sessionStore.Add(&Session{ID: "dead-bad-ws", WorkspaceID: "nonexistent", IsDead: true, LastUsedAt: time.Now()})
-
-	req := httptest.NewRequest("PUT", "/dead-bad-ws/revive", nil)
-	w := httptest.NewRecorder()
-
-	router.Routes().ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusBadRequest, w.Code)
-
-	retrieved, err := sessionStore.GetByID("dead-bad-ws")
-	require.NoError(t, err)
-	require.True(t, retrieved.IsDead)
-}
-
-func TestSessionRouter_ActivateSession_AutoRevivesDeadSession(t *testing.T) {
-	router, sessionStore, _ := setupSessionRouter(t)
-
-	sessionStore.Add(&Session{ID: "dead-session", TmuxSessionName: "dead-session", WorkspaceID: "ws-1", IsDead: true, LastUsedAt: time.Now()})
-
-	req := httptest.NewRequest("PUT", "/dead-session/activate", nil)
+	req := httptest.NewRequest("PUT", "/alive-session/repair", nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
+}
 
-	retrieved, err := sessionStore.GetByID("dead-session")
-	require.NoError(t, err)
-	require.False(t, retrieved.IsDead)
-	require.True(t, retrieved.IsAttached)
+func TestSessionRouter_ActivateSession_RejectsBrokenSession(t *testing.T) {
+	router, sessionStore, _ := setupSessionRouter(t)
+
+	sessionStore.Add(&Session{
+		ID:              "broken-session",
+		TmuxSessionName: "broken-session",
+		WorkspaceID:     "ws-1",
+		Status:          StatusBroken,
+		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceRemoved}},
+		LastUsedAt:      time.Now(),
+	})
+
+	req := httptest.NewRequest("PUT", "/broken-session/activate", nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
 }

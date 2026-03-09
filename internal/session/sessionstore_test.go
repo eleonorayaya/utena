@@ -29,7 +29,7 @@ func TestSessionStore_Add(t *testing.T) {
 		ID:          "session-1",
 		WorkspaceID: "ws-1",
 		IsAttached:  true,
-		IsActive:    true,
+		Status:      StatusReady,
 		LastUsedAt:  time.Now(),
 	}
 
@@ -87,7 +87,7 @@ func TestSessionStore_GetByID(t *testing.T) {
 		ID:          "session-1",
 		WorkspaceID: "ws-1",
 		IsAttached:  false,
-		IsActive:    true,
+		Status:      StatusReady,
 		LastUsedAt:  time.Now(),
 	}
 
@@ -98,7 +98,7 @@ func TestSessionStore_GetByID(t *testing.T) {
 	require.Equal(t, session.ID, retrieved.ID)
 	require.Equal(t, session.WorkspaceID, retrieved.WorkspaceID)
 	require.Equal(t, session.IsAttached, retrieved.IsAttached)
-	require.Equal(t, session.IsActive, retrieved.IsActive)
+	require.Equal(t, session.Status, retrieved.Status)
 }
 
 func TestSessionStore_GetByID_NotFound(t *testing.T) {
@@ -180,7 +180,7 @@ func TestSessionStore_Update(t *testing.T) {
 		ID:          "session-1",
 		WorkspaceID: "ws-1",
 		IsAttached:  false,
-		IsActive:    true,
+		Status:      StatusReady,
 		LastUsedAt:  time.Now(),
 	}
 

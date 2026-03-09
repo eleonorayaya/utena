@@ -166,35 +166,25 @@ func (c *client) activateSession(name string) tea.Cmd {
 	}
 }
 
-func (c *client) reviveSession(name string) tea.Cmd {
+func (c *client) repairSession(id string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := http.NewRequest(http.MethodPut, c.baseURL+"/sessions/"+name+"/revive", nil)
+		req, err := http.NewRequest(http.MethodPut, c.baseURL+"/sessions/"+id+"/repair", nil)
 		if err != nil {
 			return ErrMsg{err}
 		}
 
 		res, err := c.httpClient.Do(req)
 		if err != nil {
-			log.Printf("[ERROR] revive session %q: %v", name, err)
+			log.Printf("[ERROR] repair session %q: %v", id, err)
 			return ErrMsg{err}
 		}
 		defer res.Body.Close()
 
 		if res.StatusCode != http.StatusOK {
-			return parseAPIError(res, "revive session")
+			return parseAPIError(res, "repair session")
 		}
 
-		var resp struct {
-			WorkspacePath string `json:"workspace_path"`
-			WorktreePath  string `json:"worktree_path"`
-		}
-		json.NewDecoder(res.Body).Decode(&resp)
-
-		return sessionRevivedMsg{
-			name:          name,
-			workspacePath: resp.WorkspacePath,
-			worktreePath:  resp.WorktreePath,
-		}
+		return sessionRepairedMsg{id: id}
 	}
 }
 
@@ -227,17 +217,17 @@ func (c *client) createSession(name, workspaceID, branch string, branchCreated b
 		}
 		defer res.Body.Close()
 
-		if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusCreated {
+		if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusAccepted {
 			return parseAPIError(res, "create session")
 		}
 
 		var resp struct {
-			ID           string `json:"id"`
-			WorktreePath string `json:"worktree_path"`
+			ID     string `json:"id"`
+			Status string `json:"status"`
 		}
 		json.NewDecoder(res.Body).Decode(&resp)
 
-		return sessionCreatedMsg{id: resp.ID, worktreePath: resp.WorktreePath}
+		return sessionCreatedMsg{id: resp.ID, status: session.SessionStatus(resp.Status)}
 	}
 }
 

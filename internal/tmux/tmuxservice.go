@@ -36,6 +36,9 @@ func (t *TmuxService) OnAppEnd(ctx context.Context) error {
 }
 
 func (t *TmuxService) CreateSession(name, startDir string) error {
+	if t.tmux == nil {
+		return nil
+	}
 	opts := &gotmux.SessionOptions{
 		Name:           name,
 		StartDirectory: startDir,
@@ -45,6 +48,9 @@ func (t *TmuxService) CreateSession(name, startDir string) error {
 }
 
 func (t *TmuxService) KillSession(name string) error {
+	if t.tmux == nil {
+		return nil
+	}
 	sess, err := t.tmux.GetSessionByName(name)
 	if err != nil {
 		return err
@@ -53,10 +59,16 @@ func (t *TmuxService) KillSession(name string) error {
 }
 
 func (t *TmuxService) HasSession(name string) bool {
+	if t.tmux == nil {
+		return false
+	}
 	return t.tmux.HasSession(name)
 }
 
 func (t *TmuxService) ListSessionNames() ([]string, error) {
+	if t.tmux == nil {
+		return nil, nil
+	}
 	sessions, err := t.tmux.ListSessions()
 	if err != nil {
 		return nil, err
