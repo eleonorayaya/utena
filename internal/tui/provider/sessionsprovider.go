@@ -50,6 +50,10 @@ func RepairSession(id string) tea.Cmd {
 	return func() tea.Msg { return repairSessionIntentMsg{id: id} }
 }
 
+func PollSession(id string) tea.Cmd {
+	return func() tea.Msg { return pollSessionIntentMsg{id: id} }
+}
+
 func DeleteSession(id string) tea.Cmd {
 	return func() tea.Msg { return deleteSessionIntentMsg{id: id} }
 }
@@ -114,11 +118,27 @@ type sessionDeletedMsg struct {
 	id string
 }
 
+type sessionPolledMsg struct {
+	session session.Session
+}
+
+type pollSessionIntentMsg struct {
+	id string
+}
+
+type SessionPolledMsg struct {
+	Session session.Session
+}
+
+type SessionCreatedMsg struct {
+	ID     string
+	Status session.SessionStatus
+}
+
 type sessionsProvider struct {
-	client           *client
-	sessions         []session.Session
-	claudeSessions   map[string][]claude.ClaudeSession
-	pendingSessionID string
+	client         *client
+	sessions       []session.Session
+	claudeSessions map[string][]claude.ClaudeSession
 }
 
 func newSessionsProvider(c *client) sessionsProvider {
@@ -150,43 +170,11 @@ func (p sessionsProvider) deriveActiveWorkspace() tea.Cmd {
 	}
 }
 
-func (p sessionsProvider) checkPendingSession() tea.Cmd {
-	if p.pendingSessionID == "" {
-		return nil
-	}
-	pendingID := p.pendingSessionID
-	for _, s := range p.sessions {
-		if s.ID == pendingID {
-			switch s.Status {
-			case session.StatusReady:
-				return ActivateSession(pendingID)
-			case session.StatusBroken:
-				errMsg := "session creation failed"
-				if s.Resources != nil {
-					if e := s.Resources.FirstError(); e != "" {
-						errMsg = e
-					}
-				}
-				return func() tea.Msg {
-					return ErrMsg{Err: fmt.Errorf("%s", errMsg)}
-				}
-			}
-			break
-		}
-	}
-	return nil
-}
-
 func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionsLoadedMsg:
 		p.sessions = msg.sessions
-		cmds := []tea.Cmd{p.emitState(), p.deriveActiveWorkspace()}
-		if pendingCmd := p.checkPendingSession(); pendingCmd != nil {
-			p.pendingSessionID = ""
-			cmds = append(cmds, pendingCmd)
-		}
-		return p, tea.Batch(cmds...)
+		return p, tea.Batch(p.emitState(), p.deriveActiveWorkspace())
 
 	case claudeSessionsLoadedMsg:
 		p.claudeSessions = make(map[string][]claude.ClaudeSession)
@@ -220,7 +208,6 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, p.client.repairSession(id)
 
 	case sessionRepairedMsg:
-		p.pendingSessionID = msg.id
 		return p, p.client.fetchSessions()
 
 	case createSessionIntentMsg:
@@ -241,11 +228,13 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		}
 
 	case sessionCreatedMsg:
-		p.pendingSessionID = msg.id
-		return p, p.client.fetchSessions()
+		id := msg.id
+		status := msg.status
+		return p, tea.Batch(p.client.fetchSessions(), func() tea.Msg {
+			return SessionCreatedMsg{ID: id, Status: status}
+		})
 
 	case sessionActivatedMsg:
-		p.pendingSessionID = ""
 		return p, p.client.switchTmuxSession(msg.tmuxSessionName)
 
 	case deleteSessionIntentMsg:
@@ -253,6 +242,14 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 
 	case sessionDeletedMsg:
 		return p, p.client.fetchSessions()
+
+	case pollSessionIntentMsg:
+		return p, p.client.getSession(msg.id)
+
+	case sessionPolledMsg:
+		return p, func() tea.Msg {
+			return SessionPolledMsg{Session: msg.session}
+		}
 	}
 
 	return p, nil

@@ -27,17 +27,13 @@ func NewApp(cfg Config) *App {
 	return newApp(afero.NewOsFs(), cfg)
 }
 
-func NewTestApp(cfg Config) *App {
-	return newTestApp(afero.NewMemMapFs(), cfg)
-}
-
-func newTestApp(fs afero.Fs, cfg Config) *App {
+func NewTestApp(cfg Config, tmuxManager session.TmuxManager) *App {
+	fs := afero.NewMemMapFs()
 	bus := eventbus.NewEventBus()
 
 	workspaceModule := workspace.NewWorkspaceModule(fs, cfg.ConfigDir)
 	tmuxModule := tmux.NewTmuxModule(bus)
-	mockTmux := &noopTmuxManager{sessions: make(map[string]bool)}
-	sessionModule := session.NewSessionModule(mockTmux, workspaceModule, bus, fs, cfg.ConfigDir, cfg.BranchPrefix)
+	sessionModule := session.NewSessionModule(tmuxManager, workspaceModule, bus, fs, cfg.ConfigDir, cfg.BranchPrefix)
 
 	return &App{
 		Workspace: workspaceModule,
@@ -46,32 +42,6 @@ func newTestApp(fs afero.Fs, cfg Config) *App {
 		Claude:    claude.NewClaudeModule(bus, fs, cfg.ConfigDir),
 		Todo:      todo.NewTodoModule(workspaceModule, fs, cfg.ConfigDir),
 	}
-}
-
-type noopTmuxManager struct {
-	sessions map[string]bool
-}
-
-func (m *noopTmuxManager) CreateSession(name, startDir string) error {
-	m.sessions[name] = true
-	return nil
-}
-
-func (m *noopTmuxManager) KillSession(name string) error {
-	delete(m.sessions, name)
-	return nil
-}
-
-func (m *noopTmuxManager) HasSession(name string) bool {
-	return m.sessions[name]
-}
-
-func (m *noopTmuxManager) ListSessionNames() ([]string, error) {
-	names := make([]string, 0, len(m.sessions))
-	for name := range m.sessions {
-		names = append(names, name)
-	}
-	return names, nil
 }
 
 func newApp(fs afero.Fs, cfg Config) *App {

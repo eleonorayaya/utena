@@ -376,6 +376,27 @@ func (c *client) deleteTodo(id string) tea.Cmd {
 	}
 }
 
+func (c *client) getSession(id string) tea.Cmd {
+	return func() tea.Msg {
+		res, err := c.httpClient.Get(c.baseURL + "/sessions/" + id)
+		if err != nil {
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			return parseAPIError(res, "get session")
+		}
+
+		var resp session.SessionResponse
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			return ErrMsg{err}
+		}
+
+		return sessionPolledMsg{session: *resp.Session}
+	}
+}
+
 func (c *client) switchTmuxSession(name string) tea.Cmd {
 	return func() tea.Msg {
 		t, err := gotmux.DefaultTmux()

@@ -10,6 +10,7 @@ import (
 	ulist "github.com/eleonorayaya/utena/internal/tui/list"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
 )
 
 type Model struct {
@@ -113,7 +114,14 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			case session.StatusBroken:
 				if m.pendingRepairID == item.session.ID {
 					m.pendingRepairID = ""
-					return m, provider.RepairSession(item.session.ID), true
+					id := item.session.ID
+					return m, tea.Batch(
+						provider.RepairSession(id),
+						tea.Sequence(
+							router.NavigateTo(router.SessionProgressView),
+							sessionprogress.Start(id),
+						),
+					), true
 				}
 				errMsg := "broken"
 				if item.session.Resources != nil {
