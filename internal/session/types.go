@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/render"
 )
 
@@ -13,8 +14,13 @@ type SessionResponse struct {
 	WorkspacePath string `json:"workspace_path,omitempty"`
 }
 
-func NewSessionResponse(session *Session) *SessionResponse {
-	return &SessionResponse{Session: session}
+func NewSessionResponse(session *Session, ws *workspace.Workspace) *SessionResponse {
+	resp := &SessionResponse{Session: session}
+	if ws != nil {
+		resp.WorkspaceName = ws.Name
+		resp.WorkspacePath = ws.Path
+	}
+	return resp
 }
 
 func (sr *SessionResponse) Render(w http.ResponseWriter, r *http.Request) error {
@@ -37,7 +43,7 @@ func RenderSessionList(sessions []Session) []render.Renderer {
 	list := make([]render.Renderer, len(sessions))
 	for i, session := range sessions {
 		s := session
-		list[i] = NewSessionResponse(&s)
+		list[i] = NewSessionResponse(&s, nil)
 	}
 	return list
 }

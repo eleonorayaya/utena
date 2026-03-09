@@ -73,17 +73,6 @@ func (s *SessionService) resolveWorkspaceName(session *Session) string {
 	return ws.Name
 }
 
-func (s *SessionService) resolveWorkspacePath(session *Session) string {
-	if session.WorkspaceID == "" {
-		return ""
-	}
-	ws, err := s.workspaceService.GetWorkspace(context.Background(), session.WorkspaceID)
-	if err != nil {
-		return ""
-	}
-	return ws.Path
-}
-
 func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceID string) ([]Session, error) {
 	_, err := s.workspaceService.GetWorkspace(ctx, workspaceID)
 	if err != nil {
