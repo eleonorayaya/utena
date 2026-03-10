@@ -1,5 +1,36 @@
 # Error Handling Patterns
 
+## Never Swallow Errors
+
+Every error must be explicitly handled -- never discard with `_` or ignore a return value.
+
+```go
+// Wrong: silently swallowed
+result, _ := doSomething()
+doSomething() // ignoring error return
+
+// Correct: always handle
+result, err := doSomething()
+if err != nil {
+	return fmt.Errorf("doing something: %w", err)
+}
+```
+
+Logging an error and returning nil is also swallowing -- the caller loses the ability to react. Never do this unless the user explicitly asks for it.
+
+```go
+// Wrong: swallowed via log-and-discard
+if err != nil {
+	log.Printf("failed: %v", err)
+	return nil // caller has no idea something failed
+}
+
+// Correct: propagate the error
+if err != nil {
+	return fmt.Errorf("doing something: %w", err)
+}
+```
+
 Choose between two patterns based on whether the error needs to carry context.
 
 ## Sentinel Errors: errors.Is
