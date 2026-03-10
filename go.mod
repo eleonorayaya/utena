@@ -13,6 +13,8 @@ require (
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
+	gorm.io/driver/sqlite v1.6.0
+	gorm.io/gorm v1.31.1
 )
 
 require (
@@ -45,6 +47,4 @@ require (
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	gorm.io/driver/sqlite v1.6.0 // indirect
-	gorm.io/gorm v1.31.1 // indirect
 )
