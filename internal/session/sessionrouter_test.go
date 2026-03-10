@@ -10,12 +10,13 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
+	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace.WorkspaceStore, *mockTmuxManager) {
+func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace.WorkspaceStore, *mockTmuxClient) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -26,14 +27,15 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
 
-	tmux := newMockTmuxManager()
+	mock := newMockTmuxClient()
+	tmuxService := utmux.NewTmuxService(mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmux, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
-	return router, sessionStore, workspaceStore, tmux
+	return router, sessionStore, workspaceStore, mock
 }
 
 func TestSessionRouter_ListSessions(t *testing.T) {

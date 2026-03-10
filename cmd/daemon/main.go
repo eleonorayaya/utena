@@ -26,7 +26,7 @@ func main() {
 
 	app, err := api.NewApp(cfg)
 	if err != nil {
-		slog.Error("Failed to open database", "error", err)
+		slog.Error("Failed to create app", "error", err)
 		os.Exit(1)
 	}
 

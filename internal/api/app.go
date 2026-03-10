@@ -15,10 +15,11 @@ import (
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/afero"
+	"gorm.io/gorm"
 )
 
 type App struct {
-	db        db.Database
+	DB        *db.DatabaseModule
 	Workspace *workspace.WorkspaceModule
 	Session   *session.SessionModule
 	Tmux      *tmux.TmuxModule
@@ -27,32 +28,25 @@ type App struct {
 }
 
 func NewApp(cfg Config) (*App, error) {
-	database, err := db.Open(filepath.Join(cfg.ConfigDir, "utena.db"))
+	gormDB, err := db.OpenSQLite(filepath.Join(cfg.ConfigDir, "utena.db"))
 	if err != nil {
 		return nil, err
 	}
-	return newApp(database, afero.NewOsFs(), cfg, nil), nil
+	return newApp(gormDB, tmux.NewGotmuxClient(), afero.NewOsFs(), cfg), nil
 }
 
-func NewTestApp(cfg Config, tmuxManager session.TmuxManager) *App {
-	database, _ := db.OpenInMemory()
-	return newApp(database, afero.NewMemMapFs(), cfg, tmuxManager)
-}
-
-func newApp(database db.Database, fs afero.Fs, cfg Config, tmuxOverride session.TmuxManager) *App {
+func newApp(gormDB *gorm.DB, tmuxClient tmux.TmuxClient, fs afero.Fs, cfg Config) *App {
 	bus := eventbus.NewEventBus()
 
-	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir)
-	tmuxModule := tmux.NewTmuxModule(bus)
+	dbModule := db.NewDatabaseModule(gormDB)
+	database := dbModule.Service
 
-	tmuxManager := tmuxOverride
-	if tmuxManager == nil {
-		tmuxManager = tmuxModule.Service
-	}
-	sessionModule := session.NewSessionModule(tmuxManager, workspaceModule, bus, database, cfg.BranchPrefix)
+	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir)
+	tmuxModule := tmux.NewTmuxModule(tmuxClient, bus)
+	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix)
 
 	app := &App{
-		db:        database,
+		DB:        dbModule,
 		Workspace: workspaceModule,
 		Session:   sessionModule,
 		Tmux:      tmuxModule,
@@ -60,14 +54,18 @@ func newApp(database db.Database, fs afero.Fs, cfg Config, tmuxOverride session.
 		Todo:      todo.NewTodoModule(workspaceModule, database),
 	}
 
-	database.Migrate(app.collectModels()...)
+	database.RegisterModels(app.collectModels()...)
 
 	return app
 }
 
 func (a *App) OnStart(ctx context.Context) error {
-	modules := a.modules()
-	for _, m := range modules {
+	if err := a.DB.OnAppStart(ctx); err != nil {
+		return err
+	}
+	slog.Info("Initialized module", "module", "database")
+
+	for _, m := range a.modules() {
 		if err := m.module.OnAppStart(ctx); err != nil {
 			return err
 		}
@@ -84,8 +82,8 @@ func (a *App) OnEnd(ctx context.Context) {
 			slog.Error("Error cleaning up module", "module", m.name, "error", err)
 		}
 	}
-	if a.db != nil {
-		a.db.Close()
+	if err := a.DB.OnAppEnd(ctx); err != nil {
+		slog.Error("Error closing database", "error", err)
 	}
 }
 

@@ -12,23 +12,24 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
+	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-type mockTmuxManager struct {
+type mockTmuxClient struct {
 	mu        sync.Mutex
 	sessions  map[string]bool
 	createErr error
 	killErr   error
 }
 
-func newMockTmuxManager() *mockTmuxManager {
-	return &mockTmuxManager{sessions: make(map[string]bool)}
+func newMockTmuxClient() *mockTmuxClient {
+	return &mockTmuxClient{sessions: make(map[string]bool)}
 }
 
-func (m *mockTmuxManager) CreateSession(name, startDir string) error {
+func (m *mockTmuxClient) CreateSession(name, startDir string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.createErr != nil {
@@ -38,7 +39,7 @@ func (m *mockTmuxManager) CreateSession(name, startDir string) error {
 	return nil
 }
 
-func (m *mockTmuxManager) KillSession(name string) error {
+func (m *mockTmuxClient) KillSession(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.killErr != nil {
@@ -48,13 +49,13 @@ func (m *mockTmuxManager) KillSession(name string) error {
 	return nil
 }
 
-func (m *mockTmuxManager) HasSession(name string) bool {
+func (m *mockTmuxClient) HasSession(name string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.sessions[name]
 }
 
-func (m *mockTmuxManager) ListSessionNames() ([]string, error) {
+func (m *mockTmuxClient) ListSessionNames() ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	names := make([]string, 0, len(m.sessions))
@@ -64,19 +65,27 @@ func (m *mockTmuxManager) ListSessionNames() ([]string, error) {
 	return names, nil
 }
 
-func (m *mockTmuxManager) setCreateErr(err error) {
+func (m *mockTmuxClient) SwitchClient(targetSession string) error {
+	return nil
+}
+
+func (m *mockTmuxClient) RunCommand(cmd ...string) (string, error) {
+	return "", nil
+}
+
+func (m *mockTmuxClient) setCreateErr(err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.createErr = err
 }
 
-func (m *mockTmuxManager) removeSession(name string) {
+func (m *mockTmuxClient) removeSession(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessions, name)
 }
 
-func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *mockTmuxManager) {
+func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *mockTmuxClient) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -87,11 +96,12 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
 
-	tmux := newMockTmuxManager()
+	mock := newMockTmuxClient()
+	tmuxService := utmux.NewTmuxService(mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmux, bus, "eqt/")
-	return service, sessionStore, workspaceStore, tmux
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
+	return service, sessionStore, workspaceStore, mock
 }
 
 func waitForStatus(t *testing.T, store *SessionStore, id string, status SessionStatus, timeout time.Duration) {
@@ -390,10 +400,11 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-git", Name: "git-repo", Path: repoPath, IsGitRepo: true})
 
-	tmux := newMockTmuxManager()
+	mock := newMockTmuxClient()
+	tmuxService := utmux.NewTmuxService(mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmux, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
 
 	session := &Session{
 		Name:          "my-feature",
@@ -425,7 +436,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	require.True(t, info.IsDir())
 
 	require.Equal(t, "main", retrieved.BaseBranch)
-	require.True(t, tmux.HasSession("git-repo-my-feature"))
+	require.True(t, mock.HasSession("git-repo-my-feature"))
 }
 
 func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
@@ -437,10 +448,11 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-git", Name: "git-repo", Path: repoPath, IsGitRepo: true})
 
-	tmux := newMockTmuxManager()
+	mock := newMockTmuxClient()
+	tmuxService := utmux.NewTmuxService(mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmux, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
 
 	session := &Session{
 		Name:          "my-feature",
@@ -460,7 +472,7 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	require.Equal(t, StatusBroken, retrieved.Status)
 	require.Equal(t, ResourceFailed, retrieved.Resources.Branch.Status)
 	require.NotEmpty(t, retrieved.Resources.Branch.Error)
-	require.False(t, tmux.HasSession("git-repo-my-feature"))
+	require.False(t, mock.HasSession("git-repo-my-feature"))
 }
 
 func TestSessionService_CreateSession_WithName_ComputesID(t *testing.T) {
@@ -533,10 +545,11 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-nogit", Name: "plain", Path: "/tmp/plain", IsGitRepo: false})
 
-	tmux := newMockTmuxManager()
+	mock := newMockTmuxClient()
+	tmuxService := utmux.NewTmuxService(mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmux, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
 
 	session := &Session{
 		Name:        "my-session",

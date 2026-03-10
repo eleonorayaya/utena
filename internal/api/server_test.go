@@ -11,23 +11,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-type testTmuxManager struct {
+type testTmuxClient struct {
 	mu        sync.Mutex
 	sessions  map[string]bool
 	createErr error
 }
 
-func newTestTmuxManager() *testTmuxManager {
-	return &testTmuxManager{sessions: make(map[string]bool)}
+func newTestTmuxClient() *testTmuxClient {
+	return &testTmuxClient{sessions: make(map[string]bool)}
 }
 
-func (m *testTmuxManager) CreateSession(name, startDir string) error {
+func (m *testTmuxClient) CreateSession(name, startDir string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.createErr != nil {
@@ -37,20 +39,20 @@ func (m *testTmuxManager) CreateSession(name, startDir string) error {
 	return nil
 }
 
-func (m *testTmuxManager) KillSession(name string) error {
+func (m *testTmuxClient) KillSession(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessions, name)
 	return nil
 }
 
-func (m *testTmuxManager) HasSession(name string) bool {
+func (m *testTmuxClient) HasSession(name string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.sessions[name]
 }
 
-func (m *testTmuxManager) ListSessionNames() ([]string, error) {
+func (m *testTmuxClient) ListSessionNames() ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	names := make([]string, 0, len(m.sessions))
@@ -60,28 +62,39 @@ func (m *testTmuxManager) ListSessionNames() ([]string, error) {
 	return names, nil
 }
 
-func (m *testTmuxManager) setCreateErr(err error) {
+func (m *testTmuxClient) SwitchClient(targetSession string) error {
+	return nil
+}
+
+func (m *testTmuxClient) RunCommand(cmd ...string) (string, error) {
+	return "", nil
+}
+
+func (m *testTmuxClient) setCreateErr(err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.createErr = err
 }
 
-func setupTestRouter(t *testing.T) (*App, chi.Router, *testTmuxManager) {
+func setupTestRouter(t *testing.T) (*App, chi.Router, *testTmuxClient) {
 	t.Helper()
 
+	gormDB, err := db.OpenInMemorySQLite()
+	require.NoError(t, err)
+
 	cfg := Config{ConfigDir: "/config"}
-	tmux := newTestTmuxManager()
-	app := NewTestApp(cfg, tmux)
+	mock := newTestTmuxClient()
+	app := newApp(gormDB, mock, afero.NewMemMapFs(), cfg)
+
+	err = app.OnStart(context.Background())
+	require.NoError(t, err)
 
 	app.Workspace.Store.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 	app.Workspace.Store.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
 
-	err := app.OnStart(context.Background())
-	require.NoError(t, err)
-
 	server := BuildServer(app, cfg)
 
-	return app, server.Handler.(*chi.Mux), tmux
+	return app, server.Handler.(*chi.Mux), mock
 }
 
 func waitForSessionStatus(t *testing.T, router chi.Router, id string, status session.SessionStatus, timeout time.Duration) {
