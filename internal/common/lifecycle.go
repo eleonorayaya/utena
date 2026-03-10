@@ -11,3 +11,7 @@ type Module interface {
 	OnAppEnd(ctx context.Context) error
 	Routes() chi.Router
 }
+
+type ModelProvider interface {
+	Models() []any
+}

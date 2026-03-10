@@ -53,6 +53,10 @@ func (m *ClaudeModule) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
+func (m *ClaudeModule) Models() []any {
+	return []any{&ClaudeSession{}}
+}
+
 func (m *ClaudeModule) Routes() chi.Router {
 	return m.Router.Routes()
 }

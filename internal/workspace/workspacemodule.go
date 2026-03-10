@@ -59,6 +59,10 @@ func (m *WorkspaceModule) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
+func (m *WorkspaceModule) Models() []any {
+	return []any{&Workspace{}}
+}
+
 func (m *WorkspaceModule) Routes() chi.Router {
 	return m.Router.Routes()
 }

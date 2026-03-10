@@ -53,6 +53,10 @@ func (m *TodoModule) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
+func (m *TodoModule) Models() []any {
+	return []any{&Todo{}}
+}
+
 func (m *TodoModule) Routes() chi.Router {
 	return m.Router.Routes()
 }

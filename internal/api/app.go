@@ -39,18 +39,11 @@ func NewTestApp(cfg Config, tmuxManager session.TmuxManager) *App {
 	fs := afero.NewMemMapFs()
 	bus := eventbus.NewEventBus()
 
-	database.Migrate(
-		&workspace.Workspace{},
-		&session.Session{},
-		&todo.Todo{},
-		&claude.ClaudeSession{},
-	)
-
 	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir)
 	tmuxModule := tmux.NewTmuxModule(bus)
 	sessionModule := session.NewSessionModule(tmuxManager, workspaceModule, bus, database, cfg.BranchPrefix)
 
-	return &App{
+	app := &App{
 		db:        database,
 		Workspace: workspaceModule,
 		Session:   sessionModule,
@@ -58,23 +51,20 @@ func NewTestApp(cfg Config, tmuxManager session.TmuxManager) *App {
 		Claude:    claude.NewClaudeModule(bus, database),
 		Todo:      todo.NewTodoModule(workspaceModule, database),
 	}
+
+	database.Migrate(app.collectModels()...)
+
+	return app
 }
 
 func newApp(database db.Database, fs afero.Fs, cfg Config) *App {
 	bus := eventbus.NewEventBus()
 
-	database.Migrate(
-		&workspace.Workspace{},
-		&session.Session{},
-		&todo.Todo{},
-		&claude.ClaudeSession{},
-	)
-
 	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir)
 	tmuxModule := tmux.NewTmuxModule(bus)
 	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix)
 
-	return &App{
+	app := &App{
 		db:        database,
 		Workspace: workspaceModule,
 		Session:   sessionModule,
@@ -82,6 +72,10 @@ func newApp(database db.Database, fs afero.Fs, cfg Config) *App {
 		Claude:    claude.NewClaudeModule(bus, database),
 		Todo:      todo.NewTodoModule(workspaceModule, database),
 	}
+
+	database.Migrate(app.collectModels()...)
+
+	return app
 }
 
 func (a *App) OnStart(ctx context.Context) error {
@@ -120,6 +114,16 @@ type moduleEntry struct {
 	name   string
 	path   string
 	module common.Module
+}
+
+func (a *App) collectModels() []any {
+	var models []any
+	for _, m := range a.modules() {
+		if mp, ok := m.module.(common.ModelProvider); ok {
+			models = append(models, mp.Models()...)
+		}
+	}
+	return models
 }
 
 func (a *App) modules() []moduleEntry {

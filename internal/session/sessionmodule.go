@@ -54,6 +54,10 @@ func (m *SessionModule) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
+func (m *SessionModule) Models() []any {
+	return []any{&Session{}}
+}
+
 func (m *SessionModule) Routes() chi.Router {
 	return m.Router.Routes()
 }
