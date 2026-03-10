@@ -227,7 +227,7 @@ func (c *client) createSession(name, workspaceID, branch string, branchCreated b
 		}
 		json.NewDecoder(res.Body).Decode(&resp)
 
-		return sessionCreatedMsg{id: resp.ID, status: session.SessionStatus(resp.Status)}
+		return SessionCreatedMsg{ID: resp.ID, Status: session.SessionStatus(resp.Status)}
 	}
 }
 

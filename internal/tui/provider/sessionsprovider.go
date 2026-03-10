@@ -1,8 +1,6 @@
 package provider
 
 import (
-	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
@@ -105,9 +103,9 @@ type sessionActivatedMsg struct {
 	tmuxSessionName string
 }
 
-type sessionCreatedMsg struct {
-	id     string
-	status session.SessionStatus
+type SessionCreatedMsg struct {
+	ID     string
+	Status session.SessionStatus
 }
 
 type sessionRepairedMsg struct {
@@ -128,11 +126,6 @@ type pollSessionIntentMsg struct {
 
 type SessionPolledMsg struct {
 	Session session.Session
-}
-
-type SessionCreatedMsg struct {
-	ID     string
-	Status session.SessionStatus
 }
 
 type sessionsProvider struct {
@@ -215,24 +208,10 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		workspaceID := msg.workspaceID
 		branch := msg.branch
 		branchCreated := msg.branchCreated
-		return p, func() tea.Msg {
-			createResult := p.client.createSession(name, workspaceID, branch, branchCreated)()
-			if err, ok := createResult.(ErrMsg); ok {
-				return err
-			}
-			created, ok := createResult.(sessionCreatedMsg)
-			if !ok {
-				return ErrMsg{Err: fmt.Errorf("unexpected result from createSession")}
-			}
-			return created
-		}
+		return p, p.client.createSession(name, workspaceID, branch, branchCreated)
 
-	case sessionCreatedMsg:
-		id := msg.id
-		status := msg.status
-		return p, tea.Batch(p.client.fetchSessions(), func() tea.Msg {
-			return SessionCreatedMsg{ID: id, Status: status}
-		})
+	case SessionCreatedMsg:
+		return p, p.client.fetchSessions()
 
 	case sessionActivatedMsg:
 		return p, p.client.switchTmuxSession(msg.tmuxSessionName)
