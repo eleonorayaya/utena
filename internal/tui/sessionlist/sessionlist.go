@@ -10,6 +10,7 @@ import (
 	ulist "github.com/eleonorayaya/utena/internal/tui/list"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
 )
 
 type Model struct {
@@ -17,7 +18,8 @@ type Model struct {
 	sessions        []session.Session
 	claudeSessions  map[string][]claude.ClaudeSession
 	pendingDeleteID string
-	showDead        bool
+	pendingRepairID string
+	showBroken      bool
 }
 
 func New() Model {
@@ -41,10 +43,10 @@ func (m Model) Keys() help.KeyMap {
 func (m *Model) rebuildItems() tea.Cmd {
 	var items []list.Item
 	for _, s := range m.sessions {
-		if s.IsDeleted {
+		if s.Status == session.StatusDeleted {
 			continue
 		}
-		if s.IsDead && !m.showDead {
+		if s.Status == session.StatusBroken && !m.showBroken {
 			continue
 		}
 		status := aggregateClaudeStatus(m.claudeSessions[s.ID])
@@ -90,9 +92,12 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if !key.Matches(msg, keys.Close) {
 		m.pendingDeleteID = ""
 	}
+	if !key.Matches(msg, keys.Select) {
+		m.pendingRepairID = ""
+	}
 	switch {
-	case key.Matches(msg, keys.ToggleDead):
-		m.showDead = !m.showDead
+	case key.Matches(msg, keys.ToggleBroken):
+		m.showBroken = !m.showBroken
 		return m, m.rebuildItems(), true
 	case key.Matches(msg, keys.New):
 		return m, router.NavigateTo(router.SessionFormView), true
@@ -103,10 +108,32 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			if item.session.IsAttached {
 				return m, m.list.NewStatusMessage("already attached to this session"), true
 			}
-			if item.session.IsDead {
-				return m, provider.ReviveSession(item.session.ID), true
+			switch item.session.Status {
+			case session.StatusCreating:
+				return m, m.list.NewStatusMessage("session is still being created"), true
+			case session.StatusBroken:
+				if m.pendingRepairID == item.session.ID {
+					m.pendingRepairID = ""
+					id := item.session.ID
+					return m, tea.Batch(
+						provider.RepairSession(id),
+						tea.Sequence(
+							router.NavigateTo(router.SessionProgressView),
+							sessionprogress.Start(id),
+						),
+					), true
+				}
+				errMsg := "broken"
+				if item.session.Resources != nil {
+					if e := item.session.Resources.FirstError(); e != "" {
+						errMsg = e
+					}
+				}
+				m.pendingRepairID = item.session.ID
+				return m, m.list.NewStatusMessage(errMsg + " — press enter again to repair"), true
+			default:
+				return m, provider.ActivateSession(item.session.ID), true
 			}
-			return m, provider.ActivateSession(item.session.ID), true
 		}
 	case key.Matches(msg, keys.Close):
 		item, ok := m.list.SelectedItem().(sessionItem)

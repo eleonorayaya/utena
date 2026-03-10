@@ -2,7 +2,9 @@ package router
 
 import tea "github.com/charmbracelet/bubbletea"
 
-type NavigateToMsg struct{ Target View }
+type NavigateToMsg struct {
+	Target View
+}
 
 type BackMsg struct{}
 

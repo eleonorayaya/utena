@@ -8,6 +8,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionform"
 	"github.com/eleonorayaya/utena/internal/tui/sessionlist"
+	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
 	"github.com/eleonorayaya/utena/internal/tui/todoform"
 	"github.com/eleonorayaya/utena/internal/tui/todolist"
 	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
@@ -23,6 +24,7 @@ var (
 	_ ViewModel[router.Router]         = router.Router{}
 	_ ViewModel[sessionlist.Model]     = sessionlist.Model{}
 	_ ViewModel[sessionform.Model]     = sessionform.Model{}
+	_ ViewModel[sessionprogress.Model] = sessionprogress.Model{}
 	_ ViewModel[todolist.Model]        = todolist.Model{}
 	_ ViewModel[todoform.Model]        = todoform.Model{}
 	_ ViewModel[debug.Model]           = debug.Model{}

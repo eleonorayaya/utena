@@ -14,6 +14,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/filepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
 	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
@@ -102,6 +103,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case provider.ErrMsg:
 		m.nameErr = msg.Err.Error()
 		return m, nil
+	case provider.SessionCreatedMsg:
+		id := msg.ID
+		return m, tea.Sequence(
+			router.NavigateTo(router.SessionProgressView),
+			sessionprogress.Start(id),
+		)
 	}
 
 	switch m.activeStep {

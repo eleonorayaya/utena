@@ -5,6 +5,7 @@ type View int
 const (
 	SessionListView View = iota
 	SessionFormView
+	SessionProgressView
 	TodoListView
 	TodoFormView
 	DebugView

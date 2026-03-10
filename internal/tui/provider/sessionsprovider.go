@@ -1,8 +1,6 @@
 package provider
 
 import (
-	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
@@ -46,8 +44,12 @@ func CreateSession(name, workspaceID, branch, workspacePath string, branchCreate
 	}
 }
 
-func ReviveSession(name string) tea.Cmd {
-	return func() tea.Msg { return reviveSessionIntentMsg{name: name} }
+func RepairSession(id string) tea.Cmd {
+	return func() tea.Msg { return repairSessionIntentMsg{id: id} }
+}
+
+func PollSession(id string) tea.Cmd {
+	return func() tea.Msg { return pollSessionIntentMsg{id: id} }
 }
 
 func DeleteSession(id string) tea.Cmd {
@@ -69,8 +71,8 @@ type createSessionIntentMsg struct {
 	branchCreated bool
 }
 
-type reviveSessionIntentMsg struct {
-	name string
+type repairSessionIntentMsg struct {
+	id string
 }
 
 type deleteSessionIntentMsg struct {
@@ -101,19 +103,29 @@ type sessionActivatedMsg struct {
 	tmuxSessionName string
 }
 
-type sessionCreatedMsg struct {
-	id           string
-	worktreePath string
+type SessionCreatedMsg struct {
+	ID     string
+	Status session.SessionStatus
 }
 
-type sessionRevivedMsg struct {
-	name          string
-	workspacePath string
-	worktreePath  string
+type sessionRepairedMsg struct {
+	id string
 }
 
 type sessionDeletedMsg struct {
 	id string
+}
+
+type sessionPolledMsg struct {
+	session session.Session
+}
+
+type pollSessionIntentMsg struct {
+	id string
+}
+
+type SessionPolledMsg struct {
+	Session session.Session
 }
 
 type sessionsProvider struct {
@@ -184,38 +196,22 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 			return p.client.activateSession(name)()
 		}
 
-	case reviveSessionIntentMsg:
-		name := msg.name
-		return p, func() tea.Msg {
-			reviveResult := p.client.reviveSession(name)()
-			if err, ok := reviveResult.(ErrMsg); ok {
-				return err
-			}
-			if _, ok := reviveResult.(sessionRevivedMsg); !ok {
-				return ErrMsg{Err: fmt.Errorf("unexpected result from reviveSession")}
-			}
+	case repairSessionIntentMsg:
+		id := msg.id
+		return p, p.client.repairSession(id)
 
-			return p.client.activateSession(name)()
-		}
+	case sessionRepairedMsg:
+		return p, p.client.fetchSessions()
 
 	case createSessionIntentMsg:
 		name := msg.name
 		workspaceID := msg.workspaceID
 		branch := msg.branch
 		branchCreated := msg.branchCreated
-		return p, func() tea.Msg {
-			createResult := p.client.createSession(name, workspaceID, branch, branchCreated)()
-			if err, ok := createResult.(ErrMsg); ok {
-				return err
-			}
-			created, ok := createResult.(sessionCreatedMsg)
-			if !ok {
-				return ErrMsg{Err: fmt.Errorf("unexpected result from createSession")}
-			}
-			sessionID := created.id
+		return p, p.client.createSession(name, workspaceID, branch, branchCreated)
 
-			return p.client.activateSession(sessionID)()
-		}
+	case SessionCreatedMsg:
+		return p, p.client.fetchSessions()
 
 	case sessionActivatedMsg:
 		return p, p.client.switchTmuxSession(msg.tmuxSessionName)
@@ -225,6 +221,14 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 
 	case sessionDeletedMsg:
 		return p, p.client.fetchSessions()
+
+	case pollSessionIntentMsg:
+		return p, p.client.getSession(msg.id)
+
+	case sessionPolledMsg:
+		return p, func() tea.Msg {
+			return SessionPolledMsg{Session: msg.session}
+		}
 	}
 
 	return p, nil

@@ -4,32 +4,26 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/render"
 )
 
 type SessionResponse struct {
 	*Session
+	WorkspaceName string `json:"workspace_name,omitempty"`
 	WorkspacePath string `json:"workspace_path,omitempty"`
 }
 
-func NewSessionResponse(session *Session) *SessionResponse {
-	return &SessionResponse{Session: session}
-}
-
-type ReviveResult struct {
-	Session       *Session
-	WorkspacePath string
-}
-
-func NewReviveResponse(result *ReviveResult) *SessionResponse {
-	return &SessionResponse{
-		Session:       result.Session,
-		WorkspacePath: result.WorkspacePath,
+func NewSessionResponse(session *Session, ws *workspace.Workspace) *SessionResponse {
+	resp := &SessionResponse{Session: session}
+	if ws != nil {
+		resp.WorkspaceName = ws.Name
+		resp.WorkspacePath = ws.Path
 	}
+	return resp
 }
 
 func (sr *SessionResponse) Render(w http.ResponseWriter, r *http.Request) error {
-
 	return nil
 }
 
@@ -42,7 +36,6 @@ func NewSessionListResponse(sessions []Session) *SessionListResponse {
 }
 
 func (slr *SessionListResponse) Render(w http.ResponseWriter, r *http.Request) error {
-
 	return nil
 }
 
@@ -50,7 +43,7 @@ func RenderSessionList(sessions []Session) []render.Renderer {
 	list := make([]render.Renderer, len(sessions))
 	for i, session := range sessions {
 		s := session
-		list[i] = NewSessionResponse(&s)
+		list[i] = NewSessionResponse(&s, nil)
 	}
 	return list
 }
@@ -79,10 +72,8 @@ type UpdateSessionRequest struct {
 }
 
 func (u *UpdateSessionRequest) Bind(r *http.Request) error {
-
 	if u.Session == nil {
 		return errors.New("session cannot be nil")
 	}
-
 	return ValidateSession(u.Session)
 }

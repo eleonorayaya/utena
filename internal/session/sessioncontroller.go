@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -18,6 +19,13 @@ func NewSessionController(service *SessionService) *SessionController {
 	return &SessionController{
 		service: service,
 	}
+}
+
+func (c *SessionController) lookupWorkspace(id string) (*workspace.Workspace, error) {
+	if id == "" {
+		return nil, nil
+	}
+	return c.service.workspaceService.GetWorkspace(context.Background(), id)
 }
 
 func (c *SessionController) ListSessions(w http.ResponseWriter, r *http.Request) {
@@ -43,8 +51,12 @@ func (c *SessionController) GetSessionByID(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	response := NewSessionResponse(session)
-	render.Render(w, r, response)
+	ws, err := c.lookupWorkspace(session.WorkspaceID)
+	if err != nil {
+		render.Render(w, r, common.ErrUnknown(err))
+		return
+	}
+	render.Render(w, r, NewSessionResponse(session, ws))
 }
 
 func (c *SessionController) ListSessionsByWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -88,9 +100,13 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	response := NewSessionResponse(session)
-	render.Status(r, http.StatusCreated)
-	render.Render(w, r, response)
+	ws, err := c.lookupWorkspace(session.WorkspaceID)
+	if err != nil {
+		render.Render(w, r, common.ErrUnknown(err))
+		return
+	}
+	render.Status(r, http.StatusAccepted)
+	render.Render(w, r, NewSessionResponse(session, ws))
 }
 
 func (c *SessionController) UpdateSession(w http.ResponseWriter, r *http.Request) {
@@ -115,8 +131,12 @@ func (c *SessionController) UpdateSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	response := NewSessionResponse(data.Session)
-	render.Render(w, r, response)
+	ws, err := c.lookupWorkspace(data.Session.WorkspaceID)
+	if err != nil {
+		render.Render(w, r, common.ErrUnknown(err))
+		return
+	}
+	render.Render(w, r, NewSessionResponse(data.Session, ws))
 }
 
 func (c *SessionController) DeleteSession(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +169,7 @@ func (c *SessionController) ActivateSession(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			render.Render(w, r, common.ErrNotFound())
-		} else if errors.Is(err, ErrSessionDead) {
+		} else if errors.Is(err, ErrCannotActivate) {
 			render.Render(w, r, common.ErrInvalidRequest(err))
 		} else {
 			render.Render(w, r, common.ErrUnknown(err))
@@ -157,21 +177,18 @@ func (c *SessionController) ActivateSession(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	render.Render(w, r, NewSessionResponse(session))
+	render.Render(w, r, NewSessionResponse(session, nil))
 }
 
-func (c *SessionController) ReviveSession(w http.ResponseWriter, r *http.Request) {
+func (c *SessionController) RepairSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	name := chi.URLParam(r, "name")
+	id := chi.URLParam(r, "id")
 
-	result, err := c.service.ReviveSession(ctx, name)
+	session, err := c.service.RepairSession(ctx, id)
 	if err != nil {
-		var wsNotFound *workspace.WorkspaceNotFoundError
 		if errors.Is(err, ErrSessionNotFound) {
 			render.Render(w, r, common.ErrNotFound())
-		} else if errors.Is(err, ErrSessionNotDead) {
-			render.Render(w, r, common.ErrInvalidRequest(err))
-		} else if errors.As(err, &wsNotFound) {
+		} else if errors.Is(err, ErrSessionNotBroken) {
 			render.Render(w, r, common.ErrInvalidRequest(err))
 		} else {
 			render.Render(w, r, common.ErrUnknown(err))
@@ -179,5 +196,5 @@ func (c *SessionController) ReviveSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	render.Render(w, r, NewReviveResponse(result))
+	render.Render(w, r, NewSessionResponse(session, nil))
 }

@@ -20,10 +20,15 @@ func (i sessionItem) displayName() string {
 
 func (i sessionItem) Title() string {
 	title := i.displayName()
-	if i.session.IsDead {
-		title += " (dead)"
-	} else if i.session.IsAttached {
-		title += " (attached)"
+	switch i.session.Status {
+	case session.StatusCreating:
+		title += " (creating...)"
+	case session.StatusBroken:
+		title += " (broken)"
+	default:
+		if i.session.IsAttached {
+			title += " (attached)"
+		}
 	}
 	if i.claudeStatus != "" {
 		title += " " + i.claudeStatus

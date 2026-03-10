@@ -10,6 +10,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionform"
 	"github.com/eleonorayaya/utena/internal/tui/sessionlist"
+	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
 	"github.com/eleonorayaya/utena/internal/tui/statusview"
 	"github.com/eleonorayaya/utena/internal/tui/todoform"
 	"github.com/eleonorayaya/utena/internal/tui/todolist"
@@ -26,12 +27,13 @@ type App struct {
 func NewApp(logPath, port string, initialView router.View) App {
 	baseURL := fmt.Sprintf("http://localhost:%s", port)
 	views := map[router.View]router.ViewEntry{
-		router.SessionListView: &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
-		router.SessionFormView: &router.ViewAdapter[sessionform.Model]{Model: sessionform.New()},
-		router.TodoListView:    &router.ViewAdapter[todolist.Model]{Model: todolist.New()},
-		router.TodoFormView:    &router.ViewAdapter[todoform.Model]{Model: todoform.New()},
-		router.DebugView:       &router.ViewAdapter[debug.Model]{Model: debug.New(logPath, baseURL)},
-		router.StatusView:      &router.ViewAdapter[statusview.Model]{Model: statusview.New()},
+		router.SessionListView:     &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
+		router.SessionFormView:     &router.ViewAdapter[sessionform.Model]{Model: sessionform.New()},
+		router.SessionProgressView: &router.ViewAdapter[sessionprogress.Model]{Model: sessionprogress.New()},
+		router.TodoListView:        &router.ViewAdapter[todolist.Model]{Model: todolist.New()},
+		router.TodoFormView:        &router.ViewAdapter[todoform.Model]{Model: todoform.New()},
+		router.DebugView:           &router.ViewAdapter[debug.Model]{Model: debug.New(logPath, baseURL)},
+		router.StatusView:          &router.ViewAdapter[statusview.Model]{Model: statusview.New()},
 	}
 
 	return App{

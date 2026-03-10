@@ -27,8 +27,21 @@ func NewApp(cfg Config) *App {
 	return newApp(afero.NewOsFs(), cfg)
 }
 
-func NewTestApp(cfg Config) *App {
-	return newApp(afero.NewMemMapFs(), cfg)
+func NewTestApp(cfg Config, tmuxManager session.TmuxManager) *App {
+	fs := afero.NewMemMapFs()
+	bus := eventbus.NewEventBus()
+
+	workspaceModule := workspace.NewWorkspaceModule(fs, cfg.ConfigDir)
+	tmuxModule := tmux.NewTmuxModule(bus)
+	sessionModule := session.NewSessionModule(tmuxManager, workspaceModule, bus, fs, cfg.ConfigDir, cfg.BranchPrefix)
+
+	return &App{
+		Workspace: workspaceModule,
+		Session:   sessionModule,
+		Tmux:      tmuxModule,
+		Claude:    claude.NewClaudeModule(bus, fs, cfg.ConfigDir),
+		Todo:      todo.NewTodoModule(workspaceModule, fs, cfg.ConfigDir),
+	}
 }
 
 func newApp(fs afero.Fs, cfg Config) *App {
