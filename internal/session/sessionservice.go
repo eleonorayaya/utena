@@ -55,22 +55,7 @@ func (s *SessionService) OnAppEnd(ctx context.Context) error {
 
 func (s *SessionService) ListSessions(ctx context.Context) ([]Session, error) {
 	sessions := s.store.List()
-	for i := range sessions {
-		sessions[i].WorkspaceName = s.resolveWorkspaceName(&sessions[i])
-	}
 	return sessions, nil
-}
-
-func (s *SessionService) resolveWorkspaceName(session *Session) string {
-	if session.WorkspaceID == "" {
-		return ""
-	}
-	ws, err := s.workspaceService.GetWorkspace(context.Background(), session.WorkspaceID)
-	if err != nil {
-		slog.Warn("failed to resolve workspace name", "session", session.ID, "workspace_id", session.WorkspaceID, "error", err)
-		return ""
-	}
-	return ws.Name
 }
 
 func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceID string) ([]Session, error) {

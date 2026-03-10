@@ -2,75 +2,43 @@ package claude
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"path/filepath"
-	"sort"
-	"sync"
 	"time"
 
-	"github.com/spf13/afero"
+	"github.com/eleonorayaya/utena/internal/db"
+	"gorm.io/gorm"
 )
 
 type ClaudeStore struct {
-	mu        sync.RWMutex
-	sessions  map[string]*ClaudeSession
-	fs        afero.Fs
-	configDir string
+	db db.Database
 }
 
-func NewClaudeStore(fs afero.Fs, configDir string) *ClaudeStore {
+func NewClaudeStore(database db.Database) *ClaudeStore {
 	return &ClaudeStore{
-		sessions:  make(map[string]*ClaudeSession),
-		fs:        fs,
-		configDir: configDir,
+		db: database,
 	}
 }
 
 func (s *ClaudeStore) GetByID(id string) (*ClaudeSession, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	session, ok := s.sessions[id]
-	if !ok {
-		return nil, ErrClaudeSessionNotFound
+	var cs ClaudeSession
+	if err := s.db.First(&cs, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrClaudeSessionNotFound
+		}
+		return nil, err
 	}
-
-	copy := *session
-	return &copy, nil
+	return &cs, nil
 }
 
 func (s *ClaudeStore) List() []ClaudeSession {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	sessions := make([]ClaudeSession, 0, len(s.sessions))
-	for _, session := range s.sessions {
-		sessions = append(sessions, *session)
-	}
-
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].LastUpdatedAt.After(sessions[j].LastUpdatedAt)
-	})
-
+	var sessions []ClaudeSession
+	s.db.Order("last_updated_at DESC").Find(&sessions)
 	return sessions
 }
 
 func (s *ClaudeStore) ListBySessionID(sessionID string) []ClaudeSession {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	sessions := make([]ClaudeSession, 0)
-	for _, session := range s.sessions {
-		if session.SessionID == sessionID {
-			sessions = append(sessions, *session)
-		}
-	}
-
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].LastUpdatedAt.After(sessions[j].LastUpdatedAt)
-	})
-
+	var sessions []ClaudeSession
+	s.db.Where("session_id = ?", sessionID).Order("last_updated_at DESC").Find(&sessions)
 	return sessions
 }
 
@@ -78,36 +46,20 @@ func (s *ClaudeStore) Upsert(session *ClaudeSession) error {
 	if session == nil {
 		return errors.New("claude session cannot be nil")
 	}
-
 	if session.ID == "" {
 		return errors.New("claude session ID cannot be empty")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	copy := *session
-	s.sessions[session.ID] = &copy
-	s.save()
-	return nil
+	return s.db.Save(session).Error
 }
 
 func (s *ClaudeStore) UpdateStatusBySessionID(sessionID string, from, to ClaudeSessionStatus) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	changed := false
-	for _, session := range s.sessions {
-		if session.SessionID == sessionID && session.Status == from {
-			session.Status = to
-			session.LastUpdatedAt = time.Now()
-			changed = true
-		}
-	}
-
-	if changed {
-		s.save()
-	}
+	s.db.Model(&ClaudeSession{}).
+		Where("session_id = ? AND status = ?", sessionID, from).
+		Updates(map[string]any{
+			"status":          to,
+			"last_updated_at": time.Now(),
+		})
 }
 
 func (s *ClaudeStore) Delete(id string) error {
@@ -115,48 +67,18 @@ func (s *ClaudeStore) Delete(id string) error {
 		return errors.New("claude session ID cannot be empty")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.sessions[id]; !exists {
-		return ErrClaudeSessionNotFound
+	var existing ClaudeSession
+	if err := s.db.First(&existing, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrClaudeSessionNotFound
+		}
+		return err
 	}
 
-	delete(s.sessions, id)
-	s.save()
-	return nil
-}
-
-func (s *ClaudeStore) sessionsPath() string {
-	return filepath.Join(s.configDir, "claude_sessions.json")
-}
-
-func (s *ClaudeStore) save() {
-	s.fs.MkdirAll(s.configDir, 0755)
-
-	data, err := json.Marshal(s.sessions)
-	if err != nil {
-		return
-	}
-
-	afero.WriteFile(s.fs, s.sessionsPath(), data, 0644)
+	return s.db.Delete(&ClaudeSession{}, "id = ?", id).Error
 }
 
 func (s *ClaudeStore) OnAppStart(ctx context.Context) error {
-	data, err := afero.ReadFile(s.fs, s.sessionsPath())
-	if err != nil {
-		return nil
-	}
-
-	loaded := make(map[string]*ClaudeSession)
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		return nil
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sessions = loaded
-
 	return nil
 }
 

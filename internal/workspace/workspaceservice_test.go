@@ -7,13 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
 func setupWorkspaceService(t *testing.T) (*WorkspaceService, *WorkspaceStore) {
 	t.Helper()
-	store := NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	database := setupTestDB(t)
+	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	service := NewWorkspaceService(store)
 	return service, store
 }
@@ -29,9 +31,6 @@ func TestWorkspaceService_OnAppStart(t *testing.T) {
 	ctx := context.Background()
 	err := service.OnAppStart(ctx)
 	require.NoError(t, err)
-
-	// Service OnAppStart is a no-op
-	// Store handles initialization
 }
 
 func TestWorkspaceService_OnAppEnd(t *testing.T) {
@@ -44,7 +43,6 @@ func TestWorkspaceService_OnAppEnd(t *testing.T) {
 func TestWorkspaceService_ListWorkspaces(t *testing.T) {
 	service, store := setupWorkspaceService(t)
 
-	// Add test workspaces
 	ws1 := &Workspace{ID: "ws-1", Name: "test1", Path: "/path1"}
 	ws2 := &Workspace{ID: "ws-2", Name: "test2", Path: "/path2"}
 	store.Add(ws1)
@@ -55,7 +53,6 @@ func TestWorkspaceService_ListWorkspaces(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, workspaces, 2)
 
-	// Verify both workspaces are in the list
 	ids := make(map[string]bool)
 	for _, ws := range workspaces {
 		ids[ws.ID] = true
@@ -126,7 +123,12 @@ func setupWorkspaceServiceWithConfig(t *testing.T) (*WorkspaceService, *Workspac
 	fs.MkdirAll(configDir, 0755)
 	afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644)
 
-	store := NewWorkspaceStore(fs, configDir)
+	database, err := db.OpenInMemory()
+	require.NoError(t, err)
+	database.Migrate(&Workspace{})
+	t.Cleanup(func() { database.Close() })
+
+	store := NewWorkspaceStore(database, fs, configDir)
 	service := NewWorkspaceService(store)
 	return service, store
 }

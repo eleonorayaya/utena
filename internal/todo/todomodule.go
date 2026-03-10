@@ -3,9 +3,9 @@ package todo
 import (
 	"context"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
-	"github.com/spf13/afero"
 )
 
 type TodoModule struct {
@@ -15,8 +15,8 @@ type TodoModule struct {
 	Router     *TodoRouter
 }
 
-func NewTodoModule(workspaceModule *workspace.WorkspaceModule, fs afero.Fs, configDir string) *TodoModule {
-	store := NewTodoStore(fs, configDir)
+func NewTodoModule(workspaceModule *workspace.WorkspaceModule, database db.Database) *TodoModule {
+	store := NewTodoStore(database)
 	service := NewTodoService(store, workspaceModule.Service)
 	controller := NewTodoController(service)
 	router := NewTodoRouter(controller)

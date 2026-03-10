@@ -3,19 +3,33 @@ package workspace
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
+func setupTestDB(t *testing.T) db.Database {
+	t.Helper()
+	database, err := db.OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	database.Migrate(&Workspace{})
+	t.Cleanup(func() { database.Close() })
+	return database
+}
+
 func setupWorkspaceStore(t *testing.T) *WorkspaceStore {
 	t.Helper()
-	return NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	database := setupTestDB(t)
+	return NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 }
 
 func setupWorkspaceStoreWithConfig(t *testing.T, roots []string) (*WorkspaceStore, string) {
@@ -34,7 +48,8 @@ func setupWorkspaceStoreWithConfig(t *testing.T, roots []string) (*WorkspaceStor
 	err = afero.WriteFile(fs, filepath.Join(configDir, "config.json"), data, 0644)
 	require.NoError(t, err)
 
-	store := NewWorkspaceStore(fs, configDir)
+	database := setupTestDB(t)
+	store := NewWorkspaceStore(database, fs, configDir)
 
 	return store, tmpDir
 }
@@ -42,7 +57,7 @@ func setupWorkspaceStoreWithConfig(t *testing.T, roots []string) (*WorkspaceStor
 func TestNewWorkspaceStore(t *testing.T) {
 	store := setupWorkspaceStore(t)
 	require.NotNil(t, store)
-	require.NotNil(t, store.workspaces)
+	require.Empty(t, store.List())
 }
 
 func TestWorkspaceStore_Add(t *testing.T) {
@@ -211,9 +226,9 @@ func TestWorkspaceStore_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			ws := &Workspace{
-				ID:   string(rune('a' + id)),
-				Name: "concurrent",
-				Path: "/path",
+				ID:   fmt.Sprintf("ws-%d", id),
+				Name: fmt.Sprintf("concurrent-%d", id),
+				Path: fmt.Sprintf("/path/%d", id),
 			}
 			store.Add(ws)
 		}(i)
@@ -260,7 +275,8 @@ func TestWorkspaceStore_OnAppStart_WithConfig(t *testing.T) {
 }
 
 func TestWorkspaceStore_OnAppStart_NoConfigFile(t *testing.T) {
-	store := NewWorkspaceStore(afero.NewMemMapFs(), "/nonexistent/path")
+	database := setupTestDB(t)
+	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/nonexistent/path")
 
 	ctx := context.Background()
 	err := store.OnAppStart(ctx)
@@ -399,7 +415,8 @@ func TestIsGitRepository(t *testing.T) {
 	nonGitDir := filepath.Join(tmpDir, "non-git-project")
 	os.MkdirAll(nonGitDir, 0755)
 
-	store := NewWorkspaceStore(afero.NewOsFs(), tmpDir)
+	database := setupTestDB(t)
+	store := NewWorkspaceStore(database, afero.NewOsFs(), tmpDir)
 	require.True(t, store.isGitRepository(gitDir))
 	require.False(t, store.isGitRepository(nonGitDir))
 }
@@ -420,7 +437,8 @@ func setupWorkspaceStoreWithFullConfig(t *testing.T, roots []string, workspaces 
 	err = afero.WriteFile(fs, filepath.Join(configDir, "config.json"), data, 0644)
 	require.NoError(t, err)
 
-	store := NewWorkspaceStore(fs, configDir)
+	database := setupTestDB(t)
+	store := NewWorkspaceStore(database, fs, configDir)
 
 	return store, tmpDir
 }
@@ -569,7 +587,8 @@ func TestWorkspaceStore_SaveConfig_CreatesDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "nested", "dir")
 
-	store := NewWorkspaceStore(afero.NewOsFs(), configDir)
+	database := setupTestDB(t)
+	store := NewWorkspaceStore(database, afero.NewOsFs(), configDir)
 
 	err := store.saveConfig(&config{Workspaces: []string{"/some/path"}})
 	require.NoError(t, err)
@@ -580,14 +599,14 @@ func TestWorkspaceStore_SaveConfig_CreatesDir(t *testing.T) {
 }
 
 func TestWorkspaceStore_Persistence(t *testing.T) {
-	store := setupWorkspaceStore(t)
+	database := setupTestDB(t)
+	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
 	now := time.Now()
 	ws := &Workspace{ID: "ws-1", Name: "test", Path: "/path", LastUsedAt: now}
 	store.Add(ws)
 
-	store2 := NewWorkspaceStore(store.fs, store.configDir)
-	store2.load()
+	store2 := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
 	retrieved, err := store2.GetByID("ws-1")
 	require.NoError(t, err)
@@ -613,11 +632,10 @@ func TestWorkspaceStore_OnAppStart_MergesDiscoveredWithPersisted(t *testing.T) {
 	workspaces[0].LastUsedAt = now
 	store.Update(&workspaces[0])
 
-	store2 := NewWorkspaceStore(store.fs, store.configDir)
-	err = store2.OnAppStart(ctx)
+	err = store.OnAppStart(ctx)
 	require.NoError(t, err)
 
-	retrieved, err := store2.GetByID(wsID)
+	retrieved, err := store.GetByID(wsID)
 	require.NoError(t, err)
 	require.Equal(t, now.Unix(), retrieved.LastUsedAt.Unix())
 }

@@ -15,9 +15,9 @@ import (
 func setupTodoRouter(t *testing.T) (*TodoRouter, *TodoStore, *workspace.WorkspaceStore) {
 	t.Helper()
 
-	fs := afero.NewMemMapFs()
-	todoStore := NewTodoStore(fs, "/config")
-	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	database := setupTestDB(t)
+	todoStore := NewTodoStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})

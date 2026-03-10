@@ -79,9 +79,10 @@ func (m *mockTmuxManager) removeSession(name string) {
 func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *mockTmuxManager) {
 	t.Helper()
 
+	database := setupTestDB(t)
 	bus := eventbus.NewEventBus()
-	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
-	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	sessionStore := NewSessionStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
@@ -132,8 +133,8 @@ func TestSessionService_ListSessions(t *testing.T) {
 	service, sessionStore, _, _ := setupSessionService(t)
 
 	now := time.Now()
-	session1 := &Session{ID: "session-1", Name: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now.Add(-1 * time.Hour)}
-	session2 := &Session{ID: "session-2", Name: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
+	session1 := &Session{ID: "session-1", TmuxSessionName: "session-1", Name: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now.Add(-1 * time.Hour)}
+	session2 := &Session{ID: "session-2", TmuxSessionName: "session-2", Name: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 
@@ -149,9 +150,9 @@ func TestSessionService_ListSessionsByWorkspace(t *testing.T) {
 	service, sessionStore, _, _ := setupSessionService(t)
 
 	now := time.Now()
-	session1 := &Session{ID: "session-1", Name: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now.Add(-1 * time.Hour)}
-	session2 := &Session{ID: "session-2", Name: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
-	session3 := &Session{ID: "session-3", Name: "session-3", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
+	session1 := &Session{ID: "session-1", TmuxSessionName: "session-1", Name: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now.Add(-1 * time.Hour)}
+	session2 := &Session{ID: "session-2", TmuxSessionName: "session-2", Name: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
+	session3 := &Session{ID: "session-3", TmuxSessionName: "session-3", Name: "session-3", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 	sessionStore.Add(session3)
@@ -181,12 +182,13 @@ func TestSessionService_GetSession(t *testing.T) {
 	service, sessionStore, _, _ := setupSessionService(t)
 
 	session := &Session{
-		ID:          "session-1",
-		Name:        "session-1",
-		WorkspaceID: "ws-1",
-		IsAttached:  true,
-		Status:      StatusReady,
-		LastUsedAt:  time.Now(),
+		ID:              "session-1",
+		TmuxSessionName: "session-1",
+		Name:            "session-1",
+		WorkspaceID:     "ws-1",
+		IsAttached:      true,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -273,12 +275,13 @@ func TestSessionService_UpdateSession(t *testing.T) {
 	service, sessionStore, _, _ := setupSessionService(t)
 
 	session := &Session{
-		ID:          "session-1",
-		Name:        "session-1",
-		WorkspaceID: "ws-1",
-		IsAttached:  false,
-		Status:      StatusReady,
-		LastUsedAt:  time.Now(),
+		ID:              "session-1",
+		TmuxSessionName: "session-1",
+		Name:            "session-1",
+		WorkspaceID:     "ws-1",
+		IsAttached:      false,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -296,10 +299,11 @@ func TestSessionService_UpdateSession_InvalidWorkspace(t *testing.T) {
 	service, sessionStore, _, _ := setupSessionService(t)
 
 	session := &Session{
-		ID:          "session-1",
-		Name:        "session-1",
-		WorkspaceID: "ws-1",
-		LastUsedAt:  time.Now(),
+		ID:              "session-1",
+		TmuxSessionName: "session-1",
+		Name:            "session-1",
+		WorkspaceID:     "ws-1",
+		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -380,9 +384,10 @@ func initTestRepo(t *testing.T) string {
 func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	repoPath := initTestRepo(t)
 
+	database := setupTestDB(t)
 	bus := eventbus.NewEventBus()
-	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
-	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	sessionStore := NewSessionStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-git", Name: "git-repo", Path: repoPath, IsGitRepo: true})
 
 	tmux := newMockTmuxManager()
@@ -426,9 +431,10 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	repoPath := initTestRepo(t)
 
+	database := setupTestDB(t)
 	bus := eventbus.NewEventBus()
-	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
-	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	sessionStore := NewSessionStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-git", Name: "git-repo", Path: repoPath, IsGitRepo: true})
 
 	tmux := newMockTmuxManager()
@@ -484,18 +490,19 @@ func TestSessionService_CreateSession_WithName_NoWorkspace(t *testing.T) {
 	service, sessionStore, _, _ := setupSessionService(t)
 
 	session := &Session{
-		Name: "standalone",
+		Name:        "standalone",
+		WorkspaceID: "ws-1",
 	}
 
 	ctx := context.Background()
 	err := service.CreateSession(ctx, session, false)
 	require.NoError(t, err)
 
-	require.Equal(t, "standalone", session.ID)
+	require.Equal(t, "utena-standalone", session.ID)
 
-	waitForStatus(t, sessionStore, "standalone", StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, "utena-standalone", StatusReady, 2*time.Second)
 
-	retrieved, err := sessionStore.GetByID("standalone")
+	retrieved, err := sessionStore.GetByID("utena-standalone")
 	require.NoError(t, err)
 	require.Equal(t, "standalone", retrieved.Name)
 }
@@ -520,9 +527,10 @@ func TestSessionService_CreateSession_NoBranch_SkipsWorktree(t *testing.T) {
 }
 
 func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T) {
+	database := setupTestDB(t)
 	bus := eventbus.NewEventBus()
-	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
-	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	sessionStore := NewSessionStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-nogit", Name: "plain", Path: "/tmp/plain", IsGitRepo: false})
 
 	tmux := newMockTmuxManager()

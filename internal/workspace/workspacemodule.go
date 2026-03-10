@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/afero"
@@ -16,8 +17,8 @@ type WorkspaceModule struct {
 	GitService *git.GitService
 }
 
-func NewWorkspaceModule(fs afero.Fs, configDir string) *WorkspaceModule {
-	store := NewWorkspaceStore(fs, configDir)
+func NewWorkspaceModule(database db.Database, fs afero.Fs, configDir string) *WorkspaceModule {
+	store := NewWorkspaceStore(database, fs, configDir)
 	service := NewWorkspaceService(store)
 	gitService := git.NewGitService()
 	controller := NewWorkspaceController(service, gitService)

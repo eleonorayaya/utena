@@ -3,10 +3,10 @@ package session
 import (
 	"context"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
-	"github.com/spf13/afero"
 )
 
 type SessionModule struct {
@@ -16,8 +16,8 @@ type SessionModule struct {
 	Router     *SessionRouter
 }
 
-func NewSessionModule(tmuxManager TmuxManager, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, fs afero.Fs, configDir string, branchPrefix string) *SessionModule {
-	store := NewSessionStore(fs, configDir)
+func NewSessionModule(tmuxManager TmuxManager, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string) *SessionModule {
+	store := NewSessionStore(database)
 	service := NewSessionService(store, workspaceModule.Service, workspaceModule.GitService, tmuxManager, bus, branchPrefix)
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)

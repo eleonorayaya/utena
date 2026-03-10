@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -18,7 +19,12 @@ import (
 func setupWorkspaceRouter(t *testing.T) (*WorkspaceRouter, *WorkspaceStore) {
 	t.Helper()
 
-	store := NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	database, err := db.OpenInMemory()
+	require.NoError(t, err)
+	database.Migrate(&Workspace{})
+	t.Cleanup(func() { database.Close() })
+
+	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
 	store.Add(&Workspace{ID: "ws-1", Name: "utena", Path: "/path/to/utena", IsGitRepo: true})
 	store.Add(&Workspace{ID: "ws-2", Name: "example-project", Path: "/path/to/example", IsGitRepo: false})
@@ -92,7 +98,12 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 	fs.MkdirAll(configDir, 0755)
 	afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644)
 
-	store := NewWorkspaceStore(fs, configDir)
+	database, err := db.OpenInMemory()
+	require.NoError(t, err)
+	database.Migrate(&Workspace{})
+	t.Cleanup(func() { database.Close() })
+
+	store := NewWorkspaceStore(database, fs, configDir)
 
 	wsDir := t.TempDir()
 
@@ -111,7 +122,7 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code)
 
 	var response WorkspaceListResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
+	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Len(t, response.Workspaces, 1)
 	require.Equal(t, wsDir, response.Workspaces[0].Path)
@@ -139,7 +150,12 @@ func initTestRepo(t *testing.T) string {
 func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	repoPath := initTestRepo(t)
 
-	store := NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	database, err := db.OpenInMemory()
+	require.NoError(t, err)
+	database.Migrate(&Workspace{})
+	t.Cleanup(func() { database.Close() })
+
+	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	store.Add(&Workspace{ID: "ws-git", Name: "git-repo", Path: repoPath, IsGitRepo: true})
 
 	service := NewWorkspaceService(store)
@@ -155,7 +171,7 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var response BranchListResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
+	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Contains(t, response.Branches, "main")
 	require.Contains(t, response.Branches, "develop")

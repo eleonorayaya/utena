@@ -12,9 +12,9 @@ import (
 func setupTodoService(t *testing.T) (*TodoService, *TodoStore, *workspace.WorkspaceStore) {
 	t.Helper()
 
-	fs := afero.NewMemMapFs()
-	todoStore := NewTodoStore(fs, "/config")
-	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	database := setupTestDB(t)
+	todoStore := NewTodoStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	service := NewTodoService(todoStore, workspaceService)
 

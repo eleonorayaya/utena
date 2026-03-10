@@ -12,9 +12,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/spf13/afero"
+	"gorm.io/gorm"
 )
 
 type WorkspaceNotFoundError struct {
@@ -31,17 +32,16 @@ type config struct {
 }
 
 type WorkspaceStore struct {
-	mu         sync.RWMutex
-	workspaces map[string]*Workspace
-	fs         afero.Fs
-	configDir  string
+	db        db.Database
+	fs        afero.Fs
+	configDir string
 }
 
-func NewWorkspaceStore(fs afero.Fs, configDir string) *WorkspaceStore {
+func NewWorkspaceStore(database db.Database, fs afero.Fs, configDir string) *WorkspaceStore {
 	return &WorkspaceStore{
-		workspaces: make(map[string]*Workspace),
-		fs:         fs,
-		configDir:  configDir,
+		db:        database,
+		fs:        fs,
+		configDir: configDir,
 	}
 }
 
@@ -50,38 +50,30 @@ func (s *WorkspaceStore) configPath() string {
 }
 
 func (s *WorkspaceStore) GetByID(id string) (*Workspace, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	ws, ok := s.workspaces[id]
-	if !ok {
-		return nil, &WorkspaceNotFoundError{WorkspaceID: id}
+	var ws Workspace
+	if err := s.db.First(&ws, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, &WorkspaceNotFoundError{WorkspaceID: id}
+		}
+		return nil, err
 	}
-
-	return ws, nil
+	return &ws, nil
 }
 
 func (s *WorkspaceStore) GetByPath(path string) (*Workspace, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	for _, ws := range s.workspaces {
-		if ws.Path == path {
-			return ws, nil
+	var ws Workspace
+	if err := s.db.First(&ws, "path = ?", path).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, &WorkspaceNotFoundError{WorkspaceID: path}
 		}
+		return nil, err
 	}
-
-	return nil, &WorkspaceNotFoundError{WorkspaceID: path}
+	return &ws, nil
 }
 
 func (s *WorkspaceStore) List() []Workspace {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	workspaces := make([]Workspace, 0, len(s.workspaces))
-	for _, ws := range s.workspaces {
-		workspaces = append(workspaces, *ws)
-	}
+	var workspaces []Workspace
+	s.db.Find(&workspaces)
 
 	sort.Slice(workspaces, func(i, j int) bool {
 		iUsed := !workspaces[i].LastUsedAt.IsZero()
@@ -103,20 +95,16 @@ func (s *WorkspaceStore) Add(ws *Workspace) error {
 	if ws == nil {
 		return errors.New("workspace cannot be nil")
 	}
-
 	if ws.ID == "" {
 		return errors.New("workspace ID cannot be empty")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.workspaces[ws.ID]; exists {
-		return errors.New("workspace with this ID already exists")
+	if err := s.db.Create(ws).Error; err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return errors.New("workspace with this ID already exists")
+		}
+		return err
 	}
-
-	s.workspaces[ws.ID] = ws
-	s.save()
 	return nil
 }
 
@@ -128,17 +116,15 @@ func (s *WorkspaceStore) Update(ws *Workspace) error {
 		return errors.New("workspace ID cannot be empty")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.workspaces[ws.ID]; !exists {
-		return &WorkspaceNotFoundError{WorkspaceID: ws.ID}
+	var existing Workspace
+	if err := s.db.First(&existing, "id = ?", ws.ID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return &WorkspaceNotFoundError{WorkspaceID: ws.ID}
+		}
+		return err
 	}
 
-	copy := *ws
-	s.workspaces[ws.ID] = &copy
-	s.save()
-	return nil
+	return s.db.Save(ws).Error
 }
 
 func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
@@ -152,10 +138,8 @@ func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
 
 	id := generateID(path)
 
-	s.mu.RLock()
-	_, exists := s.workspaces[id]
-	s.mu.RUnlock()
-	if exists {
+	var existing Workspace
+	if err := s.db.First(&existing, "id = ?", id).Error; err == nil {
 		return nil, fmt.Errorf("workspace already exists: %s", path)
 	}
 
@@ -204,10 +188,8 @@ func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
 		fullPath := filepath.Join(path, entry.Name())
 		id := generateID(fullPath)
 
-		s.mu.RLock()
-		_, exists := s.workspaces[id]
-		s.mu.RUnlock()
-		if exists {
+		var existing Workspace
+		if err := s.db.First(&existing, "id = ?", id).Error; err == nil {
 			continue
 		}
 
@@ -236,27 +218,22 @@ func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
 }
 
 func (s *WorkspaceStore) OnAppStart(ctx context.Context) error {
-	s.mu.Lock()
-	s.load()
-	s.mu.Unlock()
-
 	discovered, err := s.discoverWorkspaces()
 	if err != nil {
 		return err
 	}
 
-	s.mu.Lock()
 	for _, ws := range discovered {
-		if existing, ok := s.workspaces[ws.ID]; ok {
+		var existing Workspace
+		if err := s.db.First(&existing, "id = ?", ws.ID).Error; err == nil {
 			existing.Name = ws.Name
 			existing.Path = ws.Path
 			existing.IsGitRepo = ws.IsGitRepo
+			s.db.Save(&existing)
 		} else {
-			s.workspaces[ws.ID] = ws
+			s.db.Create(ws)
 		}
 	}
-	s.save()
-	s.mu.Unlock()
 
 	return nil
 }
@@ -350,33 +327,6 @@ func (s *WorkspaceStore) saveConfig(cfg *config) error {
 		return err
 	}
 	return afero.WriteFile(s.fs, s.configPath(), data, 0644)
-}
-
-func (s *WorkspaceStore) workspacesPath() string {
-	return filepath.Join(s.configDir, "workspaces.json")
-}
-
-func (s *WorkspaceStore) load() {
-	data, err := afero.ReadFile(s.fs, s.workspacesPath())
-	if err != nil {
-		return
-	}
-
-	loaded := make(map[string]*Workspace)
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		return
-	}
-
-	s.workspaces = loaded
-}
-
-func (s *WorkspaceStore) save() {
-	s.fs.MkdirAll(s.configDir, 0755)
-	data, err := json.Marshal(s.workspaces)
-	if err != nil {
-		return
-	}
-	afero.WriteFile(s.fs, s.workspacesPath(), data, 0644)
 }
 
 func expandHome(path string) string {

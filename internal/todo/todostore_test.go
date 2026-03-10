@@ -3,23 +3,48 @@ package todo
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/spf13/afero"
+	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
+func setupTestDB(t *testing.T) db.Database {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database.Migrate(&workspace.Workspace{}, &Todo{})
+	t.Cleanup(func() {
+		database.Close()
+		os.Remove(dbPath)
+	})
+	return database
+}
+
+func seedWorkspaces(t *testing.T, database db.Database) {
+	t.Helper()
+	database.Create(&workspace.Workspace{ID: "ws-1", Name: "workspace-1", Path: "/tmp/ws1"})
+	database.Create(&workspace.Workspace{ID: "ws-2", Name: "workspace-2", Path: "/tmp/ws2"})
+}
+
 func setupTodoStore(t *testing.T) *TodoStore {
 	t.Helper()
-	return NewTodoStore(afero.NewMemMapFs(), "/config")
+	database := setupTestDB(t)
+	seedWorkspaces(t, database)
+	return NewTodoStore(database)
 }
 
 func TestNewTodoStore(t *testing.T) {
 	store := setupTodoStore(t)
 	require.NotNil(t, store)
-	require.NotNil(t, store.todos)
 }
 
 func TestTodoStore_Add(t *testing.T) {
@@ -187,16 +212,14 @@ func TestTodoStore_Delete_EmptyID(t *testing.T) {
 }
 
 func TestTodoStore_Persistence(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	configDir := "/config"
+	database := setupTestDB(t)
+	seedWorkspaces(t, database)
 
-	store1 := NewTodoStore(fs, configDir)
+	store1 := NewTodoStore(database)
 	td := &Todo{ID: "todo-1", Name: "persist me", WorkspaceID: "ws-1", CreatedAt: time.Now()}
 	store1.Add(td)
 
-	store2 := NewTodoStore(fs, configDir)
-	err := store2.OnAppStart(context.Background())
-	require.NoError(t, err)
+	store2 := NewTodoStore(database)
 
 	list := store2.List()
 	require.Len(t, list, 1)

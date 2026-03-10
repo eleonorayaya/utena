@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -52,40 +51,20 @@ func (s *TodoService) Create(ctx context.Context, name, description, workspaceID
 		return nil, err
 	}
 
-	s.resolveWorkspaceName(t)
+	t, _ = s.store.GetByID(id)
 	return t, nil
 }
 
 func (s *TodoService) List(ctx context.Context) ([]Todo, error) {
-	todos := s.store.List()
-	for i := range todos {
-		s.resolveWorkspaceName(&todos[i])
-	}
-	return todos, nil
+	return s.store.List(), nil
 }
 
 func (s *TodoService) ListByWorkspace(ctx context.Context, workspaceID string) ([]Todo, error) {
-	todos := s.store.ListByWorkspaceID(workspaceID)
-	for i := range todos {
-		s.resolveWorkspaceName(&todos[i])
-	}
-	return todos, nil
+	return s.store.ListByWorkspaceID(workspaceID), nil
 }
 
 func (s *TodoService) Delete(ctx context.Context, id string) error {
 	return s.store.Delete(id)
-}
-
-func (s *TodoService) resolveWorkspaceName(t *Todo) {
-	if t.WorkspaceID == "" {
-		return
-	}
-	ws, err := s.workspaceService.GetWorkspace(context.Background(), t.WorkspaceID)
-	if err != nil {
-		slog.Warn("failed to resolve workspace name", "todo", t.ID, "workspace_id", t.WorkspaceID, "error", err)
-		return
-	}
-	t.WorkspaceName = ws.Name
 }
 
 func generateID(name string, t time.Time) string {

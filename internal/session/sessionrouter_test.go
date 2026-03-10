@@ -18,9 +18,10 @@ import (
 func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace.WorkspaceStore, *mockTmuxManager) {
 	t.Helper()
 
+	database := setupTestDB(t)
 	bus := eventbus.NewEventBus()
-	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
-	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	sessionStore := NewSessionStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
 	workspaceStore.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
@@ -39,8 +40,8 @@ func TestSessionRouter_ListSessions(t *testing.T) {
 	router, sessionStore, _, _ := setupSessionRouter(t)
 
 	now := time.Now()
-	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
-	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
+	session1 := &Session{ID: "session-1", TmuxSessionName: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
+	session2 := &Session{ID: "session-2", TmuxSessionName: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 
@@ -68,12 +69,13 @@ func TestSessionRouter_GetSessionByID(t *testing.T) {
 	router, sessionStore, _, _ := setupSessionRouter(t)
 
 	session := &Session{
-		ID:          "session-1",
-		WorkspaceID: "ws-1",
-		IsAttached:  true,
-		Status:      StatusReady,
-		Resources:   &Resources{Tmux: &ResourceState{Status: ResourceReady}},
-		LastUsedAt:  time.Now(),
+		ID:              "session-1",
+		TmuxSessionName: "session-1",
+		WorkspaceID:     "ws-1",
+		IsAttached:      true,
+		Status:          StatusReady,
+		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
+		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -110,9 +112,9 @@ func TestSessionRouter_ListSessionsByWorkspace(t *testing.T) {
 	router, sessionStore, _, _ := setupSessionRouter(t)
 
 	now := time.Now()
-	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
-	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
-	session3 := &Session{ID: "session-3", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
+	session1 := &Session{ID: "session-1", TmuxSessionName: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
+	session2 := &Session{ID: "session-2", TmuxSessionName: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
+	session3 := &Session{ID: "session-3", TmuxSessionName: "session-3", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 	sessionStore.Add(session3)
@@ -234,11 +236,12 @@ func TestSessionRouter_UpdateSession(t *testing.T) {
 	router, sessionStore, _, _ := setupSessionRouter(t)
 
 	session := &Session{
-		ID:          "session-1",
-		WorkspaceID: "ws-1",
-		IsAttached:  false,
-		Status:      StatusReady,
-		LastUsedAt:  time.Now(),
+		ID:              "session-1",
+		TmuxSessionName: "session-1",
+		WorkspaceID:     "ws-1",
+		IsAttached:      false,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -371,9 +374,10 @@ func TestSessionRouter_GetSessionByID_ShowsResourceState(t *testing.T) {
 	router, sessionStore, _, _ := setupSessionRouter(t)
 
 	session := &Session{
-		ID:          "creating-session",
-		WorkspaceID: "ws-1",
-		Status:      StatusCreating,
+		ID:              "creating-session",
+		TmuxSessionName: "creating-session",
+		WorkspaceID:     "ws-1",
+		Status:          StatusCreating,
 		Resources: &Resources{
 			Branch:   &ResourceState{Status: ResourceReady},
 			Worktree: &ResourceState{Status: ResourceCreating},
@@ -403,9 +407,10 @@ func TestSessionRouter_GetSessionByID_ShowsBrokenResourceError(t *testing.T) {
 	router, sessionStore, _, _ := setupSessionRouter(t)
 
 	session := &Session{
-		ID:          "broken-session",
-		WorkspaceID: "ws-1",
-		Status:      StatusBroken,
+		ID:              "broken-session",
+		TmuxSessionName: "broken-session",
+		WorkspaceID:     "ws-1",
+		Status:          StatusBroken,
 		Resources: &Resources{
 			Branch:   &ResourceState{Status: ResourceReady},
 			Worktree: &ResourceState{Status: ResourceFailed, Error: "failed to create worktree: timeout"},
