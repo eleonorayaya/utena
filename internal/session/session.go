@@ -25,6 +25,8 @@ const (
 
 type Session struct {
 	ID              string               `json:"id" gorm:"primaryKey"`
+	CreatedAt       time.Time            `json:"created_at"`
+	UpdatedAt       time.Time            `json:"updated_at"`
 	TmuxSessionName string               `json:"tmux_session_name,omitempty" gorm:"uniqueIndex"`
 	Name            string               `json:"name,omitempty"`
 	WorkspaceID     string               `json:"workspace_id" gorm:"index"`

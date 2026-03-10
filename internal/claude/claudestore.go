@@ -3,7 +3,6 @@ package claude
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"gorm.io/gorm"
@@ -32,13 +31,13 @@ func (s *ClaudeStore) GetByID(id string) (*ClaudeSession, error) {
 
 func (s *ClaudeStore) List() []ClaudeSession {
 	var sessions []ClaudeSession
-	s.db.Order("last_updated_at DESC").Find(&sessions)
+	s.db.Order("updated_at DESC").Find(&sessions)
 	return sessions
 }
 
 func (s *ClaudeStore) ListBySessionID(sessionID string) []ClaudeSession {
 	var sessions []ClaudeSession
-	s.db.Where("session_id = ?", sessionID).Order("last_updated_at DESC").Find(&sessions)
+	s.db.Where("session_id = ?", sessionID).Order("updated_at DESC").Find(&sessions)
 	return sessions
 }
 
@@ -56,10 +55,7 @@ func (s *ClaudeStore) Upsert(session *ClaudeSession) error {
 func (s *ClaudeStore) UpdateStatusBySessionID(sessionID string, from, to ClaudeSessionStatus) {
 	s.db.Model(&ClaudeSession{}).
 		Where("session_id = ? AND status = ?", sessionID, from).
-		Updates(map[string]any{
-			"status":          to,
-			"last_updated_at": time.Now(),
-		})
+		Update("status", to)
 }
 
 func (s *ClaudeStore) Delete(id string) error {

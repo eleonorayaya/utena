@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
 )
@@ -72,11 +71,10 @@ func (s *ClaudeService) HandleHookEvent(ctx context.Context, req *HookEventReque
 
 func (s *ClaudeService) upsertWithStatus(req *HookEventRequest, status ClaudeSessionStatus) error {
 	session := &ClaudeSession{
-		ID:            req.ClaudeSessionID,
-		SessionID:     req.SessionID,
-		Status:        status,
-		CWD:           req.CWD,
-		LastUpdatedAt: time.Now(),
+		ID:        req.ClaudeSessionID,
+		SessionID: req.SessionID,
+		Status:    status,
+		CWD:       req.CWD,
 	}
 	return s.store.Upsert(session)
 }

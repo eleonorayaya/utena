@@ -44,7 +44,6 @@ func (s *TodoService) Create(ctx context.Context, name, description, workspaceID
 		Name:        name,
 		Description: description,
 		WorkspaceID: workspaceID,
-		CreatedAt:   time.Now(),
 	}
 
 	if err := s.store.Add(t); err != nil {
