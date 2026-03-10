@@ -31,38 +31,25 @@ func NewApp(cfg Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newApp(database, afero.NewOsFs(), cfg), nil
+	return newApp(database, afero.NewOsFs(), cfg, nil), nil
 }
 
 func NewTestApp(cfg Config, tmuxManager session.TmuxManager) *App {
 	database, _ := db.OpenInMemory()
-	fs := afero.NewMemMapFs()
-	bus := eventbus.NewEventBus()
-
-	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir)
-	tmuxModule := tmux.NewTmuxModule(bus)
-	sessionModule := session.NewSessionModule(tmuxManager, workspaceModule, bus, database, cfg.BranchPrefix)
-
-	app := &App{
-		db:        database,
-		Workspace: workspaceModule,
-		Session:   sessionModule,
-		Tmux:      tmuxModule,
-		Claude:    claude.NewClaudeModule(bus, database),
-		Todo:      todo.NewTodoModule(workspaceModule, database),
-	}
-
-	database.Migrate(app.collectModels()...)
-
-	return app
+	return newApp(database, afero.NewMemMapFs(), cfg, tmuxManager)
 }
 
-func newApp(database db.Database, fs afero.Fs, cfg Config) *App {
+func newApp(database db.Database, fs afero.Fs, cfg Config, tmuxOverride session.TmuxManager) *App {
 	bus := eventbus.NewEventBus()
 
 	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir)
 	tmuxModule := tmux.NewTmuxModule(bus)
-	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix)
+
+	tmuxManager := tmuxOverride
+	if tmuxManager == nil {
+		tmuxManager = tmuxModule.Service
+	}
+	sessionModule := session.NewSessionModule(tmuxManager, workspaceModule, bus, database, cfg.BranchPrefix)
 
 	app := &App{
 		db:        database,
