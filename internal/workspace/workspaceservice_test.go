@@ -43,8 +43,8 @@ func TestWorkspaceService_OnAppEnd(t *testing.T) {
 func TestWorkspaceService_ListWorkspaces(t *testing.T) {
 	service, store := setupWorkspaceService(t)
 
-	ws1 := &Workspace{ID: "ws-1", Name: "test1", Path: "/path1"}
-	ws2 := &Workspace{ID: "ws-2", Name: "test2", Path: "/path2"}
+	ws1 := &Workspace{Name: "test1", Path: "/path1"}
+	ws2 := &Workspace{Name: "test2", Path: "/path2"}
 	store.Add(ws1)
 	store.Add(ws2)
 
@@ -53,19 +53,18 @@ func TestWorkspaceService_ListWorkspaces(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, workspaces, 2)
 
-	ids := make(map[string]bool)
+	names := make(map[string]bool)
 	for _, ws := range workspaces {
-		ids[ws.ID] = true
+		names[ws.Name] = true
 	}
-	require.True(t, ids["ws-1"])
-	require.True(t, ids["ws-2"])
+	require.True(t, names["test1"])
+	require.True(t, names["test2"])
 }
 
 func TestWorkspaceService_GetWorkspace(t *testing.T) {
 	service, store := setupWorkspaceService(t)
 
 	ws := &Workspace{
-		ID:        "ws-1",
 		Name:      "test",
 		Path:      "/path/to/test",
 		IsGitRepo: true,
@@ -73,7 +72,7 @@ func TestWorkspaceService_GetWorkspace(t *testing.T) {
 	store.Add(ws)
 
 	ctx := context.Background()
-	retrieved, err := service.GetWorkspace(ctx, "ws-1")
+	retrieved, err := service.GetWorkspace(ctx, ws.ID)
 	require.NoError(t, err)
 	require.Equal(t, ws.ID, retrieved.ID)
 	require.Equal(t, ws.Name, retrieved.Name)
@@ -84,7 +83,7 @@ func TestWorkspaceService_GetWorkspace(t *testing.T) {
 func TestWorkspaceService_GetWorkspace_NotFound(t *testing.T) {
 	service, _ := setupWorkspaceService(t)
 	ctx := context.Background()
-	_, err := service.GetWorkspace(ctx, "nonexistent")
+	_, err := service.GetWorkspace(ctx, 99999)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
@@ -93,7 +92,6 @@ func TestWorkspaceService_GetWorkspaceByPath(t *testing.T) {
 	service, store := setupWorkspaceService(t)
 
 	ws := &Workspace{
-		ID:   "ws-1",
 		Name: "test",
 		Path: "/unique/path",
 	}
@@ -161,15 +159,15 @@ func TestWorkspaceService_AddWorkspaceAsRoot(t *testing.T) {
 func TestWorkspaceService_Touch(t *testing.T) {
 	service, store := setupWorkspaceService(t)
 
-	ws := &Workspace{ID: "ws-1", Name: "test", Path: "/path"}
+	ws := &Workspace{Name: "test", Path: "/path"}
 	store.Add(ws)
 
 	before := time.Now()
 	ctx := context.Background()
-	err := service.Touch(ctx, "ws-1")
+	err := service.Touch(ctx, ws.ID)
 	require.NoError(t, err)
 
-	retrieved, err := store.GetByID("ws-1")
+	retrieved, err := store.GetByID(ws.ID)
 	require.NoError(t, err)
 	require.False(t, retrieved.LastUsedAt.IsZero())
 	require.True(t, retrieved.LastUsedAt.After(before) || retrieved.LastUsedAt.Equal(before))
@@ -179,7 +177,7 @@ func TestWorkspaceService_Touch_NotFound(t *testing.T) {
 	service, _ := setupWorkspaceService(t)
 
 	ctx := context.Background()
-	err := service.Touch(ctx, "nonexistent")
+	err := service.Touch(ctx, 99999)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }

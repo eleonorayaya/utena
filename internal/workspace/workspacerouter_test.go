@@ -26,8 +26,10 @@ func setupWorkspaceRouter(t *testing.T) (*WorkspaceRouter, *WorkspaceStore) {
 
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
-	store.Add(&Workspace{ID: "ws-1", Name: "utena", Path: "/path/to/utena", IsGitRepo: true})
-	store.Add(&Workspace{ID: "ws-2", Name: "example-project", Path: "/path/to/example", IsGitRepo: false})
+	ws1 := &Workspace{Name: "utena", Path: "/path/to/utena", IsGitRepo: true}
+	ws2 := &Workspace{Name: "example-project", Path: "/path/to/example", IsGitRepo: false}
+	store.Add(ws1)
+	store.Add(ws2)
 
 	service := NewWorkspaceService(store)
 	gitService := git.NewGitService()
@@ -52,18 +54,22 @@ func TestWorkspaceRouter_ListWorkspaces(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, response.Workspaces, 2)
 
-	ids := make(map[string]bool)
+	names := make(map[string]bool)
 	for _, ws := range response.Workspaces {
-		ids[ws.ID] = true
+		require.NotZero(t, ws.ID)
+		names[ws.Name] = true
 	}
-	require.True(t, ids["ws-1"])
-	require.True(t, ids["ws-2"])
+	require.True(t, names["utena"])
+	require.True(t, names["example-project"])
 }
 
 func TestWorkspaceRouter_GetWorkspaceByID(t *testing.T) {
-	router, _ := setupWorkspaceRouter(t)
+	router, store := setupWorkspaceRouter(t)
 
-	req := httptest.NewRequest("GET", "/ws-1", nil)
+	ws, err := store.GetByPath("/path/to/utena")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", fmt.Sprintf("/%d", ws.ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -71,9 +77,9 @@ func TestWorkspaceRouter_GetWorkspaceByID(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var response WorkspaceResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
+	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	require.Equal(t, "ws-1", response.ID)
+	require.Equal(t, ws.ID, response.ID)
 	require.Equal(t, "utena", response.Name)
 	require.Equal(t, "/path/to/utena", response.Path)
 	require.True(t, response.IsGitRepo)
@@ -82,7 +88,7 @@ func TestWorkspaceRouter_GetWorkspaceByID(t *testing.T) {
 func TestWorkspaceRouter_GetWorkspaceByID_NotFound(t *testing.T) {
 	router, _ := setupWorkspaceRouter(t)
 
-	req := httptest.NewRequest("GET", "/nonexistent", nil)
+	req := httptest.NewRequest("GET", "/99999", nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -156,14 +162,15 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	t.Cleanup(func() { database.Close() })
 
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
-	store.Add(&Workspace{ID: "ws-git", Name: "git-repo", Path: repoPath, IsGitRepo: true})
+	wsGit := &Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
+	store.Add(wsGit)
 
 	service := NewWorkspaceService(store)
 	gitService := git.NewGitService()
 	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 
-	req := httptest.NewRequest("GET", "/ws-git/branches", nil)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/%d/branches", wsGit.ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -179,9 +186,12 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 }
 
 func TestWorkspaceRouter_ListBranches_NotGitRepo(t *testing.T) {
-	router, _ := setupWorkspaceRouter(t)
+	router, store := setupWorkspaceRouter(t)
 
-	req := httptest.NewRequest("GET", "/ws-2/branches", nil)
+	ws, err := store.GetByPath("/path/to/example")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", fmt.Sprintf("/%d/branches", ws.ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -192,7 +202,7 @@ func TestWorkspaceRouter_ListBranches_NotGitRepo(t *testing.T) {
 func TestWorkspaceRouter_ListBranches_NotFound(t *testing.T) {
 	router, _ := setupWorkspaceRouter(t)
 
-	req := httptest.NewRequest("GET", "/nonexistent/branches", nil)
+	req := httptest.NewRequest("GET", "/99999/branches", nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)

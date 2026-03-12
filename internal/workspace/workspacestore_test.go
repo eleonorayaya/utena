@@ -64,7 +64,6 @@ func TestWorkspaceStore_Add(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
 	ws := &Workspace{
-		ID:        "ws-1",
 		Name:      "test",
 		Path:      "/path/to/test",
 		IsGitRepo: true,
@@ -72,8 +71,9 @@ func TestWorkspaceStore_Add(t *testing.T) {
 
 	err := store.Add(ws)
 	require.NoError(t, err)
+	require.NotZero(t, ws.ID)
 
-	retrieved, err := store.GetByID("ws-1")
+	retrieved, err := store.GetByID(ws.ID)
 	require.NoError(t, err)
 	require.Equal(t, ws.ID, retrieved.ID)
 }
@@ -85,19 +85,11 @@ func TestWorkspaceStore_Add_NilWorkspace(t *testing.T) {
 	require.Contains(t, err.Error(), "cannot be nil")
 }
 
-func TestWorkspaceStore_Add_EmptyID(t *testing.T) {
-	store := setupWorkspaceStore(t)
-	ws := &Workspace{Name: "test", Path: "/path"}
-	err := store.Add(ws)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "ID cannot be empty")
-}
-
 func TestWorkspaceStore_Add_Duplicate(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
-	ws1 := &Workspace{ID: "ws-1", Name: "test1", Path: "/path1"}
-	ws2 := &Workspace{ID: "ws-1", Name: "test2", Path: "/path2"}
+	ws1 := &Workspace{Name: "test1", Path: "/same/path"}
+	ws2 := &Workspace{Name: "test2", Path: "/same/path"}
 
 	err := store.Add(ws1)
 	require.NoError(t, err)
@@ -111,7 +103,6 @@ func TestWorkspaceStore_GetByID(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
 	ws := &Workspace{
-		ID:        "ws-1",
 		Name:      "test",
 		Path:      "/path/to/test",
 		IsGitRepo: false,
@@ -119,7 +110,7 @@ func TestWorkspaceStore_GetByID(t *testing.T) {
 
 	store.Add(ws)
 
-	retrieved, err := store.GetByID("ws-1")
+	retrieved, err := store.GetByID(ws.ID)
 	require.NoError(t, err)
 	require.Equal(t, ws.ID, retrieved.ID)
 	require.Equal(t, ws.Name, retrieved.Name)
@@ -130,7 +121,7 @@ func TestWorkspaceStore_GetByID(t *testing.T) {
 func TestWorkspaceStore_GetByID_NotFound(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
-	_, err := store.GetByID("nonexistent")
+	_, err := store.GetByID(99999)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
@@ -139,7 +130,6 @@ func TestWorkspaceStore_GetByPath(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
 	ws := &Workspace{
-		ID:   "ws-1",
 		Name: "test",
 		Path: "/unique/path",
 	}
@@ -162,8 +152,8 @@ func TestWorkspaceStore_GetByPath_NotFound(t *testing.T) {
 func TestWorkspaceStore_List(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
-	ws1 := &Workspace{ID: "ws-1", Name: "test1", Path: "/path1"}
-	ws2 := &Workspace{ID: "ws-2", Name: "test2", Path: "/path2"}
+	ws1 := &Workspace{Name: "test1", Path: "/path1"}
+	ws2 := &Workspace{Name: "test2", Path: "/path2"}
 
 	store.Add(ws1)
 	store.Add(ws2)
@@ -171,21 +161,22 @@ func TestWorkspaceStore_List(t *testing.T) {
 	list := store.List()
 	require.Len(t, list, 2)
 
-	ids := make(map[string]bool)
+	names := make(map[string]bool)
 	for _, ws := range list {
-		ids[ws.ID] = true
+		require.NotZero(t, ws.ID)
+		names[ws.Name] = true
 	}
 
-	require.True(t, ids["ws-1"], "ws-1 not found in list")
-	require.True(t, ids["ws-2"], "ws-2 not found in list")
+	require.True(t, names["test1"], "test1 not found in list")
+	require.True(t, names["test2"], "test2 not found in list")
 }
 
 func TestWorkspaceStore_List_SortedAlphabetically(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
-	store.Add(&Workspace{ID: "ws-3", Name: "charlie", Path: "/path3"})
-	store.Add(&Workspace{ID: "ws-1", Name: "alpha", Path: "/path1"})
-	store.Add(&Workspace{ID: "ws-2", Name: "bravo", Path: "/path2"})
+	store.Add(&Workspace{Name: "charlie", Path: "/path3"})
+	store.Add(&Workspace{Name: "alpha", Path: "/path1"})
+	store.Add(&Workspace{Name: "bravo", Path: "/path2"})
 
 	list := store.List()
 	require.Len(t, list, 3)
@@ -198,9 +189,9 @@ func TestWorkspaceStore_List_SortedByLastUsedAt(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
 	now := time.Now()
-	store.Add(&Workspace{ID: "ws-1", Name: "alpha", Path: "/path1", LastUsedAt: now.Add(-2 * time.Hour)})
-	store.Add(&Workspace{ID: "ws-2", Name: "bravo", Path: "/path2", LastUsedAt: now})
-	store.Add(&Workspace{ID: "ws-3", Name: "charlie", Path: "/path3"})
+	store.Add(&Workspace{Name: "alpha", Path: "/path1", LastUsedAt: now.Add(-2 * time.Hour)})
+	store.Add(&Workspace{Name: "bravo", Path: "/path2", LastUsedAt: now})
+	store.Add(&Workspace{Name: "charlie", Path: "/path3"})
 
 	list := store.List()
 	require.Len(t, list, 3)
@@ -226,7 +217,6 @@ func TestWorkspaceStore_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			ws := &Workspace{
-				ID:   fmt.Sprintf("ws-%d", id),
 				Name: fmt.Sprintf("concurrent-%d", id),
 				Path: fmt.Sprintf("/path/%d", id),
 			}
@@ -362,16 +352,17 @@ func TestWorkspaceStore_OnAppStart_StableIDs(t *testing.T) {
 	err := store1.OnAppStart(ctx)
 	require.NoError(t, err)
 
-	store2, _ := setupWorkspaceStoreWithConfig(t, []string{rootDir})
-	err = store2.OnAppStart(ctx)
+	ws1 := store1.List()
+	require.Len(t, ws1, 1)
+	require.Equal(t, "my-project", ws1[0].Name)
+
+	err = store1.OnAppStart(ctx)
 	require.NoError(t, err)
 
-	ws1 := store1.List()
-	ws2 := store2.List()
-
-	require.Len(t, ws1, 1)
+	ws2 := store1.List()
 	require.Len(t, ws2, 1)
-	require.Equal(t, ws1[0].ID, ws2[0].ID)
+	require.Equal(t, ws1[0].Path, ws2[0].Path)
+	require.Equal(t, "my-project", ws2[0].Name)
 }
 
 func TestWorkspaceStore_OnAppEnd(t *testing.T) {
@@ -394,16 +385,6 @@ func TestExpandHome(t *testing.T) {
 
 	result = expandHome("relative/path")
 	require.Equal(t, "relative/path", result)
-}
-
-func TestGenerateID(t *testing.T) {
-	id1 := generateID("/path/to/project")
-	id2 := generateID("/path/to/project")
-	id3 := generateID("/different/path")
-
-	require.Equal(t, id1, id2)
-	require.NotEqual(t, id1, id3)
-	require.Len(t, id1, 16)
 }
 
 func TestIsGitRepository(t *testing.T) {
@@ -549,7 +530,7 @@ func TestWorkspaceStore_AddWorkspaceRoot_InvalidPath(t *testing.T) {
 func TestWorkspaceStore_Update(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
-	ws := &Workspace{ID: "ws-1", Name: "test", Path: "/path"}
+	ws := &Workspace{Name: "test", Path: "/path"}
 	store.Add(ws)
 
 	now := time.Now()
@@ -557,7 +538,7 @@ func TestWorkspaceStore_Update(t *testing.T) {
 	err := store.Update(ws)
 	require.NoError(t, err)
 
-	retrieved, err := store.GetByID("ws-1")
+	retrieved, err := store.GetByID(ws.ID)
 	require.NoError(t, err)
 	require.Equal(t, now.Unix(), retrieved.LastUsedAt.Unix())
 }
@@ -565,7 +546,8 @@ func TestWorkspaceStore_Update(t *testing.T) {
 func TestWorkspaceStore_Update_NotFound(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
-	ws := &Workspace{ID: "nonexistent", Name: "test", Path: "/path"}
+	ws := &Workspace{Name: "test", Path: "/path"}
+	ws.ID = 99999
 	err := store.Update(ws)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
@@ -577,7 +559,7 @@ func TestWorkspaceStore_Update_Nil(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestWorkspaceStore_Update_EmptyID(t *testing.T) {
+func TestWorkspaceStore_Update_ZeroID(t *testing.T) {
 	store := setupWorkspaceStore(t)
 	err := store.Update(&Workspace{Name: "test"})
 	require.Error(t, err)
@@ -603,12 +585,12 @@ func TestWorkspaceStore_Persistence(t *testing.T) {
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
 	now := time.Now()
-	ws := &Workspace{ID: "ws-1", Name: "test", Path: "/path", LastUsedAt: now}
+	ws := &Workspace{Name: "test", Path: "/path", LastUsedAt: now}
 	store.Add(ws)
 
 	store2 := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
-	retrieved, err := store2.GetByID("ws-1")
+	retrieved, err := store2.GetByID(ws.ID)
 	require.NoError(t, err)
 	require.Equal(t, now.Unix(), retrieved.LastUsedAt.Unix())
 	require.Equal(t, "test", retrieved.Name)
