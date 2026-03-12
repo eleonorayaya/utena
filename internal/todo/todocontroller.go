@@ -2,6 +2,7 @@ package todo
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/go-chi/chi/v5"
@@ -52,9 +53,14 @@ func (c *TodoController) CreateTodo(w http.ResponseWriter, r *http.Request) {
 
 func (c *TodoController) DeleteTodo(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
+	raw := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
 
-	if err := c.service.Delete(ctx, id); err != nil {
+	if err := c.service.Delete(ctx, uint(id)); err != nil {
 		if err == ErrTodoNotFound {
 			render.Render(w, r, common.ErrNotFound())
 			return

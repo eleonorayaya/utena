@@ -8,7 +8,7 @@ import (
 type CreateTodoRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID *uint  `json:"workspace_id"`
 }
 
 func (c *CreateTodoRequest) Bind(r *http.Request) error {

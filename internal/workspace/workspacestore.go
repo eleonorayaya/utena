@@ -2,8 +2,6 @@ package workspace
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -49,11 +47,11 @@ func (s *WorkspaceStore) configPath() string {
 	return filepath.Join(s.configDir, "config.json")
 }
 
-func (s *WorkspaceStore) GetByID(id string) (*Workspace, error) {
+func (s *WorkspaceStore) GetByID(id uint) (*Workspace, error) {
 	var ws Workspace
 	if err := s.db.First(&ws, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, &WorkspaceNotFoundError{WorkspaceID: id}
+			return nil, &WorkspaceNotFoundError{WorkspaceID: fmt.Sprintf("%d", id)}
 		}
 		return nil, err
 	}
@@ -95,13 +93,10 @@ func (s *WorkspaceStore) Add(ws *Workspace) error {
 	if ws == nil {
 		return errors.New("workspace cannot be nil")
 	}
-	if ws.ID == "" {
-		return errors.New("workspace ID cannot be empty")
-	}
 
 	if err := s.db.Create(ws).Error; err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return errors.New("workspace with this ID already exists")
+			return errors.New("workspace with this path already exists")
 		}
 		return err
 	}
@@ -112,14 +107,14 @@ func (s *WorkspaceStore) Update(ws *Workspace) error {
 	if ws == nil {
 		return errors.New("workspace cannot be nil")
 	}
-	if ws.ID == "" {
-		return errors.New("workspace ID cannot be empty")
+	if ws.ID == 0 {
+		return errors.New("workspace ID cannot be zero")
 	}
 
 	var existing Workspace
 	if err := s.db.First(&existing, "id = ?", ws.ID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return &WorkspaceNotFoundError{WorkspaceID: ws.ID}
+			return &WorkspaceNotFoundError{WorkspaceID: fmt.Sprintf("%d", ws.ID)}
 		}
 		return err
 	}
@@ -136,15 +131,12 @@ func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
 		return nil, fmt.Errorf("path is not a directory: %s", path)
 	}
 
-	id := generateID(path)
-
 	var existing Workspace
-	if err := s.db.First(&existing, "id = ?", id).Error; err == nil {
+	if err := s.db.First(&existing, "path = ?", path).Error; err == nil {
 		return nil, fmt.Errorf("workspace already exists: %s", path)
 	}
 
 	ws := &Workspace{
-		ID:        id,
 		Name:      filepath.Base(path),
 		Path:      path,
 		IsGitRepo: s.isGitRepository(path),
@@ -186,15 +178,13 @@ func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
 			continue
 		}
 		fullPath := filepath.Join(path, entry.Name())
-		id := generateID(fullPath)
 
 		var existing Workspace
-		if err := s.db.First(&existing, "id = ?", id).Error; err == nil {
+		if err := s.db.First(&existing, "path = ?", fullPath).Error; err == nil {
 			continue
 		}
 
 		ws := &Workspace{
-			ID:        id,
 			Name:      entry.Name(),
 			Path:      fullPath,
 			IsGitRepo: s.isGitRepository(fullPath),
@@ -225,9 +215,8 @@ func (s *WorkspaceStore) OnAppStart(ctx context.Context) error {
 
 	for _, ws := range discovered {
 		var existing Workspace
-		if err := s.db.First(&existing, "id = ?", ws.ID).Error; err == nil {
+		if err := s.db.First(&existing, "path = ?", ws.Path).Error; err == nil {
 			existing.Name = ws.Name
-			existing.Path = ws.Path
 			existing.IsGitRepo = ws.IsGitRepo
 			s.db.Save(&existing)
 		} else {
@@ -269,11 +258,9 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 			}
 
 			fullPath := filepath.Join(expanded, entry.Name())
-			id := generateID(fullPath)
 			isGitRepo := s.isGitRepository(fullPath)
 
 			workspaces = append(workspaces, &Workspace{
-				ID:        id,
 				Name:      entry.Name(),
 				Path:      fullPath,
 				IsGitRepo: isGitRepo,
@@ -287,10 +274,8 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		id := generateID(expanded)
 		isGitRepo := s.isGitRepository(expanded)
 		workspaces = append(workspaces, &Workspace{
-			ID:        id,
 			Name:      filepath.Base(expanded),
 			Path:      expanded,
 			IsGitRepo: isGitRepo,
@@ -338,11 +323,6 @@ func expandHome(path string) string {
 		return filepath.Join(homeDir, path[2:])
 	}
 	return path
-}
-
-func generateID(path string) string {
-	hash := sha256.Sum256([]byte(path))
-	return hex.EncodeToString(hash[:8])
 }
 
 func (s *WorkspaceStore) isGitRepository(path string) bool {

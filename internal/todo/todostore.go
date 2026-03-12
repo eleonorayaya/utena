@@ -19,7 +19,7 @@ func NewTodoStore(database db.Database) *TodoStore {
 	}
 }
 
-func (s *TodoStore) GetByID(id string) (*Todo, error) {
+func (s *TodoStore) GetByID(id uint) (*Todo, error) {
 	var t Todo
 	if err := s.db.Joins("Workspace").First(&t, "todos.id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -40,7 +40,7 @@ func (s *TodoStore) List() []Todo {
 	return todos
 }
 
-func (s *TodoStore) ListByWorkspaceID(workspaceID string) []Todo {
+func (s *TodoStore) ListByWorkspaceID(workspaceID uint) []Todo {
 	var todos []Todo
 	s.db.Joins("Workspace").Where("todos.workspace_id = ?", workspaceID).Order("todos.created_at DESC").Find(&todos)
 	for i := range todos {
@@ -53,14 +53,8 @@ func (s *TodoStore) Add(t *Todo) error {
 	if t == nil {
 		return errors.New("todo cannot be nil")
 	}
-	if t.ID == "" {
-		return errors.New("todo ID cannot be empty")
-	}
 
 	omitFields := []string{"Workspace"}
-	if t.WorkspaceID == "" {
-		omitFields = append(omitFields, "WorkspaceID")
-	}
 
 	if err := s.db.Omit(omitFields...).Create(t).Error; err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -71,9 +65,9 @@ func (s *TodoStore) Add(t *Todo) error {
 	return nil
 }
 
-func (s *TodoStore) Delete(id string) error {
-	if id == "" {
-		return errors.New("todo ID cannot be empty")
+func (s *TodoStore) Delete(id uint) error {
+	if id == 0 {
+		return errors.New("todo ID cannot be zero")
 	}
 
 	var existing Todo

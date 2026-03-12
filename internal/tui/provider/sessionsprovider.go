@@ -28,11 +28,11 @@ func RequestSessionsState() tea.Cmd {
 	return func() tea.Msg { return requestSessionsStateMsg{} }
 }
 
-func ActivateSession(name string) tea.Cmd {
-	return func() tea.Msg { return activateSessionMsg{name: name} }
+func ActivateSession(id uint) tea.Cmd {
+	return func() tea.Msg { return activateSessionMsg{id: id} }
 }
 
-func CreateSession(name, workspaceID, branch, workspacePath string, branchCreated bool) tea.Cmd {
+func CreateSession(name string, workspaceID uint, branch, workspacePath string, branchCreated bool) tea.Cmd {
 	return func() tea.Msg {
 		return createSessionIntentMsg{
 			name:          name,
@@ -44,15 +44,15 @@ func CreateSession(name, workspaceID, branch, workspacePath string, branchCreate
 	}
 }
 
-func RepairSession(id string) tea.Cmd {
+func RepairSession(id uint) tea.Cmd {
 	return func() tea.Msg { return repairSessionIntentMsg{id: id} }
 }
 
-func PollSession(id string) tea.Cmd {
+func PollSession(id uint) tea.Cmd {
 	return func() tea.Msg { return pollSessionIntentMsg{id: id} }
 }
 
-func DeleteSession(id string) tea.Cmd {
+func DeleteSession(id uint) tea.Cmd {
 	return func() tea.Msg { return deleteSessionIntentMsg{id: id} }
 }
 
@@ -60,23 +60,23 @@ type fetchSessionsIntentMsg struct{}
 type requestSessionsStateMsg struct{}
 
 type activateSessionMsg struct {
-	name string
+	id uint
 }
 
 type createSessionIntentMsg struct {
 	name          string
-	workspaceID   string
+	workspaceID   uint
 	branch        string
 	workspacePath string
 	branchCreated bool
 }
 
 type repairSessionIntentMsg struct {
-	id string
+	id uint
 }
 
 type deleteSessionIntentMsg struct {
-	id string
+	id uint
 }
 
 type fetchWindowsIntentMsg struct {
@@ -88,7 +88,7 @@ type windowsLoadedMsg struct {
 }
 
 type setActiveWorkspaceMsg struct {
-	workspaceID string
+	workspaceID uint
 }
 
 type sessionsLoadedMsg struct {
@@ -104,16 +104,16 @@ type sessionActivatedMsg struct {
 }
 
 type SessionCreatedMsg struct {
-	ID     string
+	ID     uint
 	Status session.SessionStatus
 }
 
 type sessionRepairedMsg struct {
-	id string
+	id uint
 }
 
 type sessionDeletedMsg struct {
-	id string
+	id uint
 }
 
 type sessionPolledMsg struct {
@@ -121,7 +121,7 @@ type sessionPolledMsg struct {
 }
 
 type pollSessionIntentMsg struct {
-	id string
+	id uint
 }
 
 type SessionPolledMsg struct {
@@ -159,7 +159,7 @@ func (p sessionsProvider) deriveActiveWorkspace() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		return setActiveWorkspaceMsg{workspaceID: ""}
+		return setActiveWorkspaceMsg{workspaceID: 0}
 	}
 }
 
@@ -191,9 +191,9 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, p.emitState()
 
 	case activateSessionMsg:
-		name := msg.name
+		id := msg.id
 		return p, func() tea.Msg {
-			return p.client.activateSession(name)()
+			return p.client.activateSession(id)()
 		}
 
 	case repairSessionIntentMsg:

@@ -18,17 +18,6 @@ func NewClaudeStore(database db.Database) *ClaudeStore {
 	}
 }
 
-func (s *ClaudeStore) GetByID(id string) (*ClaudeSession, error) {
-	var cs ClaudeSession
-	if err := s.db.First(&cs, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrClaudeSessionNotFound
-		}
-		return nil, err
-	}
-	return &cs, nil
-}
-
 func (s *ClaudeStore) List() []ClaudeSession {
 	var sessions []ClaudeSession
 	s.db.Order("updated_at DESC").Find(&sessions)
@@ -45,11 +34,19 @@ func (s *ClaudeStore) Upsert(session *ClaudeSession) error {
 	if session == nil {
 		return errors.New("claude session cannot be nil")
 	}
-	if session.ID == "" {
+	if session.ClaudeSessionID == "" {
 		return errors.New("claude session ID cannot be empty")
 	}
 
-	return s.db.Save(session).Error
+	var existing ClaudeSession
+	if err := s.db.First(&existing, "claude_session_id = ?", session.ClaudeSessionID).Error; err == nil {
+		existing.SessionID = session.SessionID
+		existing.Status = session.Status
+		existing.CWD = session.CWD
+		return s.db.Save(&existing).Error
+	}
+
+	return s.db.Create(session).Error
 }
 
 func (s *ClaudeStore) UpdateStatusBySessionID(sessionID string, from, to ClaudeSessionStatus) {
@@ -58,20 +55,20 @@ func (s *ClaudeStore) UpdateStatusBySessionID(sessionID string, from, to ClaudeS
 		Update("status", to)
 }
 
-func (s *ClaudeStore) Delete(id string) error {
-	if id == "" {
+func (s *ClaudeStore) DeleteByClaudeSessionID(claudeSessionID string) error {
+	if claudeSessionID == "" {
 		return errors.New("claude session ID cannot be empty")
 	}
 
 	var existing ClaudeSession
-	if err := s.db.First(&existing, "id = ?", id).Error; err != nil {
+	if err := s.db.First(&existing, "claude_session_id = ?", claudeSessionID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrClaudeSessionNotFound
 		}
 		return err
 	}
 
-	return s.db.Delete(&ClaudeSession{}, "id = ?", id).Error
+	return s.db.Delete(&ClaudeSession{}, "id = ?", existing.ID).Error
 }
 
 func (s *ClaudeStore) OnAppStart(ctx context.Context) error {

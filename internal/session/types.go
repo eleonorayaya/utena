@@ -50,7 +50,7 @@ func RenderSessionList(sessions []Session) []render.Renderer {
 
 type CreateSessionRequest struct {
 	Name           string `json:"name,omitempty"`
-	WorkspaceID    string `json:"workspace_id"`
+	WorkspaceID    uint   `json:"workspace_id"`
 	Branch         string `json:"branch,omitempty"`
 	BaseBranch     string `json:"base_branch,omitempty"`
 	BranchCreated  bool   `json:"branch_created"`
@@ -58,7 +58,7 @@ type CreateSessionRequest struct {
 }
 
 func (c *CreateSessionRequest) Bind(r *http.Request) error {
-	if c.WorkspaceID == "" {
+	if c.WorkspaceID == 0 {
 		return errors.New("workspace_id is required")
 	}
 	if c.Name != "" {

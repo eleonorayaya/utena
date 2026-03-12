@@ -7,7 +7,7 @@ import (
 
 type WorkspacesStateUpdatedMsg struct {
 	Workspaces        []workspace.Workspace
-	ActiveWorkspaceID string
+	ActiveWorkspaceID uint
 }
 
 type BranchesLoadedMsg struct {
@@ -22,7 +22,7 @@ func RequestWorkspacesState() tea.Cmd {
 	return func() tea.Msg { return requestWorkspacesStateMsg{} }
 }
 
-func RequestBranches(workspaceID string) tea.Cmd {
+func RequestBranches(workspaceID uint) tea.Cmd {
 	return func() tea.Msg { return requestBranchesMsg{workspaceID: workspaceID} }
 }
 
@@ -34,7 +34,7 @@ type fetchWorkspacesIntentMsg struct{}
 type requestWorkspacesStateMsg struct{}
 
 type requestBranchesMsg struct {
-	workspaceID string
+	workspaceID uint
 }
 
 type addWorkspaceIntentMsg struct {
@@ -56,7 +56,7 @@ type workspacesProvider struct {
 	client            *client
 	workspaces        []workspace.Workspace
 	branches          []string
-	activeWorkspaceID string
+	activeWorkspaceID uint
 }
 
 func newWorkspacesProvider(c *client) workspacesProvider {

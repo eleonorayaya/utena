@@ -1,6 +1,8 @@
 package sessionlist
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -17,8 +19,8 @@ type Model struct {
 	list            list.Model
 	sessions        []session.Session
 	claudeSessions  map[string][]claude.ClaudeSession
-	pendingDeleteID string
-	pendingRepairID string
+	pendingDeleteID uint
+	pendingRepairID uint
 	showBroken      bool
 }
 
@@ -49,7 +51,7 @@ func (m *Model) rebuildItems() tea.Cmd {
 		if s.Status == session.StatusBroken && !m.showBroken {
 			continue
 		}
-		status := aggregateClaudeStatus(m.claudeSessions[s.ID])
+		status := aggregateClaudeStatus(m.claudeSessions[s.TmuxSessionName])
 		items = append(items, sessionItem{session: s, claudeStatus: status})
 	}
 	return m.list.SetItems(items)
@@ -90,10 +92,10 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	if !key.Matches(msg, keys.Close) {
-		m.pendingDeleteID = ""
+		m.pendingDeleteID = 0
 	}
 	if !key.Matches(msg, keys.Select) {
-		m.pendingRepairID = ""
+		m.pendingRepairID = 0
 	}
 	switch {
 	case key.Matches(msg, keys.ToggleBroken):
@@ -113,7 +115,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 				return m, m.list.NewStatusMessage("session is still being created"), true
 			case session.StatusBroken:
 				if m.pendingRepairID == item.session.ID {
-					m.pendingRepairID = ""
+					m.pendingRepairID = 0
 					id := item.session.ID
 					return m, tea.Batch(
 						provider.RepairSession(id),
@@ -141,15 +143,15 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, nil, false
 		}
 		if item.session.IsAttached {
-			m.pendingDeleteID = ""
+			m.pendingDeleteID = 0
 			return m, m.list.NewStatusMessage("cannot close attached session"), true
 		}
 		if m.pendingDeleteID == item.session.ID {
-			m.pendingDeleteID = ""
+			m.pendingDeleteID = 0
 			return m, provider.DeleteSession(item.session.ID), true
 		}
 		m.pendingDeleteID = item.session.ID
-		return m, m.list.NewStatusMessage("press d again to close " + item.session.ID), true
+		return m, m.list.NewStatusMessage(fmt.Sprintf("press d again to close %s", item.displayName())), true
 	}
 	return m, nil, false
 }

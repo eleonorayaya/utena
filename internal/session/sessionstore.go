@@ -20,7 +20,7 @@ func NewSessionStore(database db.Database) *SessionStore {
 	}
 }
 
-func (s *SessionStore) GetByID(id string) (*Session, error) {
+func (s *SessionStore) GetByID(id uint) (*Session, error) {
 	var session Session
 	if err := s.db.Joins("Workspace").First(&session, "sessions.id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -53,7 +53,7 @@ func (s *SessionStore) List() []Session {
 	return sessions
 }
 
-func (s *SessionStore) ListByWorkspace(workspaceID string) []Session {
+func (s *SessionStore) ListByWorkspace(workspaceID uint) []Session {
 	var sessions []Session
 	s.db.Joins("Workspace").Where("sessions.workspace_id = ?", workspaceID).Order("sessions.last_used_at DESC").Find(&sessions)
 	for i := range sessions {
@@ -66,13 +66,10 @@ func (s *SessionStore) Add(session *Session) error {
 	if session == nil {
 		return errors.New("session cannot be nil")
 	}
-	if session.ID == "" {
-		return errors.New("session ID cannot be empty")
-	}
 
 	if err := s.db.Omit("Workspace").Create(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueConstraintError(err) {
-			return fmt.Errorf("session '%s' already exists: %w", session.ID, ErrSessionAlreadyExists)
+			return fmt.Errorf("session '%s' already exists: %w", session.TmuxSessionName, ErrSessionAlreadyExists)
 		}
 		return err
 	}
@@ -83,8 +80,8 @@ func (s *SessionStore) Update(session *Session) error {
 	if session == nil {
 		return errors.New("session cannot be nil")
 	}
-	if session.ID == "" {
-		return errors.New("session ID cannot be empty")
+	if session.ID == 0 {
+		return errors.New("session ID cannot be zero")
 	}
 
 	var existing Session
@@ -98,9 +95,9 @@ func (s *SessionStore) Update(session *Session) error {
 	return s.db.Omit("Workspace").Save(session).Error
 }
 
-func (s *SessionStore) Delete(id string) error {
-	if id == "" {
-		return errors.New("session ID cannot be empty")
+func (s *SessionStore) Delete(id uint) error {
+	if id == 0 {
+		return errors.New("session ID cannot be zero")
 	}
 
 	var existing Session

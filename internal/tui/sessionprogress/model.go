@@ -25,15 +25,15 @@ var (
 type tickMsg time.Time
 
 type StartMsg struct {
-	SessionID string
+	SessionID uint
 }
 
-func Start(sessionID string) tea.Cmd {
+func Start(sessionID uint) tea.Cmd {
 	return func() tea.Msg { return StartMsg{SessionID: sessionID} }
 }
 
 type Model struct {
-	sessionID string
+	sessionID uint
 	session   *session.Session
 	done      bool
 	err       error
@@ -81,7 +81,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(provider.PollSession(m.sessionID), tick())
 
 	case tickMsg:
-		if m.done || m.sessionID == "" {
+		if m.done || m.sessionID == 0 {
 			return m, nil
 		}
 		return m, tea.Batch(provider.PollSession(m.sessionID), tick())
@@ -141,7 +141,7 @@ func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
 func (m Model) View() string {
 	var b strings.Builder
 
-	name := m.sessionID
+	name := fmt.Sprintf("%d", m.sessionID)
 	if m.session != nil && m.session.Name != "" {
 		name = m.session.Name
 	}

@@ -15,7 +15,7 @@ func (i sessionItem) displayName() string {
 	if i.session.Name != "" {
 		return i.session.Name
 	}
-	return i.session.ID
+	return i.session.TmuxSessionName
 }
 
 func (i sessionItem) Title() string {

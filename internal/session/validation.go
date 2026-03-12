@@ -31,17 +31,17 @@ func ValidateSession(session *Session) error {
 	return nil
 }
 
-func ValidateSessionID(id string) error {
-	if id == "" {
-		return errors.New("session ID cannot be empty")
+func ValidateSessionID(id uint) error {
+	if id == 0 {
+		return errors.New("session ID cannot be zero")
 	}
 
 	return nil
 }
 
-func ValidateWorkspaceID(id string) error {
-	if id == "" {
-		return errors.New("workspace ID cannot be empty")
+func ValidateWorkspaceID(id uint) error {
+	if id == 0 {
+		return errors.New("workspace ID cannot be zero")
 	}
 
 	return nil

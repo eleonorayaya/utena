@@ -57,7 +57,7 @@ func (s *ClaudeService) HandleHookEvent(ctx context.Context, req *HookEventReque
 		return s.upsertWithStatus(req, StatusReadyForReview)
 
 	case "SessionEnd":
-		err := s.store.Delete(req.ClaudeSessionID)
+		err := s.store.DeleteByClaudeSessionID(req.ClaudeSessionID)
 		if err != nil {
 			slog.Warn("failed to delete claude session on SessionEnd", "claude_session_id", req.ClaudeSessionID, "error", err)
 		}
@@ -71,10 +71,10 @@ func (s *ClaudeService) HandleHookEvent(ctx context.Context, req *HookEventReque
 
 func (s *ClaudeService) upsertWithStatus(req *HookEventRequest, status ClaudeSessionStatus) error {
 	session := &ClaudeSession{
-		ID:        req.ClaudeSessionID,
-		SessionID: req.SessionID,
-		Status:    status,
-		CWD:       req.CWD,
+		ClaudeSessionID: req.ClaudeSessionID,
+		SessionID:       req.SessionID,
+		Status:          status,
+		CWD:             req.CWD,
 	}
 	return s.store.Upsert(session)
 }

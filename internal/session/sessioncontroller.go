@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -21,8 +22,17 @@ func NewSessionController(service *SessionService) *SessionController {
 	}
 }
 
-func (c *SessionController) lookupWorkspace(id string) (*workspace.Workspace, error) {
-	if id == "" {
+func parseUintParam(r *http.Request, name string) (uint, error) {
+	raw := chi.URLParam(r, name)
+	val, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return uint(val), nil
+}
+
+func (c *SessionController) lookupWorkspace(id uint) (*workspace.Workspace, error) {
+	if id == 0 {
 		return nil, nil
 	}
 	return c.service.workspaceService.GetWorkspace(context.Background(), id)
@@ -43,7 +53,11 @@ func (c *SessionController) ListSessions(w http.ResponseWriter, r *http.Request)
 
 func (c *SessionController) GetSessionByID(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
 
 	session, err := c.service.GetSession(ctx, id)
 	if err != nil {
@@ -61,9 +75,14 @@ func (c *SessionController) GetSessionByID(w http.ResponseWriter, r *http.Reques
 
 func (c *SessionController) ListSessionsByWorkspace(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	workspaceID := chi.URLParam(r, "workspaceId")
+	raw := chi.URLParam(r, "workspaceId")
+	workspaceID, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
 
-	sessions, err := c.service.ListSessionsByWorkspace(ctx, workspaceID)
+	sessions, err := c.service.ListSessionsByWorkspace(ctx, uint(workspaceID))
 	if err != nil {
 		render.Render(w, r, common.ErrNotFound())
 		return
@@ -111,7 +130,11 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 
 func (c *SessionController) UpdateSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
 
 	data := &UpdateSessionRequest{}
 	if err := render.Bind(r, data); err != nil {
@@ -141,7 +164,11 @@ func (c *SessionController) UpdateSession(w http.ResponseWriter, r *http.Request
 
 func (c *SessionController) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
 
 	deleteBranch := r.URL.Query().Get("delete_branch") != "false"
 
@@ -163,9 +190,13 @@ func (c *SessionController) DeleteSession(w http.ResponseWriter, r *http.Request
 
 func (c *SessionController) ActivateSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	name := chi.URLParam(r, "name")
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
 
-	session, err := c.service.ActivateSession(ctx, name)
+	session, err := c.service.ActivateSession(ctx, id)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			render.Render(w, r, common.ErrNotFound())
@@ -182,7 +213,11 @@ func (c *SessionController) ActivateSession(w http.ResponseWriter, r *http.Reque
 
 func (c *SessionController) RepairSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
 
 	session, err := c.service.RepairSession(ctx, id)
 	if err != nil {

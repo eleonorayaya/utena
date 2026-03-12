@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/workspace"
+	"gorm.io/gorm"
 )
 
 var ErrSessionAlreadyExists = errors.New("session already exists")
@@ -24,12 +25,10 @@ const (
 )
 
 type Session struct {
-	ID              string               `json:"id" gorm:"primaryKey"`
-	CreatedAt       time.Time            `json:"created_at"`
-	UpdatedAt       time.Time            `json:"updated_at"`
+	gorm.Model
 	TmuxSessionName string               `json:"tmux_session_name,omitempty" gorm:"uniqueIndex"`
 	Name            string               `json:"name,omitempty"`
-	WorkspaceID     string               `json:"workspace_id" gorm:"index"`
+	WorkspaceID     uint                 `json:"workspace_id" gorm:"index"`
 	Branch          string               `json:"branch,omitempty"`
 	BaseBranch      string               `json:"base_branch,omitempty"`
 	BranchCreated   bool                 `json:"branch_created,omitempty"`
@@ -42,7 +41,7 @@ type Session struct {
 	Workspace       *workspace.Workspace `json:"-" gorm:"foreignKey:WorkspaceID"`
 }
 
-func SanitizeID(name string) string {
+func SanitizeTmuxName(name string) string {
 	r := strings.NewReplacer(
 		" ", "-",
 		".", "_",
@@ -51,6 +50,6 @@ func SanitizeID(name string) string {
 	return strings.ToLower(r.Replace(name))
 }
 
-func BuildSessionID(workspaceName, name string) string {
-	return SanitizeID(workspaceName + "-" + name)
+func BuildTmuxSessionName(workspaceName, name string) string {
+	return SanitizeTmuxName(workspaceName + "-" + name)
 }

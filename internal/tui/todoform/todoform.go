@@ -37,7 +37,7 @@ type Model struct {
 	focusIndex        int
 	selectedWorkspace *workspace.Workspace
 	selectedDirPath   string
-	activeWorkspaceID string
+	activeWorkspaceID uint
 	nameErr           string
 	width, height     int
 }
@@ -206,9 +206,10 @@ func (m Model) updateNameInput(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			m.nameErr = ""
 			desc := m.descInput.Value()
-			wsID := ""
+			var wsID *uint
 			if m.selectedWorkspace != nil {
-				wsID = m.selectedWorkspace.ID
+				id := m.selectedWorkspace.ID
+				wsID = &id
 			}
 			return m, provider.CreateTodo(name, desc, wsID)
 		case key.Matches(msg, inputKeys.Back):

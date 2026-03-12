@@ -1,11 +1,13 @@
 package workspace
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type Workspace struct {
-	ID         string    `json:"id" gorm:"primaryKey"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	gorm.Model
 	Name       string    `json:"name"`
 	Path       string    `json:"path" gorm:"uniqueIndex"`
 	IsGitRepo  bool      `json:"is_git_repo"`
