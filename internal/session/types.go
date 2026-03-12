@@ -19,6 +19,9 @@ func NewSessionResponse(session *Session, ws *workspace.Workspace) *SessionRespo
 	if ws != nil {
 		resp.WorkspaceName = ws.Name
 		resp.WorkspacePath = ws.Path
+	} else if session.Workspace != nil {
+		resp.WorkspaceName = session.Workspace.Name
+		resp.WorkspacePath = session.Workspace.Path
 	}
 	return resp
 }
@@ -28,11 +31,15 @@ func (sr *SessionResponse) Render(w http.ResponseWriter, r *http.Request) error 
 }
 
 type SessionListResponse struct {
-	Sessions []Session `json:"sessions"`
+	Sessions []*SessionResponse `json:"sessions"`
 }
 
 func NewSessionListResponse(sessions []Session) *SessionListResponse {
-	return &SessionListResponse{Sessions: sessions}
+	resp := make([]*SessionResponse, len(sessions))
+	for i := range sessions {
+		resp[i] = NewSessionResponse(&sessions[i], nil)
+	}
+	return &SessionListResponse{Sessions: resp}
 }
 
 func (slr *SessionListResponse) Render(w http.ResponseWriter, r *http.Request) error {

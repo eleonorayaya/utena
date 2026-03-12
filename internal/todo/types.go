@@ -20,10 +20,15 @@ func (c *CreateTodoRequest) Bind(r *http.Request) error {
 
 type TodoResponse struct {
 	*Todo
+	WorkspaceName string `json:"workspace_name,omitempty"`
 }
 
 func NewTodoResponse(t *Todo) *TodoResponse {
-	return &TodoResponse{Todo: t}
+	resp := &TodoResponse{Todo: t}
+	if t.Workspace != nil {
+		resp.WorkspaceName = t.Workspace.Name
+	}
+	return resp
 }
 
 func (r *TodoResponse) Render(w http.ResponseWriter, req *http.Request) error {
@@ -31,11 +36,15 @@ func (r *TodoResponse) Render(w http.ResponseWriter, req *http.Request) error {
 }
 
 type TodoListResponse struct {
-	Todos []Todo `json:"todos"`
+	Todos []*TodoResponse `json:"todos"`
 }
 
 func NewTodoListResponse(todos []Todo) *TodoListResponse {
-	return &TodoListResponse{Todos: todos}
+	resp := make([]*TodoResponse, len(todos))
+	for i := range todos {
+		resp[i] = NewTodoResponse(&todos[i])
+	}
+	return &TodoListResponse{Todos: resp}
 }
 
 func (r *TodoListResponse) Render(w http.ResponseWriter, req *http.Request) error {

@@ -28,7 +28,6 @@ func (s *SessionStore) GetByID(id uint) (*Session, error) {
 		}
 		return nil, err
 	}
-	s.populateWorkspaceName(&session)
 	return &session, nil
 }
 
@@ -40,25 +39,18 @@ func (s *SessionStore) GetByTmuxName(tmuxName string) (*Session, error) {
 		}
 		return nil, err
 	}
-	s.populateWorkspaceName(&session)
 	return &session, nil
 }
 
 func (s *SessionStore) List() []Session {
 	var sessions []Session
 	s.db.Joins("Workspace").Order("sessions.last_used_at DESC").Find(&sessions)
-	for i := range sessions {
-		s.populateWorkspaceName(&sessions[i])
-	}
 	return sessions
 }
 
 func (s *SessionStore) ListByWorkspace(workspaceID uint) []Session {
 	var sessions []Session
 	s.db.Joins("Workspace").Where("sessions.workspace_id = ?", workspaceID).Order("sessions.last_used_at DESC").Find(&sessions)
-	for i := range sessions {
-		s.populateWorkspaceName(&sessions[i])
-	}
 	return sessions
 }
 
@@ -117,12 +109,6 @@ func (s *SessionStore) OnAppStart(ctx context.Context) error {
 
 func (s *SessionStore) OnAppEnd(ctx context.Context) error {
 	return nil
-}
-
-func (s *SessionStore) populateWorkspaceName(session *Session) {
-	if session.Workspace != nil {
-		session.WorkspaceName = session.Workspace.Name
-	}
 }
 
 func isUniqueConstraintError(err error) bool {

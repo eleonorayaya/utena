@@ -8,7 +8,10 @@ type todoItem struct {
 
 func (i todoItem) Title() string { return i.todo.Name }
 func (i todoItem) Description() string {
-	desc := i.todo.WorkspaceName
+	var desc string
+	if i.todo.Workspace != nil {
+		desc = i.todo.Workspace.Name
+	}
 	if desc == "" {
 		desc = "no workspace"
 	}

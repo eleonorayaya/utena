@@ -36,7 +36,6 @@ type Session struct {
 	Status          SessionStatus        `json:"status"`
 	Resources       *Resources           `json:"resources,omitempty" gorm:"serializer:json"`
 	IsAttached      bool                 `json:"is_attached"`
-	WorkspaceName   string               `json:"workspace_name,omitempty" gorm:"-"`
 	LastUsedAt      time.Time            `json:"last_used_at"`
 	Workspace       *workspace.Workspace `json:"-" gorm:"foreignKey:WorkspaceID"`
 }

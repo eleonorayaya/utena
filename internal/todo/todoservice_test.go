@@ -34,7 +34,8 @@ func TestTodoService_Create(t *testing.T) {
 	require.Equal(t, "fix the login bug", td.Description)
 	require.NotNil(t, td.WorkspaceID)
 	require.Equal(t, ws.ID, *td.WorkspaceID)
-	require.Equal(t, "utena", td.WorkspaceName)
+	require.NotNil(t, td.Workspace)
+	require.Equal(t, "utena", td.Workspace.Name)
 	require.False(t, td.CreatedAt.IsZero())
 }
 
@@ -47,7 +48,7 @@ func TestTodoService_Create_NoWorkspace(t *testing.T) {
 	require.NotZero(t, td.ID)
 	require.Equal(t, "general task", td.Name)
 	require.Nil(t, td.WorkspaceID)
-	require.Empty(t, td.WorkspaceName)
+	require.Nil(t, td.Workspace)
 }
 
 func TestTodoService_Create_InvalidWorkspace(t *testing.T) {
@@ -84,7 +85,8 @@ func TestTodoService_List_ResolvesWorkspaceNames(t *testing.T) {
 	todos, err := service.List(ctx)
 	require.NoError(t, err)
 	require.Len(t, todos, 1)
-	require.Equal(t, "utena", todos[0].WorkspaceName)
+	require.NotNil(t, todos[0].Workspace)
+	require.Equal(t, "utena", todos[0].Workspace.Name)
 }
 
 func TestTodoService_ListByWorkspace(t *testing.T) {

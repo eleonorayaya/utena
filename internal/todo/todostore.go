@@ -27,25 +27,18 @@ func (s *TodoStore) GetByID(id uint) (*Todo, error) {
 		}
 		return nil, err
 	}
-	s.populateWorkspaceName(&t)
 	return &t, nil
 }
 
 func (s *TodoStore) List() []Todo {
 	var todos []Todo
 	s.db.Joins("Workspace").Order("todos.created_at DESC").Find(&todos)
-	for i := range todos {
-		s.populateWorkspaceName(&todos[i])
-	}
 	return todos
 }
 
 func (s *TodoStore) ListByWorkspaceID(workspaceID uint) []Todo {
 	var todos []Todo
 	s.db.Joins("Workspace").Where("todos.workspace_id = ?", workspaceID).Order("todos.created_at DESC").Find(&todos)
-	for i := range todos {
-		s.populateWorkspaceName(&todos[i])
-	}
 	return todos
 }
 
@@ -87,10 +80,4 @@ func (s *TodoStore) OnAppStart(ctx context.Context) error {
 
 func (s *TodoStore) OnAppEnd(ctx context.Context) error {
 	return nil
-}
-
-func (s *TodoStore) populateWorkspaceName(t *Todo) {
-	if t.Workspace != nil {
-		t.WorkspaceName = t.Workspace.Name
-	}
 }

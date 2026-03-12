@@ -37,7 +37,10 @@ func (i sessionItem) Title() string {
 }
 
 func (i sessionItem) Description() string {
-	name := i.session.WorkspaceName
+	var name string
+	if i.session.Workspace != nil {
+		name = i.session.Workspace.Name
+	}
 	if name == "" {
 		name = "no workspace"
 	}

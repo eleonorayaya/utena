@@ -62,7 +62,11 @@ func (c *client) fetchSessions() tea.Cmd {
 			return ErrMsg{err}
 		}
 
-		return sessionsLoadedMsg{sessions: resp.Sessions}
+		sessions := make([]session.Session, len(resp.Sessions))
+		for i, sr := range resp.Sessions {
+			sessions[i] = *sr.Session
+		}
+		return sessionsLoadedMsg{sessions: sessions}
 	}
 }
 
@@ -297,7 +301,11 @@ func (c *client) fetchTodos() tea.Cmd {
 			return ErrMsg{err}
 		}
 
-		return todosLoadedMsg{todos: resp.Todos}
+		todos := make([]todo.Todo, len(resp.Todos))
+		for i, tr := range resp.Todos {
+			todos[i] = *tr.Todo
+		}
+		return todosLoadedMsg{todos: todos}
 	}
 }
 

@@ -285,10 +285,10 @@ func TestDaemon_TmuxHookSessionCreated(t *testing.T) {
 	require.Equal(t, session.StatusReady, sess.Status)
 }
 
-func findSessionByTmuxName(sessions []session.Session, tmuxName string) *session.Session {
+func findSessionByTmuxName(sessions []*session.SessionResponse, tmuxName string) *session.SessionResponse {
 	for _, s := range sessions {
 		if s.TmuxSessionName == tmuxName {
-			return &s
+			return s
 		}
 	}
 	return nil
