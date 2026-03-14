@@ -97,7 +97,8 @@ func TestTodoRouter_CreateTodo(t *testing.T) {
 	require.Equal(t, "fix the login bug", response.Description)
 	require.NotNil(t, response.WorkspaceID)
 	require.Equal(t, ws1ID, *response.WorkspaceID)
-	require.Equal(t, "utena", response.WorkspaceName)
+	require.NotNil(t, response.Workspace)
+	require.Equal(t, "utena", response.Workspace.Name)
 	require.NotZero(t, response.ID)
 
 	retrieved, err := todoStore.GetByID(response.ID)

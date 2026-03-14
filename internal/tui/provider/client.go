@@ -66,7 +66,7 @@ func (c *client) fetchSessions() tea.Cmd {
 		for i, sr := range resp.Sessions {
 			sessions[i] = *sr.Session
 		}
-		return sessionsLoadedMsg{sessions: sessions}
+		return sessionsLoadedMsg{sessions}
 	}
 }
 
@@ -305,7 +305,7 @@ func (c *client) fetchTodos() tea.Cmd {
 		for i, tr := range resp.Todos {
 			todos[i] = *tr.Todo
 		}
-		return todosLoadedMsg{todos: todos}
+		return todosLoadedMsg{todos}
 	}
 }
 

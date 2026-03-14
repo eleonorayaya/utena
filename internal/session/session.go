@@ -37,7 +37,7 @@ type Session struct {
 	Resources       *Resources           `json:"resources,omitempty" gorm:"serializer:json"`
 	IsAttached      bool                 `json:"is_attached"`
 	LastUsedAt      time.Time            `json:"last_used_at"`
-	Workspace       *workspace.Workspace `json:"-" gorm:"foreignKey:WorkspaceID"`
+	Workspace       *workspace.Workspace `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID"`
 }
 
 func SanitizeTmuxName(name string) string {

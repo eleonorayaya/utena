@@ -20,15 +20,10 @@ func (c *CreateTodoRequest) Bind(r *http.Request) error {
 
 type TodoResponse struct {
 	*Todo
-	WorkspaceName string `json:"workspace_name,omitempty"`
 }
 
 func NewTodoResponse(t *Todo) *TodoResponse {
-	resp := &TodoResponse{Todo: t}
-	if t.Workspace != nil {
-		resp.WorkspaceName = t.Workspace.Name
-	}
-	return resp
+	return &TodoResponse{Todo: t}
 }
 
 func (r *TodoResponse) Render(w http.ResponseWriter, req *http.Request) error {
