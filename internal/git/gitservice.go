@@ -81,6 +81,26 @@ func (s *GitService) CurrentBranch(ctx context.Context, repoPath string) (string
 	return strings.TrimSpace(string(output)), nil
 }
 
+func (s *GitService) FindWorktreeByBranch(ctx context.Context, repoPath string, branch string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "list", "--porcelain")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git worktree list failed: %w", err)
+	}
+
+	targetRef := "refs/heads/" + branch
+	var currentPath string
+	for line := range strings.SplitSeq(string(output), "\n") {
+		if path, ok := strings.CutPrefix(line, "worktree "); ok {
+			currentPath = path
+		}
+		if line == "branch "+targetRef && currentPath != "" {
+			return currentPath, nil
+		}
+	}
+	return "", nil
+}
+
 func (s *GitService) RemoveWorktree(ctx context.Context, repoPath string, worktreePath string) error {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "remove", worktreePath, "--force")
 	if output, err := cmd.CombinedOutput(); err != nil {

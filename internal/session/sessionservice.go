@@ -162,28 +162,46 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace) {
 		sess.Resources.Worktree.Status = ResourceCreating
 		s.store.Update(sess)
 
+		var branchName string
 		if sess.BranchCreated {
-			branchName := s.branchPrefix + sess.Name
-			worktreePath, err := s.gitService.CreateWorktree(ctx, ws.Path, branchName, sess.BaseBranch)
+			branchName = s.branchPrefix + sess.Name
+		} else {
+			branchName = sess.Branch
+		}
+
+		if branchName != "" {
+			existingPath, err := s.gitService.FindWorktreeByBranch(ctx, ws.Path, branchName)
 			if err != nil {
-				sess.Resources.Worktree.Status = ResourceFailed
-				sess.Resources.Worktree.Error = fmt.Sprintf("failed to create worktree: %v", err)
-				sess.Status = StatusBroken
-				s.store.Update(sess)
-				return
+				slog.Warn("failed to check existing worktrees", "error", err)
 			}
-			sess.WorktreePath = worktreePath
-			sess.Branch = branchName
-		} else if sess.Branch != "" {
-			worktreePath, err := s.gitService.CheckoutWorktree(ctx, ws.Path, sess.Branch)
-			if err != nil {
-				sess.Resources.Worktree.Status = ResourceFailed
-				sess.Resources.Worktree.Error = fmt.Sprintf("failed to checkout worktree: %v", err)
-				sess.Status = StatusBroken
-				s.store.Update(sess)
-				return
+
+			if existingPath != "" {
+				sess.WorktreePath = existingPath
+				if sess.BranchCreated {
+					sess.Branch = branchName
+				}
+			} else if sess.BranchCreated {
+				worktreePath, err := s.gitService.CreateWorktree(ctx, ws.Path, branchName, sess.BaseBranch)
+				if err != nil {
+					sess.Resources.Worktree.Status = ResourceFailed
+					sess.Resources.Worktree.Error = fmt.Sprintf("failed to create worktree: %v", err)
+					sess.Status = StatusBroken
+					s.store.Update(sess)
+					return
+				}
+				sess.WorktreePath = worktreePath
+				sess.Branch = branchName
+			} else {
+				worktreePath, err := s.gitService.CheckoutWorktree(ctx, ws.Path, sess.Branch)
+				if err != nil {
+					sess.Resources.Worktree.Status = ResourceFailed
+					sess.Resources.Worktree.Error = fmt.Sprintf("failed to checkout worktree: %v", err)
+					sess.Status = StatusBroken
+					s.store.Update(sess)
+					return
+				}
+				sess.WorktreePath = worktreePath
 			}
-			sess.WorktreePath = worktreePath
 		}
 
 		sess.Resources.Worktree.Status = ResourceReady

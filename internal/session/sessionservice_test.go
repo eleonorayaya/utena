@@ -438,6 +438,97 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	require.True(t, mock.HasSession("git-repo-my-feature"))
 }
 
+func TestSessionService_CreateSession_WithWorktree_ReusesExisting(t *testing.T) {
+	repoPath := initTestRepo(t)
+
+	database := setupTestDB(t)
+	bus := eventbus.NewEventBus()
+	sessionStore := NewSessionStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
+	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
+	workspaceStore.Add(wsGit)
+
+	mock := newMockTmuxClient()
+	tmuxService := utmux.NewTmuxService(mock, bus)
+	workspaceService := workspace.NewWorkspaceService(workspaceStore)
+	gitService := git.NewGitService()
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
+
+	ctx := context.Background()
+	branchName := "eqt/existing-feature"
+	worktreePath := filepath.Join(repoPath, ".worktrees", "eqt-existing-feature")
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, "main")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "pre-create worktree failed: %s", string(out))
+
+	session := &Session{
+		Name:          "existing-feature",
+		WorkspaceID:   wsGit.ID,
+		BaseBranch:    "main",
+		BranchCreated: true,
+	}
+
+	err = service.CreateSession(ctx, session, true)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+
+	resolvedWorktreePath, _ := filepath.EvalSymlinks(worktreePath)
+	require.Equal(t, resolvedWorktreePath, retrieved.WorktreePath)
+	require.Equal(t, branchName, retrieved.Branch)
+	require.Equal(t, ResourceReady, retrieved.Resources.Worktree.Status)
+}
+
+func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testing.T) {
+	repoPath := initTestRepo(t)
+
+	database := setupTestDB(t)
+	bus := eventbus.NewEventBus()
+	sessionStore := NewSessionStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
+	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
+	workspaceStore.Add(wsGit)
+
+	mock := newMockTmuxClient()
+	tmuxService := utmux.NewTmuxService(mock, bus)
+	workspaceService := workspace.NewWorkspaceService(workspaceStore)
+	gitService := git.NewGitService()
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
+
+	ctx := context.Background()
+	branchName := "feature/checkout-me"
+	worktreePath := filepath.Join(repoPath, ".worktrees", "feature-checkout-me")
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, "main")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "pre-create worktree failed: %s", string(out))
+
+	pushCmd := exec.Command("git", "-C", worktreePath, "push", "-u", "origin", branchName)
+	out, err = pushCmd.CombinedOutput()
+	require.NoError(t, err, "push branch failed: %s", string(out))
+
+	session := &Session{
+		Name:          branchName,
+		WorkspaceID:   wsGit.ID,
+		Branch:        branchName,
+		BranchCreated: false,
+	}
+
+	err = service.CreateSession(ctx, session, true)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+
+	resolvedWorktreePath, _ := filepath.EvalSymlinks(worktreePath)
+	require.Equal(t, resolvedWorktreePath, retrieved.WorktreePath)
+	require.Equal(t, ResourceReady, retrieved.Resources.Worktree.Status)
+}
+
 func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	repoPath := initTestRepo(t)
 
