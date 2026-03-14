@@ -1,133 +1,180 @@
 # Store Patterns
 
-Every in-memory store must: defensively copy on read and write, use afero for filesystem, protect with sync.RWMutex, and persist after mutations.
+Stores use GORM with SQLite for persistence. Each store takes a `db.Database` interface and uses GORM queries for all CRUD operations.
 
-## Defensive Copying (Critical)
+## Store Constructor
 
-Without this, callers mutate internal store state. Copy on BOTH read and write.
+Stores accept a `db.Database` interface -- no filesystem, no mutex, no in-memory maps.
 
 From `internal/session/sessionstore.go`:
 
 ```go
-func (s *SessionStore) Add(session *Session) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.sessions[session.ID]; exists {
-		return fmt.Errorf("session '%s' already exists: %w", session.ID, ErrSessionAlreadyExists)
-	}
-
-	copy := *session
-	s.sessions[session.ID] = &copy
-	return nil
+type SessionStore struct {
+	db db.Database
 }
 
-func (s *SessionStore) GetByID(id string) (*Session, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	session, ok := s.sessions[id]
-	if !ok {
-		return nil, errors.New("session not found")
+func NewSessionStore(database db.Database) *SessionStore {
+	return &SessionStore{
+		db: database,
 	}
+}
+```
 
-	copy := *session
-	return &copy, nil
+Production: `NewSessionStore(database)` where `database` is opened via `db.OpenSQLite(path)`.
+Tests: `NewSessionStore(database)` where `database` is opened via `db.OpenInMemory()`.
+
+## GORM Read Queries
+
+Use `Joins("Workspace")` to LEFT JOIN associated workspace data in a single query. Map `gorm.ErrRecordNotFound` to domain-specific sentinel errors.
+
+```go
+func (s *SessionStore) GetByID(id uint) (*Session, error) {
+	var session Session
+	if err := s.db.Joins("Workspace").First(&session, "sessions.id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return &session, nil
 }
 
 func (s *SessionStore) List() []Session {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	var sessions []Session
+	s.db.Joins("Workspace").Order("sessions.last_used_at DESC").Find(&sessions)
+	return sessions
+}
 
-	sessions := make([]Session, 0, len(s.sessions))
-	for _, session := range s.sessions {
-		sessions = append(sessions, *session)
-	}
+func (s *SessionStore) ListByWorkspace(workspaceID uint) []Session {
+	var sessions []Session
+	s.db.Joins("Workspace").Where("sessions.workspace_id = ?", workspaceID).Order("sessions.last_used_at DESC").Find(&sessions)
 	return sessions
 }
 ```
 
-List returns value types (not pointers) for the same reason -- the caller gets copies.
+List returns value types (not pointers) -- GORM already returns copies, no defensive copying needed.
 
-## Afero Filesystem Injection
+## GORM Write Queries
 
-Never use `os.ReadFile`/`os.WriteFile` directly. Inject `afero.Fs` so tests use `afero.NewMemMapFs()`.
-
-```go
-type SessionStore struct {
-	mu        sync.RWMutex
-	sessions  map[string]*Session
-	fs        afero.Fs
-	configDir string
-}
-
-func NewSessionStore(fs afero.Fs, configDir string) *SessionStore {
-	return &SessionStore{
-		sessions:  make(map[string]*Session),
-		fs:        fs,
-		configDir: configDir,
-	}
-}
-```
-
-Production: `NewSessionStore(afero.NewOsFs(), configDir)`
-Tests: `NewSessionStore(afero.NewMemMapFs(), "/config")`
-
-## Persistence
-
-Load on startup via `OnAppStart`, save after every mutation. Use `afero.ReadFile`/`afero.WriteFile`.
-
-```go
-func (s *SessionStore) OnAppStart(ctx context.Context) error {
-	data, err := afero.ReadFile(s.fs, s.sessionsPath())
-	if err != nil {
-		return nil
-	}
-
-	loaded := make(map[string]*Session)
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		return nil
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sessions = loaded
-	return nil
-}
-
-func (s *SessionStore) save() {
-	s.fs.MkdirAll(s.configDir, 0755)
-	data, err := json.Marshal(s.sessions)
-	if err != nil {
-		return
-	}
-	afero.WriteFile(s.fs, s.sessionsPath(), data, 0644)
-}
-```
-
-Call `s.save()` at the end of `Add`, `Update`, and `Delete` -- while the lock is still held.
-
-## Thread Safety
-
-- `sync.RWMutex` for read-heavy workloads
-- `RLock()` for GetByID, List, ListByWorkspace
-- `Lock()` for Add, Update, Delete
-- Always `defer s.mu.Unlock()` / `defer s.mu.RUnlock()` immediately after locking
-
-## Input Validation
-
-Validate nil and empty ID at the top of mutating methods, before acquiring the lock:
+Use `Omit("Workspace")` on Create/Save to avoid writing the association. Check for unique constraint violations.
 
 ```go
 func (s *SessionStore) Add(session *Session) error {
 	if session == nil {
 		return errors.New("session cannot be nil")
 	}
-	if session.ID == "" {
-		return errors.New("session ID cannot be empty")
+
+	if err := s.db.Omit("Workspace").Create(session).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueConstraintError(err) {
+			return fmt.Errorf("session '%s' already exists: %w", session.TmuxSessionName, ErrSessionAlreadyExists)
+		}
+		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return nil
+}
+
+func (s *SessionStore) Update(session *Session) error {
+	if session == nil {
+		return errors.New("session cannot be nil")
+	}
+	if session.ID == 0 {
+		return errors.New("session ID cannot be zero")
+	}
+
+	var existing Session
+	if err := s.db.First(&existing, "id = ?", session.ID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrSessionNotFound
+		}
+		return err
+	}
+
+	return s.db.Omit("Workspace").Save(session).Error
+}
+
+func (s *SessionStore) Delete(id uint) error {
+	if id == 0 {
+		return errors.New("session ID cannot be zero")
+	}
+
+	var existing Session
+	if err := s.db.First(&existing, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrSessionNotFound
+		}
+		return err
+	}
+
+	return s.db.Delete(&Session{}, "id = ?", id).Error
+}
+```
+
+## Error Mapping
+
+Map GORM errors to domain sentinel errors. SQLite unique constraint errors need string matching as a fallback:
+
+```go
+func isUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+```
+
+## Input Validation
+
+Validate nil and zero-value ID at the top of mutating methods, before hitting the database:
+
+```go
+func (s *SessionStore) Add(session *Session) error {
+	if session == nil {
+		return errors.New("session cannot be nil")
+	}
 	// ...
 }
 ```
+
+## Lifecycle
+
+Store lifecycle methods are no-ops -- migration is handled by `DatabaseModule.OnAppStart`. Stores just need to satisfy the interface:
+
+```go
+func (s *SessionStore) OnAppStart(ctx context.Context) error { return nil }
+func (s *SessionStore) OnAppEnd(ctx context.Context) error  { return nil }
+```
+
+## Database Interface
+
+From `internal/db/dbservice.go`:
+
+```go
+type Database interface {
+	Create(value any) *gorm.DB
+	Save(value any) *gorm.DB
+	Delete(value any, conds ...any) *gorm.DB
+	First(dest any, conds ...any) *gorm.DB
+	Find(dest any, conds ...any) *gorm.DB
+	Where(query any, args ...any) *gorm.DB
+	Model(value any) *gorm.DB
+	Order(value any) *gorm.DB
+	Joins(query string, args ...any) *gorm.DB
+	Omit(columns ...string) *gorm.DB
+	Migrate(models ...any) error
+	Close() error
+}
+```
+
+The interface returns `*gorm.DB` from query-building methods to allow chaining. It abstracts lifecycle (Open/Close/Migrate) while GORM's fluent API handles query composition.
+
+## Model Registration
+
+Modules that own database models implement `common.ModelProvider`:
+
+```go
+func (m *SessionModule) Models() []any {
+	return []any{&Session{}}
+}
+```
+
+The app collects models from all modules and registers them with the database for migration.

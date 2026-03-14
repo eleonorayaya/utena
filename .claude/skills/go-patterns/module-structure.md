@@ -8,7 +8,7 @@ Each domain is a self-contained package with layered components wired together b
 internal/
   {domain}/
     {domain}.go            # Core types and sentinel errors
-    {domain}store.go       # In-memory data persistence
+    {domain}store.go       # GORM-backed data persistence
     {domain}service.go     # Business logic, cross-store coordination
     {domain}controller.go  # HTTP handlers
     {domain}router.go      # Route definitions
@@ -31,9 +31,9 @@ type SessionModule struct {
 	Router     *SessionRouter
 }
 
-func NewSessionModule(workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, fs afero.Fs, configDir string) *SessionModule {
-	store := NewSessionStore(fs, configDir)
-	service := NewSessionService(store, workspaceModule.Store, bus)
+func NewSessionModule(tmuxService *utmux.TmuxService, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string) *SessionModule {
+	store := NewSessionStore(database)
+	service := NewSessionService(store, workspaceModule.Service, workspaceModule.GitService, tmuxService, bus, branchPrefix)
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
@@ -54,6 +54,11 @@ From `internal/common/lifecycle.go`:
 type Module interface {
 	OnAppStart(ctx context.Context) error
 	OnAppEnd(ctx context.Context) error
+	Routes() chi.Router
+}
+
+type ModelProvider interface {
+	Models() []any
 }
 ```
 
@@ -81,48 +86,30 @@ func (m *SessionModule) OnAppEnd(ctx context.Context) error {
 }
 ```
 
-OnAppStart: store first (loads data), then service (subscribes to events).
+OnAppStart: store first (no-op for GORM stores since migration is handled by DatabaseModule), then service (subscribes to events).
 OnAppEnd: reverse order -- service first, then store.
 
-## Daemon Wiring
-
-From `internal/api/daemon.go`:
+Modules that own database models implement `ModelProvider`:
 
 ```go
-func StartDaemon() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	bus := eventbus.NewEventBus()
-
-	workspaceModule := workspace.NewWorkspaceModule()
-	sessionModule := session.NewSessionModule(workspaceModule, bus, afero.NewOsFs(), configDir)
-	zellijModule := zellij.NewZellijModule(sessionModule, bus)
-
-	workspaceModule.OnAppStart(ctx)
-	sessionModule.OnAppStart(ctx)
-	zellijModule.OnAppStart(ctx)
-
-	go serveAPI(ctx, workspaceModule, sessionModule, zellijModule)
-
-	<-ctx.Done()
-
-	zellijModule.OnAppEnd(ctx)
-	sessionModule.OnAppEnd(ctx)
-	workspaceModule.OnAppEnd(ctx)
+func (m *SessionModule) Models() []any {
+	return []any{&Session{}}
 }
 ```
 
-Module startup order: dependencies first (workspace before session before zellij).
-Module shutdown order: reverse (zellij before session before workspace).
+The app collects models from all modules and registers them with the database before starting modules.
+
+## Daemon Wiring
+
+The app (`internal/api/app.go`) creates a `DatabaseModule` first, collects models from all domain modules, then starts everything in dependency order. The database starts before all other modules and shuts down last.
+
+Module startup order: database → workspace → session → tmux → others.
+Module shutdown order: reverse.
 
 ## Dependency Flow
 
-- Store: no dependencies (or just afero.Fs)
-- Service: depends on own store + other module stores + event bus
+- Store: depends on `db.Database` interface only
+- Service: depends on own store + other module services + event bus
 - Controller: depends on own service only
 - Router: depends on own controller only
-- Module: accepts external dependencies, creates internal layers
+- Module: accepts `db.Database` and other external dependencies, creates internal layers

@@ -1,13 +1,19 @@
 # Go Testing Patterns
 
-## Afero for Filesystem Tests
+## In-Memory SQLite for Store Tests
 
-Never use `t.TempDir()` or real filesystem. Use `afero.NewMemMapFs()` -- faster, no cleanup, full isolation.
+Use `db.OpenInMemory()` for all store tests. This gives real SQL semantics without filesystem overhead.
 
 ```go
-func setupSessionStore(t *testing.T) *SessionStore {
+func setupTestDB(t *testing.T) db.Database {
 	t.Helper()
-	return NewSessionStore(afero.NewMemMapFs(), "/config")
+	database, err := db.OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	database.Migrate(&workspace.Workspace{}, &Session{})
+	t.Cleanup(func() { database.Close() })
+	return database
 }
 ```
 
@@ -16,36 +22,36 @@ func setupSessionStore(t *testing.T) *SessionStore {
 Always mark setup functions with `t.Helper()` so test failures report the caller's line, not the helper's.
 
 ```go
-func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore) {
+func setupSessionStore(t *testing.T) (*SessionStore, uint, uint) {
 	t.Helper()
-
-	bus := eventbus.NewEventBus()
-	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
-	workspaceStore := workspace.NewWorkspaceStore()
-
-	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "test", Path: "/tmp/test"})
-
-	service := NewSessionService(sessionStore, workspaceStore, bus)
-	return service, sessionStore, workspaceStore
+	database := setupTestDB(t)
+	ws1 := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
+	ws2 := &workspace.Workspace{Name: "other", Path: "/tmp/other"}
+	database.Create(ws1)
+	database.Create(ws2)
+	return NewSessionStore(database), ws1.ID, ws2.ID
 }
 ```
+
+Create workspace records first since stores use foreign keys. GORM auto-fills the `ID` field on Create, so capture it from the struct after creation.
 
 ## Test Data Isolation
 
-Each test sets up its own data. Never rely on shared fixtures or OnAppStart data.
+Each test sets up its own database and data. Never rely on shared fixtures.
 
 ```go
 func TestListSessions(t *testing.T) {
-	service, store, _ := setupSessionService(t)
+	store, ws1ID, _ := setupSessionStore(t)
 
-	store.Add(&Session{ID: "s1", WorkspaceID: "ws-1", LastUsedAt: time.Now()})
-	store.Add(&Session{ID: "s2", WorkspaceID: "ws-1", LastUsedAt: time.Now()})
+	store.Add(&Session{TmuxSessionName: "s1", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: time.Now()})
+	store.Add(&Session{TmuxSessionName: "s2", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: time.Now()})
 
-	sessions, err := service.ListSessions(context.Background())
-	require.NoError(t, err)
+	sessions := store.List()
 	require.Len(t, sessions, 2)
 }
 ```
+
+Note: with `gorm.Model`, don't set the `ID` field -- let GORM auto-increment it.
 
 ## Testing Custom Error Types
 
@@ -98,30 +104,42 @@ Use `httptest` with the actual chi router to test the full request path:
 func TestSessionRouter_GetSessionByID(t *testing.T) {
 	router, sessionStore, _ := setupSessionRouter(t)
 
-	session := &Session{ID: "session-1", WorkspaceID: "ws-1", LastUsedAt: time.Now()}
+	session := &Session{TmuxSessionName: "test", WorkspaceID: wsID, Status: StatusReady, LastUsedAt: time.Now()}
 	sessionStore.Add(session)
 
-	req := httptest.NewRequest("GET", "/session-1", nil)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/%d", session.ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
+}
+```
 
-	var response SessionResponse
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
-	require.Equal(t, "session-1", response.ID)
+Note: with uint IDs, URL paths use numeric IDs (e.g., `/1`, `/2`), not string slugs.
+
+## Integration Tests with newApp
+
+For full-stack tests, use `newApp` with a mock `TmuxClient` and in-memory SQLite:
+
+```go
+func setupTestApp(t *testing.T) (*App, *mockTmuxClient) {
+	t.Helper()
+	mock := &mockTmuxClient{}
+	app := newApp(mock)
+	app.OnAppStart(context.Background())
+	t.Cleanup(func() { app.OnAppEnd(context.Background()) })
+	return app, mock
 }
 ```
 
 ## Concurrency Tests
 
-Verify thread safety with goroutines:
+GORM with SQLite handles concurrency via `MaxOpenConns(1)` and `busy_timeout`. Concurrency tests verify that the store layer handles concurrent access correctly:
 
 ```go
 func TestSessionStore_ConcurrentAccess(t *testing.T) {
-	store := setupSessionStore(t)
+	store, ws1ID, _ := setupSessionStore(t)
 	var wg sync.WaitGroup
 
 	for i := 0; i < 10; i++ {
@@ -129,8 +147,10 @@ func TestSessionStore_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			store.Add(&Session{
-				ID:         string(rune('a' + id)),
-				LastUsedAt: time.Now(),
+				TmuxSessionName: fmt.Sprintf("session-%d", id),
+				WorkspaceID:     ws1ID,
+				Status:          StatusReady,
+				LastUsedAt:      time.Now(),
 			})
 		}(i)
 	}
