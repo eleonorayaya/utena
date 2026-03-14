@@ -29,7 +29,7 @@ func (s *WorkspaceService) ListWorkspaces(ctx context.Context) ([]Workspace, err
 	return s.store.List(), nil
 }
 
-func (s *WorkspaceService) GetWorkspace(ctx context.Context, id string) (*Workspace, error) {
+func (s *WorkspaceService) GetWorkspace(ctx context.Context, id uint) (*Workspace, error) {
 	return s.store.GetByID(id)
 }
 
@@ -37,7 +37,7 @@ func (s *WorkspaceService) GetWorkspaceByPath(ctx context.Context, path string) 
 	return s.store.GetByPath(path)
 }
 
-func (s *WorkspaceService) Touch(ctx context.Context, id string) error {
+func (s *WorkspaceService) Touch(ctx context.Context, id uint) error {
 	ws, err := s.store.GetByID(id)
 	if err != nil {
 		return err

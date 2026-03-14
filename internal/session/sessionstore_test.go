@@ -3,73 +3,85 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/spf13/afero"
+	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
-func setupSessionStore(t *testing.T) *SessionStore {
+func setupTestDB(t *testing.T) db.Database {
 	t.Helper()
-	return NewSessionStore(afero.NewMemMapFs(), "/config")
+	database, err := db.OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	database.Migrate(&workspace.Workspace{}, &Session{})
+	t.Cleanup(func() { database.Close() })
+	return database
+}
+
+func setupSessionStore(t *testing.T) (*SessionStore, uint, uint) {
+	t.Helper()
+	database := setupTestDB(t)
+	ws1 := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
+	ws2 := &workspace.Workspace{Name: "other", Path: "/tmp/other"}
+	database.Create(ws1)
+	database.Create(ws2)
+	return NewSessionStore(database), ws1.ID, ws2.ID
 }
 
 func TestNewSessionStore(t *testing.T) {
-	store := setupSessionStore(t)
+	store, _, _ := setupSessionStore(t)
 	require.NotNil(t, store)
-	require.NotNil(t, store.sessions)
+	list := store.List()
+	require.Empty(t, list)
 }
 
 func TestSessionStore_Add(t *testing.T) {
-	store := setupSessionStore(t)
+	store, ws1ID, _ := setupSessionStore(t)
 
 	session := &Session{
-		ID:          "session-1",
-		WorkspaceID: "ws-1",
-		IsAttached:  true,
-		Status:      StatusReady,
-		LastUsedAt:  time.Now(),
+		TmuxSessionName: "session-1",
+		WorkspaceID:     ws1ID,
+		IsAttached:      true,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
 	}
 
 	err := store.Add(session)
 	require.NoError(t, err)
+	require.NotZero(t, session.ID)
 
-	// Verify session was added
-	retrieved, err := store.GetByID("session-1")
+	retrieved, err := store.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, session.ID, retrieved.ID)
 	require.Equal(t, session.WorkspaceID, retrieved.WorkspaceID)
 }
 
 func TestSessionStore_Add_NilSession(t *testing.T) {
-	store := setupSessionStore(t)
+	store, _, _ := setupSessionStore(t)
 	err := store.Add(nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot be nil")
 }
 
-func TestSessionStore_Add_EmptyID(t *testing.T) {
-	store := setupSessionStore(t)
-	session := &Session{WorkspaceID: "ws-1", LastUsedAt: time.Now()}
-	err := store.Add(session)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "ID cannot be empty")
-}
-
-func TestSessionStore_Add_EmptyWorkspaceID(t *testing.T) {
-	store := setupSessionStore(t)
-	session := &Session{ID: "session-1", LastUsedAt: time.Now()}
+func TestSessionStore_Add_WithWorkspaceID(t *testing.T) {
+	store, ws1ID, _ := setupSessionStore(t)
+	session := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
 	err := store.Add(session)
 	require.NoError(t, err)
+	require.NotZero(t, session.ID)
 }
 
 func TestSessionStore_Add_Duplicate(t *testing.T) {
-	store := setupSessionStore(t)
+	store, ws1ID, ws2ID := setupSessionStore(t)
 
-	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", LastUsedAt: time.Now()}
-	session2 := &Session{ID: "session-1", WorkspaceID: "ws-2", LastUsedAt: time.Now()}
+	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
+	session2 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws2ID, LastUsedAt: time.Now()}
 
 	err := store.Add(session1)
 	require.NoError(t, err)
@@ -81,19 +93,19 @@ func TestSessionStore_Add_Duplicate(t *testing.T) {
 }
 
 func TestSessionStore_GetByID(t *testing.T) {
-	store := setupSessionStore(t)
+	store, ws1ID, _ := setupSessionStore(t)
 
 	session := &Session{
-		ID:          "session-1",
-		WorkspaceID: "ws-1",
-		IsAttached:  false,
-		Status:      StatusReady,
-		LastUsedAt:  time.Now(),
+		TmuxSessionName: "session-1",
+		WorkspaceID:     ws1ID,
+		IsAttached:      false,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
 	}
 
 	store.Add(session)
 
-	retrieved, err := store.GetByID("session-1")
+	retrieved, err := store.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, session.ID, retrieved.ID)
 	require.Equal(t, session.WorkspaceID, retrieved.WorkspaceID)
@@ -102,20 +114,20 @@ func TestSessionStore_GetByID(t *testing.T) {
 }
 
 func TestSessionStore_GetByID_NotFound(t *testing.T) {
-	store := setupSessionStore(t)
+	store, _, _ := setupSessionStore(t)
 
-	_, err := store.GetByID("nonexistent")
+	_, err := store.GetByID(99999)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
 
 func TestSessionStore_List(t *testing.T) {
-	store := setupSessionStore(t)
+	store, ws1ID, ws2ID := setupSessionStore(t)
 
 	now := time.Now()
-	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", LastUsedAt: now.Add(-2 * time.Hour)}
-	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", LastUsedAt: now}
-	session3 := &Session{ID: "session-3", WorkspaceID: "ws-1", LastUsedAt: now.Add(-1 * time.Hour)}
+	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, LastUsedAt: now.Add(-2 * time.Hour)}
+	session2 := &Session{TmuxSessionName: "session-2", WorkspaceID: ws2ID, LastUsedAt: now}
+	session3 := &Session{TmuxSessionName: "session-3", WorkspaceID: ws1ID, LastUsedAt: now.Add(-1 * time.Hour)}
 
 	store.Add(session1)
 	store.Add(session2)
@@ -124,151 +136,143 @@ func TestSessionStore_List(t *testing.T) {
 	list := store.List()
 	require.Len(t, list, 3)
 
-	// Verify MRU sorting (most recent first)
-	require.Equal(t, "session-2", list[0].ID, "Most recent session should be first")
-	require.Equal(t, "session-3", list[1].ID, "Second most recent session should be second")
-	require.Equal(t, "session-1", list[2].ID, "Oldest session should be last")
+	require.Equal(t, "session-2", list[0].TmuxSessionName, "Most recent session should be first")
+	require.Equal(t, "session-3", list[1].TmuxSessionName, "Second most recent session should be second")
+	require.Equal(t, "session-1", list[2].TmuxSessionName, "Oldest session should be last")
 }
 
 func TestSessionStore_List_Empty(t *testing.T) {
-	store := setupSessionStore(t)
+	store, _, _ := setupSessionStore(t)
 	list := store.List()
 	require.Empty(t, list)
 }
 
 func TestSessionStore_ListByWorkspace(t *testing.T) {
-	store := setupSessionStore(t)
+	store, ws1ID, ws2ID := setupSessionStore(t)
 
 	now := time.Now()
-	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", LastUsedAt: now.Add(-2 * time.Hour)}
-	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", LastUsedAt: now}
-	session3 := &Session{ID: "session-3", WorkspaceID: "ws-1", LastUsedAt: now.Add(-1 * time.Hour)}
+	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, LastUsedAt: now.Add(-2 * time.Hour)}
+	session2 := &Session{TmuxSessionName: "session-2", WorkspaceID: ws2ID, LastUsedAt: now}
+	session3 := &Session{TmuxSessionName: "session-3", WorkspaceID: ws1ID, LastUsedAt: now.Add(-1 * time.Hour)}
 
 	store.Add(session1)
 	store.Add(session2)
 	store.Add(session3)
 
-	// List sessions for ws-1
-	ws1Sessions := store.ListByWorkspace("ws-1")
+	ws1Sessions := store.ListByWorkspace(ws1ID)
 	require.Len(t, ws1Sessions, 2)
 
-	// Verify only ws-1 sessions returned
 	for _, session := range ws1Sessions {
-		require.Equal(t, "ws-1", session.WorkspaceID)
+		require.Equal(t, ws1ID, session.WorkspaceID)
 	}
 
-	// Verify MRU sorting (most recent first)
-	require.Equal(t, "session-3", ws1Sessions[0].ID, "Most recent ws-1 session should be first")
-	require.Equal(t, "session-1", ws1Sessions[1].ID, "Older ws-1 session should be second")
+	require.Equal(t, "session-3", ws1Sessions[0].TmuxSessionName, "Most recent ws-1 session should be first")
+	require.Equal(t, "session-1", ws1Sessions[1].TmuxSessionName, "Older ws-1 session should be second")
 
-	// List sessions for ws-2
-	ws2Sessions := store.ListByWorkspace("ws-2")
+	ws2Sessions := store.ListByWorkspace(ws2ID)
 	require.Len(t, ws2Sessions, 1)
-	require.Equal(t, "session-2", ws2Sessions[0].ID)
+	require.Equal(t, "session-2", ws2Sessions[0].TmuxSessionName)
 }
 
 func TestSessionStore_ListByWorkspace_Empty(t *testing.T) {
-	store := setupSessionStore(t)
-	list := store.ListByWorkspace("nonexistent")
+	store, _, _ := setupSessionStore(t)
+	list := store.ListByWorkspace(99999)
 	require.Empty(t, list)
 }
 
 func TestSessionStore_Update(t *testing.T) {
-	store := setupSessionStore(t)
+	store, ws1ID, _ := setupSessionStore(t)
 
 	session := &Session{
-		ID:          "session-1",
-		WorkspaceID: "ws-1",
-		IsAttached:  false,
-		Status:      StatusReady,
-		LastUsedAt:  time.Now(),
+		TmuxSessionName: "session-1",
+		WorkspaceID:     ws1ID,
+		IsAttached:      false,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
 	}
 
 	store.Add(session)
 
-	// Update session
 	session.IsAttached = true
 	session.LastUsedAt = time.Now().Add(1 * time.Hour)
 
 	err := store.Update(session)
 	require.NoError(t, err)
 
-	// Verify update
-	retrieved, err := store.GetByID("session-1")
+	retrieved, err := store.GetByID(session.ID)
 	require.NoError(t, err)
 	require.True(t, retrieved.IsAttached)
 }
 
 func TestSessionStore_Update_NotFound(t *testing.T) {
-	store := setupSessionStore(t)
+	store, ws1ID, _ := setupSessionStore(t)
 
-	session := &Session{ID: "nonexistent", WorkspaceID: "ws-1", LastUsedAt: time.Now()}
+	session := &Session{TmuxSessionName: "nonexistent", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
+	session.ID = 99999
 	err := store.Update(session)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
 
 func TestSessionStore_Update_NilSession(t *testing.T) {
-	store := setupSessionStore(t)
+	store, _, _ := setupSessionStore(t)
 	err := store.Update(nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot be nil")
 }
 
-func TestSessionStore_Update_EmptyID(t *testing.T) {
-	store := setupSessionStore(t)
-	session := &Session{WorkspaceID: "ws-1", LastUsedAt: time.Now()}
+func TestSessionStore_Update_ZeroID(t *testing.T) {
+	store, ws1ID, _ := setupSessionStore(t)
+	session := &Session{WorkspaceID: ws1ID, LastUsedAt: time.Now()}
 	err := store.Update(session)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "ID cannot be empty")
+	require.Contains(t, err.Error(), "ID cannot be zero")
 }
 
 func TestSessionStore_Delete(t *testing.T) {
-	store := setupSessionStore(t)
+	store, ws1ID, _ := setupSessionStore(t)
 
-	session := &Session{ID: "session-1", WorkspaceID: "ws-1", LastUsedAt: time.Now()}
+	session := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
 	store.Add(session)
 
-	err := store.Delete("session-1")
+	err := store.Delete(session.ID)
 	require.NoError(t, err)
 
-	// Verify deletion
-	_, err = store.GetByID("session-1")
+	_, err = store.GetByID(session.ID)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
 
 func TestSessionStore_Delete_NotFound(t *testing.T) {
-	store := setupSessionStore(t)
+	store, _, _ := setupSessionStore(t)
 
-	err := store.Delete("nonexistent")
+	err := store.Delete(99999)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
 
-func TestSessionStore_Delete_EmptyID(t *testing.T) {
-	store := setupSessionStore(t)
+func TestSessionStore_Delete_ZeroID(t *testing.T) {
+	store, _, _ := setupSessionStore(t)
 
-	err := store.Delete("")
+	err := store.Delete(0)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "ID cannot be empty")
+	require.Contains(t, err.Error(), "ID cannot be zero")
 }
 
 func TestSessionStore_ConcurrentAccess(t *testing.T) {
-	store := setupSessionStore(t)
+	store, ws1ID, _ := setupSessionStore(t)
 
 	var wg sync.WaitGroup
 	numGoroutines := 10
 
-	// Concurrent adds
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			session := &Session{
-				ID:          string(rune('a' + id)),
-				WorkspaceID: "ws-1",
-				LastUsedAt:  time.Now(),
+				TmuxSessionName: fmt.Sprintf("session-%d", id),
+				WorkspaceID:     ws1ID,
+				LastUsedAt:      time.Now(),
 			}
 			store.Add(session)
 		}(i)
@@ -276,7 +280,6 @@ func TestSessionStore_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 
-	// Concurrent reads
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func() {
@@ -287,13 +290,12 @@ func TestSessionStore_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 
-	// Should have added sessions without panic
 	list := store.List()
 	require.Len(t, list, numGoroutines)
 }
 
 func TestSessionStore_OnAppStart(t *testing.T) {
-	store := setupSessionStore(t)
+	store, _, _ := setupSessionStore(t)
 
 	ctx := context.Background()
 	err := store.OnAppStart(ctx)
@@ -301,7 +303,7 @@ func TestSessionStore_OnAppStart(t *testing.T) {
 }
 
 func TestSessionStore_OnAppEnd(t *testing.T) {
-	store := setupSessionStore(t)
+	store, _, _ := setupSessionStore(t)
 
 	ctx := context.Background()
 	err := store.OnAppEnd(ctx)

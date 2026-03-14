@@ -13,8 +13,8 @@ type TmuxModule struct {
 	Router     *TmuxRouter
 }
 
-func NewTmuxModule(bus eventbus.EventBus) *TmuxModule {
-	service := NewTmuxService(bus)
+func NewTmuxModule(client TmuxClient, bus eventbus.EventBus) *TmuxModule {
+	service := NewTmuxService(client, bus)
 	controller := NewTmuxController(service)
 	router := NewTmuxRouter(controller)
 	return &TmuxModule{Service: service, Controller: controller, Router: router}

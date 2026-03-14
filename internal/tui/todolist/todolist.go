@@ -15,8 +15,8 @@ type Model struct {
 	list              list.Model
 	todos             []todo.Todo
 	showAllWorkspaces bool
-	activeWorkspaceID string
-	pendingDeleteID   string
+	activeWorkspaceID uint
+	pendingDeleteID   uint
 }
 
 func New() Model {
@@ -38,8 +38,10 @@ func (m Model) Keys() help.KeyMap {
 func (m *Model) rebuildItems() tea.Cmd {
 	var items []list.Item
 	for _, t := range m.todos {
-		if !m.showAllWorkspaces && m.activeWorkspaceID != "" && t.WorkspaceID != m.activeWorkspaceID {
-			continue
+		if !m.showAllWorkspaces && m.activeWorkspaceID != 0 {
+			if t.WorkspaceID == nil || *t.WorkspaceID != m.activeWorkspaceID {
+				continue
+			}
 		}
 		items = append(items, todoItem{todo: t})
 	}
@@ -91,7 +93,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	if !key.Matches(msg, keys.Delete) {
-		m.pendingDeleteID = ""
+		m.pendingDeleteID = 0
 	}
 	switch {
 	case key.Matches(msg, keys.New):
@@ -104,7 +106,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, nil, false
 		}
 		if m.pendingDeleteID == item.todo.ID {
-			m.pendingDeleteID = ""
+			m.pendingDeleteID = 0
 			return m, provider.DeleteTodo(item.todo.ID), true
 		}
 		m.pendingDeleteID = item.todo.ID

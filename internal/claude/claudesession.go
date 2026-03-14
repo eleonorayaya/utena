@@ -2,7 +2,8 @@ package claude
 
 import (
 	"errors"
-	"time"
+
+	"gorm.io/gorm"
 )
 
 var ErrClaudeSessionNotFound = errors.New("claude session not found")
@@ -17,9 +18,9 @@ const (
 )
 
 type ClaudeSession struct {
-	ID            string              `json:"id"`
-	SessionID     string              `json:"session_id"`
-	Status        ClaudeSessionStatus `json:"status"`
-	CWD           string              `json:"cwd,omitempty"`
-	LastUpdatedAt time.Time           `json:"last_updated_at"`
+	gorm.Model
+	ClaudeSessionID string              `json:"claude_session_id" gorm:"uniqueIndex"`
+	SessionID       string              `json:"session_id" gorm:"index"`
+	Status          ClaudeSessionStatus `json:"status"`
+	CWD             string              `json:"cwd,omitempty"`
 }

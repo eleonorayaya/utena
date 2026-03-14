@@ -12,9 +12,9 @@ import (
 func setupTodoService(t *testing.T) (*TodoService, *TodoStore, *workspace.WorkspaceStore) {
 	t.Helper()
 
-	fs := afero.NewMemMapFs()
-	todoStore := NewTodoStore(fs, "/config")
-	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	database := setupTestDB(t)
+	todoStore := NewTodoStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	service := NewTodoService(todoStore, workspaceService)
 
@@ -23,16 +23,19 @@ func setupTodoService(t *testing.T) (*TodoService, *TodoStore, *workspace.Worksp
 
 func TestTodoService_Create(t *testing.T) {
 	service, _, workspaceStore := setupTodoService(t)
-	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
+	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
+	workspaceStore.Add(ws)
 
 	ctx := context.Background()
-	td, err := service.Create(ctx, "fix bug", "fix the login bug", "ws-1")
+	td, err := service.Create(ctx, "fix bug", "fix the login bug", &ws.ID)
 	require.NoError(t, err)
-	require.NotEmpty(t, td.ID)
+	require.NotZero(t, td.ID)
 	require.Equal(t, "fix bug", td.Name)
 	require.Equal(t, "fix the login bug", td.Description)
-	require.Equal(t, "ws-1", td.WorkspaceID)
-	require.Equal(t, "utena", td.WorkspaceName)
+	require.NotNil(t, td.WorkspaceID)
+	require.Equal(t, ws.ID, *td.WorkspaceID)
+	require.NotNil(t, td.Workspace)
+	require.Equal(t, "utena", td.Workspace.Name)
 	require.False(t, td.CreatedAt.IsZero())
 }
 
@@ -40,29 +43,31 @@ func TestTodoService_Create_NoWorkspace(t *testing.T) {
 	service, _, _ := setupTodoService(t)
 
 	ctx := context.Background()
-	td, err := service.Create(ctx, "general task", "no workspace", "")
+	td, err := service.Create(ctx, "general task", "no workspace", nil)
 	require.NoError(t, err)
-	require.NotEmpty(t, td.ID)
+	require.NotZero(t, td.ID)
 	require.Equal(t, "general task", td.Name)
-	require.Empty(t, td.WorkspaceID)
-	require.Empty(t, td.WorkspaceName)
+	require.Nil(t, td.WorkspaceID)
+	require.Nil(t, td.Workspace)
 }
 
 func TestTodoService_Create_InvalidWorkspace(t *testing.T) {
 	service, _, _ := setupTodoService(t)
 
 	ctx := context.Background()
-	_, err := service.Create(ctx, "task", "desc", "nonexistent")
+	badID := uint(99999)
+	_, err := service.Create(ctx, "task", "desc", &badID)
 	require.Error(t, err)
 }
 
 func TestTodoService_List(t *testing.T) {
 	service, _, workspaceStore := setupTodoService(t)
-	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
+	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
+	workspaceStore.Add(ws)
 
 	ctx := context.Background()
-	service.Create(ctx, "task 1", "", "ws-1")
-	service.Create(ctx, "task 2", "", "")
+	service.Create(ctx, "task 1", "", &ws.ID)
+	service.Create(ctx, "task 2", "", nil)
 
 	todos, err := service.List(ctx)
 	require.NoError(t, err)
@@ -71,45 +76,51 @@ func TestTodoService_List(t *testing.T) {
 
 func TestTodoService_List_ResolvesWorkspaceNames(t *testing.T) {
 	service, _, workspaceStore := setupTodoService(t)
-	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
+	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
+	workspaceStore.Add(ws)
 
 	ctx := context.Background()
-	service.Create(ctx, "task 1", "", "ws-1")
+	service.Create(ctx, "task 1", "", &ws.ID)
 
 	todos, err := service.List(ctx)
 	require.NoError(t, err)
 	require.Len(t, todos, 1)
-	require.Equal(t, "utena", todos[0].WorkspaceName)
+	require.NotNil(t, todos[0].Workspace)
+	require.Equal(t, "utena", todos[0].Workspace.Name)
 }
 
 func TestTodoService_ListByWorkspace(t *testing.T) {
 	service, _, workspaceStore := setupTodoService(t)
-	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
-	workspaceStore.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
+	ws1 := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
+	ws2 := &workspace.Workspace{Name: "other", Path: "/tmp/other"}
+	workspaceStore.Add(ws1)
+	workspaceStore.Add(ws2)
 
 	ctx := context.Background()
-	service.Create(ctx, "task 1", "", "ws-1")
-	service.Create(ctx, "task 2", "", "ws-2")
-	service.Create(ctx, "task 3", "", "ws-1")
+	service.Create(ctx, "task 1", "", &ws1.ID)
+	service.Create(ctx, "task 2", "", &ws2.ID)
+	service.Create(ctx, "task 3", "", &ws1.ID)
 
-	ws1Todos, err := service.ListByWorkspace(ctx, "ws-1")
+	ws1Todos, err := service.ListByWorkspace(ctx, ws1.ID)
 	require.NoError(t, err)
 	require.Len(t, ws1Todos, 2)
 	for _, td := range ws1Todos {
-		require.Equal(t, "ws-1", td.WorkspaceID)
+		require.NotNil(t, td.WorkspaceID)
+		require.Equal(t, ws1.ID, *td.WorkspaceID)
 	}
 
-	ws2Todos, err := service.ListByWorkspace(ctx, "ws-2")
+	ws2Todos, err := service.ListByWorkspace(ctx, ws2.ID)
 	require.NoError(t, err)
 	require.Len(t, ws2Todos, 1)
 }
 
 func TestTodoService_Delete(t *testing.T) {
 	service, _, workspaceStore := setupTodoService(t)
-	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
+	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
+	workspaceStore.Add(ws)
 
 	ctx := context.Background()
-	td, _ := service.Create(ctx, "task", "", "ws-1")
+	td, _ := service.Create(ctx, "task", "", &ws.ID)
 
 	err := service.Delete(ctx, td.ID)
 	require.NoError(t, err)
@@ -122,7 +133,7 @@ func TestTodoService_Delete_NotFound(t *testing.T) {
 	service, _, _ := setupTodoService(t)
 
 	ctx := context.Background()
-	err := service.Delete(ctx, "nonexistent")
+	err := service.Delete(ctx, 99999)
 	require.Error(t, err)
 }
 
@@ -130,8 +141,8 @@ func TestTodoService_UniqueIDs(t *testing.T) {
 	service, _, _ := setupTodoService(t)
 
 	ctx := context.Background()
-	td1, _ := service.Create(ctx, "same name", "", "")
-	td2, _ := service.Create(ctx, "same name", "", "")
+	td1, _ := service.Create(ctx, "same name", "", nil)
+	td2, _ := service.Create(ctx, "same name", "", nil)
 
 	require.NotEqual(t, td1.ID, td2.ID)
 }

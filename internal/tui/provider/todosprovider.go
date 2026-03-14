@@ -19,7 +19,7 @@ func RequestTodosState() tea.Cmd {
 	return func() tea.Msg { return requestTodosStateMsg{} }
 }
 
-func CreateTodo(name, description, workspaceID string) tea.Cmd {
+func CreateTodo(name, description string, workspaceID *uint) tea.Cmd {
 	return func() tea.Msg {
 		return createTodoIntentMsg{
 			name:        name,
@@ -29,7 +29,7 @@ func CreateTodo(name, description, workspaceID string) tea.Cmd {
 	}
 }
 
-func DeleteTodo(id string) tea.Cmd {
+func DeleteTodo(id uint) tea.Cmd {
 	return func() tea.Msg { return deleteTodoIntentMsg{id: id} }
 }
 
@@ -39,11 +39,11 @@ type requestTodosStateMsg struct{}
 type createTodoIntentMsg struct {
 	name        string
 	description string
-	workspaceID string
+	workspaceID *uint
 }
 
 type deleteTodoIntentMsg struct {
-	id string
+	id uint
 }
 
 type todosLoadedMsg struct {
@@ -51,7 +51,7 @@ type todosLoadedMsg struct {
 }
 
 type todoDeletedMsg struct {
-	id string
+	id uint
 }
 
 type todosProvider struct {

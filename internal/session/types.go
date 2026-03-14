@@ -4,23 +4,15 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/render"
 )
 
 type SessionResponse struct {
 	*Session
-	WorkspaceName string `json:"workspace_name,omitempty"`
-	WorkspacePath string `json:"workspace_path,omitempty"`
 }
 
-func NewSessionResponse(session *Session, ws *workspace.Workspace) *SessionResponse {
-	resp := &SessionResponse{Session: session}
-	if ws != nil {
-		resp.WorkspaceName = ws.Name
-		resp.WorkspacePath = ws.Path
-	}
-	return resp
+func NewSessionResponse(session *Session) *SessionResponse {
+	return &SessionResponse{Session: session}
 }
 
 func (sr *SessionResponse) Render(w http.ResponseWriter, r *http.Request) error {
@@ -28,11 +20,15 @@ func (sr *SessionResponse) Render(w http.ResponseWriter, r *http.Request) error 
 }
 
 type SessionListResponse struct {
-	Sessions []Session `json:"sessions"`
+	Sessions []*SessionResponse `json:"sessions"`
 }
 
 func NewSessionListResponse(sessions []Session) *SessionListResponse {
-	return &SessionListResponse{Sessions: sessions}
+	resp := make([]*SessionResponse, len(sessions))
+	for i := range sessions {
+		resp[i] = NewSessionResponse(&sessions[i])
+	}
+	return &SessionListResponse{Sessions: resp}
 }
 
 func (slr *SessionListResponse) Render(w http.ResponseWriter, r *http.Request) error {
@@ -43,14 +39,14 @@ func RenderSessionList(sessions []Session) []render.Renderer {
 	list := make([]render.Renderer, len(sessions))
 	for i, session := range sessions {
 		s := session
-		list[i] = NewSessionResponse(&s, nil)
+		list[i] = NewSessionResponse(&s)
 	}
 	return list
 }
 
 type CreateSessionRequest struct {
 	Name           string `json:"name,omitempty"`
-	WorkspaceID    string `json:"workspace_id"`
+	WorkspaceID    uint   `json:"workspace_id"`
 	Branch         string `json:"branch,omitempty"`
 	BaseBranch     string `json:"base_branch,omitempty"`
 	BranchCreated  bool   `json:"branch_created"`
@@ -58,7 +54,7 @@ type CreateSessionRequest struct {
 }
 
 func (c *CreateSessionRequest) Bind(r *http.Request) error {
-	if c.WorkspaceID == "" {
+	if c.WorkspaceID == 0 {
 		return errors.New("workspace_id is required")
 	}
 	if c.Name != "" {

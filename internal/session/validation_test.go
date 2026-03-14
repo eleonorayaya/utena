@@ -2,7 +2,6 @@ package session
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -17,9 +16,7 @@ func TestValidateSession(t *testing.T) {
 		{
 			name: "valid session",
 			session: &Session{
-				ID:          "session-1",
-				WorkspaceID: "ws-1",
-				LastUsedAt:  time.Now(),
+				WorkspaceID: 1,
 			},
 			expectError: false,
 		},
@@ -32,7 +29,7 @@ func TestValidateSession(t *testing.T) {
 		{
 			name: "empty fields allowed",
 			session: &Session{
-				WorkspaceID: "ws-1",
+				WorkspaceID: 1,
 			},
 			expectError: false,
 		},
@@ -128,17 +125,17 @@ func TestValidateSessionName(t *testing.T) {
 func TestValidateSessionID(t *testing.T) {
 	tests := []struct {
 		name        string
-		id          string
+		id          uint
 		expectError bool
 	}{
 		{
 			name:        "valid ID",
-			id:          "session-1",
+			id:          1,
 			expectError: false,
 		},
 		{
-			name:        "empty ID",
-			id:          "",
+			name:        "zero ID",
+			id:          0,
 			expectError: true,
 		},
 	}
@@ -149,7 +146,7 @@ func TestValidateSessionID(t *testing.T) {
 
 			if tt.expectError {
 				require.Error(t, err)
-				require.Contains(t, err.Error(), "ID cannot be empty")
+				require.Contains(t, err.Error(), "session ID cannot be zero")
 			} else {
 				require.NoError(t, err)
 			}
@@ -160,17 +157,17 @@ func TestValidateSessionID(t *testing.T) {
 func TestValidateWorkspaceID(t *testing.T) {
 	tests := []struct {
 		name        string
-		id          string
+		id          uint
 		expectError bool
 	}{
 		{
 			name:        "valid ID",
-			id:          "ws-1",
+			id:          1,
 			expectError: false,
 		},
 		{
-			name:        "empty ID",
-			id:          "",
+			name:        "zero ID",
+			id:          0,
 			expectError: true,
 		},
 	}
@@ -181,7 +178,7 @@ func TestValidateWorkspaceID(t *testing.T) {
 
 			if tt.expectError {
 				require.Error(t, err)
-				require.Contains(t, err.Error(), "ID cannot be empty")
+				require.Contains(t, err.Error(), "workspace ID cannot be zero")
 			} else {
 				require.NoError(t, err)
 			}

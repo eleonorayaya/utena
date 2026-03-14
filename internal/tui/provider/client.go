@@ -62,7 +62,11 @@ func (c *client) fetchSessions() tea.Cmd {
 			return ErrMsg{err}
 		}
 
-		return sessionsLoadedMsg{sessions: resp.Sessions}
+		sessions := make([]session.Session, len(resp.Sessions))
+		for i, sr := range resp.Sessions {
+			sessions[i] = *sr.Session
+		}
+		return sessionsLoadedMsg{sessions}
 	}
 }
 
@@ -117,9 +121,9 @@ type branchListResponse struct {
 	CurrentBranch string   `json:"current_branch"`
 }
 
-func (c *client) fetchBranches(workspaceID string) tea.Cmd {
+func (c *client) fetchBranches(workspaceID uint) tea.Cmd {
 	return func() tea.Msg {
-		res, err := c.httpClient.Get(c.baseURL + "/workspaces/" + workspaceID + "/branches")
+		res, err := c.httpClient.Get(fmt.Sprintf("%s/workspaces/%d/branches", c.baseURL, workspaceID))
 		if err != nil {
 			log.Printf("[ERROR] fetch branches: %v", err)
 			return ErrMsg{err}
@@ -139,16 +143,16 @@ func (c *client) fetchBranches(workspaceID string) tea.Cmd {
 	}
 }
 
-func (c *client) activateSession(name string) tea.Cmd {
+func (c *client) activateSession(id uint) tea.Cmd {
 	return func() tea.Msg {
-		req, err := http.NewRequest(http.MethodPut, c.baseURL+"/sessions/"+name+"/activate", nil)
+		req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/sessions/%d/activate", c.baseURL, id), nil)
 		if err != nil {
 			return ErrMsg{err}
 		}
 
 		res, err := c.httpClient.Do(req)
 		if err != nil {
-			log.Printf("[ERROR] activate session %q: %v", name, err)
+			log.Printf("[ERROR] activate session %d: %v", id, err)
 			return ErrMsg{err}
 		}
 		defer res.Body.Close()
@@ -166,16 +170,16 @@ func (c *client) activateSession(name string) tea.Cmd {
 	}
 }
 
-func (c *client) repairSession(id string) tea.Cmd {
+func (c *client) repairSession(id uint) tea.Cmd {
 	return func() tea.Msg {
-		req, err := http.NewRequest(http.MethodPut, c.baseURL+"/sessions/"+id+"/repair", nil)
+		req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/sessions/%d/repair", c.baseURL, id), nil)
 		if err != nil {
 			return ErrMsg{err}
 		}
 
 		res, err := c.httpClient.Do(req)
 		if err != nil {
-			log.Printf("[ERROR] repair session %q: %v", id, err)
+			log.Printf("[ERROR] repair session %d: %v", id, err)
 			return ErrMsg{err}
 		}
 		defer res.Body.Close()
@@ -188,7 +192,7 @@ func (c *client) repairSession(id string) tea.Cmd {
 	}
 }
 
-func (c *client) createSession(name, workspaceID, branch string, branchCreated bool) tea.Cmd {
+func (c *client) createSession(name string, workspaceID uint, branch string, branchCreated bool) tea.Cmd {
 	return func() tea.Msg {
 		body := map[string]interface{}{
 			"workspace_id": workspaceID,
@@ -222,7 +226,7 @@ func (c *client) createSession(name, workspaceID, branch string, branchCreated b
 		}
 
 		var resp struct {
-			ID     string `json:"id"`
+			ID     uint   `json:"id"`
 			Status string `json:"status"`
 		}
 		json.NewDecoder(res.Body).Decode(&resp)
@@ -231,16 +235,16 @@ func (c *client) createSession(name, workspaceID, branch string, branchCreated b
 	}
 }
 
-func (c *client) deleteSession(id string) tea.Cmd {
+func (c *client) deleteSession(id uint) tea.Cmd {
 	return func() tea.Msg {
-		req, err := http.NewRequest(http.MethodDelete, c.baseURL+"/sessions/"+id, nil)
+		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/sessions/%d", c.baseURL, id), nil)
 		if err != nil {
 			return ErrMsg{err}
 		}
 
 		res, err := c.httpClient.Do(req)
 		if err != nil {
-			log.Printf("[ERROR] delete session %q: %v", id, err)
+			log.Printf("[ERROR] delete session %d: %v", id, err)
 			return ErrMsg{err}
 		}
 		defer res.Body.Close()
@@ -297,7 +301,11 @@ func (c *client) fetchTodos() tea.Cmd {
 			return ErrMsg{err}
 		}
 
-		return todosLoadedMsg{todos: resp.Todos}
+		todos := make([]todo.Todo, len(resp.Todos))
+		for i, tr := range resp.Todos {
+			todos[i] = *tr.Todo
+		}
+		return todosLoadedMsg{todos}
 	}
 }
 
@@ -325,14 +333,14 @@ func (c *client) fetchWindows(sessionName string) tea.Cmd {
 	}
 }
 
-func (c *client) createTodo(name, description, workspaceID string) tea.Cmd {
+func (c *client) createTodo(name, description string, workspaceID *uint) tea.Cmd {
 	return func() tea.Msg {
-		body := map[string]string{
+		body := map[string]interface{}{
 			"name":        name,
 			"description": description,
 		}
-		if workspaceID != "" {
-			body["workspace_id"] = workspaceID
+		if workspaceID != nil {
+			body["workspace_id"] = *workspaceID
 		}
 		jsonBody, err := json.Marshal(body)
 		if err != nil {
@@ -354,16 +362,16 @@ func (c *client) createTodo(name, description, workspaceID string) tea.Cmd {
 	}
 }
 
-func (c *client) deleteTodo(id string) tea.Cmd {
+func (c *client) deleteTodo(id uint) tea.Cmd {
 	return func() tea.Msg {
-		req, err := http.NewRequest(http.MethodDelete, c.baseURL+"/todos/"+id, nil)
+		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/todos/%d", c.baseURL, id), nil)
 		if err != nil {
 			return ErrMsg{err}
 		}
 
 		res, err := c.httpClient.Do(req)
 		if err != nil {
-			log.Printf("[ERROR] delete todo %q: %v", id, err)
+			log.Printf("[ERROR] delete todo %d: %v", id, err)
 			return ErrMsg{err}
 		}
 		defer res.Body.Close()
@@ -376,9 +384,9 @@ func (c *client) deleteTodo(id string) tea.Cmd {
 	}
 }
 
-func (c *client) getSession(id string) tea.Cmd {
+func (c *client) getSession(id uint) tea.Cmd {
 	return func() tea.Msg {
-		res, err := c.httpClient.Get(c.baseURL + "/sessions/" + id)
+		res, err := c.httpClient.Get(fmt.Sprintf("%s/sessions/%d", c.baseURL, id))
 		if err != nil {
 			return ErrMsg{err}
 		}

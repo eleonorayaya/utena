@@ -8,7 +8,7 @@ import (
 type CreateTodoRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID *uint  `json:"workspace_id"`
 }
 
 func (c *CreateTodoRequest) Bind(r *http.Request) error {
@@ -31,11 +31,15 @@ func (r *TodoResponse) Render(w http.ResponseWriter, req *http.Request) error {
 }
 
 type TodoListResponse struct {
-	Todos []Todo `json:"todos"`
+	Todos []*TodoResponse `json:"todos"`
 }
 
 func NewTodoListResponse(todos []Todo) *TodoListResponse {
-	return &TodoListResponse{Todos: todos}
+	resp := make([]*TodoResponse, len(todos))
+	for i := range todos {
+		resp[i] = NewTodoResponse(&todos[i])
+	}
+	return &TodoListResponse{Todos: resp}
 }
 
 func (r *TodoListResponse) Render(w http.ResponseWriter, req *http.Request) error {

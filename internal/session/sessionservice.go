@@ -9,31 +9,25 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
+	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
-
-type TmuxManager interface {
-	CreateSession(name, startDir string) error
-	KillSession(name string) error
-	HasSession(name string) bool
-	ListSessionNames() ([]string, error)
-}
 
 type SessionService struct {
 	store            *SessionStore
 	workspaceService *workspace.WorkspaceService
 	gitService       *git.GitService
-	tmuxManager      TmuxManager
+	tmuxService      *utmux.TmuxService
 	eventBus         eventbus.EventBus
 	branchPrefix     string
 }
 
-func NewSessionService(store *SessionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxManager TmuxManager, bus eventbus.EventBus, branchPrefix string) *SessionService {
+func NewSessionService(store *SessionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string) *SessionService {
 	return &SessionService{
 		store:            store,
 		workspaceService: workspaceService,
 		gitService:       gitService,
-		tmuxManager:      tmuxManager,
+		tmuxService:      tmuxService,
 		eventBus:         bus,
 		branchPrefix:     branchPrefix,
 	}
@@ -55,25 +49,10 @@ func (s *SessionService) OnAppEnd(ctx context.Context) error {
 
 func (s *SessionService) ListSessions(ctx context.Context) ([]Session, error) {
 	sessions := s.store.List()
-	for i := range sessions {
-		sessions[i].WorkspaceName = s.resolveWorkspaceName(&sessions[i])
-	}
 	return sessions, nil
 }
 
-func (s *SessionService) resolveWorkspaceName(session *Session) string {
-	if session.WorkspaceID == "" {
-		return ""
-	}
-	ws, err := s.workspaceService.GetWorkspace(context.Background(), session.WorkspaceID)
-	if err != nil {
-		slog.Warn("failed to resolve workspace name", "session", session.ID, "workspace_id", session.WorkspaceID, "error", err)
-		return ""
-	}
-	return ws.Name
-}
-
-func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceID string) ([]Session, error) {
+func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceID uint) ([]Session, error) {
 	_, err := s.workspaceService.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -82,7 +61,7 @@ func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceI
 	return s.store.ListByWorkspace(workspaceID), nil
 }
 
-func (s *SessionService) GetSession(ctx context.Context, id string) (*Session, error) {
+func (s *SessionService) GetSession(ctx context.Context, id uint) (*Session, error) {
 	return s.store.GetByID(id)
 }
 
@@ -92,7 +71,7 @@ func (s *SessionService) GetSessionByTmuxName(ctx context.Context, tmuxName stri
 
 func (s *SessionService) CreateSession(ctx context.Context, session *Session, createWorktree bool) error {
 	var ws *workspace.Workspace
-	if session.WorkspaceID != "" {
+	if session.WorkspaceID != 0 {
 		var err error
 		ws, err = s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
 		if err != nil {
@@ -103,24 +82,22 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 	switch {
 	case session.Name != "":
 		if ws != nil {
-			session.ID = BuildSessionID(ws.Name, session.Name)
+			session.TmuxSessionName = BuildTmuxSessionName(ws.Name, session.Name)
 		} else {
-			session.ID = SanitizeID(session.Name)
+			session.TmuxSessionName = SanitizeTmuxName(session.Name)
 		}
 	case session.Branch != "":
 		if session.Name == "" {
 			session.Name = session.Branch
 		}
 		if ws != nil {
-			session.ID = BuildSessionID(ws.Name, session.Name)
+			session.TmuxSessionName = BuildTmuxSessionName(ws.Name, session.Name)
 		} else {
-			session.ID = SanitizeID(session.Name)
+			session.TmuxSessionName = SanitizeTmuxName(session.Name)
 		}
 	default:
 		return fmt.Errorf("session name or branch is required")
 	}
-
-	session.TmuxSessionName = session.ID
 
 	res := &Resources{
 		Tmux: &ResourceState{Status: ResourcePending},
@@ -140,7 +117,7 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 		return err
 	}
 
-	if session.WorkspaceID != "" {
+	if session.WorkspaceID != 0 {
 		s.workspaceService.Touch(ctx, session.WorkspaceID)
 	}
 
@@ -149,7 +126,7 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 	return nil
 }
 
-func (s *SessionService) runSetup(sessionID string, ws *workspace.Workspace) {
+func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace) {
 	ctx := context.Background()
 
 	sess, err := s.store.GetByID(sessionID)
@@ -218,7 +195,7 @@ func (s *SessionService) runSetup(sessionID string, ws *workspace.Workspace) {
 		s.store.Update(sess)
 
 		startDir := s.resolveStartDir(ctx, sess)
-		if err := s.tmuxManager.CreateSession(sess.TmuxSessionName, startDir); err != nil {
+		if err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir); err != nil {
 			sess.Resources.Tmux.Status = ResourceFailed
 			sess.Resources.Tmux.Error = fmt.Sprintf("failed to create tmux session: %v", err)
 			sess.Status = StatusBroken
@@ -234,7 +211,7 @@ func (s *SessionService) runSetup(sessionID string, ws *workspace.Workspace) {
 	s.store.Update(sess)
 }
 
-func (s *SessionService) RefreshSession(ctx context.Context, id string) (*Session, error) {
+func (s *SessionService) RefreshSession(ctx context.Context, id uint) (*Session, error) {
 	sess, err := s.store.GetByID(id)
 	if err != nil {
 		return nil, err
@@ -253,7 +230,7 @@ func (s *SessionService) RefreshSession(ctx context.Context, id string) (*Sessio
 	}
 
 	if sess.Resources.Tmux != nil && sess.Resources.Tmux.Status == ResourceReady {
-		if !s.tmuxManager.HasSession(sess.TmuxSessionName) {
+		if !s.tmuxService.HasSession(sess.TmuxSessionName) {
 			sess.Resources.Tmux.Status = ResourceRemoved
 		}
 	}
@@ -270,7 +247,7 @@ func (s *SessionService) RefreshSession(ctx context.Context, id string) (*Sessio
 	return sess, nil
 }
 
-func (s *SessionService) RepairSession(ctx context.Context, id string) (*Session, error) {
+func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, error) {
 	sess, err := s.RefreshSession(ctx, id)
 	if err != nil {
 		return nil, err
@@ -297,7 +274,7 @@ func (s *SessionService) RepairSession(ctx context.Context, id string) (*Session
 	s.store.Update(sess)
 
 	var ws *workspace.Workspace
-	if sess.WorkspaceID != "" {
+	if sess.WorkspaceID != 0 {
 		ws, _ = s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID)
 	}
 
@@ -312,7 +289,7 @@ func (s *SessionService) UpdateSession(ctx context.Context, session *Session) er
 		return err
 	}
 
-	if session.WorkspaceID != "" && session.WorkspaceID != existing.WorkspaceID {
+	if session.WorkspaceID != 0 && session.WorkspaceID != existing.WorkspaceID {
 		_, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
 		if err != nil {
 			return err
@@ -322,21 +299,21 @@ func (s *SessionService) UpdateSession(ctx context.Context, session *Session) er
 	return s.store.Update(session)
 }
 
-func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Session, error) {
-	session, err := s.store.GetByID(name)
+func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session, error) {
+	session, err := s.store.GetByID(id)
 	if err != nil {
 		return nil, err
 	}
 
-	slog.Info("activate session", "session", name, "status", session.Status, "is_attached", session.IsAttached)
+	slog.Info("activate session", "session", id, "status", session.Status, "is_attached", session.IsAttached)
 
 	if session.Status == StatusCreating || session.Status == StatusBroken {
 		return nil, ErrCannotActivate
 	}
 
-	if !s.tmuxManager.HasSession(session.TmuxSessionName) {
+	if !s.tmuxService.HasSession(session.TmuxSessionName) {
 		startDir := s.resolveStartDir(ctx, session)
-		if err := s.tmuxManager.CreateSession(session.TmuxSessionName, startDir); err != nil {
+		if err := s.tmuxService.CreateSession(session.TmuxSessionName, startDir); err != nil {
 			return nil, fmt.Errorf("failed to revive tmux session: %w", err)
 		}
 		session.Status = StatusReady
@@ -347,7 +324,7 @@ func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Ses
 	}
 
 	if session.IsAttached {
-		slog.Info("skipping activation for already attached session", "session", name)
+		slog.Info("skipping activation for already attached session", "session", id)
 		return session, nil
 	}
 
@@ -366,19 +343,19 @@ func (s *SessionService) ActivateSession(ctx context.Context, name string) (*Ses
 		return nil, err
 	}
 
-	if session.WorkspaceID != "" {
+	if session.WorkspaceID != 0 {
 		s.workspaceService.Touch(ctx, session.WorkspaceID)
 	}
 
 	s.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionActivated,
-		Data: eventbus.SessionActivatedEvent{SessionName: name},
+		Data: eventbus.SessionActivatedEvent{SessionName: session.TmuxSessionName},
 	})
 
 	return session, nil
 }
 
-func (s *SessionService) DeleteSession(ctx context.Context, id string, deleteBranch bool) error {
+func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranch bool) error {
 	session, err := s.store.GetByID(id)
 	if err != nil {
 		return err
@@ -396,7 +373,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string, deleteBra
 		session.Resources = &Resources{}
 	}
 
-	if session.WorkspaceID != "" {
+	if session.WorkspaceID != 0 {
 		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
 		if err == nil {
 			if session.WorktreePath != "" {
@@ -418,7 +395,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, id string, deleteBra
 		}
 	}
 
-	if err := s.tmuxManager.KillSession(session.TmuxSessionName); err != nil {
+	if err := s.tmuxService.KillSession(session.TmuxSessionName); err != nil {
 		slog.Info("tmux session already gone or failed to kill", "session", session.TmuxSessionName, "error", err)
 	} else if session.Resources.Tmux != nil {
 		session.Resources.Tmux.Status = ResourceRemoved
@@ -433,7 +410,7 @@ func (s *SessionService) resolveStartDir(ctx context.Context, session *Session) 
 	if session.WorktreePath != "" {
 		return session.WorktreePath
 	}
-	if session.WorkspaceID != "" {
+	if session.WorkspaceID != 0 {
 		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
 		if err == nil {
 			return ws.Path

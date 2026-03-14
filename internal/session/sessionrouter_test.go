@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,37 +11,42 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
+	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace.WorkspaceStore, *mockTmuxManager) {
+func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace.WorkspaceStore, *mockTmuxClient, uint, uint) {
 	t.Helper()
 
+	database := setupTestDB(t)
 	bus := eventbus.NewEventBus()
-	sessionStore := NewSessionStore(afero.NewMemMapFs(), "/config")
-	workspaceStore := workspace.NewWorkspaceStore(afero.NewMemMapFs(), "/config")
+	sessionStore := NewSessionStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
-	workspaceStore.Add(&workspace.Workspace{ID: "ws-1", Name: "utena", Path: "/tmp/utena"})
-	workspaceStore.Add(&workspace.Workspace{ID: "ws-2", Name: "other", Path: "/tmp/other"})
+	ws1 := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
+	ws2 := &workspace.Workspace{Name: "other", Path: "/tmp/other"}
+	workspaceStore.Add(ws1)
+	workspaceStore.Add(ws2)
 
-	tmux := newMockTmuxManager()
+	mock := newMockTmuxClient()
+	tmuxService := utmux.NewTmuxService(mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmux, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
-	return router, sessionStore, workspaceStore, tmux
+	return router, sessionStore, workspaceStore, mock, ws1.ID, ws2.ID
 }
 
 func TestSessionRouter_ListSessions(t *testing.T) {
-	router, sessionStore, _, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, ws1ID, ws2ID := setupSessionRouter(t)
 
 	now := time.Now()
-	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
-	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
+	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: now}
+	session2 := &Session{TmuxSessionName: "session-2", WorkspaceID: ws2ID, Status: StatusReady, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 
@@ -56,28 +62,28 @@ func TestSessionRouter_ListSessions(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, response.Sessions, 2)
 
-	ids := make(map[string]bool)
+	names := make(map[string]bool)
 	for _, session := range response.Sessions {
-		ids[session.ID] = true
+		names[session.TmuxSessionName] = true
 	}
-	require.True(t, ids["session-1"])
-	require.True(t, ids["session-2"])
+	require.True(t, names["session-1"])
+	require.True(t, names["session-2"])
 }
 
 func TestSessionRouter_GetSessionByID(t *testing.T) {
-	router, sessionStore, _, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 
 	session := &Session{
-		ID:          "session-1",
-		WorkspaceID: "ws-1",
-		IsAttached:  true,
-		Status:      StatusReady,
-		Resources:   &Resources{Tmux: &ResourceState{Status: ResourceReady}},
-		LastUsedAt:  time.Now(),
+		TmuxSessionName: "session-1",
+		WorkspaceID:     ws1ID,
+		IsAttached:      true,
+		Status:          StatusReady,
+		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
+		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
 
-	req := httptest.NewRequest("GET", "/session-1", nil)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/%d", session.ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -87,8 +93,8 @@ func TestSessionRouter_GetSessionByID(t *testing.T) {
 	var response SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	require.Equal(t, "session-1", response.ID)
-	require.Equal(t, "ws-1", response.WorkspaceID)
+	require.Equal(t, session.ID, response.ID)
+	require.Equal(t, ws1ID, response.WorkspaceID)
 	require.True(t, response.IsAttached)
 	require.Equal(t, StatusReady, response.Status)
 	require.NotNil(t, response.Resources)
@@ -96,9 +102,9 @@ func TestSessionRouter_GetSessionByID(t *testing.T) {
 }
 
 func TestSessionRouter_GetSessionByID_NotFound(t *testing.T) {
-	router, _, _, _ := setupSessionRouter(t)
+	router, _, _, _, _, _ := setupSessionRouter(t)
 
-	req := httptest.NewRequest("GET", "/nonexistent", nil)
+	req := httptest.NewRequest("GET", "/99999", nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -107,17 +113,17 @@ func TestSessionRouter_GetSessionByID_NotFound(t *testing.T) {
 }
 
 func TestSessionRouter_ListSessionsByWorkspace(t *testing.T) {
-	router, sessionStore, _, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, ws1ID, ws2ID := setupSessionRouter(t)
 
 	now := time.Now()
-	session1 := &Session{ID: "session-1", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
-	session2 := &Session{ID: "session-2", WorkspaceID: "ws-2", Status: StatusReady, LastUsedAt: now}
-	session3 := &Session{ID: "session-3", WorkspaceID: "ws-1", Status: StatusReady, LastUsedAt: now}
+	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: now}
+	session2 := &Session{TmuxSessionName: "session-2", WorkspaceID: ws2ID, Status: StatusReady, LastUsedAt: now}
+	session3 := &Session{TmuxSessionName: "session-3", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 	sessionStore.Add(session3)
 
-	req := httptest.NewRequest("GET", "/workspace/ws-1", nil)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/workspace/%d", ws1ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -130,14 +136,14 @@ func TestSessionRouter_ListSessionsByWorkspace(t *testing.T) {
 	require.Len(t, response.Sessions, 2)
 
 	for _, session := range response.Sessions {
-		require.Equal(t, "ws-1", session.WorkspaceID)
+		require.Equal(t, ws1ID, session.WorkspaceID)
 	}
 }
 
 func TestSessionRouter_CreateSession(t *testing.T) {
-	router, sessionStore, _, tmux := setupSessionRouter(t)
+	router, sessionStore, _, tmux, ws1ID, _ := setupSessionRouter(t)
 
-	body := []byte(`{"name":"session-1","workspace_id":"ws-1"}`)
+	body := []byte(fmt.Sprintf(`{"name":"session-1","workspace_id":%d}`, ws1ID))
 
 	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -150,23 +156,23 @@ func TestSessionRouter_CreateSession(t *testing.T) {
 	var resp SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	require.Equal(t, "utena-session-1", resp.ID)
+	require.Equal(t, "utena-session-1", resp.TmuxSessionName)
 	require.Equal(t, "session-1", resp.Name)
 	require.Equal(t, StatusCreating, resp.Status)
 
-	waitForStatus(t, sessionStore, "utena-session-1", StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, resp.ID, StatusReady, 2*time.Second)
 
-	retrieved, err := sessionStore.GetByID("utena-session-1")
+	retrieved, err := sessionStore.GetByID(resp.ID)
 	require.NoError(t, err)
-	require.Equal(t, "utena-session-1", retrieved.ID)
-	require.Equal(t, "ws-1", retrieved.WorkspaceID)
+	require.Equal(t, "utena-session-1", retrieved.TmuxSessionName)
+	require.Equal(t, ws1ID, retrieved.WorkspaceID)
 	require.True(t, tmux.HasSession("utena-session-1"))
 }
 
 func TestSessionRouter_CreateSession_WithName(t *testing.T) {
-	router, sessionStore, _, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 
-	body := []byte(`{"name":"main","workspace_id":"ws-1"}`)
+	body := []byte(fmt.Sprintf(`{"name":"main","workspace_id":%d}`, ws1ID))
 
 	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -179,20 +185,20 @@ func TestSessionRouter_CreateSession_WithName(t *testing.T) {
 	var resp SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	require.Equal(t, "utena-main", resp.ID)
+	require.Equal(t, "utena-main", resp.TmuxSessionName)
 	require.Equal(t, "main", resp.Name)
 
-	waitForStatus(t, sessionStore, "utena-main", StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, resp.ID, StatusReady, 2*time.Second)
 
-	retrieved, err := sessionStore.GetByID("utena-main")
+	retrieved, err := sessionStore.GetByID(resp.ID)
 	require.NoError(t, err)
 	require.Equal(t, "main", retrieved.Name)
 }
 
 func TestSessionRouter_CreateSession_ExistingBranch(t *testing.T) {
-	router, sessionStore, _, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 
-	body := []byte(`{"workspace_id":"ws-1","branch":"main","branch_created":false,"create_worktree":false}`)
+	body := []byte(fmt.Sprintf(`{"workspace_id":%d,"branch":"main","branch_created":false,"create_worktree":false}`, ws1ID))
 
 	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -205,21 +211,21 @@ func TestSessionRouter_CreateSession_ExistingBranch(t *testing.T) {
 	var resp SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	require.Equal(t, "utena-main", resp.ID)
+	require.Equal(t, "utena-main", resp.TmuxSessionName)
 	require.Equal(t, "main", resp.Name)
 
-	waitForStatus(t, sessionStore, "utena-main", StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, resp.ID, StatusReady, 2*time.Second)
 
-	retrieved, err := sessionStore.GetByID("utena-main")
+	retrieved, err := sessionStore.GetByID(resp.ID)
 	require.NoError(t, err)
 	require.Equal(t, "main", retrieved.Name)
 	require.Equal(t, "main", retrieved.Branch)
 }
 
 func TestSessionRouter_CreateSession_InvalidWorkspace(t *testing.T) {
-	router, _, _, _ := setupSessionRouter(t)
+	router, _, _, _, _, _ := setupSessionRouter(t)
 
-	body := []byte(`{"name":"session-1","workspace_id":"nonexistent"}`)
+	body := []byte(`{"name":"session-1","workspace_id":99999}`)
 
 	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -231,14 +237,14 @@ func TestSessionRouter_CreateSession_InvalidWorkspace(t *testing.T) {
 }
 
 func TestSessionRouter_UpdateSession(t *testing.T) {
-	router, sessionStore, _, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 
 	session := &Session{
-		ID:          "session-1",
-		WorkspaceID: "ws-1",
-		IsAttached:  false,
-		Status:      StatusReady,
-		LastUsedAt:  time.Now(),
+		TmuxSessionName: "session-1",
+		WorkspaceID:     ws1ID,
+		IsAttached:      false,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -246,7 +252,7 @@ func TestSessionRouter_UpdateSession(t *testing.T) {
 	body, err := json.Marshal(session)
 	require.NoError(t, err)
 
-	req := httptest.NewRequest("PUT", "/session-1", bytes.NewReader(body))
+	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d", session.ID), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -254,33 +260,32 @@ func TestSessionRouter_UpdateSession(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 
-	retrieved, err := sessionStore.GetByID("session-1")
+	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.True(t, retrieved.IsAttached)
 }
 
 func TestSessionRouter_DeleteSession(t *testing.T) {
-	router, sessionStore, _, tmux := setupSessionRouter(t)
+	router, sessionStore, _, tmux, ws1ID, _ := setupSessionRouter(t)
 
 	tmux.sessions["session-1"] = true
 	session := &Session{
-		ID:              "session-1",
 		TmuxSessionName: "session-1",
-		WorkspaceID:     "ws-1",
+		WorkspaceID:     ws1ID,
 		Status:          StatusReady,
 		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
 		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
 
-	req := httptest.NewRequest("DELETE", "/session-1", nil)
+	req := httptest.NewRequest("DELETE", fmt.Sprintf("/%d", session.ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusNoContent, w.Code)
 
-	retrieved, err := sessionStore.GetByID("session-1")
+	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusDeleted, retrieved.Status)
 	require.Equal(t, ResourceRemoved, retrieved.Resources.Tmux.Status)
@@ -288,18 +293,18 @@ func TestSessionRouter_DeleteSession(t *testing.T) {
 }
 
 func TestSessionRouter_RepairSession(t *testing.T) {
-	router, sessionStore, _, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 
-	sessionStore.Add(&Session{
-		ID:              "broken-session",
+	session := &Session{
 		TmuxSessionName: "broken-session",
-		WorkspaceID:     "ws-1",
+		WorkspaceID:     ws1ID,
 		Status:          StatusBroken,
 		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceRemoved}},
 		LastUsedAt:      time.Now(),
-	})
+	}
+	sessionStore.Add(session)
 
-	req := httptest.NewRequest("PUT", "/broken-session/repair", nil)
+	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/repair", session.ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -309,16 +314,16 @@ func TestSessionRouter_RepairSession(t *testing.T) {
 	var response SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	require.Equal(t, "broken-session", response.ID)
+	require.Equal(t, session.ID, response.ID)
 	require.Equal(t, StatusCreating, response.Status)
 
-	waitForStatus(t, sessionStore, "broken-session", StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusReady, 2*time.Second)
 }
 
 func TestSessionRouter_RepairSession_NotFound(t *testing.T) {
-	router, _, _, _ := setupSessionRouter(t)
+	router, _, _, _, _, _ := setupSessionRouter(t)
 
-	req := httptest.NewRequest("PUT", "/nonexistent/repair", nil)
+	req := httptest.NewRequest("PUT", "/99999/repair", nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -327,19 +332,19 @@ func TestSessionRouter_RepairSession_NotFound(t *testing.T) {
 }
 
 func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
-	router, sessionStore, _, tmux := setupSessionRouter(t)
+	router, sessionStore, _, tmux, ws1ID, _ := setupSessionRouter(t)
 
 	tmux.sessions["alive-session"] = true
-	sessionStore.Add(&Session{
-		ID:              "alive-session",
+	session := &Session{
 		TmuxSessionName: "alive-session",
-		WorkspaceID:     "ws-1",
+		WorkspaceID:     ws1ID,
 		Status:          StatusReady,
 		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
 		LastUsedAt:      time.Now(),
-	})
+	}
+	sessionStore.Add(session)
 
-	req := httptest.NewRequest("PUT", "/alive-session/repair", nil)
+	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/repair", session.ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -348,18 +353,18 @@ func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
 }
 
 func TestSessionRouter_ActivateSession_RejectsBrokenSession(t *testing.T) {
-	router, sessionStore, _, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 
-	sessionStore.Add(&Session{
-		ID:              "broken-session",
+	session := &Session{
 		TmuxSessionName: "broken-session",
-		WorkspaceID:     "ws-1",
+		WorkspaceID:     ws1ID,
 		Status:          StatusBroken,
 		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceRemoved}},
 		LastUsedAt:      time.Now(),
-	})
+	}
+	sessionStore.Add(session)
 
-	req := httptest.NewRequest("PUT", "/broken-session/activate", nil)
+	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/activate", session.ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -368,12 +373,12 @@ func TestSessionRouter_ActivateSession_RejectsBrokenSession(t *testing.T) {
 }
 
 func TestSessionRouter_GetSessionByID_ShowsResourceState(t *testing.T) {
-	router, sessionStore, _, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 
 	session := &Session{
-		ID:          "creating-session",
-		WorkspaceID: "ws-1",
-		Status:      StatusCreating,
+		TmuxSessionName: "creating-session",
+		WorkspaceID:     ws1ID,
+		Status:          StatusCreating,
 		Resources: &Resources{
 			Branch:   &ResourceState{Status: ResourceReady},
 			Worktree: &ResourceState{Status: ResourceCreating},
@@ -383,7 +388,7 @@ func TestSessionRouter_GetSessionByID_ShowsResourceState(t *testing.T) {
 	}
 	sessionStore.Add(session)
 
-	req := httptest.NewRequest("GET", "/creating-session", nil)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/%d", session.ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)
@@ -400,12 +405,12 @@ func TestSessionRouter_GetSessionByID_ShowsResourceState(t *testing.T) {
 }
 
 func TestSessionRouter_GetSessionByID_ShowsBrokenResourceError(t *testing.T) {
-	router, sessionStore, _, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 
 	session := &Session{
-		ID:          "broken-session",
-		WorkspaceID: "ws-1",
-		Status:      StatusBroken,
+		TmuxSessionName: "broken-session",
+		WorkspaceID:     ws1ID,
+		Status:          StatusBroken,
 		Resources: &Resources{
 			Branch:   &ResourceState{Status: ResourceReady},
 			Worktree: &ResourceState{Status: ResourceFailed, Error: "failed to create worktree: timeout"},
@@ -415,7 +420,7 @@ func TestSessionRouter_GetSessionByID_ShowsBrokenResourceError(t *testing.T) {
 	}
 	sessionStore.Add(session)
 
-	req := httptest.NewRequest("GET", "/broken-session", nil)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/%d", session.ID), nil)
 	w := httptest.NewRecorder()
 
 	router.Routes().ServeHTTP(w, req)

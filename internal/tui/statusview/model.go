@@ -217,9 +217,9 @@ func (m Model) collapsedView() string {
 	for _, s := range m.activeSessions() {
 		name := s.Name
 		if name == "" {
-			name = s.ID
+			name = s.TmuxSessionName
 		}
-		indicator := statusIndicator(m.claudeSessions[s.ID])
+		indicator := statusIndicator(m.claudeSessions[s.TmuxSessionName])
 		if indicator != "" {
 			sessionParts = append(sessionParts, name+"("+indicator+")")
 		} else {
@@ -241,16 +241,16 @@ func (m Model) expandedView() string {
 	for i, s := range activeSessions {
 		name := s.Name
 		if name == "" {
-			name = s.ID
+			name = s.TmuxSessionName
 		}
 		prefix := "  "
 		if i == m.cursor {
 			prefix = cursorStyle.Render("▸ ")
 		}
-		indicator := statusIndicator(m.claudeSessions[s.ID])
+		indicator := statusIndicator(m.claudeSessions[s.TmuxSessionName])
 		entry := prefix + name
 		if indicator != "" {
-			entry += " " + coloredIndicator(m.claudeSessions[s.ID])
+			entry += " " + coloredIndicator(m.claudeSessions[s.TmuxSessionName])
 		}
 		if s.IsAttached {
 			entry += dimStyle.Render(" (attached)")

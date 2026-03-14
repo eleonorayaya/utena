@@ -4,6 +4,9 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/eleonorayaya/utena/internal/workspace"
+	"gorm.io/gorm"
 )
 
 var ErrSessionAlreadyExists = errors.New("session already exists")
@@ -22,22 +25,22 @@ const (
 )
 
 type Session struct {
-	ID              string        `json:"id"`
-	TmuxSessionName string        `json:"tmux_session_name,omitempty"`
-	Name            string        `json:"name,omitempty"`
-	WorkspaceID     string        `json:"workspace_id"`
-	Branch          string        `json:"branch,omitempty"`
-	BaseBranch      string        `json:"base_branch,omitempty"`
-	BranchCreated   bool          `json:"branch_created,omitempty"`
-	WorktreePath    string        `json:"worktree_path,omitempty"`
-	Status          SessionStatus `json:"status"`
-	Resources       *Resources    `json:"resources,omitempty"`
-	IsAttached      bool          `json:"is_attached"`
-	WorkspaceName   string        `json:"workspace_name,omitempty"`
-	LastUsedAt      time.Time     `json:"last_used_at"`
+	gorm.Model
+	TmuxSessionName string               `json:"tmux_session_name,omitempty" gorm:"uniqueIndex"`
+	Name            string               `json:"name,omitempty"`
+	WorkspaceID     uint                 `json:"workspace_id" gorm:"index"`
+	Branch          string               `json:"branch,omitempty"`
+	BaseBranch      string               `json:"base_branch,omitempty"`
+	BranchCreated   bool                 `json:"branch_created,omitempty"`
+	WorktreePath    string               `json:"worktree_path,omitempty"`
+	Status          SessionStatus        `json:"status"`
+	Resources       *Resources           `json:"resources,omitempty" gorm:"serializer:json"`
+	IsAttached      bool                 `json:"is_attached"`
+	LastUsedAt      time.Time            `json:"last_used_at"`
+	Workspace       *workspace.Workspace `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID"`
 }
 
-func SanitizeID(name string) string {
+func SanitizeTmuxName(name string) string {
 	r := strings.NewReplacer(
 		" ", "-",
 		".", "_",
@@ -46,6 +49,6 @@ func SanitizeID(name string) string {
 	return strings.ToLower(r.Replace(name))
 }
 
-func BuildSessionID(workspaceName, name string) string {
-	return SanitizeID(workspaceName + "-" + name)
+func BuildTmuxSessionName(workspaceName, name string) string {
+	return SanitizeTmuxName(workspaceName + "-" + name)
 }

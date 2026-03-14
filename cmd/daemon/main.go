@@ -24,7 +24,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	app := api.NewApp(cfg)
+	app, err := api.NewApp(cfg)
+	if err != nil {
+		slog.Error("Failed to create app", "error", err)
+		os.Exit(1)
+	}
 
 	if err := app.OnStart(ctx); err != nil {
 		slog.Error("Failed to initialize", "error", err)

@@ -13,7 +13,7 @@ import (
 type Model struct {
 	list              list.Model
 	sortActiveFirst   bool
-	activeWorkspaceID string
+	activeWorkspaceID uint
 }
 
 func New(title string, sortActiveFirst bool) Model {
@@ -48,7 +48,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.activeWorkspaceID = msg.ActiveWorkspaceID
 		workspaces := msg.Workspaces
 
-		if m.sortActiveFirst && m.activeWorkspaceID != "" {
+		if m.sortActiveFirst && m.activeWorkspaceID != 0 {
 			sorted := make([]workspace.Workspace, 0, len(workspaces))
 			var rest []workspace.Workspace
 			for _, ws := range workspaces {

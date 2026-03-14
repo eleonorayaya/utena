@@ -3,6 +3,7 @@ package workspace
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
@@ -37,9 +38,14 @@ func (c *WorkspaceController) ListWorkspaces(w http.ResponseWriter, r *http.Requ
 
 func (c *WorkspaceController) GetWorkspaceByID(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
+	raw := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
 
-	workspace, err := c.service.GetWorkspace(ctx, id)
+	workspace, err := c.service.GetWorkspace(ctx, uint(id))
 	if err != nil {
 		render.Render(w, r, common.ErrNotFound())
 		return
@@ -75,9 +81,14 @@ func (c *WorkspaceController) AddWorkspace(w http.ResponseWriter, r *http.Reques
 
 func (c *WorkspaceController) ListBranches(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
+	raw := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
 
-	ws, err := c.service.GetWorkspace(ctx, id)
+	ws, err := c.service.GetWorkspace(ctx, uint(id))
 	if err != nil {
 		render.Render(w, r, common.ErrNotFound())
 		return

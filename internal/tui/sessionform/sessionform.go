@@ -104,10 +104,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.nameErr = msg.Err.Error()
 		return m, nil
 	case provider.SessionCreatedMsg:
-		id := msg.ID
 		return m, tea.Sequence(
 			router.NavigateTo(router.SessionProgressView),
-			sessionprogress.Start(id),
+			sessionprogress.Start(msg.ID),
 		)
 	}
 

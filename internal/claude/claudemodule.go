@@ -3,9 +3,9 @@ package claude
 import (
 	"context"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/go-chi/chi/v5"
-	"github.com/spf13/afero"
 )
 
 type ClaudeModule struct {
@@ -15,8 +15,8 @@ type ClaudeModule struct {
 	Router     *ClaudeRouter
 }
 
-func NewClaudeModule(bus eventbus.EventBus, fs afero.Fs, configDir string) *ClaudeModule {
-	store := NewClaudeStore(fs, configDir)
+func NewClaudeModule(bus eventbus.EventBus, database db.Database) *ClaudeModule {
+	store := NewClaudeStore(database)
 	service := NewClaudeService(store, bus)
 	controller := NewClaudeController(service)
 	router := NewClaudeRouter(controller)
@@ -51,6 +51,10 @@ func (m *ClaudeModule) OnAppEnd(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (m *ClaudeModule) Models() []any {
+	return []any{&ClaudeSession{}}
 }
 
 func (m *ClaudeModule) Routes() chi.Router {
