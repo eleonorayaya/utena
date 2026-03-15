@@ -140,6 +140,12 @@ func TestGitService_Pull_NoRemote(t *testing.T) {
 	require.Contains(t, err.Error(), "git pull failed")
 }
 
+func TestGitService_WorktreePath(t *testing.T) {
+	svc := NewGitService()
+	require.Equal(t, "/repo/.worktrees/eqt-my-feature", svc.WorktreePath("/repo", "eqt/my-feature"))
+	require.Equal(t, "/repo/.worktrees/simple-branch", svc.WorktreePath("/repo", "simple-branch"))
+}
+
 func trimOutput(b []byte) string {
 	s := string(b)
 	for len(s) > 0 && (s[len(s)-1] == '\n' || s[len(s)-1] == '\r') {

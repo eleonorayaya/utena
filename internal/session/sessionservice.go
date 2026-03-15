@@ -135,80 +135,104 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace) {
 		return
 	}
 
-	if sess.Resources.Branch != nil && sess.Resources.Branch.Status != ResourceReady {
-		sess.Resources.Branch.Status = ResourceCreating
-		s.store.Update(sess)
-
-		pullBranch := sess.BaseBranch
-		if !sess.BranchCreated && sess.Branch != "" {
-			pullBranch = sess.Branch
-		}
-
-		if pullBranch != "" {
-			if err := s.gitService.Pull(ctx, ws.Path, pullBranch); err != nil {
-				sess.Resources.Branch.Status = ResourceFailed
-				sess.Resources.Branch.Error = fmt.Sprintf("failed to pull branch %q: %v", pullBranch, err)
-				sess.Status = StatusBroken
-				s.store.Update(sess)
-				return
-			}
-		}
-
-		sess.Resources.Branch.Status = ResourceReady
-		s.store.Update(sess)
+	steps := []struct {
+		resource *ResourceState
+		run      func() error
+	}{
+		{sess.Resources.Branch, func() error { return s.setupBranch(ctx, sess, ws) }},
+		{sess.Resources.Worktree, func() error { return s.setupWorktree(ctx, sess, ws) }},
+		{sess.Resources.Tmux, func() error { return s.setupTmux(ctx, sess) }},
 	}
 
-	if sess.Resources.Worktree != nil && sess.Resources.Worktree.Status != ResourceReady {
-		sess.Resources.Worktree.Status = ResourceCreating
-		s.store.Update(sess)
-
-		if sess.BranchCreated {
-			branchName := s.branchPrefix + sess.Name
-			worktreePath, err := s.gitService.CreateWorktree(ctx, ws.Path, branchName, sess.BaseBranch)
-			if err != nil {
-				sess.Resources.Worktree.Status = ResourceFailed
-				sess.Resources.Worktree.Error = fmt.Sprintf("failed to create worktree: %v", err)
-				sess.Status = StatusBroken
-				s.store.Update(sess)
-				return
-			}
-			sess.WorktreePath = worktreePath
-			sess.Branch = branchName
-		} else if sess.Branch != "" {
-			worktreePath, err := s.gitService.CheckoutWorktree(ctx, ws.Path, sess.Branch)
-			if err != nil {
-				sess.Resources.Worktree.Status = ResourceFailed
-				sess.Resources.Worktree.Error = fmt.Sprintf("failed to checkout worktree: %v", err)
-				sess.Status = StatusBroken
-				s.store.Update(sess)
-				return
-			}
-			sess.WorktreePath = worktreePath
+	for _, step := range steps {
+		if step.resource == nil || step.resource.Status == ResourceReady {
+			continue
 		}
-
-		sess.Resources.Worktree.Status = ResourceReady
-		s.store.Update(sess)
-	}
-
-	if sess.Resources.Tmux != nil && sess.Resources.Tmux.Status != ResourceReady {
-		sess.Resources.Tmux.Status = ResourceCreating
+		step.resource.Status = ResourceCreating
 		s.store.Update(sess)
 
-		startDir := s.resolveStartDir(ctx, sess)
-		if err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir); err != nil {
-			sess.Resources.Tmux.Status = ResourceFailed
-			sess.Resources.Tmux.Error = fmt.Sprintf("failed to create tmux session: %v", err)
+		if err := step.run(); err != nil {
+			step.resource.Status = ResourceFailed
+			step.resource.Error = err.Error()
 			sess.Status = StatusBroken
 			s.store.Update(sess)
 			return
 		}
 
-		sess.Resources.Tmux.Status = ResourceReady
+		step.resource.Status = ResourceReady
 		s.store.Update(sess)
 	}
 
 	sess.Status = StatusReady
 	s.store.Update(sess)
+}
+
+func (s *SessionService) setupBranch(ctx context.Context, sess *Session, ws *workspace.Workspace) error {
+	pullBranch := sess.Branch
+	if sess.BaseBranch != "" {
+		pullBranch = sess.BaseBranch
+	}
+
+	if err := s.gitService.Pull(ctx, ws.Path, pullBranch); err != nil {
+		return fmt.Errorf("failed to pull branch %q: %v", pullBranch, err)
+	}
+	return nil
+}
+
+func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *workspace.Workspace) error {
+	creatingNewBranch := sess.BaseBranch != ""
+
+	branchName := sess.Branch
+	if creatingNewBranch {
+		branchName = s.branchPrefix + sess.Name
+	}
+
+	branchExists, err := s.gitService.HasBranch(ctx, ws.Path, branchName)
+	if err != nil {
+		return fmt.Errorf("failed to check branch %q: %v", branchName, err)
+	}
+	if creatingNewBranch && branchExists {
+		return fmt.Errorf("branch %q already exists; use it as an existing branch instead", branchName)
+	}
+	if !creatingNewBranch && !branchExists {
+		return fmt.Errorf("branch %q does not exist; provide a base branch to create it", branchName)
+	}
+
+	worktreePath := s.gitService.WorktreePath(ws.Path, branchName)
+
+	exists, err := s.gitService.ValidateWorktree(ctx, worktreePath, branchName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		sess.WorktreePath = worktreePath
+		sess.Branch = branchName
+		return nil
+	}
+
+	if creatingNewBranch {
+		path, err := s.gitService.CreateWorktree(ctx, ws.Path, branchName, sess.BaseBranch)
+		if err != nil {
+			return fmt.Errorf("failed to create worktree: %v", err)
+		}
+		sess.WorktreePath = path
+		sess.Branch = branchName
+	} else {
+		path, err := s.gitService.CheckoutWorktree(ctx, ws.Path, sess.Branch)
+		if err != nil {
+			return fmt.Errorf("failed to checkout worktree: %v", err)
+		}
+		sess.WorktreePath = path
+	}
+	return nil
+}
+
+func (s *SessionService) setupTmux(ctx context.Context, sess *Session) error {
+	startDir := s.resolveStartDir(ctx, sess)
+	if err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir); err != nil {
+		return fmt.Errorf("failed to create tmux session: %v", err)
+	}
+	return nil
 }
 
 func (s *SessionService) RefreshSession(ctx context.Context, id uint) (*Session, error) {

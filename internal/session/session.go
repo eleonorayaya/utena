@@ -31,7 +31,6 @@ type Session struct {
 	WorkspaceID     uint                 `json:"workspace_id" gorm:"index"`
 	Branch          string               `json:"branch,omitempty"`
 	BaseBranch      string               `json:"base_branch,omitempty"`
-	BranchCreated   bool                 `json:"branch_created,omitempty"`
 	WorktreePath    string               `json:"worktree_path,omitempty"`
 	Status          SessionStatus        `json:"status"`
 	Resources       *Resources           `json:"resources,omitempty" gorm:"serializer:json"`

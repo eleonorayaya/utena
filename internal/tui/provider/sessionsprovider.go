@@ -32,14 +32,14 @@ func ActivateSession(id uint) tea.Cmd {
 	return func() tea.Msg { return activateSessionMsg{id: id} }
 }
 
-func CreateSession(name string, workspaceID uint, branch, workspacePath string, branchCreated bool) tea.Cmd {
+func CreateSession(name string, workspaceID uint, branch, baseBranch, workspacePath string) tea.Cmd {
 	return func() tea.Msg {
 		return createSessionIntentMsg{
 			name:          name,
 			workspaceID:   workspaceID,
 			branch:        branch,
+			baseBranch:    baseBranch,
 			workspacePath: workspacePath,
-			branchCreated: branchCreated,
 		}
 	}
 }
@@ -67,8 +67,8 @@ type createSessionIntentMsg struct {
 	name          string
 	workspaceID   uint
 	branch        string
+	baseBranch    string
 	workspacePath string
-	branchCreated bool
 }
 
 type repairSessionIntentMsg struct {
@@ -204,11 +204,7 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, p.client.fetchSessions()
 
 	case createSessionIntentMsg:
-		name := msg.name
-		workspaceID := msg.workspaceID
-		branch := msg.branch
-		branchCreated := msg.branchCreated
-		return p, p.client.createSession(name, workspaceID, branch, branchCreated)
+		return p, p.client.createSession(msg.name, msg.workspaceID, msg.branch, msg.baseBranch)
 
 	case SessionCreatedMsg:
 		return p, p.client.fetchSessions()

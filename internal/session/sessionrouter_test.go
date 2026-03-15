@@ -198,7 +198,7 @@ func TestSessionRouter_CreateSession_WithName(t *testing.T) {
 func TestSessionRouter_CreateSession_ExistingBranch(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 
-	body := []byte(fmt.Sprintf(`{"workspace_id":%d,"branch":"main","branch_created":false,"create_worktree":false}`, ws1ID))
+	body := []byte(fmt.Sprintf(`{"workspace_id":%d,"branch":"main","create_worktree":false}`, ws1ID))
 
 	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

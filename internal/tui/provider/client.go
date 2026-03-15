@@ -192,7 +192,7 @@ func (c *client) repairSession(id uint) tea.Cmd {
 	}
 }
 
-func (c *client) createSession(name string, workspaceID uint, branch string, branchCreated bool) tea.Cmd {
+func (c *client) createSession(name string, workspaceID uint, branch string, baseBranch string) tea.Cmd {
 	return func() tea.Msg {
 		body := map[string]interface{}{
 			"workspace_id": workspaceID,
@@ -200,13 +200,13 @@ func (c *client) createSession(name string, workspaceID uint, branch string, bra
 		if name != "" {
 			body["name"] = name
 		}
-		if branch != "" {
+		if branch != "" || baseBranch != "" {
 			body["create_worktree"] = true
-			body["branch_created"] = branchCreated
-			if branchCreated {
-				body["base_branch"] = branch
-			} else {
+			if branch != "" {
 				body["branch"] = branch
+			}
+			if baseBranch != "" {
+				body["base_branch"] = baseBranch
 			}
 		}
 		jsonBody, err := json.Marshal(body)

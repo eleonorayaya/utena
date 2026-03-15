@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -53,8 +54,7 @@ func (s *GitService) Pull(ctx context.Context, repoPath string, branch string) e
 }
 
 func (s *GitService) CreateWorktree(ctx context.Context, repoPath string, branchName string, baseBranch string) (string, error) {
-	dirName := strings.ReplaceAll(branchName, "/", "-")
-	worktreePath := filepath.Join(repoPath, ".worktrees", dirName)
+	worktreePath := s.WorktreePath(repoPath, branchName)
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, baseBranch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
@@ -63,8 +63,7 @@ func (s *GitService) CreateWorktree(ctx context.Context, repoPath string, branch
 }
 
 func (s *GitService) CheckoutWorktree(ctx context.Context, repoPath string, branch string) (string, error) {
-	sanitized := strings.ReplaceAll(branch, "/", "-")
-	worktreePath := filepath.Join(repoPath, ".worktrees", sanitized)
+	worktreePath := s.WorktreePath(repoPath, branch)
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", worktreePath, branch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
@@ -79,6 +78,35 @@ func (s *GitService) CurrentBranch(ctx context.Context, repoPath string) (string
 		return "", fmt.Errorf("failed to get current branch: %w", err)
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+func (s *GitService) HasBranch(ctx context.Context, repoPath string, branch string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--verify", "refs/heads/"+branch)
+	if err := cmd.Run(); err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *GitService) ValidateWorktree(ctx context.Context, worktreePath string, expectedBranch string) (bool, error) {
+	info, err := os.Stat(worktreePath)
+	if err != nil || !info.IsDir() {
+		return false, nil
+	}
+
+	currentBranch, err := s.CurrentBranch(ctx, worktreePath)
+	if err != nil {
+		return false, fmt.Errorf("worktree exists at %s but failed to read branch: %w", worktreePath, err)
+	}
+	if currentBranch != expectedBranch {
+		return false, fmt.Errorf("worktree at %s has branch %q, expected %q", worktreePath, currentBranch, expectedBranch)
+	}
+	return true, nil
+}
+
+func (s *GitService) WorktreePath(repoPath string, branch string) string {
+	dirName := strings.ReplaceAll(branch, "/", "-")
+	return filepath.Join(repoPath, ".worktrees", dirName)
 }
 
 func (s *GitService) RemoveWorktree(ctx context.Context, repoPath string, worktreePath string) error {
