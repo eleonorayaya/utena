@@ -200,14 +200,11 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 
 	worktreePath := s.gitService.WorktreePath(ws.Path, branchName)
 
-	if info, err := os.Stat(worktreePath); err == nil && info.IsDir() {
-		currentBranch, err := s.gitService.CurrentBranch(ctx, worktreePath)
-		if err != nil {
-			return fmt.Errorf("worktree exists at %s but failed to read branch: %v", worktreePath, err)
-		}
-		if currentBranch != branchName {
-			return fmt.Errorf("worktree at %s has branch %q, expected %q", worktreePath, currentBranch, branchName)
-		}
+	exists, err := s.gitService.ValidateWorktree(ctx, worktreePath, branchName)
+	if err != nil {
+		return err
+	}
+	if exists {
 		sess.WorktreePath = worktreePath
 		sess.Branch = branchName
 		return nil

@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -83,6 +84,22 @@ func (s *GitService) HasBranch(ctx context.Context, repoPath string, branch stri
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--verify", "refs/heads/"+branch)
 	if err := cmd.Run(); err != nil {
 		return false, nil
+	}
+	return true, nil
+}
+
+func (s *GitService) ValidateWorktree(ctx context.Context, worktreePath string, expectedBranch string) (bool, error) {
+	info, err := os.Stat(worktreePath)
+	if err != nil || !info.IsDir() {
+		return false, nil
+	}
+
+	currentBranch, err := s.CurrentBranch(ctx, worktreePath)
+	if err != nil {
+		return false, fmt.Errorf("worktree exists at %s but failed to read branch: %w", worktreePath, err)
+	}
+	if currentBranch != expectedBranch {
+		return false, fmt.Errorf("worktree at %s has branch %q, expected %q", worktreePath, currentBranch, expectedBranch)
 	}
 	return true, nil
 }
