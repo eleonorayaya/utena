@@ -169,12 +169,8 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace) {
 
 func (s *SessionService) setupBranch(ctx context.Context, sess *Session, ws *workspace.Workspace) error {
 	pullBranch := sess.BaseBranch
-	if !sess.BranchCreated && sess.Branch != "" {
+	if !sess.BranchCreated {
 		pullBranch = sess.Branch
-	}
-
-	if pullBranch == "" {
-		return nil
 	}
 
 	if err := s.gitService.Pull(ctx, ws.Path, pullBranch); err != nil {
