@@ -79,6 +79,14 @@ func (s *GitService) CurrentBranch(ctx context.Context, repoPath string) (string
 	return strings.TrimSpace(string(output)), nil
 }
 
+func (s *GitService) HasBranch(ctx context.Context, repoPath string, branch string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--verify", "refs/heads/"+branch)
+	if err := cmd.Run(); err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (s *GitService) WorktreePath(repoPath string, branch string) string {
 	dirName := strings.ReplaceAll(branch, "/", "-")
 	return filepath.Join(repoPath, ".worktrees", dirName)

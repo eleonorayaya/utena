@@ -168,9 +168,9 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace) {
 }
 
 func (s *SessionService) setupBranch(ctx context.Context, sess *Session, ws *workspace.Workspace) error {
-	pullBranch := sess.BaseBranch
-	if !sess.BranchCreated {
-		pullBranch = sess.Branch
+	pullBranch := sess.Branch
+	if sess.BaseBranch != "" {
+		pullBranch = sess.BaseBranch
 	}
 
 	if err := s.gitService.Pull(ctx, ws.Path, pullBranch); err != nil {
@@ -180,12 +180,22 @@ func (s *SessionService) setupBranch(ctx context.Context, sess *Session, ws *wor
 }
 
 func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *workspace.Workspace) error {
+	creatingNewBranch := sess.BaseBranch != ""
+
 	branchName := sess.Branch
-	if sess.BranchCreated {
+	if creatingNewBranch {
 		branchName = s.branchPrefix + sess.Name
 	}
-	if branchName == "" {
-		return nil
+
+	branchExists, err := s.gitService.HasBranch(ctx, ws.Path, branchName)
+	if err != nil {
+		return fmt.Errorf("failed to check branch %q: %v", branchName, err)
+	}
+	if creatingNewBranch && branchExists {
+		return fmt.Errorf("branch %q already exists; use it as an existing branch instead", branchName)
+	}
+	if !creatingNewBranch && !branchExists {
+		return fmt.Errorf("branch %q does not exist; provide a base branch to create it", branchName)
 	}
 
 	worktreePath := s.gitService.WorktreePath(ws.Path, branchName)
@@ -203,7 +213,7 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 		return nil
 	}
 
-	if sess.BranchCreated {
+	if creatingNewBranch {
 		path, err := s.gitService.CreateWorktree(ctx, ws.Path, branchName, sess.BaseBranch)
 		if err != nil {
 			return fmt.Errorf("failed to create worktree: %v", err)

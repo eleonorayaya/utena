@@ -93,7 +93,6 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 		WorkspaceID:   data.WorkspaceID,
 		Branch:        data.Branch,
 		BaseBranch:    data.BaseBranch,
-		BranchCreated: data.BranchCreated,
 	}
 
 	if err := c.service.CreateSession(ctx, session, data.CreateWorktree); err != nil {

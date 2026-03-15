@@ -45,7 +45,6 @@ type Model struct {
 	selectedWorkspace workspace.Workspace
 	selectedBranch    string
 	selectedDirPath   string
-	branchCreated     bool
 	nameErr           string
 	width, height     int
 }
@@ -228,13 +227,11 @@ func (m Model) updateBranchMode(msg tea.Msg) (Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "n":
-			m.branchCreated = true
 			m.activeStep = nameInputStep
 			m.initNameInput()
 			return m, m.nameInput.Focus()
 		case "e":
-			m.branchCreated = false
-			return m, provider.CreateSession("", m.selectedWorkspace.ID, m.selectedBranch, m.selectedWorkspace.Path, false)
+			return m, provider.CreateSession("", m.selectedWorkspace.ID, m.selectedBranch, "", m.selectedWorkspace.Path)
 		case "esc":
 			m.activeStep = branchPickerStep
 			return m, nil
@@ -256,7 +253,7 @@ func (m Model) updateNameInput(msg tea.Msg) (Model, tea.Cmd) {
 				m.nameErr = err.Error()
 				return m, nil
 			}
-			return m, provider.CreateSession(name, m.selectedWorkspace.ID, m.selectedBranch, m.selectedWorkspace.Path, m.branchCreated)
+			return m, provider.CreateSession(name, m.selectedWorkspace.ID, "", m.selectedBranch, m.selectedWorkspace.Path)
 		case key.Matches(msg, formKeys.Back):
 			if m.selectedWorkspace.IsGitRepo {
 				m.activeStep = branchModeStep

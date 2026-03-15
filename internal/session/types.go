@@ -49,7 +49,6 @@ type CreateSessionRequest struct {
 	WorkspaceID    uint   `json:"workspace_id"`
 	Branch         string `json:"branch,omitempty"`
 	BaseBranch     string `json:"base_branch,omitempty"`
-	BranchCreated  bool   `json:"branch_created"`
 	CreateWorktree bool   `json:"create_worktree"`
 }
 
