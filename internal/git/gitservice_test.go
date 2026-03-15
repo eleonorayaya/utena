@@ -140,38 +140,10 @@ func TestGitService_Pull_NoRemote(t *testing.T) {
 	require.Contains(t, err.Error(), "git pull failed")
 }
 
-func TestGitService_FindWorktreeByBranch(t *testing.T) {
-	repo := initTestRepo(t)
-
+func TestGitService_WorktreePath(t *testing.T) {
 	svc := NewGitService()
-	_, err := svc.CreateWorktree(context.Background(), repo, "eqt/my-feature", "main")
-	require.NoError(t, err)
-
-	path, err := svc.FindWorktreeByBranch(context.Background(), repo, "eqt/my-feature")
-	require.NoError(t, err)
-
-	resolvedExpected, _ := filepath.EvalSymlinks(filepath.Join(repo, ".worktrees", "eqt-my-feature"))
-	require.Equal(t, resolvedExpected, path)
-}
-
-func TestGitService_FindWorktreeByBranch_NotFound(t *testing.T) {
-	repo := initTestRepo(t)
-
-	svc := NewGitService()
-	path, err := svc.FindWorktreeByBranch(context.Background(), repo, "nonexistent")
-	require.NoError(t, err)
-	require.Empty(t, path)
-}
-
-func TestGitService_FindWorktreeByBranch_MainWorktree(t *testing.T) {
-	repo := initTestRepo(t)
-	resolvedRepo, err := filepath.EvalSymlinks(repo)
-	require.NoError(t, err)
-
-	svc := NewGitService()
-	path, err := svc.FindWorktreeByBranch(context.Background(), repo, "main")
-	require.NoError(t, err)
-	require.Equal(t, resolvedRepo, path)
+	require.Equal(t, "/repo/.worktrees/eqt-my-feature", svc.WorktreePath("/repo", "eqt/my-feature"))
+	require.Equal(t, "/repo/.worktrees/simple-branch", svc.WorktreePath("/repo", "simple-branch"))
 }
 
 func trimOutput(b []byte) string {

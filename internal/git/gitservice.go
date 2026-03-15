@@ -53,8 +53,7 @@ func (s *GitService) Pull(ctx context.Context, repoPath string, branch string) e
 }
 
 func (s *GitService) CreateWorktree(ctx context.Context, repoPath string, branchName string, baseBranch string) (string, error) {
-	dirName := strings.ReplaceAll(branchName, "/", "-")
-	worktreePath := filepath.Join(repoPath, ".worktrees", dirName)
+	worktreePath := s.WorktreePath(repoPath, branchName)
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, baseBranch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
@@ -63,8 +62,7 @@ func (s *GitService) CreateWorktree(ctx context.Context, repoPath string, branch
 }
 
 func (s *GitService) CheckoutWorktree(ctx context.Context, repoPath string, branch string) (string, error) {
-	sanitized := strings.ReplaceAll(branch, "/", "-")
-	worktreePath := filepath.Join(repoPath, ".worktrees", sanitized)
+	worktreePath := s.WorktreePath(repoPath, branch)
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", worktreePath, branch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
@@ -81,24 +79,9 @@ func (s *GitService) CurrentBranch(ctx context.Context, repoPath string) (string
 	return strings.TrimSpace(string(output)), nil
 }
 
-func (s *GitService) FindWorktreeByBranch(ctx context.Context, repoPath string, branch string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "list", "--porcelain")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git worktree list failed: %w", err)
-	}
-
-	targetRef := "refs/heads/" + branch
-	var currentPath string
-	for line := range strings.SplitSeq(string(output), "\n") {
-		if path, ok := strings.CutPrefix(line, "worktree "); ok {
-			currentPath = path
-		}
-		if line == "branch "+targetRef && currentPath != "" {
-			return currentPath, nil
-		}
-	}
-	return "", nil
+func (s *GitService) WorktreePath(repoPath string, branch string) string {
+	dirName := strings.ReplaceAll(branch, "/", "-")
+	return filepath.Join(repoPath, ".worktrees", dirName)
 }
 
 func (s *GitService) RemoveWorktree(ctx context.Context, repoPath string, worktreePath string) error {

@@ -476,8 +476,7 @@ func TestSessionService_CreateSession_WithWorktree_ReusesExisting(t *testing.T) 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 
-	resolvedWorktreePath, _ := filepath.EvalSymlinks(worktreePath)
-	require.Equal(t, resolvedWorktreePath, retrieved.WorktreePath)
+	require.Equal(t, worktreePath, retrieved.WorktreePath)
 	require.Equal(t, branchName, retrieved.Branch)
 	require.Equal(t, ResourceReady, retrieved.Resources.Worktree.Status)
 }
@@ -524,8 +523,7 @@ func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testi
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 
-	resolvedWorktreePath, _ := filepath.EvalSymlinks(worktreePath)
-	require.Equal(t, resolvedWorktreePath, retrieved.WorktreePath)
+	require.Equal(t, worktreePath, retrieved.WorktreePath)
 	require.Equal(t, ResourceReady, retrieved.Resources.Worktree.Status)
 }
 
