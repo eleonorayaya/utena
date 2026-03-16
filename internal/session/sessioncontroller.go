@@ -89,10 +89,10 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 	}
 
 	session := &Session{
-		Name:          data.Name,
-		WorkspaceID:   data.WorkspaceID,
-		Branch:        data.Branch,
-		BaseBranch:    data.BaseBranch,
+		Name:        data.Name,
+		WorkspaceID: data.WorkspaceID,
+		Branch:      data.Branch,
+		BaseBranch:  data.BaseBranch,
 	}
 
 	if err := c.service.CreateSession(ctx, session, data.CreateWorktree); err != nil {
