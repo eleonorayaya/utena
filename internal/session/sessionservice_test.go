@@ -406,9 +406,9 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
 
 	session := &Session{
-		Name:          "my-feature",
-		WorkspaceID:   wsGit.ID,
-		BaseBranch:    "main",
+		Name:        "my-feature",
+		WorkspaceID: wsGit.ID,
+		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
@@ -465,9 +465,9 @@ func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testi
 	require.NoError(t, err, "push branch failed: %s", string(out))
 
 	session := &Session{
-		Name:          branchName,
-		WorkspaceID:   wsGit.ID,
-		Branch:        branchName,
+		Name:        branchName,
+		WorkspaceID: wsGit.ID,
+		Branch:      branchName,
 	}
 
 	err = service.CreateSession(ctx, session, true)
@@ -499,9 +499,9 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
 
 	session := &Session{
-		Name:          "my-feature",
-		WorkspaceID:   wsGit.ID,
-		BaseBranch:    "nonexistent",
+		Name:        "my-feature",
+		WorkspaceID: wsGit.ID,
+		BaseBranch:  "nonexistent",
 	}
 
 	ctx := context.Background()
