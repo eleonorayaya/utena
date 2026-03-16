@@ -10,10 +10,9 @@ if [ -z "$PANES" ]; then
     exit 0
 fi
 
-PANE_COUNT=$(echo "$PANES" | wc -l | tr -d ' ')
-if [ "$PANE_COUNT" -eq 1 ]; then
-    STATUS_PANE=$(echo "$PANES" | grep ' 1$' | awk '{print $1}')
-    if [ -n "$STATUS_PANE" ]; then
-        tmux kill-pane -t "$STATUS_PANE"
-    fi
+NON_STATUS_COUNT=$(echo "$PANES" | grep -v ' 1$' | grep -c . || true)
+if [ "$NON_STATUS_COUNT" -le 1 ]; then
+    echo "$PANES" | grep ' 1$' | awk '{print $1}' | while read -r status_pane; do
+        tmux kill-pane -t "$status_pane" 2>/dev/null
+    done
 fi
