@@ -145,7 +145,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.Collapse):
 		m.expanded = false
 		m.collapsePane()
-		return m, router.SetHelpVisible(false)
+		return m, tea.Batch(tea.ClearScreen, router.SetHelpVisible(false))
 	}
 	return m, nil
 }
@@ -162,14 +162,27 @@ func (m *Model) syncFocusState() tea.Cmd {
 	active := strings.TrimSpace(output) == "1"
 	if active && !m.expanded {
 		m.expanded = true
-		return router.SetHelpVisible(true)
+		m.expandPane()
+		return tea.Batch(tea.ClearScreen, router.SetHelpVisible(true))
 	}
 	if !active && m.expanded {
 		m.expanded = false
 		m.collapsePane()
-		return router.SetHelpVisible(false)
+		return tea.Batch(tea.ClearScreen, router.SetHelpVisible(false))
 	}
 	return nil
+}
+
+func (m Model) expandPane() {
+	if m.paneID == "" {
+		return
+	}
+	t, err := gotmux.DefaultTmux()
+	if err != nil {
+		return
+	}
+	t.Command("resize-pane", "-y", "8", "-t", m.paneID)
+	t.Command("select-pane", "-e", "-t", m.paneID)
 }
 
 func (m Model) collapsePane() {
