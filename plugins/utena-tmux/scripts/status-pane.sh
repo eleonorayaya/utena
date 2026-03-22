@@ -17,6 +17,6 @@ if [ -n "$existing" ]; then
     exit 0
 fi
 
-PANE_ID=$(tmux split-window -v -f -l 1 -d -t "$WINDOW_ID" -P -F '#{pane_id}' 'utena status')
+PANE_ID=$(tmux split-window -h -b -f -l 34 -d -t "$WINDOW_ID" -P -F '#{pane_id}' 'utena status')
 tmux set-option -p -t "$PANE_ID" @utena-status 1
-tmux select-pane -d -t "$PANE_ID"
+tmux select-pane -e -t "$PANE_ID"

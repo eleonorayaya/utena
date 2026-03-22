@@ -67,6 +67,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, m.rebuildItems()
 	case provider.ErrMsg:
 		return m, m.list.NewStatusMessage(msg.Err.Error())
+	case provider.SessionSwitchedMsg:
+		return m, tea.Quit
 	case tea.KeyMsg:
 		var cmd tea.Cmd
 		var handled bool

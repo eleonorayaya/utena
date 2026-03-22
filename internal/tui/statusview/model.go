@@ -3,6 +3,7 @@ package statusview
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,27 +19,76 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/router"
 )
 
+const collapsedWidth = 14
+
 var (
-	dimStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	activeWinStyle = lipgloss.NewStyle().Bold(true)
-	cursorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
-	attentionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	workingStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	reviewStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	completedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	selectedRowStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#edd5d0"))
+
+	workspaceStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9370b9"))
+
+	cursorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#e6537a")).
+			Bold(true)
+
+	sessionNameStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#4a4a4a"))
+
+	sessionAttachedStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#2a2a2a")).
+				Bold(true)
+
+	windowActiveStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6a9bc3"))
+
+	windowDimStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#8a7873"))
+
+	dimStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#8a7873"))
+
+	attentionDotStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#e6537a")).
+				Bold(true)
+
+	workingDotStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#d97c6e"))
+
+	reviewDotStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#5fafa5"))
+
+	completedDotStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#8a7873"))
+
+	attentionBadgeStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#fef6f0")).
+				Background(lipgloss.Color("#d16577"))
+
+	workingBadgeStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#d97c6e"))
+
+	reviewBadgeStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#5fafa5"))
+
+	dividerStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#d8cfc5"))
 )
 
 type tickMsg time.Time
 
 type Model struct {
-	windows            []tmux.Window
 	sessions           []session.Session
 	claudeSessions     map[string][]claude.ClaudeSession
+	windowsBySession   map[string][]tmux.Window
+	expandedSessions   map[string]bool
 	currentTmuxSession string
 	paneID             string
-	expanded           bool
+	focused            bool
 	cursor             int
 	width              int
+	height             int
 }
 
 func New() Model {
@@ -56,6 +106,8 @@ func New() Model {
 	return Model{
 		paneID:             paneID,
 		currentTmuxSession: currentSession,
+		windowsBySession:   make(map[string][]tmux.Window),
+		expandedSessions:   map[string]bool{currentSession: true},
 	}
 }
 
@@ -63,12 +115,10 @@ func (m Model) Init() (Model, tea.Cmd) {
 	cmds := []tea.Cmd{
 		provider.FetchSessions(),
 		tick(),
+		router.SetHelpVisible(false),
 	}
 	if m.currentTmuxSession != "" {
 		cmds = append(cmds, provider.FetchWindows(m.currentTmuxSession))
-	}
-	if !m.expanded {
-		cmds = append(cmds, router.SetHelpVisible(false))
 	}
 	return m, tea.Batch(cmds...)
 }
@@ -78,15 +128,33 @@ func (m Model) Keys() help.KeyMap {
 }
 
 func tick() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+func (m Model) isExpanded() bool {
+	return m.width > collapsedWidth
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		wasExpanded := m.isExpanded()
 		m.width = msg.Width
+		m.height = msg.Height
+		nowExpanded := m.isExpanded()
+		if wasExpanded != nowExpanded {
+			return m, tea.ClearScreen
+		}
+		return m, nil
+
+	case tea.FocusMsg:
+		m.focused = true
+		return m, nil
+
+	case tea.BlurMsg:
+		m.focused = false
 		return m, nil
 
 	case tickMsg:
@@ -94,13 +162,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			provider.FetchSessions(),
 			tick(),
 		}
-		if m.currentTmuxSession != "" {
-			cmds = append(cmds, provider.FetchWindows(m.currentTmuxSession))
+		for name, expanded := range m.expandedSessions {
+			if expanded {
+				cmds = append(cmds, provider.FetchWindows(name))
+			}
 		}
-		if m.paneID != "" {
-			cmd := m.syncFocusState()
-			if cmd != nil {
-				cmds = append(cmds, cmd)
+		for _, s := range m.activeSessions() {
+			if s.IsAttached {
+				cmds = append(cmds, provider.FetchWindows(s.TmuxSessionName))
+				break
 			}
 		}
 		return m, tea.Batch(cmds...)
@@ -111,11 +181,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case provider.WindowsStateUpdatedMsg:
-		m.windows = msg.Windows
+		if msg.SessionName != "" {
+			m.windowsBySession[msg.SessionName] = msg.Windows
+		}
+		return m, nil
+
+	case provider.SessionSwitchedMsg:
+		m.focusNextPane()
+		m.focused = false
 		return m, nil
 
 	case tea.KeyMsg:
-		if m.expanded {
+		if m.isExpanded() {
 			return m.onKeyMsg(msg)
 		}
 	}
@@ -123,11 +200,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) focusNextPane() {
+	if m.paneID == "" {
+		return
+	}
+	t, err := gotmux.DefaultTmux()
+	if err != nil {
+		return
+	}
+	t.Command("select-pane", "-t", "{right-of}")
+}
+
 func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
-	activeSessions := m.activeSessions()
+	ordered := m.orderedActiveSessions()
 	switch {
 	case key.Matches(msg, keys.Down):
-		if m.cursor < len(activeSessions)-1 {
+		if m.cursor < len(ordered)-1 {
 			m.cursor++
 		}
 		return m, nil
@@ -137,64 +225,33 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	case key.Matches(msg, keys.Select):
-		if m.cursor < len(activeSessions) {
-			s := activeSessions[m.cursor]
+		if m.cursor < len(ordered) {
+			s := ordered[m.cursor]
+			if s.IsAttached {
+				return m, nil
+			}
 			return m, provider.ActivateSession(s.ID)
 		}
 		return m, nil
+	case key.Matches(msg, keys.Toggle):
+		if m.cursor < len(ordered) {
+			s := ordered[m.cursor]
+			if s.IsAttached {
+				return m, nil
+			}
+			tmuxName := s.TmuxSessionName
+			if m.expandedSessions[tmuxName] {
+				delete(m.expandedSessions, tmuxName)
+			} else {
+				m.expandedSessions[tmuxName] = true
+				return m, provider.FetchWindows(tmuxName)
+			}
+		}
+		return m, nil
 	case key.Matches(msg, keys.Collapse):
-		m.expanded = false
-		m.collapsePane()
-		return m, tea.Batch(tea.ClearScreen, router.SetHelpVisible(false))
+		return m, nil
 	}
 	return m, nil
-}
-
-func (m *Model) syncFocusState() tea.Cmd {
-	t, err := gotmux.DefaultTmux()
-	if err != nil {
-		return nil
-	}
-	output, err := t.Command("display-message", "-p", "-t", m.paneID, "#{pane_active}")
-	if err != nil {
-		return nil
-	}
-	active := strings.TrimSpace(output) == "1"
-	if active && !m.expanded {
-		m.expanded = true
-		m.expandPane()
-		return tea.Batch(tea.ClearScreen, router.SetHelpVisible(true))
-	}
-	if !active && m.expanded {
-		m.expanded = false
-		m.collapsePane()
-		return tea.Batch(tea.ClearScreen, router.SetHelpVisible(false))
-	}
-	return nil
-}
-
-func (m Model) expandPane() {
-	if m.paneID == "" {
-		return
-	}
-	t, err := gotmux.DefaultTmux()
-	if err != nil {
-		return
-	}
-	t.Command("resize-pane", "-y", "8", "-t", m.paneID)
-	t.Command("select-pane", "-e", "-t", m.paneID)
-}
-
-func (m Model) collapsePane() {
-	if m.paneID == "" {
-		return
-	}
-	t, err := gotmux.DefaultTmux()
-	if err != nil {
-		return
-	}
-	t.Command("resize-pane", "-y", "1", "-t", m.paneID)
-	t.Command("select-pane", "-d", "-t", m.paneID)
 }
 
 func (m Model) activeSessions() []session.Session {
@@ -207,139 +264,347 @@ func (m Model) activeSessions() []session.Session {
 	return result
 }
 
+func (m Model) categorizedSessions() (active, others []session.Session) {
+	for _, s := range m.activeSessions() {
+		if s.IsAttached {
+			active = append(active, s)
+		} else {
+			others = append(others, s)
+		}
+	}
+	sortByName := func(ss []session.Session) {
+		sort.Slice(ss, func(i, j int) bool {
+			return sessionDisplayName(ss[i]) < sessionDisplayName(ss[j])
+		})
+	}
+	sortByName(active)
+	sortByName(others)
+	return
+}
+
+func (m Model) orderedActiveSessions() []session.Session {
+	active, others := m.categorizedSessions()
+	var result []session.Session
+	result = append(result, others...)
+	result = append(result, active...)
+	return result
+}
+
+func (m Model) showWindows(s session.Session) bool {
+	return s.IsAttached || m.expandedSessions[s.TmuxSessionName]
+}
+
 func (m Model) View() string {
-	if m.expanded {
+	if m.isExpanded() {
 		return m.expandedView()
 	}
 	return m.collapsedView()
 }
 
 func (m Model) collapsedView() string {
-	var windowParts []string
-	for _, w := range m.windows {
-		entry := fmt.Sprintf("%d:%s", w.Index, w.Name)
-		if w.Active {
-			entry += "*"
-			entry = activeWinStyle.Render(entry)
-		}
-		windowParts = append(windowParts, entry)
+	maxNameLen := m.width - 3
+	if maxNameLen < 1 {
+		maxNameLen = 1
 	}
-	windowStr := " " + strings.Join(windowParts, " ")
 
-	var sessionParts []string
-	for _, s := range m.activeSessions() {
-		name := s.Name
-		if name == "" {
-			name = s.TmuxSessionName
-		}
-		indicator := statusIndicator(m.claudeSessions[s.TmuxSessionName])
-		if indicator != "" {
-			sessionParts = append(sessionParts, name+"("+indicator+")")
-		} else {
-			sessionParts = append(sessionParts, name)
-		}
+	var lines []string
+	for _, sess := range m.orderedActiveSessions() {
+		name := sessionDisplayName(sess)
+		name = truncate(name, maxNameLen)
+		dot := statusDot(m.claudeSessions[sess.TmuxSessionName], sess.IsAttached)
+		lines = append(lines, " "+dot+" "+name)
 	}
-	sessionStr := strings.Join(sessionParts, " ")
 
-	sep := dimStyle.Render("│")
-	return windowStr + " " + sep + " " + sessionStr
+	return bottomAlign(lines, m.height)
 }
 
 func (m Model) expandedView() string {
-	lines := []string{m.collapsedView()}
-	divider := dimStyle.Render(strings.Repeat("─", m.width))
-	lines = append(lines, divider)
-
-	activeSessions := m.activeSessions()
-	for i, s := range activeSessions {
-		name := s.Name
-		if name == "" {
-			name = s.TmuxSessionName
-		}
-		prefix := "  "
-		if i == m.cursor {
-			prefix = cursorStyle.Render("▸ ")
-		}
-		indicator := statusIndicator(m.claudeSessions[s.TmuxSessionName])
-		entry := prefix + name
-		if indicator != "" {
-			entry += " " + coloredIndicator(m.claudeSessions[s.TmuxSessionName])
-		}
-		if s.IsAttached {
-			entry += dimStyle.Render(" (attached)")
-		}
-		lines = append(lines, entry)
+	innerWidth := m.width
+	if innerWidth < 1 {
+		innerWidth = 1
 	}
 
+	active, others := m.categorizedSessions()
+	ordered := m.orderedActiveSessions()
+
+	var lines []string
+	cursorIdx := 0
+
+	for i, s := range others {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, m.renderSessionRow(s, cursorIdx, innerWidth, ordered))
+		if m.showWindows(s) {
+			lines = append(lines, m.renderWindows(s, innerWidth)...)
+		}
+		cursorIdx++
+	}
+
+	if len(others) > 0 && len(active) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, dividerStyle.Render(strings.Repeat("─", innerWidth)))
+		lines = append(lines, "")
+	}
+
+	for _, s := range active {
+		lines = append(lines, m.renderSessionRow(s, cursorIdx, innerWidth, ordered))
+		lines = append(lines, m.renderWindows(s, innerWidth)...)
+		lines = append(lines, "")
+		cursorIdx++
+	}
+
+	if len(ordered) == 0 {
+		lines = append(lines, dimStyle.Render("  no active sessions"))
+	}
+
+	return bottomAlign(lines, m.height)
+}
+
+func (m Model) renderSessionRow(s session.Session, idx, innerWidth int, _ []session.Session) string {
+	selected := idx == m.cursor && m.focused
+	bg := lipgloss.Color("#edd5d0")
+
+	name := sessionDisplayName(s)
+	wsName := ""
+	if s.Workspace != nil {
+		wsName = s.Workspace.Name
+	}
+
+	dotStyle := statusDotStyle(m.claudeSessions[s.TmuxSessionName], s.IsAttached)
+	dotChar := statusDotChar(m.claudeSessions[s.TmuxSessionName], s.IsAttached)
+
+	nStyle := sessionNameStyle
+	if s.IsAttached {
+		nStyle = sessionAttachedStyle
+	}
+	wsStyle := workspaceStyle
+	bStyle, badgeText := claudeBadgeParts(m.claudeSessions[s.TmuxSessionName])
+
+	if selected {
+		dotStyle = dotStyle.Background(bg)
+		nStyle = nStyle.Background(bg)
+		wsStyle = wsStyle.Background(bg)
+		if bStyle != nil {
+			s := (*bStyle).Background(bg)
+			bStyle = &s
+		}
+	}
+
+	sp := " "
+	if selected {
+		sp = lipgloss.NewStyle().Background(bg).Render(" ")
+	}
+
+	prefix := sp + dotStyle.Render(dotChar) + sp
+
+	wsStr := ""
+	if wsName != "" {
+		wsStr = sp + wsStyle.Render(wsName)
+	}
+
+	badgeStr := ""
+	if bStyle != nil {
+		badgeStr = (*bStyle).Render(badgeText)
+	}
+
+	maxName := innerWidth - lipgloss.Width(prefix) - lipgloss.Width(wsStr) - lipgloss.Width(badgeStr) - 1
+	if maxName < 4 {
+		maxName = 4
+	}
+	truncName := truncate(name, maxName)
+	nameStr := nStyle.Render(truncName)
+
+	line := prefix + nameStr + wsStr
+	if badgeStr != "" {
+		usedWidth := lipgloss.Width(prefix + truncName + wsStr + badgeStr)
+		pad := innerWidth - usedWidth
+		if pad < 1 {
+			pad = 1
+		}
+		if selected {
+			line += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", pad)) + badgeStr
+		} else {
+			line += strings.Repeat(" ", pad) + badgeStr
+		}
+	}
+
+	if selected {
+		lineWidth := lipgloss.Width(line)
+		if lineWidth < innerWidth {
+			line += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", innerWidth-lineWidth))
+		}
+	}
+
+	return line
+}
+
+func statusDotChar(claudeSessions []claude.ClaudeSession, attached bool) string {
+	status := aggregateStatus(claudeSessions)
+	switch status {
+	case claude.StatusNeedsAttention:
+		return "◆"
+	case claude.StatusWorking, claude.StatusReadyForReview, claude.StatusCompleted:
+		return "●"
+	default:
+		if attached {
+			return "●"
+		}
+		return "○"
+	}
+}
+
+func statusDotStyle(claudeSessions []claude.ClaudeSession, attached bool) lipgloss.Style {
+	status := aggregateStatus(claudeSessions)
+	switch status {
+	case claude.StatusNeedsAttention:
+		return attentionDotStyle
+	case claude.StatusWorking:
+		return workingDotStyle
+	case claude.StatusReadyForReview:
+		return reviewDotStyle
+	case claude.StatusCompleted:
+		return completedDotStyle
+	default:
+		if attached {
+			return sessionAttachedStyle
+		}
+		return dimStyle
+	}
+}
+
+func claudeBadgeParts(sessions []claude.ClaudeSession) (*lipgloss.Style, string) {
+	status := aggregateStatus(sessions)
+	switch status {
+	case claude.StatusNeedsAttention:
+		s := attentionBadgeStyle
+		return &s, " ! "
+	case claude.StatusWorking:
+		s := workingBadgeStyle
+		return &s, " ~ "
+	case claude.StatusReadyForReview:
+		s := reviewBadgeStyle
+		return &s, " ✓ "
+	case claude.StatusCompleted:
+		s := completedDotStyle
+		return &s, " ✓ "
+	default:
+		return nil, ""
+	}
+}
+
+func (m Model) renderWindows(s session.Session, innerWidth int) []string {
+	windows := m.windowsBySession[s.TmuxSessionName]
+	if len(windows) == 0 {
+		return nil
+	}
+
+	var lines []string
+	for _, w := range windows {
+		winEntry := fmt.Sprintf("     %d:%s", w.Index, w.Name)
+		if w.Active {
+			lines = append(lines, windowActiveStyle.Render(winEntry))
+		} else {
+			lines = append(lines, windowDimStyle.Render(winEntry))
+		}
+	}
+	return lines
+}
+
+func bottomAlign(lines []string, height int) string {
+	if height > len(lines) {
+		padding := make([]string, height-len(lines))
+		for i := range padding {
+			padding[i] = ""
+		}
+		lines = append(padding, lines...)
+	}
 	return strings.Join(lines, "\n")
 }
 
-func statusIndicator(sessions []claude.ClaudeSession) string {
-	if len(sessions) == 0 {
-		return ""
+func sessionDisplayName(s session.Session) string {
+	if s.Name != "" {
+		return s.Name
 	}
-	hasNeedsAttention := false
-	hasReadyForReview := false
-	hasWorking := false
-	hasCompleted := false
-	for _, cs := range sessions {
-		switch cs.Status {
-		case claude.StatusNeedsAttention:
-			hasNeedsAttention = true
-		case claude.StatusReadyForReview:
-			hasReadyForReview = true
-		case claude.StatusWorking:
-			hasWorking = true
-		case claude.StatusCompleted:
-			hasCompleted = true
-		}
-	}
-	if hasNeedsAttention {
-		return "!"
-	}
-	if hasWorking {
-		return "~"
-	}
-	if hasReadyForReview {
-		return "✓"
-	}
-	if hasCompleted {
-		return "✓"
-	}
-	return ""
+	return s.TmuxSessionName
 }
 
-func coloredIndicator(sessions []claude.ClaudeSession) string {
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 1 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-1] + "…"
+}
+
+func statusDot(claudeSessions []claude.ClaudeSession, attached bool) string {
+	status := aggregateStatus(claudeSessions)
+	switch status {
+	case claude.StatusNeedsAttention:
+		return attentionDotStyle.Render("◆")
+	case claude.StatusWorking:
+		return workingDotStyle.Render("●")
+	case claude.StatusReadyForReview:
+		return reviewDotStyle.Render("●")
+	case claude.StatusCompleted:
+		return completedDotStyle.Render("●")
+	default:
+		if attached {
+			return sessionAttachedStyle.Render("●")
+		}
+		return dimStyle.Render("○")
+	}
+}
+
+func claudeBadge(sessions []claude.ClaudeSession) string {
+	status := aggregateStatus(sessions)
+	switch status {
+	case claude.StatusNeedsAttention:
+		return attentionBadgeStyle.Render(" ! ")
+	case claude.StatusWorking:
+		return workingBadgeStyle.Render(" ~ ")
+	case claude.StatusReadyForReview:
+		return reviewBadgeStyle.Render(" ✓ ")
+	case claude.StatusCompleted:
+		return completedDotStyle.Render(" ✓ ")
+	default:
+		return ""
+	}
+}
+
+func aggregateStatus(sessions []claude.ClaudeSession) claude.ClaudeSessionStatus {
 	if len(sessions) == 0 {
 		return ""
 	}
 	hasNeedsAttention := false
-	hasReadyForReview := false
 	hasWorking := false
+	hasReadyForReview := false
 	hasCompleted := false
 	for _, cs := range sessions {
 		switch cs.Status {
 		case claude.StatusNeedsAttention:
 			hasNeedsAttention = true
-		case claude.StatusReadyForReview:
-			hasReadyForReview = true
 		case claude.StatusWorking:
 			hasWorking = true
+		case claude.StatusReadyForReview:
+			hasReadyForReview = true
 		case claude.StatusCompleted:
 			hasCompleted = true
 		}
 	}
 	if hasNeedsAttention {
-		return attentionStyle.Render("!")
+		return claude.StatusNeedsAttention
 	}
 	if hasWorking {
-		return workingStyle.Render("~")
+		return claude.StatusWorking
 	}
 	if hasReadyForReview {
-		return reviewStyle.Render("✓")
+		return claude.StatusReadyForReview
 	}
 	if hasCompleted {
-		return completedStyle.Render("✓")
+		return claude.StatusCompleted
 	}
 	return ""
 }

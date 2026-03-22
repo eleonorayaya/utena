@@ -314,22 +314,22 @@ func (c *client) fetchWindows(sessionName string) tea.Cmd {
 		res, err := c.httpClient.Get(c.baseURL + "/tmux/windows/" + sessionName)
 		if err != nil {
 			log.Printf("[ERROR] fetch windows: %v", err)
-			return windowsLoadedMsg{}
+			return windowsLoadedMsg{sessionName: sessionName}
 		}
 		defer res.Body.Close()
 
 		if res.StatusCode != http.StatusOK {
 			log.Printf("[ERROR] fetch windows: status %d", res.StatusCode)
-			return windowsLoadedMsg{}
+			return windowsLoadedMsg{sessionName: sessionName}
 		}
 
 		var windows []tmux.Window
 		if err := json.NewDecoder(res.Body).Decode(&windows); err != nil {
 			log.Printf("[ERROR] decode windows: %v", err)
-			return windowsLoadedMsg{}
+			return windowsLoadedMsg{sessionName: sessionName}
 		}
 
-		return windowsLoadedMsg{windows: windows}
+		return windowsLoadedMsg{sessionName: sessionName, windows: windows}
 	}
 }
 
@@ -410,11 +410,11 @@ func (c *client) switchTmuxSession(name string) tea.Cmd {
 		t, err := gotmux.DefaultTmux()
 		if err != nil {
 			log.Printf("[ERROR] gotmux init failed: %v", err)
-			return tea.Quit()
+			return ErrMsg{err}
 		}
 		if err := t.SwitchClient(&gotmux.SwitchClientOptions{TargetSession: name}); err != nil {
 			log.Printf("[ERROR] tmux switch-client failed: %v", err)
 		}
-		return tea.Quit()
+		return SessionSwitchedMsg{}
 	}
 }
