@@ -17,9 +17,9 @@ type SessionModule struct {
 	Router     *SessionRouter
 }
 
-func NewSessionModule(tmuxService *utmux.TmuxService, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string) *SessionModule {
+func NewSessionModule(tmuxService *utmux.TmuxService, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string, configDir string) *SessionModule {
 	store := NewSessionStore(database)
-	service := NewSessionService(store, workspaceModule.Service, workspaceModule.GitService, tmuxService, bus, branchPrefix)
+	service := NewSessionService(store, workspaceModule.Service, workspaceModule.GitService, tmuxService, bus, branchPrefix, configDir)
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 

@@ -16,16 +16,17 @@ type ResourceState struct {
 }
 
 type Resources struct {
-	Branch   *ResourceState `json:"branch,omitempty"`
-	Worktree *ResourceState `json:"worktree,omitempty"`
-	Tmux     *ResourceState `json:"tmux,omitempty"`
+	Branch       *ResourceState `json:"branch,omitempty"`
+	Worktree     *ResourceState `json:"worktree,omitempty"`
+	WorktreeInit *ResourceState `json:"worktree_init,omitempty"`
+	Tmux         *ResourceState `json:"tmux,omitempty"`
 }
 
 func (r *Resources) AllReady() bool {
 	if r == nil {
 		return true
 	}
-	for _, rs := range []*ResourceState{r.Branch, r.Worktree, r.Tmux} {
+	for _, rs := range []*ResourceState{r.Branch, r.Worktree, r.WorktreeInit, r.Tmux} {
 		if rs != nil && rs.Status != ResourceReady {
 			return false
 		}
@@ -37,7 +38,7 @@ func (r *Resources) FirstError() string {
 	if r == nil {
 		return ""
 	}
-	for _, rs := range []*ResourceState{r.Branch, r.Worktree, r.Tmux} {
+	for _, rs := range []*ResourceState{r.Branch, r.Worktree, r.WorktreeInit, r.Tmux} {
 		if rs != nil && rs.Error != "" {
 			return rs.Error
 		}

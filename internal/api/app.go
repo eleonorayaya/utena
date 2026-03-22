@@ -43,7 +43,7 @@ func newApp(gormDB *gorm.DB, tmuxClient tmux.TmuxClient, fs afero.Fs, cfg Config
 
 	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir)
 	tmuxModule := tmux.NewTmuxModule(tmuxClient, bus)
-	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix)
+	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir)
 
 	app := &App{
 		DB:        dbModule,
