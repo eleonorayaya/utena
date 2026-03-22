@@ -186,6 +186,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case provider.SessionSwitchedMsg:
+		m.focusNextPane()
+		m.focused = false
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.isExpanded() {
 			return m.onKeyMsg(msg)
@@ -193,6 +198,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m Model) focusNextPane() {
+	if m.paneID == "" {
+		return
+	}
+	t, err := gotmux.DefaultTmux()
+	if err != nil {
+		return
+	}
+	t.Command("select-pane", "-t", "{right-of}")
 }
 
 func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
