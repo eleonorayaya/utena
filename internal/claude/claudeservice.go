@@ -22,6 +22,7 @@ func NewClaudeService(store *ClaudeStore, bus eventbus.EventBus) *ClaudeService 
 
 func (s *ClaudeService) OnAppStart(ctx context.Context) error {
 	s.eventBus.Subscribe(eventbus.SessionActivated, s.handleSessionActivated)
+	s.eventBus.Subscribe(eventbus.TmuxClientSessionChanged, s.handleTmuxClientSessionChanged)
 	return nil
 }
 
@@ -32,6 +33,15 @@ func (s *ClaudeService) handleSessionActivated(ctx context.Context, event eventb
 	}
 
 	s.store.UpdateStatusBySessionID(data.SessionName, StatusReadyForReview, StatusCompleted)
+	return nil
+}
+
+func (s *ClaudeService) handleTmuxClientSessionChanged(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(eventbus.TmuxHookEvent)
+	if !ok {
+		return fmt.Errorf("unexpected event data type: %T", event.Data)
+	}
+	s.store.UpdateStatusBySessionID(data.TmuxSessionName, StatusReadyForReview, StatusCompleted)
 	return nil
 }
 
@@ -52,6 +62,9 @@ func (s *ClaudeService) HandleHookEvent(ctx context.Context, req *HookEventReque
 			return s.upsertWithStatus(req, StatusNeedsAttention)
 		}
 		return nil
+
+	case "PreToolUse":
+		return s.store.UpdateStatusByClaudeSessionID(req.ClaudeSessionID, StatusNeedsAttention, StatusWorking)
 
 	case "TaskCompleted":
 		return s.upsertWithStatus(req, StatusReadyForReview)
