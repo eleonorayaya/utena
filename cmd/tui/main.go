@@ -12,7 +12,6 @@ import (
 	"github.com/eleonorayaya/utena/internal/shellinit"
 	"github.com/eleonorayaya/utena/internal/tui"
 	"github.com/eleonorayaya/utena/internal/tui/router"
-	"github.com/eleonorayaya/utena/internal/tui/todoform"
 )
 
 var (
@@ -94,7 +93,6 @@ func newTaskCmd() *cobra.Command {
 
 			p := tea.NewProgram(tui.NewApp(
 				resolvedLogPath, port, router.TodoListView,
-				tui.WithTodoFormOptions(todoform.WithPreSelectActiveWorkspace()),
 				tui.WithNavigateTo(router.TodoFormView),
 			))
 			if _, err := p.Run(); err != nil {

@@ -28,14 +28,7 @@ type App struct {
 type AppOption func(*appConfig)
 
 type appConfig struct {
-	todoFormOpts []todoform.Option
-	navigateTo   *router.View
-}
-
-func WithTodoFormOptions(opts ...todoform.Option) AppOption {
-	return func(c *appConfig) {
-		c.todoFormOpts = append(c.todoFormOpts, opts...)
-	}
+	navigateTo *router.View
 }
 
 func WithNavigateTo(view router.View) AppOption {
@@ -56,7 +49,7 @@ func NewApp(logPath, port string, initialView router.View, opts ...AppOption) Ap
 		router.SessionFormView:     &router.ViewAdapter[sessionform.Model]{Model: sessionform.New()},
 		router.SessionProgressView: &router.ViewAdapter[sessionprogress.Model]{Model: sessionprogress.New()},
 		router.TodoListView:        &router.ViewAdapter[todolist.Model]{Model: todolist.New()},
-		router.TodoFormView:        &router.ViewAdapter[todoform.Model]{Model: todoform.New(cfg.todoFormOpts...)},
+		router.TodoFormView:        &router.ViewAdapter[todoform.Model]{Model: todoform.New()},
 		router.DebugView:           &router.ViewAdapter[debug.Model]{Model: debug.New(logPath, baseURL)},
 		router.StatusView:          &router.ViewAdapter[statusview.Model]{Model: statusview.New()},
 	}

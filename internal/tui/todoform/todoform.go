@@ -37,22 +37,12 @@ type Model struct {
 	focusIndex        int
 	selectedWorkspace *workspace.Workspace
 	selectedDirPath   string
-	activeWorkspaceID  uint
-	preSelectActive    bool
-	preSelectConsumed  bool
-	nameErr            string
-	width, height      int
+	activeWorkspaceID uint
+	nameErr           string
+	width, height     int
 }
 
-type Option func(*Model)
-
-func WithPreSelectActiveWorkspace() Option {
-	return func(m *Model) {
-		m.preSelectActive = true
-	}
-}
-
-func New(opts ...Option) Model {
+func New() Model {
 	nameInput := textinput.New()
 	nameInput.Prompt = "Name: "
 	nameInput.Placeholder = "todo name"
@@ -62,16 +52,12 @@ func New(opts ...Option) Model {
 	descInput.Prompt = "Description: "
 	descInput.Placeholder = "optional description"
 
-	m := Model{
+	return Model{
 		activeStep:      workspacePickerStep,
 		workspacePicker: workspacepicker.New("Select workspace for todo", true),
 		nameInput:       nameInput,
 		descInput:       descInput,
 	}
-	for _, opt := range opts {
-		opt(&m)
-	}
-	return m
 }
 
 func (m *Model) SetSize(width, height int) {
@@ -87,7 +73,6 @@ func (m Model) Init() (Model, tea.Cmd) {
 	m.selectedDirPath = ""
 	m.focusIndex = 0
 	m.nameErr = ""
-	m.preSelectConsumed = false
 	m.nameInput.SetValue("")
 	m.descInput.SetValue("")
 	return m, provider.FetchWorkspaces()
@@ -112,8 +97,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.OnWindowSizeMsg(msg)
 	case provider.WorkspacesStateUpdatedMsg:
 		m.activeWorkspaceID = msg.ActiveWorkspaceID
-		if m.preSelectActive && !m.preSelectConsumed && msg.ActiveWorkspaceID != 0 {
-			m.preSelectConsumed = true
+		if m.activeStep == workspacePickerStep && m.selectedWorkspace == nil && msg.ActiveWorkspaceID != 0 {
 			for _, ws := range msg.Workspaces {
 				if ws.ID == msg.ActiveWorkspaceID {
 					m.selectedWorkspace = &ws
