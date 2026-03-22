@@ -17,34 +17,64 @@ import (
 )
 
 type App struct {
-	provider provider.Provider
-	router   router.Router
-	help     helpModel
-	width    int
-	height   int
+	provider   provider.Provider
+	router     router.Router
+	help       helpModel
+	navigateTo *router.View
+	width      int
+	height     int
 }
 
-func NewApp(logPath, port string, initialView router.View) App {
+type AppOption func(*appConfig)
+
+type appConfig struct {
+	todoFormOpts []todoform.Option
+	navigateTo   *router.View
+}
+
+func WithTodoFormOptions(opts ...todoform.Option) AppOption {
+	return func(c *appConfig) {
+		c.todoFormOpts = append(c.todoFormOpts, opts...)
+	}
+}
+
+func WithNavigateTo(view router.View) AppOption {
+	return func(c *appConfig) {
+		c.navigateTo = &view
+	}
+}
+
+func NewApp(logPath, port string, initialView router.View, opts ...AppOption) App {
+	var cfg appConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	baseURL := fmt.Sprintf("http://localhost:%s", port)
 	views := map[router.View]router.ViewEntry{
 		router.SessionListView:     &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
 		router.SessionFormView:     &router.ViewAdapter[sessionform.Model]{Model: sessionform.New()},
 		router.SessionProgressView: &router.ViewAdapter[sessionprogress.Model]{Model: sessionprogress.New()},
 		router.TodoListView:        &router.ViewAdapter[todolist.Model]{Model: todolist.New()},
-		router.TodoFormView:        &router.ViewAdapter[todoform.Model]{Model: todoform.New()},
+		router.TodoFormView:        &router.ViewAdapter[todoform.Model]{Model: todoform.New(cfg.todoFormOpts...)},
 		router.DebugView:           &router.ViewAdapter[debug.Model]{Model: debug.New(logPath, baseURL)},
 		router.StatusView:          &router.ViewAdapter[statusview.Model]{Model: statusview.New()},
 	}
 
 	return App{
-		provider: provider.NewRootProvider(baseURL),
-		router:   router.New(views, initialView),
-		help:     newHelpModel(initialView != router.StatusView),
+		provider:   provider.NewRootProvider(baseURL),
+		router:     router.New(views, initialView),
+		help:       newHelpModel(initialView != router.StatusView),
+		navigateTo: cfg.navigateTo,
 	}
 }
 
 func (a App) Init() tea.Cmd {
 	_, cmd := a.router.Init()
+	if a.navigateTo != nil {
+		target := *a.navigateTo
+		return tea.Sequence(cmd, router.NavigateTo(target))
+	}
 	return cmd
 }
 

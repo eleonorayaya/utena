@@ -12,6 +12,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/shellinit"
 	"github.com/eleonorayaya/utena/internal/tui"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/todoform"
 )
 
 var (
@@ -31,6 +32,7 @@ func main() {
 
 	rootCmd.AddCommand(shellInitCmd())
 	rootCmd.AddCommand(todosCmd())
+	rootCmd.AddCommand(newTaskCmd())
 	rootCmd.AddCommand(statusCmd())
 
 	if err := rootCmd.Execute(); err != nil {
@@ -72,6 +74,29 @@ func todosCmd() *cobra.Command {
 			resolvedLogPath := setupLogging()
 
 			p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, router.TodoListView))
+			if _, err := p.Run(); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	return cmd
+}
+
+func newTaskCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "new-task",
+		Short:        "Open new task form with current workspace preselected",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			port, _ := cmd.Root().Flags().GetString("port")
+			resolvedLogPath := setupLogging()
+
+			p := tea.NewProgram(tui.NewApp(
+				resolvedLogPath, port, router.TodoListView,
+				tui.WithTodoFormOptions(todoform.WithPreSelectActiveWorkspace()),
+				tui.WithNavigateTo(router.TodoFormView),
+			))
 			if _, err := p.Run(); err != nil {
 				return err
 			}
