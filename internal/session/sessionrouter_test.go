@@ -34,7 +34,7 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 	tmuxService := utmux.NewTmuxService(mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 

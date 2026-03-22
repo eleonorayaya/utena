@@ -102,7 +102,7 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	tmuxService := utmux.NewTmuxService(mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 	return service, sessionStore, workspaceStore, mock, ws1.ID, ws2.ID
 }
 
@@ -389,8 +389,8 @@ func initTestRepo(t *testing.T) string {
 	return dir
 }
 
-func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
-	repoPath := initTestRepo(t)
+func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *mockTmuxClient, uint) {
+	t.Helper()
 
 	database := setupTestDB(t)
 	bus := eventbus.NewEventBus()
@@ -403,11 +403,17 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	tmuxService := utmux.NewTmuxService(mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir)
+	return service, sessionStore, mock, wsGit.ID
+}
+
+func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
+	repoPath := initTestRepo(t)
+	service, sessionStore, mock, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
 	session := &Session{
 		Name:        "my-feature",
-		WorkspaceID: wsGit.ID,
+		WorkspaceID: wsGitID,
 		BaseBranch:  "main",
 	}
 
@@ -427,6 +433,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	require.Equal(t, "eqt/my-feature", retrieved.Branch)
 	require.Equal(t, ResourceReady, retrieved.Resources.Branch.Status)
 	require.Equal(t, ResourceReady, retrieved.Resources.Worktree.Status)
+	require.Equal(t, ResourceReady, retrieved.Resources.WorktreeInit.Status)
 	require.Equal(t, ResourceReady, retrieved.Resources.Tmux.Status)
 
 	info, err := os.Stat(expectedPath)
@@ -439,19 +446,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 
 func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testing.T) {
 	repoPath := initTestRepo(t)
-
-	database := setupTestDB(t)
-	bus := eventbus.NewEventBus()
-	sessionStore := NewSessionStore(database)
-	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
-	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
-	workspaceStore.Add(wsGit)
-
-	mock := newMockTmuxClient()
-	tmuxService := utmux.NewTmuxService(mock, bus)
-	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
 	ctx := context.Background()
 	branchName := "feature/checkout-me"
@@ -466,7 +461,7 @@ func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testi
 
 	session := &Session{
 		Name:        branchName,
-		WorkspaceID: wsGit.ID,
+		WorkspaceID: wsGitID,
 		Branch:      branchName,
 	}
 
@@ -484,23 +479,11 @@ func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testi
 
 func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	repoPath := initTestRepo(t)
-
-	database := setupTestDB(t)
-	bus := eventbus.NewEventBus()
-	sessionStore := NewSessionStore(database)
-	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
-	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
-	workspaceStore.Add(wsGit)
-
-	mock := newMockTmuxClient()
-	tmuxService := utmux.NewTmuxService(mock, bus)
-	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
+	service, sessionStore, mock, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
 	session := &Session{
 		Name:        "my-feature",
-		WorkspaceID: wsGit.ID,
+		WorkspaceID: wsGitID,
 		BaseBranch:  "nonexistent",
 	}
 
@@ -593,7 +576,7 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	tmuxService := utmux.NewTmuxService(mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/")
+	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 
 	session := &Session{
 		Name:        "my-session",
@@ -900,4 +883,176 @@ func TestSessionService_Reconcile_SkipsDeleted(t *testing.T) {
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusDeleted, retrieved.Status)
+}
+
+func writeScript(t *testing.T, path string, script string) {
+	t.Helper()
+	dir := filepath.Dir(path)
+	require.NoError(t, os.MkdirAll(dir, 0755))
+	require.NoError(t, os.WriteFile(path, []byte(script), 0755))
+}
+
+func TestSessionService_WorktreeInit_RunsUserLevelScript(t *testing.T) {
+	repoPath := initTestRepo(t)
+	configDir := t.TempDir()
+	markerFile := filepath.Join(t.TempDir(), "user-marker")
+
+	writeScript(t, filepath.Join(configDir, "worktree-setup"), fmt.Sprintf("#!/bin/sh\necho \"$UTENA_BRANCH\" > %s\n", markerFile))
+
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, configDir)
+
+	session := &Session{
+		Name:        "init-test",
+		WorkspaceID: wsGitID,
+		BaseBranch:  "main",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session, true)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+
+	data, err := os.ReadFile(markerFile)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "eqt/init-test")
+}
+
+func TestSessionService_WorktreeInit_RunsRepoLevelScript(t *testing.T) {
+	repoPath := initTestRepo(t)
+	markerFile := filepath.Join(t.TempDir(), "repo-marker")
+
+	writeScript(t, filepath.Join(repoPath, ".utena", "worktree-setup"), fmt.Sprintf("#!/bin/sh\necho \"$UTENA_WORKSPACE_NAME\" > %s\n", markerFile))
+
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+
+	session := &Session{
+		Name:        "repo-init",
+		WorkspaceID: wsGitID,
+		BaseBranch:  "main",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session, true)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+
+	data, err := os.ReadFile(markerFile)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "git-repo")
+}
+
+func TestSessionService_WorktreeInit_SkipsWhenReusingWorktree(t *testing.T) {
+	repoPath := initTestRepo(t)
+	configDir := t.TempDir()
+	markerFile := filepath.Join(t.TempDir(), "should-not-exist")
+
+	writeScript(t, filepath.Join(configDir, "worktree-setup"), fmt.Sprintf("#!/bin/sh\ntouch %s\n", markerFile))
+
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, configDir)
+
+	branchName := "feature/reuse-me"
+	worktreePath := filepath.Join(repoPath, ".worktrees", "feature-reuse-me")
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, "main")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "pre-create worktree failed: %s", string(out))
+
+	pushCmd := exec.Command("git", "-C", worktreePath, "push", "-u", "origin", branchName)
+	out, err = pushCmd.CombinedOutput()
+	require.NoError(t, err, "push branch failed: %s", string(out))
+
+	session := &Session{
+		Name:        branchName,
+		WorkspaceID: wsGitID,
+		Branch:      branchName,
+	}
+
+	ctx := context.Background()
+	err = service.CreateSession(ctx, session, true)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+
+	_, err = os.Stat(markerFile)
+	require.True(t, os.IsNotExist(err), "script should not have run for reused worktree")
+}
+
+func TestSessionService_WorktreeInit_FailingScriptContinues(t *testing.T) {
+	repoPath := initTestRepo(t)
+	configDir := t.TempDir()
+
+	writeScript(t, filepath.Join(configDir, "worktree-setup"), "#!/bin/sh\nexit 1\n")
+
+	service, sessionStore, mock, wsGitID := setupWorktreeSessionService(t, repoPath, configDir)
+
+	session := &Session{
+		Name:        "fail-init",
+		WorkspaceID: wsGitID,
+		BaseBranch:  "main",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session, true)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusReady, retrieved.Status)
+	require.Equal(t, ResourceReady, retrieved.Resources.WorktreeInit.Status)
+	require.NotEmpty(t, retrieved.Resources.WorktreeInit.Error)
+	require.True(t, mock.HasSession("git-repo-fail-init"))
+}
+
+func TestSessionService_WorktreeInit_MissingScriptsSkipped(t *testing.T) {
+	repoPath := initTestRepo(t)
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+
+	session := &Session{
+		Name:        "no-scripts",
+		WorkspaceID: wsGitID,
+		BaseBranch:  "main",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session, true)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusReady, retrieved.Status)
+	require.Equal(t, ResourceReady, retrieved.Resources.WorktreeInit.Status)
+	require.Empty(t, retrieved.Resources.WorktreeInit.Error)
+}
+
+func TestSessionService_WorktreeInit_WorkingDirIsWorktree(t *testing.T) {
+	repoPath := initTestRepo(t)
+	configDir := t.TempDir()
+	markerFile := filepath.Join(t.TempDir(), "pwd-marker")
+
+	writeScript(t, filepath.Join(configDir, "worktree-setup"), fmt.Sprintf("#!/bin/sh\npwd > %s\n", markerFile))
+
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, configDir)
+
+	session := &Session{
+		Name:        "wd-test",
+		WorkspaceID: wsGitID,
+		BaseBranch:  "main",
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session, true)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+
+	data, err := os.ReadFile(markerFile)
+	require.NoError(t, err)
+
+	retrieved, _ := sessionStore.GetByID(session.ID)
+	require.Contains(t, string(data), retrieved.WorktreePath)
 }

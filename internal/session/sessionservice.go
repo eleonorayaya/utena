@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
@@ -20,9 +23,10 @@ type SessionService struct {
 	tmuxService      *utmux.TmuxService
 	eventBus         eventbus.EventBus
 	branchPrefix     string
+	configDir        string
 }
 
-func NewSessionService(store *SessionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string) *SessionService {
+func NewSessionService(store *SessionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string) *SessionService {
 	return &SessionService{
 		store:            store,
 		workspaceService: workspaceService,
@@ -30,6 +34,7 @@ func NewSessionService(store *SessionStore, workspaceService *workspace.Workspac
 		tmuxService:      tmuxService,
 		eventBus:         bus,
 		branchPrefix:     branchPrefix,
+		configDir:        configDir,
 	}
 }
 
@@ -105,6 +110,7 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 	if ws != nil && ws.IsGitRepo && createWorktree {
 		res.Branch = &ResourceState{Status: ResourcePending}
 		res.Worktree = &ResourceState{Status: ResourcePending}
+		res.WorktreeInit = &ResourceState{Status: ResourcePending}
 	}
 	session.Resources = res
 	session.Status = StatusCreating
@@ -135,13 +141,23 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace) {
 		return
 	}
 
+	var worktreeCreated bool
+
 	steps := []struct {
-		resource *ResourceState
-		run      func() error
+		resource        *ResourceState
+		run             func() error
+		continueOnError bool
 	}{
-		{sess.Resources.Branch, func() error { return s.setupBranch(ctx, sess, ws) }},
-		{sess.Resources.Worktree, func() error { return s.setupWorktree(ctx, sess, ws) }},
-		{sess.Resources.Tmux, func() error { return s.setupTmux(ctx, sess) }},
+		{sess.Resources.Branch, func() error { return s.setupBranch(ctx, sess, ws) }, false},
+		{sess.Resources.Worktree, func() error {
+			created, err := s.setupWorktree(ctx, sess, ws)
+			worktreeCreated = created
+			return err
+		}, false},
+		{sess.Resources.WorktreeInit, func() error {
+			return s.setupWorktreeInit(ctx, sess, ws, worktreeCreated)
+		}, true},
+		{sess.Resources.Tmux, func() error { return s.setupTmux(ctx, sess) }, false},
 	}
 
 	for _, step := range steps {
@@ -152,6 +168,13 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace) {
 		s.store.Update(sess)
 
 		if err := step.run(); err != nil {
+			if step.continueOnError {
+				slog.Warn("setup step failed, continuing", "error", err)
+				step.resource.Status = ResourceReady
+				step.resource.Error = err.Error()
+				s.store.Update(sess)
+				continue
+			}
 			step.resource.Status = ResourceFailed
 			step.resource.Error = err.Error()
 			sess.Status = StatusBroken
@@ -179,7 +202,7 @@ func (s *SessionService) setupBranch(ctx context.Context, sess *Session, ws *wor
 	return nil
 }
 
-func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *workspace.Workspace) error {
+func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *workspace.Workspace) (bool, error) {
 	creatingNewBranch := sess.BaseBranch != ""
 
 	branchName := sess.Branch
@@ -189,48 +212,110 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 
 	branchExists, err := s.gitService.HasBranch(ctx, ws.Path, branchName)
 	if err != nil {
-		return fmt.Errorf("failed to check branch %q: %v", branchName, err)
+		return false, fmt.Errorf("failed to check branch %q: %v", branchName, err)
 	}
 	if creatingNewBranch && branchExists {
-		return fmt.Errorf("branch %q already exists; use it as an existing branch instead", branchName)
+		return false, fmt.Errorf("branch %q already exists; use it as an existing branch instead", branchName)
 	}
 	if !creatingNewBranch && !branchExists {
-		return fmt.Errorf("branch %q does not exist; provide a base branch to create it", branchName)
+		return false, fmt.Errorf("branch %q does not exist; provide a base branch to create it", branchName)
 	}
 
 	worktreePath := s.gitService.WorktreePath(ws.Path, branchName)
 
 	exists, err := s.gitService.ValidateWorktree(ctx, worktreePath, branchName)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if exists {
 		sess.WorktreePath = worktreePath
 		sess.Branch = branchName
-		return nil
+		return false, nil
 	}
 
 	if creatingNewBranch {
 		path, err := s.gitService.CreateWorktree(ctx, ws.Path, branchName, sess.BaseBranch)
 		if err != nil {
-			return fmt.Errorf("failed to create worktree: %v", err)
+			return false, fmt.Errorf("failed to create worktree: %v", err)
 		}
 		sess.WorktreePath = path
 		sess.Branch = branchName
 	} else {
 		path, err := s.gitService.CheckoutWorktree(ctx, ws.Path, sess.Branch)
 		if err != nil {
-			return fmt.Errorf("failed to checkout worktree: %v", err)
+			return false, fmt.Errorf("failed to checkout worktree: %v", err)
 		}
 		sess.WorktreePath = path
 	}
-	return nil
+	return true, nil
 }
 
 func (s *SessionService) setupTmux(ctx context.Context, sess *Session) error {
 	startDir := s.resolveStartDir(ctx, sess)
 	if err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir); err != nil {
 		return fmt.Errorf("failed to create tmux session: %v", err)
+	}
+	return nil
+}
+
+func (s *SessionService) setupWorktreeInit(ctx context.Context, sess *Session, ws *workspace.Workspace, worktreeCreated bool) error {
+	if !worktreeCreated {
+		return nil
+	}
+
+	env := []string{
+		"UTENA_WORKTREE_PATH=" + sess.WorktreePath,
+		"UTENA_BRANCH=" + sess.Branch,
+		"UTENA_SESSION_NAME=" + sess.Name,
+	}
+	if ws != nil {
+		env = append(env,
+			"UTENA_WORKSPACE_NAME="+ws.Name,
+			"UTENA_WORKSPACE_PATH="+ws.Path,
+		)
+	}
+
+	scripts := []string{
+		filepath.Join(s.configDir, "worktree-setup"),
+	}
+	if ws != nil {
+		scripts = append(scripts, filepath.Join(ws.Path, ".utena", "worktree-setup"))
+	}
+
+	var warnings []string
+	for _, script := range scripts {
+		if err := s.runScript(ctx, script, sess.WorktreePath, env); err != nil {
+			slog.Warn("worktree setup script failed", "script", script, "error", err)
+			warnings = append(warnings, err.Error())
+		}
+	}
+
+	if len(warnings) > 0 {
+		return fmt.Errorf("%s", strings.Join(warnings, "; "))
+	}
+	return nil
+}
+
+func (s *SessionService) runScript(ctx context.Context, path string, workDir string, env []string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to stat script %s: %w", path, err)
+	}
+
+	if info.Mode()&0111 == 0 {
+		return fmt.Errorf("script %s exists but is not executable", path)
+	}
+
+	cmd := exec.CommandContext(ctx, path)
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), env...)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("script %s failed: %s: %w", path, strings.TrimSpace(string(output)), err)
 	}
 	return nil
 }
@@ -286,7 +371,7 @@ func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, 
 	}
 
 	if sess.Resources != nil {
-		for _, rs := range []*ResourceState{sess.Resources.Branch, sess.Resources.Worktree, sess.Resources.Tmux} {
+		for _, rs := range []*ResourceState{sess.Resources.Branch, sess.Resources.Worktree, sess.Resources.WorktreeInit, sess.Resources.Tmux} {
 			if rs != nil && rs.Status != ResourceReady {
 				rs.Status = ResourcePending
 				rs.Error = ""

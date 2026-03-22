@@ -158,6 +158,10 @@ func (m Model) View() string {
 			b.WriteString(resourceLine("Worktree", res.Worktree))
 			b.WriteString("\n")
 		}
+		if res.WorktreeInit != nil {
+			b.WriteString(resourceLine("Setup", res.WorktreeInit))
+			b.WriteString("\n")
+		}
 		if res.Tmux != nil {
 			b.WriteString(resourceLine("Tmux", res.Tmux))
 			b.WriteString("\n")
