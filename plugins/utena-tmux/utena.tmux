@@ -14,6 +14,7 @@ tmux set-hook -g client-attached "run-shell '${script_dir}/hook.sh client-attach
 tmux set-hook -g client-detached "run-shell '${script_dir}/hook.sh client-detached \"#{session_name}\"'"
 
 tmux set-hook -g pane-exited "run-shell '${script_dir}/cleanup-status-pane.sh \"#{window_id}\"'"
+tmux set-hook -g after-kill-pane "run-shell '${script_dir}/cleanup-status-pane.sh \"#{window_id}\"'"
 tmux set-hook -g after-new-window "run-shell '${script_dir}/sync-windows.sh \"#{session_name}\"' ; run-shell '${script_dir}/status-pane.sh \"#{session_name}\" \"#{window_id}\"'"
 tmux set-hook -g window-renamed "run-shell '${script_dir}/sync-windows.sh \"#{session_name}\"'"
 tmux set-hook -g after-kill-window "run-shell '${script_dir}/sync-windows.sh \"#{session_name}\"'"

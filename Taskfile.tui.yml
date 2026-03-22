@@ -21,6 +21,7 @@ tasks:
       - build
     cmds:
       - mkdir -p {{dir .TUI_BIN}}
+      - rm -f {{shellQuote .TUI_BIN}}
       - cp ./out/tui {{shellQuote .TUI_BIN}}
   run:
     deps:

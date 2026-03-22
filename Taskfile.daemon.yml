@@ -32,6 +32,7 @@ tasks:
     cmds:
       - mkdir -p {{shellQuote .LOG_DIR}}
       - mkdir -p {{dir .DAEMON_BIN}}
+      - rm -f {{shellQuote .DAEMON_BIN}}
       - cp out/daemon {{shellQuote .DAEMON_BIN}}
       - sed -e 's|__DAEMON_PATH__|{{.DAEMON_BIN}}|g' -e 's|__LOG_DIR__|{{.LOG_DIR}}|g' config/launchd/{{.PLIST_NAME}} > {{shellQuote .PLIST_DEST}}
       - launchctl bootout gui/$(id -u) {{shellQuote .PLIST_DEST}} 2>/dev/null || true

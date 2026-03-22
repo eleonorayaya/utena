@@ -13,7 +13,8 @@ type SessionsStateUpdatedMsg struct {
 }
 
 type WindowsStateUpdatedMsg struct {
-	Windows []tmux.Window
+	SessionName string
+	Windows     []tmux.Window
 }
 
 func FetchSessions() tea.Cmd {
@@ -84,7 +85,8 @@ type fetchWindowsIntentMsg struct {
 }
 
 type windowsLoadedMsg struct {
-	windows []tmux.Window
+	sessionName string
+	windows     []tmux.Window
 }
 
 type setActiveWorkspaceMsg struct {
@@ -127,6 +129,8 @@ type pollSessionIntentMsg struct {
 type SessionPolledMsg struct {
 	Session session.Session
 }
+
+type SessionSwitchedMsg struct{}
 
 type sessionsProvider struct {
 	client         *client
@@ -184,7 +188,7 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 
 	case windowsLoadedMsg:
 		return p, func() tea.Msg {
-			return WindowsStateUpdatedMsg{Windows: msg.windows}
+			return WindowsStateUpdatedMsg{SessionName: msg.sessionName, Windows: msg.windows}
 		}
 
 	case requestSessionsStateMsg:
