@@ -55,6 +55,12 @@ func (s *ClaudeStore) UpdateStatusBySessionID(sessionID string, from, to ClaudeS
 		Update("status", to)
 }
 
+func (s *ClaudeStore) UpdateStatusByClaudeSessionID(claudeSessionID string, from, to ClaudeSessionStatus) error {
+	return s.db.Model(&ClaudeSession{}).
+		Where("claude_session_id = ? AND status = ?", claudeSessionID, from).
+		Update("status", to).Error
+}
+
 func (s *ClaudeStore) DeleteByClaudeSessionID(claudeSessionID string) error {
 	if claudeSessionID == "" {
 		return errors.New("claude session ID cannot be empty")
