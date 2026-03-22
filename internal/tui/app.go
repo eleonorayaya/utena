@@ -17,14 +17,32 @@ import (
 )
 
 type App struct {
-	provider provider.Provider
-	router   router.Router
-	help     helpModel
-	width    int
-	height   int
+	provider   provider.Provider
+	router     router.Router
+	help       helpModel
+	navigateTo *router.View
+	width      int
+	height     int
 }
 
-func NewApp(logPath, port string, initialView router.View) App {
+type AppOption func(*appConfig)
+
+type appConfig struct {
+	navigateTo *router.View
+}
+
+func WithNavigateTo(view router.View) AppOption {
+	return func(c *appConfig) {
+		c.navigateTo = &view
+	}
+}
+
+func NewApp(logPath, port string, initialView router.View, opts ...AppOption) App {
+	var cfg appConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	baseURL := fmt.Sprintf("http://localhost:%s", port)
 	views := map[router.View]router.ViewEntry{
 		router.SessionListView:     &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
@@ -37,14 +55,19 @@ func NewApp(logPath, port string, initialView router.View) App {
 	}
 
 	return App{
-		provider: provider.NewRootProvider(baseURL),
-		router:   router.New(views, initialView),
-		help:     newHelpModel(initialView != router.StatusView),
+		provider:   provider.NewRootProvider(baseURL),
+		router:     router.New(views, initialView),
+		help:       newHelpModel(initialView != router.StatusView),
+		navigateTo: cfg.navigateTo,
 	}
 }
 
 func (a App) Init() tea.Cmd {
 	_, cmd := a.router.Init()
+	if a.navigateTo != nil {
+		target := *a.navigateTo
+		return tea.Sequence(cmd, router.NavigateTo(target))
+	}
 	return cmd
 }
 

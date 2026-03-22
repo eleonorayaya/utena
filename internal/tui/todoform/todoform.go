@@ -97,6 +97,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.OnWindowSizeMsg(msg)
 	case provider.WorkspacesStateUpdatedMsg:
 		m.activeWorkspaceID = msg.ActiveWorkspaceID
+		if m.activeStep == workspacePickerStep && m.selectedWorkspace == nil && msg.ActiveWorkspaceID != 0 {
+			for _, ws := range msg.Workspaces {
+				if ws.ID == msg.ActiveWorkspaceID {
+					m.selectedWorkspace = &ws
+					m.activeStep = nameInputStep
+					m.focusIndex = 0
+					m.nameInput.Focus()
+					m.descInput.Blur()
+					return m, textinput.Blink
+				}
+			}
+		}
 		var cmd tea.Cmd
 		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
 		return m, cmd
