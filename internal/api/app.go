@@ -50,7 +50,7 @@ func newApp(gormDB *gorm.DB, tmuxClient tmux.TmuxClient, fs afero.Fs, cfg Config
 		Workspace: workspaceModule,
 		Session:   sessionModule,
 		Tmux:      tmuxModule,
-		Claude:    claude.NewClaudeModule(bus, database),
+		Claude:    claude.NewClaudeModule(database),
 		Todo:      todo.NewTodoModule(workspaceModule, database),
 	}
 

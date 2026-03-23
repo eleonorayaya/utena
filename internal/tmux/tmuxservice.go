@@ -113,6 +113,10 @@ func (t *TmuxService) SyncWindows(ctx context.Context, tmuxName string, windows 
 	t.windowsBySession[tmuxName] = windows
 }
 
+func (t *TmuxService) SetSessionEnv(sessionName, key, value string) {
+	t.client.RunCommand("set-environment", "-t", sessionName, key, value)
+}
+
 func (t *TmuxService) GetWindows(ctx context.Context, tmuxName string) []Window {
 	return t.windowsBySession[tmuxName]
 }

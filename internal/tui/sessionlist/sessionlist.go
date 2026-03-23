@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
 	ulist "github.com/eleonorayaya/utena/internal/tui/list"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
@@ -18,7 +17,6 @@ import (
 type Model struct {
 	list            list.Model
 	sessions        []session.Session
-	claudeSessions  map[string][]claude.ClaudeSession
 	pendingDeleteID uint
 	pendingRepairID uint
 	showBroken      bool
@@ -51,7 +49,7 @@ func (m *Model) rebuildItems() tea.Cmd {
 		if s.Status == session.StatusBroken && !m.showBroken {
 			continue
 		}
-		status := aggregateClaudeStatus(m.claudeSessions[s.TmuxSessionName])
+		status := aggregateClaudeStatus(s.ClaudeSessions)
 		items = append(items, sessionItem{session: s, claudeStatus: status})
 	}
 	return m.list.SetItems(items)
@@ -63,7 +61,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.OnWindowSizeMsg(msg)
 	case provider.SessionsStateUpdatedMsg:
 		m.sessions = msg.Sessions
-		m.claudeSessions = msg.ClaudeSessions
 		return m, m.rebuildItems()
 	case provider.ErrMsg:
 		return m, m.list.NewStatusMessage(msg.Err.Error())

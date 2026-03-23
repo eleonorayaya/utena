@@ -8,7 +8,7 @@ import (
 
 type sessionItem struct {
 	session      session.Session
-	claudeStatus string
+	claudeStatus claude.ClaudeSessionStatus
 }
 
 func (i sessionItem) displayName() string {
@@ -30,8 +30,17 @@ func (i sessionItem) Title() string {
 			title += " (attached)"
 		}
 	}
-	if i.claudeStatus != "" {
-		title += " " + i.claudeStatus
+	switch i.claudeStatus {
+	case claude.StatusNeedsAttention:
+		title += " [needs attention]"
+	case claude.StatusWorking:
+		title += " [working]"
+	case claude.StatusReadyForReview:
+		title += " [ready for review]"
+	case claude.StatusDone:
+		title += " [done]"
+	case claude.StatusIdle:
+		title += " [idle]"
 	}
 	return title
 }
@@ -52,33 +61,45 @@ func (i sessionItem) Description() string {
 
 func (i sessionItem) FilterValue() string { return i.displayName() }
 
-func aggregateClaudeStatus(sessions []claude.ClaudeSession) string {
+func aggregateClaudeStatus(sessions []claude.ClaudeSession) claude.ClaudeSessionStatus {
 	if len(sessions) == 0 {
 		return ""
 	}
 
 	hasNeedsAttention := false
-	hasReadyForReview := false
 	hasWorking := false
+	hasReadyForReview := false
+	hasDone := false
+	hasIdle := false
 	for _, cs := range sessions {
 		switch cs.Status {
 		case claude.StatusNeedsAttention:
 			hasNeedsAttention = true
-		case claude.StatusReadyForReview:
-			hasReadyForReview = true
 		case claude.StatusWorking:
 			hasWorking = true
+		case claude.StatusReadyForReview:
+			hasReadyForReview = true
+		case claude.StatusDone:
+			hasDone = true
+		case claude.StatusIdle:
+			hasIdle = true
 		}
 	}
 
 	if hasNeedsAttention {
-		return "[needs attention]"
+		return claude.StatusNeedsAttention
 	}
 	if hasWorking {
-		return "[working]"
+		return claude.StatusWorking
 	}
 	if hasReadyForReview {
-		return "[ready for review]"
+		return claude.StatusReadyForReview
 	}
-	return "[done]"
+	if hasDone {
+		return claude.StatusDone
+	}
+	if hasIdle {
+		return claude.StatusIdle
+	}
+	return ""
 }

@@ -260,6 +260,7 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session) error {
 	if err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir); err != nil {
 		return fmt.Errorf("failed to create tmux session: %v", err)
 	}
+	s.tmuxService.SetSessionEnv(sess.TmuxSessionName, "UTENA_SESSION_ID", fmt.Sprintf("%d", sess.ID))
 	return nil
 }
 
@@ -430,6 +431,7 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		if err := s.tmuxService.CreateSession(session.TmuxSessionName, startDir); err != nil {
 			return nil, fmt.Errorf("failed to revive tmux session: %w", err)
 		}
+		s.tmuxService.SetSessionEnv(session.TmuxSessionName, "UTENA_SESSION_ID", fmt.Sprintf("%d", session.ID))
 		session.Status = StatusReady
 		if session.Resources != nil && session.Resources.Tmux != nil {
 			session.Resources.Tmux.Status = ResourceReady

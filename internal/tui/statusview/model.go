@@ -80,7 +80,6 @@ type tickMsg time.Time
 
 type Model struct {
 	sessions           []session.Session
-	claudeSessions     map[string][]claude.ClaudeSession
 	windowsBySession   map[string][]tmux.Window
 	expandedSessions   map[string]bool
 	currentTmuxSession string
@@ -177,7 +176,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case provider.SessionsStateUpdatedMsg:
 		m.sessions = msg.Sessions
-		m.claudeSessions = msg.ClaudeSessions
 		return m, nil
 
 	case provider.WindowsStateUpdatedMsg:
@@ -311,7 +309,7 @@ func (m Model) collapsedView() string {
 	for _, sess := range m.orderedActiveSessions() {
 		name := sessionDisplayName(sess)
 		name = truncate(name, maxNameLen)
-		dot := statusDot(m.claudeSessions[sess.TmuxSessionName], sess.IsAttached)
+		dot := statusDot(sess.ClaudeSessions, sess.IsAttached)
 		lines = append(lines, " "+dot+" "+name)
 	}
 
@@ -371,15 +369,15 @@ func (m Model) renderSessionRow(s session.Session, idx, innerWidth int, _ []sess
 		wsName = s.Workspace.Name
 	}
 
-	dotStyle := statusDotStyle(m.claudeSessions[s.TmuxSessionName], s.IsAttached)
-	dotChar := statusDotChar(m.claudeSessions[s.TmuxSessionName], s.IsAttached)
+	dotStyle := statusDotStyle(s.ClaudeSessions, s.IsAttached)
+	dotChar := statusDotChar(s.ClaudeSessions, s.IsAttached)
 
 	nStyle := sessionNameStyle
 	if s.IsAttached {
 		nStyle = sessionAttachedStyle
 	}
 	wsStyle := workspaceStyle
-	bStyle, badgeText := claudeBadgeParts(m.claudeSessions[s.TmuxSessionName])
+	bStyle, badgeText := claudeBadgeParts(s.ClaudeSessions)
 
 	if selected {
 		dotStyle = dotStyle.Background(bg)
@@ -444,7 +442,7 @@ func statusDotChar(claudeSessions []claude.ClaudeSession, attached bool) string 
 	switch status {
 	case claude.StatusNeedsAttention:
 		return "◆"
-	case claude.StatusWorking, claude.StatusReadyForReview, claude.StatusCompleted:
+	case claude.StatusWorking, claude.StatusReadyForReview, claude.StatusDone:
 		return "●"
 	default:
 		if attached {
@@ -463,7 +461,7 @@ func statusDotStyle(claudeSessions []claude.ClaudeSession, attached bool) lipglo
 		return workingDotStyle
 	case claude.StatusReadyForReview:
 		return reviewDotStyle
-	case claude.StatusCompleted:
+	case claude.StatusDone:
 		return completedDotStyle
 	default:
 		if attached {
@@ -485,7 +483,7 @@ func claudeBadgeParts(sessions []claude.ClaudeSession) (*lipgloss.Style, string)
 	case claude.StatusReadyForReview:
 		s := reviewBadgeStyle
 		return &s, " ✓ "
-	case claude.StatusCompleted:
+	case claude.StatusDone:
 		s := completedDotStyle
 		return &s, " ✓ "
 	default:
@@ -548,7 +546,7 @@ func statusDot(claudeSessions []claude.ClaudeSession, attached bool) string {
 		return workingDotStyle.Render("●")
 	case claude.StatusReadyForReview:
 		return reviewDotStyle.Render("●")
-	case claude.StatusCompleted:
+	case claude.StatusDone:
 		return completedDotStyle.Render("●")
 	default:
 		if attached {
@@ -567,7 +565,7 @@ func claudeBadge(sessions []claude.ClaudeSession) string {
 		return workingBadgeStyle.Render(" ~ ")
 	case claude.StatusReadyForReview:
 		return reviewBadgeStyle.Render(" ✓ ")
-	case claude.StatusCompleted:
+	case claude.StatusDone:
 		return completedDotStyle.Render(" ✓ ")
 	default:
 		return ""
@@ -581,7 +579,8 @@ func aggregateStatus(sessions []claude.ClaudeSession) claude.ClaudeSessionStatus
 	hasNeedsAttention := false
 	hasWorking := false
 	hasReadyForReview := false
-	hasCompleted := false
+	hasDone := false
+	hasIdle := false
 	for _, cs := range sessions {
 		switch cs.Status {
 		case claude.StatusNeedsAttention:
@@ -590,8 +589,10 @@ func aggregateStatus(sessions []claude.ClaudeSession) claude.ClaudeSessionStatus
 			hasWorking = true
 		case claude.StatusReadyForReview:
 			hasReadyForReview = true
-		case claude.StatusCompleted:
-			hasCompleted = true
+		case claude.StatusDone:
+			hasDone = true
+		case claude.StatusIdle:
+			hasIdle = true
 		}
 	}
 	if hasNeedsAttention {
@@ -603,8 +604,11 @@ func aggregateStatus(sessions []claude.ClaudeSession) claude.ClaudeSessionStatus
 	if hasReadyForReview {
 		return claude.StatusReadyForReview
 	}
-	if hasCompleted {
-		return claude.StatusCompleted
+	if hasDone {
+		return claude.StatusDone
+	}
+	if hasIdle {
+		return claude.StatusIdle
 	}
 	return ""
 }
