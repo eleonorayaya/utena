@@ -5,10 +5,12 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/todo"
 	ulist "github.com/eleonorayaya/utena/internal/tui/list"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
 )
 
 type Model struct {
@@ -66,6 +68,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case provider.WorkspacesStateUpdatedMsg:
 		m.activeWorkspaceID = msg.ActiveWorkspaceID
 		return m, m.rebuildItems()
+	case provider.SessionCreatedMsg:
+		return m, tea.Sequence(
+			router.NavigateTo(router.SessionProgressView),
+			sessionprogress.Start(msg.ID),
+		)
 	case provider.ErrMsg:
 		return m, m.list.NewStatusMessage(msg.Err.Error())
 	case tea.KeyMsg:
@@ -111,6 +118,13 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 		m.pendingDeleteID = item.todo.ID
 		return m, m.list.NewStatusMessage("press d again to delete " + item.todo.Name), true
+	case key.Matches(msg, keys.CreateSession):
+		item, ok := m.list.SelectedItem().(todoItem)
+		if !ok || item.todo.WorkspaceID == nil {
+			return m, nil, false
+		}
+		name := session.SanitizeSessionName(item.todo.Name)
+		return m, provider.CreateSessionFromTodo(name, *item.todo.WorkspaceID, item.todo.ID), true
 	case key.Matches(msg, keys.ToggleAll):
 		m.showAllWorkspaces = !m.showAllWorkspaces
 		m.updateTitle()
