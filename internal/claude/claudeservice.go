@@ -64,7 +64,7 @@ func (s *ClaudeService) HandleHookEvent(ctx context.Context, req *HookEventReque
 		return nil
 
 	case "PreToolUse":
-		return s.store.UpdateStatusByClaudeSessionID(req.ClaudeSessionID, StatusNeedsAttention, StatusWorking)
+		return s.store.UpdateStatusByClaudeSessionID(req.ClaudeSessionID, StatusWorking)
 
 	case "TaskCompleted":
 		return s.upsertWithStatus(req, StatusReadyForReview)

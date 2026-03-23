@@ -58,7 +58,7 @@ func TestPreToolUse_NoOpWhenWorking(t *testing.T) {
 	require.Equal(t, StatusWorking, sessions[0].Status)
 }
 
-func TestPreToolUse_NoOpWhenReadyForReview(t *testing.T) {
+func TestPreToolUse_ClearsReadyForReview(t *testing.T) {
 	service, store := setupService(t)
 	store.Upsert(&ClaudeSession{
 		ClaudeSessionID: "cs-1",
@@ -75,7 +75,27 @@ func TestPreToolUse_NoOpWhenReadyForReview(t *testing.T) {
 
 	sessions := store.ListBySessionID("sess-1")
 	require.Len(t, sessions, 1)
-	require.Equal(t, StatusReadyForReview, sessions[0].Status)
+	require.Equal(t, StatusWorking, sessions[0].Status)
+}
+
+func TestPreToolUse_ClearsCompleted(t *testing.T) {
+	service, store := setupService(t)
+	store.Upsert(&ClaudeSession{
+		ClaudeSessionID: "cs-1",
+		SessionID:       "sess-1",
+		Status:          StatusCompleted,
+	})
+
+	err := service.HandleHookEvent(context.Background(), &HookEventRequest{
+		Event:           "PreToolUse",
+		ClaudeSessionID: "cs-1",
+		SessionID:       "sess-1",
+	})
+	require.NoError(t, err)
+
+	sessions := store.ListBySessionID("sess-1")
+	require.Len(t, sessions, 1)
+	require.Equal(t, StatusWorking, sessions[0].Status)
 }
 
 func TestFullFlow_NeedsAttentionToWorkingViaPreToolUse(t *testing.T) {
