@@ -23,7 +23,7 @@ func setupStore(t *testing.T) *ClaudeStore {
 	return NewClaudeStore(setupTestDB(t))
 }
 
-func TestUpdateStatusByClaudeSessionID_MatchingFromStatus(t *testing.T) {
+func TestUpdateStatusByClaudeSessionID(t *testing.T) {
 	store := setupStore(t)
 	store.Upsert(&ClaudeSession{
 		ClaudeSessionID: "cs-1",
@@ -31,23 +31,7 @@ func TestUpdateStatusByClaudeSessionID_MatchingFromStatus(t *testing.T) {
 		Status:          StatusNeedsAttention,
 	})
 
-	err := store.UpdateStatusByClaudeSessionID("cs-1", StatusNeedsAttention, StatusWorking)
-	require.NoError(t, err)
-
-	sessions := store.ListBySessionID("sess-1")
-	require.Len(t, sessions, 1)
-	require.Equal(t, StatusWorking, sessions[0].Status)
-}
-
-func TestUpdateStatusByClaudeSessionID_NonMatchingFromStatus(t *testing.T) {
-	store := setupStore(t)
-	store.Upsert(&ClaudeSession{
-		ClaudeSessionID: "cs-1",
-		SessionID:       "sess-1",
-		Status:          StatusWorking,
-	})
-
-	err := store.UpdateStatusByClaudeSessionID("cs-1", StatusNeedsAttention, StatusWorking)
+	err := store.UpdateStatusByClaudeSessionID("cs-1", StatusWorking)
 	require.NoError(t, err)
 
 	sessions := store.ListBySessionID("sess-1")
@@ -58,6 +42,6 @@ func TestUpdateStatusByClaudeSessionID_NonMatchingFromStatus(t *testing.T) {
 func TestUpdateStatusByClaudeSessionID_NonExistentSession(t *testing.T) {
 	store := setupStore(t)
 
-	err := store.UpdateStatusByClaudeSessionID("nonexistent", StatusNeedsAttention, StatusWorking)
+	err := store.UpdateStatusByClaudeSessionID("nonexistent", StatusWorking)
 	require.NoError(t, err)
 }

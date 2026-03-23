@@ -55,10 +55,10 @@ func (s *ClaudeStore) UpdateStatusBySessionID(sessionID string, from, to ClaudeS
 		Update("status", to)
 }
 
-func (s *ClaudeStore) UpdateStatusByClaudeSessionID(claudeSessionID string, from, to ClaudeSessionStatus) error {
+func (s *ClaudeStore) UpdateStatusByClaudeSessionID(claudeSessionID string, status ClaudeSessionStatus) error {
 	return s.db.Model(&ClaudeSession{}).
-		Where("claude_session_id = ? AND status = ?", claudeSessionID, from).
-		Update("status", to).Error
+		Where("claude_session_id = ?", claudeSessionID).
+		Update("status", status).Error
 }
 
 func (s *ClaudeStore) DeleteByClaudeSessionID(claudeSessionID string) error {
