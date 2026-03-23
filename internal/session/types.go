@@ -50,6 +50,7 @@ type CreateSessionRequest struct {
 	Branch         string `json:"branch,omitempty"`
 	BaseBranch     string `json:"base_branch,omitempty"`
 	CreateWorktree bool   `json:"create_worktree"`
+	TodoID         *uint  `json:"todo_id,omitempty"`
 }
 
 func (c *CreateSessionRequest) Bind(r *http.Request) error {

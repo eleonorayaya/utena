@@ -29,6 +29,7 @@ type Session struct {
 	TmuxSessionName string               `json:"tmux_session_name,omitempty" gorm:"uniqueIndex"`
 	Name            string               `json:"name,omitempty"`
 	WorkspaceID     uint                 `json:"workspace_id" gorm:"index"`
+	TodoID          *uint                `json:"todo_id,omitempty" gorm:"index"`
 	Branch          string               `json:"branch,omitempty"`
 	BaseBranch      string               `json:"base_branch,omitempty"`
 	WorktreePath    string               `json:"worktree_path,omitempty"`

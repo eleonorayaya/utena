@@ -4,9 +4,27 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 var validSessionNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+var invalidCharsPattern = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
+var multiDash = regexp.MustCompile(`-{2,}`)
+
+func SanitizeSessionName(name string) string {
+	s := strings.ToLower(name)
+	s = invalidCharsPattern.ReplaceAllString(s, "-")
+	s = multiDash.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if len(s) > 50 {
+		s = strings.TrimRight(s[:50], "-")
+	}
+	if s == "" {
+		return "session"
+	}
+	return s
+}
 
 func ValidateSessionName(name string) error {
 	if name == "" {

@@ -84,6 +84,11 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 		}
 	}
 
+	if session.TodoID != nil && ws != nil && ws.IsGitRepo && session.BaseBranch == "" {
+		session.BaseBranch = "main"
+		createWorktree = true
+	}
+
 	switch {
 	case session.Name != "":
 		if ws != nil {
