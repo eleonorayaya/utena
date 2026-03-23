@@ -31,11 +31,11 @@ func (t *TmuxService) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
-func (t *TmuxService) CreateSession(name, startDir string) error {
+func (t *TmuxService) CreateSession(name, startDir string, env map[string]string) error {
 	if t.client == nil {
 		return ErrTmuxNotAvailable
 	}
-	return t.client.CreateSession(name, startDir)
+	return t.client.CreateSession(name, startDir, env)
 }
 
 func (t *TmuxService) KillSession(name string) error {

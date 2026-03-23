@@ -12,7 +12,6 @@ import (
 
 	"github.com/GianlucaP106/gotmux/gotmux"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/todo"
@@ -67,30 +66,6 @@ func (c *client) fetchSessions() tea.Cmd {
 			sessions[i] = *sr.Session
 		}
 		return sessionsLoadedMsg{sessions}
-	}
-}
-
-func (c *client) fetchClaudeSessions() tea.Cmd {
-	return func() tea.Msg {
-		res, err := c.httpClient.Get(c.baseURL + "/claude/sessions")
-		if err != nil {
-			log.Printf("[ERROR] fetch claude sessions: %v", err)
-			return claudeSessionsLoadedMsg{}
-		}
-		defer res.Body.Close()
-
-		if res.StatusCode != http.StatusOK {
-			log.Printf("[ERROR] fetch claude sessions: status %d", res.StatusCode)
-			return claudeSessionsLoadedMsg{}
-		}
-
-		var resp claude.ClaudeSessionListResponse
-		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-			log.Printf("[ERROR] decode claude sessions: %v", err)
-			return claudeSessionsLoadedMsg{}
-		}
-
-		return claudeSessionsLoadedMsg{claudeSessions: resp.ClaudeSessions}
 	}
 }
 

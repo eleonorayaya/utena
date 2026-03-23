@@ -44,13 +44,13 @@ func (s *SessionStore) GetByTmuxName(tmuxName string) (*Session, error) {
 
 func (s *SessionStore) List() []Session {
 	var sessions []Session
-	s.db.Joins("Workspace").Order("sessions.last_used_at DESC").Find(&sessions)
+	s.db.Joins("Workspace").Preload("ClaudeSessions").Order("sessions.last_used_at DESC").Find(&sessions)
 	return sessions
 }
 
 func (s *SessionStore) ListByWorkspace(workspaceID uint) []Session {
 	var sessions []Session
-	s.db.Joins("Workspace").Where("sessions.workspace_id = ?", workspaceID).Order("sessions.last_used_at DESC").Find(&sessions)
+	s.db.Joins("Workspace").Preload("ClaudeSessions").Where("sessions.workspace_id = ?", workspaceID).Order("sessions.last_used_at DESC").Find(&sessions)
 	return sessions
 }
 
@@ -59,7 +59,7 @@ func (s *SessionStore) Add(session *Session) error {
 		return errors.New("session cannot be nil")
 	}
 
-	if err := s.db.Omit("Workspace").Create(session).Error; err != nil {
+	if err := s.db.Omit("Workspace", "ClaudeSessions").Create(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueConstraintError(err) {
 			return fmt.Errorf("session '%s' already exists: %w", session.TmuxSessionName, ErrSessionAlreadyExists)
 		}
@@ -84,7 +84,7 @@ func (s *SessionStore) Update(session *Session) error {
 		return err
 	}
 
-	return s.db.Omit("Workspace").Save(session).Error
+	return s.db.Omit("Workspace", "ClaudeSessions").Save(session).Error
 }
 
 func (s *SessionStore) Delete(id uint) error {

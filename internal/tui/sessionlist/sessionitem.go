@@ -8,7 +8,7 @@ import (
 
 type sessionItem struct {
 	session      session.Session
-	claudeStatus string
+	claudeStatus claude.ClaudeSessionStatus
 }
 
 func (i sessionItem) displayName() string {
@@ -30,8 +30,17 @@ func (i sessionItem) Title() string {
 			title += " (attached)"
 		}
 	}
-	if i.claudeStatus != "" {
-		title += " " + i.claudeStatus
+	switch i.claudeStatus {
+	case claude.StatusNeedsAttention:
+		title += " [needs attention]"
+	case claude.StatusWorking:
+		title += " [working]"
+	case claude.StatusReadyForReview:
+		title += " [ready for review]"
+	case claude.StatusDone:
+		title += " [done]"
+	case claude.StatusIdle:
+		title += " [idle]"
 	}
 	return title
 }
@@ -52,33 +61,6 @@ func (i sessionItem) Description() string {
 
 func (i sessionItem) FilterValue() string { return i.displayName() }
 
-func aggregateClaudeStatus(sessions []claude.ClaudeSession) string {
-	if len(sessions) == 0 {
-		return ""
-	}
-
-	hasNeedsAttention := false
-	hasReadyForReview := false
-	hasWorking := false
-	for _, cs := range sessions {
-		switch cs.Status {
-		case claude.StatusNeedsAttention:
-			hasNeedsAttention = true
-		case claude.StatusReadyForReview:
-			hasReadyForReview = true
-		case claude.StatusWorking:
-			hasWorking = true
-		}
-	}
-
-	if hasNeedsAttention {
-		return "[needs attention]"
-	}
-	if hasWorking {
-		return "[working]"
-	}
-	if hasReadyForReview {
-		return "[ready for review]"
-	}
-	return "[done]"
+func aggregateClaudeStatus(sessions []claude.ClaudeSession) claude.ClaudeSessionStatus {
+	return claude.AggregateStatus(sessions)
 }

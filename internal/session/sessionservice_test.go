@@ -29,7 +29,7 @@ func newMockTmuxClient() *mockTmuxClient {
 	return &mockTmuxClient{sessions: make(map[string]bool)}
 }
 
-func (m *mockTmuxClient) CreateSession(name, startDir string) error {
+func (m *mockTmuxClient) CreateSession(name, startDir string, env map[string]string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.createErr != nil {

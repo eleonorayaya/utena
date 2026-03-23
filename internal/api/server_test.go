@@ -29,7 +29,7 @@ func newTestTmuxClient() *testTmuxClient {
 	return &testTmuxClient{sessions: make(map[string]bool)}
 }
 
-func (m *testTmuxClient) CreateSession(name, startDir string) error {
+func (m *testTmuxClient) CreateSession(name, startDir string, env map[string]string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.createErr != nil {

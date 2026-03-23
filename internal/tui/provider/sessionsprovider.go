@@ -2,14 +2,12 @@ package provider
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tmux"
 )
 
 type SessionsStateUpdatedMsg struct {
-	Sessions       []session.Session
-	ClaudeSessions map[string][]claude.ClaudeSession
+	Sessions []session.Session
 }
 
 type WindowsStateUpdatedMsg struct {
@@ -108,10 +106,6 @@ type sessionsLoadedMsg struct {
 	sessions []session.Session
 }
 
-type claudeSessionsLoadedMsg struct {
-	claudeSessions []claude.ClaudeSession
-}
-
 type sessionActivatedMsg struct {
 	tmuxSessionName string
 }
@@ -144,9 +138,8 @@ type SessionPolledMsg struct {
 type SessionSwitchedMsg struct{}
 
 type sessionsProvider struct {
-	client         *client
-	sessions       []session.Session
-	claudeSessions map[string][]claude.ClaudeSession
+	client   *client
+	sessions []session.Session
 }
 
 func newSessionsProvider(c *client) sessionsProvider {
@@ -155,11 +148,9 @@ func newSessionsProvider(c *client) sessionsProvider {
 
 func (p sessionsProvider) emitState() tea.Cmd {
 	sessions := p.sessions
-	claudeSessions := p.claudeSessions
 	return func() tea.Msg {
 		return SessionsStateUpdatedMsg{
-			Sessions:       sessions,
-			ClaudeSessions: claudeSessions,
+			Sessions: sessions,
 		}
 	}
 }
@@ -184,15 +175,8 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		p.sessions = msg.sessions
 		return p, tea.Batch(p.emitState(), p.deriveActiveWorkspace())
 
-	case claudeSessionsLoadedMsg:
-		p.claudeSessions = make(map[string][]claude.ClaudeSession)
-		for _, cs := range msg.claudeSessions {
-			p.claudeSessions[cs.SessionID] = append(p.claudeSessions[cs.SessionID], cs)
-		}
-		return p, p.emitState()
-
 	case fetchSessionsIntentMsg:
-		return p, tea.Batch(p.client.fetchSessions(), p.client.fetchClaudeSessions())
+		return p, p.client.fetchSessions()
 
 	case fetchWindowsIntentMsg:
 		return p, p.client.fetchWindows(msg.sessionName)

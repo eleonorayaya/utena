@@ -8,7 +8,7 @@ import (
 type HookEventRequest struct {
 	Event            string `json:"event"`
 	ClaudeSessionID  string `json:"claude_session_id"`
-	SessionID        string `json:"session_id"`
+	SessionID        uint   `json:"session_id,string"`
 	CWD              string `json:"cwd,omitempty"`
 	NotificationType string `json:"notification_type,omitempty"`
 }
@@ -19,9 +19,6 @@ func (h *HookEventRequest) Bind(r *http.Request) error {
 	}
 	if h.ClaudeSessionID == "" {
 		return errors.New("claude_session_id is required")
-	}
-	if h.SessionID == "" {
-		return errors.New("session_id is required")
 	}
 	return nil
 }

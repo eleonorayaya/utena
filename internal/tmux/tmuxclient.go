@@ -1,13 +1,14 @@
 package tmux
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/GianlucaP106/gotmux/gotmux"
 )
 
 type TmuxClient interface {
-	CreateSession(name, startDir string) error
+	CreateSession(name, startDir string, env map[string]string) error
 	KillSession(name string) error
 	HasSession(name string) bool
 	ListSessionNames() ([]string, error)
@@ -28,12 +29,20 @@ func NewGotmuxClient() TmuxClient {
 	return &gotmuxClient{tmux: t}
 }
 
-func (c *gotmuxClient) CreateSession(name, startDir string) error {
+func (c *gotmuxClient) CreateSession(name, startDir string, env map[string]string) error {
 	_, err := c.tmux.NewSession(&gotmux.SessionOptions{
 		Name:           name,
 		StartDirectory: startDir,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	for k, v := range env {
+		if _, err := c.tmux.Command("set-environment", "-t", name, k, v); err != nil {
+			return fmt.Errorf("failed to set environment %s: %w", k, err)
+		}
+	}
+	return nil
 }
 
 func (c *gotmuxClient) KillSession(name string) error {

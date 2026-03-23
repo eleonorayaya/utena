@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -19,7 +20,7 @@ func setupTestDB(t *testing.T) db.Database {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database.Migrate(&workspace.Workspace{}, &Session{})
+	database.Migrate(&workspace.Workspace{}, &Session{}, &claude.ClaudeSession{})
 	t.Cleanup(func() { database.Close() })
 	return database
 }

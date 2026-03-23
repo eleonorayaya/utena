@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/eleonorayaya/utena/internal/db"
-	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -15,9 +14,9 @@ type ClaudeModule struct {
 	Router     *ClaudeRouter
 }
 
-func NewClaudeModule(bus eventbus.EventBus, database db.Database) *ClaudeModule {
+func NewClaudeModule(database db.Database) *ClaudeModule {
 	store := NewClaudeStore(database)
-	service := NewClaudeService(store, bus)
+	service := NewClaudeService(store)
 	controller := NewClaudeController(service)
 	router := NewClaudeRouter(controller)
 

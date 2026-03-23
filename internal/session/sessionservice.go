@@ -257,7 +257,8 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 
 func (s *SessionService) setupTmux(ctx context.Context, sess *Session) error {
 	startDir := s.resolveStartDir(ctx, sess)
-	if err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir); err != nil {
+	env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", sess.ID)}
+	if err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir, env); err != nil {
 		return fmt.Errorf("failed to create tmux session: %v", err)
 	}
 	return nil
@@ -427,7 +428,8 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 
 	if !s.tmuxService.HasSession(session.TmuxSessionName) {
 		startDir := s.resolveStartDir(ctx, session)
-		if err := s.tmuxService.CreateSession(session.TmuxSessionName, startDir); err != nil {
+		env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", session.ID)}
+		if err := s.tmuxService.CreateSession(session.TmuxSessionName, startDir, env); err != nil {
 			return nil, fmt.Errorf("failed to revive tmux session: %w", err)
 		}
 		session.Status = StatusReady
