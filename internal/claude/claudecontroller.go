@@ -2,10 +2,8 @@ package claude
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/eleonorayaya/utena/internal/common"
-	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
 )
 
@@ -45,23 +43,6 @@ func (c *ClaudeController) ListClaudeSessions(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	response := NewClaudeSessionListResponse(sessions)
-	render.Render(w, r, response)
-}
-
-func (c *ClaudeController) ListClaudeSessionsBySession(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	raw := chi.URLParam(r, "sessionId")
-	sessionID, err := strconv.ParseUint(raw, 10, 64)
-	if err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
-		return
-	}
-	sessions, err := c.service.ListBySessionID(ctx, uint(sessionID))
-	if err != nil {
-		render.Render(w, r, common.ErrUnknown(err))
-		return
-	}
 	response := NewClaudeSessionListResponse(sessions)
 	render.Render(w, r, response)
 }

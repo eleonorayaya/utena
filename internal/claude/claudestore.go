@@ -22,12 +22,6 @@ func (s *ClaudeStore) List() []ClaudeSession {
 	return sessions
 }
 
-func (s *ClaudeStore) ListBySessionID(sessionID uint) []ClaudeSession {
-	var sessions []ClaudeSession
-	s.db.Where("session_id = ?", sessionID).Order("updated_at DESC").Find(&sessions)
-	return sessions
-}
-
 func (s *ClaudeStore) Create(cs *ClaudeSession) error {
 	return s.db.Create(cs).Error
 }

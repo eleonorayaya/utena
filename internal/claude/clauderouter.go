@@ -19,7 +19,6 @@ func (cr *ClaudeRouter) Routes() chi.Router {
 
 	r.Put("/hook", cr.controller.HandleHookEvent)
 	r.Get("/sessions", cr.controller.ListClaudeSessions)
-	r.Get("/sessions/{sessionId}", cr.controller.ListClaudeSessionsBySession)
 
 	return r
 }

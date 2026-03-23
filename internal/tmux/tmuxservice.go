@@ -31,11 +31,11 @@ func (t *TmuxService) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
-func (t *TmuxService) CreateSession(name, startDir string) error {
+func (t *TmuxService) CreateSession(name, startDir string, env map[string]string) error {
 	if t.client == nil {
 		return ErrTmuxNotAvailable
 	}
-	return t.client.CreateSession(name, startDir)
+	return t.client.CreateSession(name, startDir, env)
 }
 
 func (t *TmuxService) KillSession(name string) error {
@@ -111,10 +111,6 @@ func (t *TmuxService) HandleClientDetached(ctx context.Context, tmuxName string)
 
 func (t *TmuxService) SyncWindows(ctx context.Context, tmuxName string, windows []Window) {
 	t.windowsBySession[tmuxName] = windows
-}
-
-func (t *TmuxService) SetSessionEnv(sessionName, key, value string) {
-	t.client.RunCommand("set-environment", "-t", sessionName, key, value)
 }
 
 func (t *TmuxService) GetWindows(ctx context.Context, tmuxName string) []Window {

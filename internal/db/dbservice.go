@@ -17,7 +17,6 @@ type Database interface {
 	Order(value any) *gorm.DB
 	Joins(query string, args ...any) *gorm.DB
 	Omit(columns ...string) *gorm.DB
-	Exec(sql string, values ...any) *gorm.DB
 	Migrate(models ...any) error
 	Close() error
 }

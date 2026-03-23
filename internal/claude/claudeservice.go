@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 )
 
@@ -24,6 +25,9 @@ func (s *ClaudeService) OnAppEnd(ctx context.Context) error {
 func (s *ClaudeService) HandleHookEvent(ctx context.Context, req *HookEventRequest) error {
 	switch req.Event {
 	case "SessionStart":
+		if req.SessionID == 0 {
+			return errors.New("session_id is required for SessionStart")
+		}
 		return s.store.Create(&ClaudeSession{
 			ClaudeSessionID: req.ClaudeSessionID,
 			SessionID:       req.SessionID,
@@ -49,8 +53,4 @@ func (s *ClaudeService) HandleHookEvent(ctx context.Context, req *HookEventReque
 
 func (s *ClaudeService) ListAll(ctx context.Context) ([]ClaudeSession, error) {
 	return s.store.List(), nil
-}
-
-func (s *ClaudeService) ListBySessionID(ctx context.Context, sessionID uint) ([]ClaudeSession, error) {
-	return s.store.ListBySessionID(sessionID), nil
 }

@@ -33,7 +33,7 @@ func TestPreToolUse_ClearsNeedsAttention(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sessions := store.ListBySessionID(sessionID)
+	sessions := store.List()
 	require.Len(t, sessions, 1)
 	require.Equal(t, StatusWorking, sessions[0].Status)
 }
@@ -55,7 +55,7 @@ func TestPreToolUse_NoOpWhenWorking(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sessions := store.ListBySessionID(sessionID)
+	sessions := store.List()
 	require.Len(t, sessions, 1)
 	require.Equal(t, StatusWorking, sessions[0].Status)
 }
@@ -77,7 +77,7 @@ func TestPreToolUse_ClearsReadyForReview(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sessions := store.ListBySessionID(sessionID)
+	sessions := store.List()
 	require.Len(t, sessions, 1)
 	require.Equal(t, StatusWorking, sessions[0].Status)
 }
@@ -99,7 +99,7 @@ func TestPreToolUse_ClearsDone(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sessions := store.ListBySessionID(sessionID)
+	sessions := store.List()
 	require.Len(t, sessions, 1)
 	require.Equal(t, StatusWorking, sessions[0].Status)
 }
@@ -115,7 +115,7 @@ func TestFullFlow_NeedsAttentionToWorkingViaPreToolUse(t *testing.T) {
 		SessionID:       sessionID,
 		CWD:             "/tmp",
 	})
-	sessions := store.ListBySessionID(sessionID)
+	sessions := store.List()
 	require.Equal(t, StatusIdle, sessions[0].Status)
 
 	service.HandleHookEvent(ctx, &HookEventRequest{
@@ -124,7 +124,7 @@ func TestFullFlow_NeedsAttentionToWorkingViaPreToolUse(t *testing.T) {
 		SessionID:        sessionID,
 		NotificationType: "permission_prompt",
 	})
-	sessions = store.ListBySessionID(sessionID)
+	sessions = store.List()
 	require.Equal(t, StatusNeedsAttention, sessions[0].Status)
 
 	service.HandleHookEvent(ctx, &HookEventRequest{
@@ -132,7 +132,7 @@ func TestFullFlow_NeedsAttentionToWorkingViaPreToolUse(t *testing.T) {
 		ClaudeSessionID: "cs-1",
 		SessionID:       sessionID,
 	})
-	sessions = store.ListBySessionID(sessionID)
+	sessions = store.List()
 	require.Equal(t, StatusWorking, sessions[0].Status)
 
 	service.HandleHookEvent(ctx, &HookEventRequest{
@@ -140,6 +140,6 @@ func TestFullFlow_NeedsAttentionToWorkingViaPreToolUse(t *testing.T) {
 		ClaudeSessionID: "cs-1",
 		SessionID:       sessionID,
 	})
-	sessions = store.ListBySessionID(sessionID)
+	sessions = store.List()
 	require.Equal(t, StatusReadyForReview, sessions[0].Status)
 }

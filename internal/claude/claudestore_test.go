@@ -51,7 +51,7 @@ func TestUpdateStatus(t *testing.T) {
 	err := store.UpdateStatus("cs-1", StatusWorking)
 	require.NoError(t, err)
 
-	sessions := store.ListBySessionID(sessionID)
+	sessions := store.List()
 	require.Len(t, sessions, 1)
 	require.Equal(t, StatusWorking, sessions[0].Status)
 }
