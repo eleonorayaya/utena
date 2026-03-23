@@ -39,8 +39,7 @@ func (s *ClaudeStore) UpdateStatus(claudeSessionID string, status ClaudeSessionS
 }
 
 func (s *ClaudeStore) OnAppStart(ctx context.Context) error {
-	s.db.Exec("DROP TABLE IF EXISTS claude_sessions")
-	return s.db.Migrate(&ClaudeSession{})
+	return nil
 }
 
 func (s *ClaudeStore) OnAppEnd(ctx context.Context) error {

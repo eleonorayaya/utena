@@ -22,7 +22,7 @@ func NewSessionStore(database db.Database) *SessionStore {
 
 func (s *SessionStore) GetByID(id uint) (*Session, error) {
 	var session Session
-	if err := s.db.Joins("Workspace").Preload("ClaudeSessions").First(&session, "sessions.id = ?", id).Error; err != nil {
+	if err := s.db.Joins("Workspace").First(&session, "sessions.id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound
 		}
@@ -33,7 +33,7 @@ func (s *SessionStore) GetByID(id uint) (*Session, error) {
 
 func (s *SessionStore) GetByTmuxName(tmuxName string) (*Session, error) {
 	var session Session
-	if err := s.db.Joins("Workspace").Preload("ClaudeSessions").First(&session, "tmux_session_name = ?", tmuxName).Error; err != nil {
+	if err := s.db.Joins("Workspace").First(&session, "tmux_session_name = ?", tmuxName).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound
 		}

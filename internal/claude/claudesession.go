@@ -25,3 +25,44 @@ type ClaudeSession struct {
 	Status          ClaudeSessionStatus `json:"status"`
 	CWD             string              `json:"cwd,omitempty"`
 }
+
+func AggregateStatus(sessions []ClaudeSession) ClaudeSessionStatus {
+	if len(sessions) == 0 {
+		return ""
+	}
+	hasNeedsAttention := false
+	hasWorking := false
+	hasReadyForReview := false
+	hasDone := false
+	hasIdle := false
+	for _, cs := range sessions {
+		switch cs.Status {
+		case StatusNeedsAttention:
+			hasNeedsAttention = true
+		case StatusWorking:
+			hasWorking = true
+		case StatusReadyForReview:
+			hasReadyForReview = true
+		case StatusDone:
+			hasDone = true
+		case StatusIdle:
+			hasIdle = true
+		}
+	}
+	if hasNeedsAttention {
+		return StatusNeedsAttention
+	}
+	if hasWorking {
+		return StatusWorking
+	}
+	if hasReadyForReview {
+		return StatusReadyForReview
+	}
+	if hasDone {
+		return StatusDone
+	}
+	if hasIdle {
+		return StatusIdle
+	}
+	return ""
+}

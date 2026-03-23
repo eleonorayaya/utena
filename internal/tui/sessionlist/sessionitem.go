@@ -62,44 +62,5 @@ func (i sessionItem) Description() string {
 func (i sessionItem) FilterValue() string { return i.displayName() }
 
 func aggregateClaudeStatus(sessions []claude.ClaudeSession) claude.ClaudeSessionStatus {
-	if len(sessions) == 0 {
-		return ""
-	}
-
-	hasNeedsAttention := false
-	hasWorking := false
-	hasReadyForReview := false
-	hasDone := false
-	hasIdle := false
-	for _, cs := range sessions {
-		switch cs.Status {
-		case claude.StatusNeedsAttention:
-			hasNeedsAttention = true
-		case claude.StatusWorking:
-			hasWorking = true
-		case claude.StatusReadyForReview:
-			hasReadyForReview = true
-		case claude.StatusDone:
-			hasDone = true
-		case claude.StatusIdle:
-			hasIdle = true
-		}
-	}
-
-	if hasNeedsAttention {
-		return claude.StatusNeedsAttention
-	}
-	if hasWorking {
-		return claude.StatusWorking
-	}
-	if hasReadyForReview {
-		return claude.StatusReadyForReview
-	}
-	if hasDone {
-		return claude.StatusDone
-	}
-	if hasIdle {
-		return claude.StatusIdle
-	}
-	return ""
+	return claude.AggregateStatus(sessions)
 }
