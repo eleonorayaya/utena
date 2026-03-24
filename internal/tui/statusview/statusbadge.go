@@ -12,8 +12,11 @@ type StatusBadge struct {
 	isAttached   bool
 }
 
-func NewStatusBadge() StatusBadge {
-	return StatusBadge{}
+func NewStatusBadge(sessions []claude.ClaudeSession, isAttached bool) StatusBadge {
+	return StatusBadge{
+		claudeStatus: claude.AggregateStatus(sessions),
+		isAttached:   isAttached,
+	}
 }
 
 type statusBadgeMsg struct {

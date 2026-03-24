@@ -19,16 +19,10 @@ type SessionTab struct {
 }
 
 func NewSessionTab(s session.Session) SessionTab {
-	tab := SessionTab{
+	return SessionTab{
 		session: s,
-		badge:   NewStatusBadge(),
+		badge:   NewStatusBadge(s.ClaudeSessions, s.IsAttached),
 	}
-	tab.badge, _ = tab.badge.Update(statusBadgeMsg{
-		ClaudeSessions: s.ClaudeSessions,
-		Selected:       false,
-		IsAttached:     s.IsAttached,
-	})
-	return tab
 }
 
 type sessionTabMsg struct {
