@@ -14,10 +14,14 @@ type SessionTab struct {
 	Windows  []tmux.Window
 	Selected bool
 	Width    int
+	badge    ClaudeBadge
 }
 
 func NewSessionTab(s session.Session) SessionTab {
-	return SessionTab{Session: s}
+	return SessionTab{
+		Session: s,
+		badge:   NewClaudeBadge(s.ClaudeSessions),
+	}
 }
 
 func (t SessionTab) Update(s session.Session, windows []tmux.Window, selected bool, width int) SessionTab {
@@ -25,6 +29,7 @@ func (t SessionTab) Update(s session.Session, windows []tmux.Window, selected bo
 	t.Windows = windows
 	t.Selected = selected
 	t.Width = width
+	t.badge = NewClaudeBadge(s.ClaudeSessions)
 	return t
 }
 
@@ -34,50 +39,38 @@ func (t SessionTab) View() string {
 	}
 	bg := t.bg()
 	var lines []string
-	lines = append(lines, emptyLine(t.Width, bg))
+	lines = append(lines, t.emptyLine(bg))
 	lines = append(lines, t.renderHeader(bg)...)
 	lines = append(lines, t.renderWindows(bg)...)
-	lines = append(lines, emptyLine(t.Width, bg))
+	lines = append(lines, t.emptyLine(bg))
 	return strings.Join(lines, "\n")
 }
 
 func (t SessionTab) bg() lipgloss.Color {
 	if t.Selected {
-		return selectedBg
+		return colorSelection
 	}
 	if t.Session.IsAttached {
-		return activeSessionBg
+		return colorSurfaceActive
 	}
-	return inactiveSessionBg
+	return colorSurface
 }
 
 func (t SessionTab) accent(bg lipgloss.Color) string {
-	barColor := accentBarColor(t.Session.ClaudeSessions)
-	barBase := lipgloss.NewStyle().Foreground(barColor)
-	return renderAccent(barBase, bg)
+	barBase := lipgloss.NewStyle().Foreground(t.badge.AccentColor())
+	return barBase.Background(bg).Render("▐") + lipgloss.NewStyle().Background(bg).Render(" ")
 }
 
 func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
 	s := t.Session
-	nStyle := sessionNameStyle
+
+	nStyle := lipgloss.NewStyle().Foreground(colorText)
 	if s.IsAttached {
-		nStyle = sessionAttachedStyle
+		nStyle = lipgloss.NewStyle().Foreground(colorTextEmphasis).Bold(true)
 	}
-	wsStyle := workspaceStyle
-	bStyle, badgeText := claudeBadgeParts(s.ClaudeSessions)
-
 	nStyle = nStyle.Background(bg)
-	wsStyle = wsStyle.Background(bg)
-	if bStyle != nil {
-		styled := (*bStyle).Background(bg)
-		bStyle = &styled
-	}
 
-	badgeStr := ""
-	if bStyle != nil {
-		badgeStr = (*bStyle).Render(badgeText)
-	}
-
+	badgeStr := t.badge.Render(bg)
 	accent := t.accent(bg)
 	accentWidth := 2
 
@@ -103,7 +96,7 @@ func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
 		padStr := lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", pad))
 		nameLine = accent + nameStr + padStr + badgeStr
 	}
-	nameLine = padLine(nameLine, t.Width, bg)
+	nameLine = t.padLine(nameLine, bg)
 
 	var result []string
 	result = append(result, nameLine)
@@ -113,13 +106,14 @@ func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
 		wsName = s.Workspace.Name
 	}
 	if wsName != "" {
+		wsStyle := lipgloss.NewStyle().Foreground(colorTertiary).Background(bg)
 		timeStr := ""
 		if !s.LastUsedAt.IsZero() {
-			tStyle := dimStyle.Background(bg)
+			tStyle := lipgloss.NewStyle().Foreground(colorTextMuted).Background(bg)
 			timeStr = tStyle.Render(" · " + common.TimeAgo(s.LastUsedAt))
 		}
 		wsLine := accent + wsStyle.Render(wsName) + timeStr
-		wsLine = padLine(wsLine, t.Width, bg)
+		wsLine = t.padLine(wsLine, bg)
 		result = append(result, wsLine)
 	}
 
@@ -136,16 +130,27 @@ func (t SessionTab) renderWindows(bg lipgloss.Color) []string {
 	var lines []string
 	for _, w := range t.Windows {
 		marker := "  "
-		wStyle := windowDimStyle
+		wStyle := lipgloss.NewStyle().Foreground(colorTextMuted)
 		if w.Active {
 			marker = "› "
-			wStyle = windowActiveStyle
+			wStyle = lipgloss.NewStyle().Foreground(colorAccentBlue)
 		}
 		wStyle = wStyle.Background(bg)
 		line := accent + wStyle.Render(marker+w.Name)
-		line = padLine(line, t.Width, bg)
+		line = t.padLine(line, bg)
 		lines = append(lines, line)
 	}
 	return lines
 }
 
+func (t SessionTab) padLine(line string, bg lipgloss.Color) string {
+	lineWidth := lipgloss.Width(line)
+	if lineWidth < t.Width {
+		line += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", t.Width-lineWidth))
+	}
+	return line
+}
+
+func (t SessionTab) emptyLine(bg lipgloss.Color) string {
+	return lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", t.Width))
+}

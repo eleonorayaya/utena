@@ -3,6 +3,7 @@ package statusview
 import (
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/session"
 )
 
@@ -40,7 +41,8 @@ func (m Model) expandedView() string {
 	}
 
 	if len(parts) == 0 {
-		return dimStyle.Render("  no active sessions")
+		empty := lipgloss.NewStyle().Foreground(colorTextMuted)
+		return empty.Render("  no active sessions")
 	}
 
 	return strings.Join(parts, "\n")
