@@ -22,8 +22,8 @@ import (
 const collapsedWidth = 14
 
 var (
-	selectedRowStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#edd5d0"))
+	selectedBg     = lipgloss.Color("#edd5d0")
+	activeSessionBg = lipgloss.Color("#e8ddd8")
 
 	workspaceStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#9370b9"))
@@ -47,16 +47,6 @@ var (
 
 	dimStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#8a7873"))
-
-	attentionDotStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#e6537a")).
-				Bold(true)
-
-	workingDotStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#d97c6e"))
-
-	reviewDotStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#5fafa5"))
 
 	completedDotStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#8a7873"))
@@ -300,7 +290,7 @@ func (m Model) View() string {
 }
 
 func (m Model) collapsedView() string {
-	maxNameLen := m.width - 3
+	maxNameLen := m.width - 2
 	if maxNameLen < 1 {
 		maxNameLen = 1
 	}
@@ -309,8 +299,7 @@ func (m Model) collapsedView() string {
 	for _, sess := range m.orderedActiveSessions() {
 		name := sessionDisplayName(sess)
 		name = truncate(name, maxNameLen)
-		dot := statusDot(sess.ClaudeSessions, sess.IsAttached)
-		lines = append(lines, " "+dot+" "+name)
+		lines = append(lines, "  "+name)
 	}
 
 	return bottomAlign(lines, m.height)
@@ -332,9 +321,9 @@ func (m Model) expandedView() string {
 		if i > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, m.renderSessionRow(s, cursorIdx, innerWidth, ordered))
+		lines = append(lines, m.renderSessionBlock(s, cursorIdx, innerWidth)...)
 		if m.showWindows(s) {
-			lines = append(lines, m.renderWindows(s, innerWidth)...)
+			lines = append(lines, m.renderWindows(s, innerWidth, nil)...)
 		}
 		cursorIdx++
 	}
@@ -346,8 +335,8 @@ func (m Model) expandedView() string {
 	}
 
 	for _, s := range active {
-		lines = append(lines, m.renderSessionRow(s, cursorIdx, innerWidth, ordered))
-		lines = append(lines, m.renderWindows(s, innerWidth)...)
+		lines = append(lines, m.renderSessionBlock(s, cursorIdx, innerWidth)...)
+		lines = append(lines, m.renderWindows(s, innerWidth, &activeSessionBg)...)
 		lines = append(lines, "")
 		cursorIdx++
 	}
@@ -359,9 +348,16 @@ func (m Model) expandedView() string {
 	return bottomAlign(lines, m.height)
 }
 
-func (m Model) renderSessionRow(s session.Session, idx, innerWidth int, _ []session.Session) string {
+func (m Model) renderSessionBlock(s session.Session, idx, innerWidth int) []string {
 	selected := idx == m.cursor && m.focused
-	bg := lipgloss.Color("#edd5d0")
+	active := s.IsAttached
+
+	var bg *lipgloss.Color
+	if selected {
+		bg = &selectedBg
+	} else if active {
+		bg = &activeSessionBg
+	}
 
 	name := sessionDisplayName(s)
 	wsName := ""
@@ -369,36 +365,20 @@ func (m Model) renderSessionRow(s session.Session, idx, innerWidth int, _ []sess
 		wsName = s.Workspace.Name
 	}
 
-	dotStyle := statusDotStyle(s.ClaudeSessions, s.IsAttached)
-	dotChar := statusDotChar(s.ClaudeSessions, s.IsAttached)
-
 	nStyle := sessionNameStyle
-	if s.IsAttached {
+	if active {
 		nStyle = sessionAttachedStyle
 	}
 	wsStyle := workspaceStyle
 	bStyle, badgeText := claudeBadgeParts(s.ClaudeSessions)
 
-	if selected {
-		dotStyle = dotStyle.Background(bg)
-		nStyle = nStyle.Background(bg)
-		wsStyle = wsStyle.Background(bg)
+	if bg != nil {
+		nStyle = nStyle.Background(*bg)
+		wsStyle = wsStyle.Background(*bg)
 		if bStyle != nil {
-			s := (*bStyle).Background(bg)
+			s := (*bStyle).Background(*bg)
 			bStyle = &s
 		}
-	}
-
-	sp := " "
-	if selected {
-		sp = lipgloss.NewStyle().Background(bg).Render(" ")
-	}
-
-	prefix := sp + dotStyle.Render(dotChar) + sp
-
-	wsStr := ""
-	if wsName != "" {
-		wsStr = sp + wsStyle.Render(wsName)
 	}
 
 	badgeStr := ""
@@ -406,69 +386,60 @@ func (m Model) renderSessionRow(s session.Session, idx, innerWidth int, _ []sess
 		badgeStr = (*bStyle).Render(badgeText)
 	}
 
-	maxName := innerWidth - lipgloss.Width(prefix) - lipgloss.Width(wsStr) - lipgloss.Width(badgeStr) - 1
+	maxName := innerWidth - 2 - lipgloss.Width(badgeStr)
+	if badgeStr != "" {
+		maxName--
+	}
 	if maxName < 4 {
 		maxName = 4
 	}
 	truncName := truncate(name, maxName)
 	nameStr := nStyle.Render(truncName)
 
-	line := prefix + nameStr + wsStr
+	prefix := "  "
+	if bg != nil {
+		prefix = lipgloss.NewStyle().Background(*bg).Render(prefix)
+	}
+	nameLine := prefix + nameStr
 	if badgeStr != "" {
-		usedWidth := lipgloss.Width(prefix + truncName + wsStr + badgeStr)
+		usedWidth := 2 + lipgloss.Width(truncName) + lipgloss.Width(badgeStr)
 		pad := innerWidth - usedWidth
 		if pad < 1 {
 			pad = 1
 		}
-		if selected {
-			line += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", pad)) + badgeStr
-		} else {
-			line += strings.Repeat(" ", pad) + badgeStr
+		padStr := strings.Repeat(" ", pad)
+		if bg != nil {
+			padStr = lipgloss.NewStyle().Background(*bg).Render(padStr)
 		}
+		nameLine = prefix + nameStr + padStr + badgeStr
+	}
+	nameLine = m.padLine(nameLine, innerWidth, bg)
+
+	var result []string
+	result = append(result, nameLine)
+
+	if wsName != "" {
+		wsIndent := "    "
+		if bg != nil {
+			wsIndent = lipgloss.NewStyle().Background(*bg).Render(wsIndent)
+		}
+		wsLine := wsIndent + wsStyle.Render(wsName)
+		wsLine = m.padLine(wsLine, innerWidth, bg)
+		result = append(result, wsLine)
 	}
 
-	if selected {
-		lineWidth := lipgloss.Width(line)
-		if lineWidth < innerWidth {
-			line += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", innerWidth-lineWidth))
-		}
-	}
+	return result
+}
 
+func (m Model) padLine(line string, width int, bg *lipgloss.Color) string {
+	if bg == nil {
+		return line
+	}
+	lineWidth := lipgloss.Width(line)
+	if lineWidth < width {
+		line += lipgloss.NewStyle().Background(*bg).Render(strings.Repeat(" ", width-lineWidth))
+	}
 	return line
-}
-
-func statusDotChar(claudeSessions []claude.ClaudeSession, attached bool) string {
-	status := aggregateStatus(claudeSessions)
-	switch status {
-	case claude.StatusNeedsAttention:
-		return "◆"
-	case claude.StatusWorking, claude.StatusReadyForReview, claude.StatusDone:
-		return "●"
-	default:
-		if attached {
-			return "●"
-		}
-		return "○"
-	}
-}
-
-func statusDotStyle(claudeSessions []claude.ClaudeSession, attached bool) lipgloss.Style {
-	status := aggregateStatus(claudeSessions)
-	switch status {
-	case claude.StatusNeedsAttention:
-		return attentionDotStyle
-	case claude.StatusWorking:
-		return workingDotStyle
-	case claude.StatusReadyForReview:
-		return reviewDotStyle
-	case claude.StatusDone:
-		return completedDotStyle
-	default:
-		if attached {
-			return sessionAttachedStyle
-		}
-		return dimStyle
-	}
 }
 
 func claudeBadgeParts(sessions []claude.ClaudeSession) (*lipgloss.Style, string) {
@@ -491,7 +462,7 @@ func claudeBadgeParts(sessions []claude.ClaudeSession) (*lipgloss.Style, string)
 	}
 }
 
-func (m Model) renderWindows(s session.Session, innerWidth int) []string {
+func (m Model) renderWindows(s session.Session, innerWidth int, bg *lipgloss.Color) []string {
 	windows := m.windowsBySession[s.TmuxSessionName]
 	if len(windows) == 0 {
 		return nil
@@ -500,11 +471,16 @@ func (m Model) renderWindows(s session.Session, innerWidth int) []string {
 	var lines []string
 	for _, w := range windows {
 		winEntry := fmt.Sprintf("     %d:%s", w.Index, w.Name)
+		wStyle := windowDimStyle
 		if w.Active {
-			lines = append(lines, windowActiveStyle.Render(winEntry))
-		} else {
-			lines = append(lines, windowDimStyle.Render(winEntry))
+			wStyle = windowActiveStyle
 		}
+		if bg != nil {
+			wStyle = wStyle.Background(*bg)
+		}
+		line := wStyle.Render(winEntry)
+		line = m.padLine(line, innerWidth, bg)
+		lines = append(lines, line)
 	}
 	return lines
 }
@@ -535,41 +511,6 @@ func truncate(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-1] + "…"
-}
-
-func statusDot(claudeSessions []claude.ClaudeSession, attached bool) string {
-	status := aggregateStatus(claudeSessions)
-	switch status {
-	case claude.StatusNeedsAttention:
-		return attentionDotStyle.Render("◆")
-	case claude.StatusWorking:
-		return workingDotStyle.Render("●")
-	case claude.StatusReadyForReview:
-		return reviewDotStyle.Render("●")
-	case claude.StatusDone:
-		return completedDotStyle.Render("●")
-	default:
-		if attached {
-			return sessionAttachedStyle.Render("●")
-		}
-		return dimStyle.Render("○")
-	}
-}
-
-func claudeBadge(sessions []claude.ClaudeSession) string {
-	status := aggregateStatus(sessions)
-	switch status {
-	case claude.StatusNeedsAttention:
-		return attentionBadgeStyle.Render(" ! ")
-	case claude.StatusWorking:
-		return workingBadgeStyle.Render(" ~ ")
-	case claude.StatusReadyForReview:
-		return reviewBadgeStyle.Render(" ✓ ")
-	case claude.StatusDone:
-		return completedDotStyle.Render(" ✓ ")
-	default:
-		return ""
-	}
 }
 
 func aggregateStatus(sessions []claude.ClaudeSession) claude.ClaudeSessionStatus {
