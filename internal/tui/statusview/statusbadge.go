@@ -45,19 +45,6 @@ func (b StatusBadge) bg() lipgloss.TerminalColor {
 	return lipgloss.NoColor{}
 }
 
-func (b StatusBadge) AccentColor() lipgloss.Color {
-	switch b.claudeStatus {
-	case claude.StatusNeedsAttention:
-		return colorPrimary
-	case claude.StatusWorking:
-		return colorAccentBlue
-	case claude.StatusReadyForReview:
-		return colorAccentMint
-	default:
-		return colorSurfaceVariant
-	}
-}
-
 func (b StatusBadge) View() string {
 	style, text := b.parts()
 	if style == nil {

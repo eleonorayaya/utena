@@ -15,5 +15,6 @@ var (
 	colorSecondary      = lipgloss.Color("#d97c6e")
 	colorTertiary       = lipgloss.Color("#9370b9")
 	colorAccentBlue     = lipgloss.Color("#6a9bc3")
+	colorAccentLavender = lipgloss.Color("#a87bb7")
 	colorAccentMint     = lipgloss.Color("#5fafa5")
 )

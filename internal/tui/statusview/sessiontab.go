@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tmux"
@@ -71,8 +72,21 @@ func (t SessionTab) bg() lipgloss.TerminalColor {
 	return lipgloss.NoColor{}
 }
 
+func (t SessionTab) accentColor() lipgloss.Color {
+	switch claude.AggregateStatus(t.session.ClaudeSessions) {
+	case claude.StatusNeedsAttention:
+		return colorPrimary
+	case claude.StatusWorking:
+		return colorAccentLavender
+	case claude.StatusReadyForReview:
+		return colorAccentMint
+	default:
+		return colorSurfaceVariant
+	}
+}
+
 func (t SessionTab) accent(bg lipgloss.TerminalColor) string {
-	barBase := lipgloss.NewStyle().Foreground(t.badge.AccentColor())
+	barBase := lipgloss.NewStyle().Foreground(t.accentColor())
 	return barBase.Background(bg).Render("▐") + lipgloss.NewStyle().Background(bg).Render(" ")
 }
 
