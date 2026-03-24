@@ -11,7 +11,7 @@ if [ -z "$PANES" ]; then
 fi
 
 NON_STATUS_COUNT=$(echo "$PANES" | grep -v ' 1$' | grep -c . || true)
-if [ "$NON_STATUS_COUNT" -le 1 ]; then
+if [ "$NON_STATUS_COUNT" -eq 0 ]; then
     echo "$PANES" | grep ' 1$' | awk '{print $1}' | while read -r status_pane; do
         tmux kill-pane -t "$status_pane" 2>/dev/null
     done
