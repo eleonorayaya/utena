@@ -86,6 +86,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, tea.Batch(provider.PollSession(m.sessionID), tick())
 
+	case provider.SessionSwitchedMsg:
+		return m, tea.Quit
+
 	case provider.SessionPolledMsg:
 		s := msg.Session
 		if s.ID != m.sessionID {
