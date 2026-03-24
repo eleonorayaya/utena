@@ -3,6 +3,7 @@ package statusview
 import (
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/session"
@@ -12,7 +13,7 @@ import (
 type SessionTab struct {
 	session  session.Session
 	windows  []tmux.Window
-	badge    ClaudeBadge
+	badge    StatusBadge
 	selected bool
 	width    int
 }
@@ -20,9 +21,13 @@ type SessionTab struct {
 func NewSessionTab(s session.Session) SessionTab {
 	tab := SessionTab{
 		session: s,
-		badge:   NewClaudeBadge(),
+		badge:   NewStatusBadge(),
 	}
-	tab.badge = tab.badge.Update(claudeSessionsMsg{Sessions: s.ClaudeSessions})
+	tab.badge, _ = tab.badge.Update(statusBadgeMsg{
+		ClaudeSessions: s.ClaudeSessions,
+		Selected:       false,
+		IsAttached:     s.IsAttached,
+	})
 	return tab
 }
 
@@ -33,13 +38,20 @@ type sessionTabMsg struct {
 	Width    int
 }
 
-func (t SessionTab) Update(msg sessionTabMsg) SessionTab {
-	t.session = msg.Session
-	t.windows = msg.Windows
-	t.selected = msg.Selected
-	t.width = msg.Width
-	t.badge = t.badge.Update(claudeSessionsMsg{Sessions: msg.Session.ClaudeSessions})
-	return t
+func (t SessionTab) Update(msg tea.Msg) (SessionTab, tea.Cmd) {
+	switch msg := msg.(type) {
+	case sessionTabMsg:
+		t.session = msg.Session
+		t.windows = msg.Windows
+		t.selected = msg.Selected
+		t.width = msg.Width
+		t.badge, _ = t.badge.Update(statusBadgeMsg{
+			ClaudeSessions: msg.Session.ClaudeSessions,
+			Selected:       msg.Selected,
+			IsAttached:     msg.Session.IsAttached,
+		})
+	}
+	return t, nil
 }
 
 func (t SessionTab) View() string {
@@ -79,7 +91,7 @@ func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
 	}
 	nStyle = nStyle.Background(bg)
 
-	badgeStr := t.badge.Render(bg)
+	badgeStr := t.badge.View()
 	accent := t.accent(bg)
 	accentWidth := 2
 

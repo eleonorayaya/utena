@@ -93,11 +93,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case tea.FocusMsg:
 		m.focused = true
-		return m, nil
+		return m, m.syncTabs()
 
 	case tea.BlurMsg:
 		m.focused = false
-		return m, nil
+		return m, m.syncTabs()
 
 	case tickMsg:
 		cmds := []tea.Cmd{
@@ -111,15 +111,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case provider.SessionsStateUpdatedMsg:
 		m.sessions = msg.Sessions
-		m.syncTabs()
-		return m, nil
+		return m, m.syncTabs()
 
 	case provider.WindowsStateUpdatedMsg:
 		if msg.SessionName != "" {
 			m.windowsBySession[msg.SessionName] = msg.Windows
 		}
-		m.syncTabs()
-		return m, nil
+		return m, m.syncTabs()
 
 	case provider.SessionSwitchedMsg:
 		m.focusNextPane()
@@ -135,9 +133,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) syncTabs() {
+func (m *Model) syncTabs() tea.Cmd {
 	ordered := m.orderedActiveSessions()
 	seen := make(map[uint]bool)
+	var cmds []tea.Cmd
 	for i, s := range ordered {
 		seen[s.ID] = true
 		selected := i == m.cursor && m.focused
@@ -146,18 +145,24 @@ func (m *Model) syncTabs() {
 		if !ok {
 			tab = NewSessionTab(s)
 		}
-		m.tabs[s.ID] = tab.Update(sessionTabMsg{
+		var cmd tea.Cmd
+		tab, cmd = tab.Update(sessionTabMsg{
 			Session:  s,
 			Windows:  windows,
 			Selected: selected,
 			Width:    m.width,
 		})
+		m.tabs[s.ID] = tab
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 	for id := range m.tabs {
 		if !seen[id] {
 			delete(m.tabs, id)
 		}
 	}
+	return tea.Batch(cmds...)
 }
 
 func (m Model) View() string {
@@ -219,14 +224,12 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if m.cursor < len(ordered)-1 {
 			m.cursor++
 		}
-		m.syncTabs()
-		return m, nil
+		return m, m.syncTabs()
 	case key.Matches(msg, keys.Up):
 		if m.cursor > 0 {
 			m.cursor--
 		}
-		m.syncTabs()
-		return m, nil
+		return m, m.syncTabs()
 	case key.Matches(msg, keys.Select):
 		if m.cursor < len(ordered) {
 			s := ordered[m.cursor]
