@@ -80,6 +80,24 @@ func (s *GitService) CurrentBranch(ctx context.Context, repoPath string) (string
 	return strings.TrimSpace(string(output)), nil
 }
 
+func (s *GitService) IsDirty(ctx context.Context, repoPath string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "status", "--porcelain")
+	output, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("git status failed: %w", err)
+	}
+	return strings.TrimSpace(string(output)) != "", nil
+}
+
+func (s *GitService) HasRemoteBranch(ctx context.Context, repoPath string, branch string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "ls-remote", "--heads", "origin", "refs/heads/"+branch)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("git ls-remote failed: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return strings.TrimSpace(string(output)) != "", nil
+}
+
 func (s *GitService) HasBranch(ctx context.Context, repoPath string, branch string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--verify", "refs/heads/"+branch)
 	if err := cmd.Run(); err != nil {
