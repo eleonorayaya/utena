@@ -3,7 +3,6 @@ package statusview
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	colorSurface        = lipgloss.Color("#e8dfd5")
 	colorSurfaceVariant = lipgloss.Color("#dfd6cc")
 	colorSurfaceActive  = lipgloss.Color("#f0e8e0")
 	colorSelection      = lipgloss.Color("#ffd5d5")

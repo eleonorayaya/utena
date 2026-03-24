@@ -35,14 +35,14 @@ func (b StatusBadge) Update(msg tea.Msg) (StatusBadge, tea.Cmd) {
 	return b, nil
 }
 
-func (b StatusBadge) bg() lipgloss.Color {
+func (b StatusBadge) bg() lipgloss.TerminalColor {
 	if b.selected {
 		return colorSelection
 	}
 	if b.isAttached {
 		return colorSurfaceActive
 	}
-	return colorSurface
+	return lipgloss.NoColor{}
 }
 
 func (b StatusBadge) AccentColor() lipgloss.Color {

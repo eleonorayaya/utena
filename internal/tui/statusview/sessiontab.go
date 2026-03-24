@@ -61,22 +61,22 @@ func (t SessionTab) View() string {
 	return strings.Join(lines, "\n")
 }
 
-func (t SessionTab) bg() lipgloss.Color {
+func (t SessionTab) bg() lipgloss.TerminalColor {
 	if t.selected {
 		return colorSelection
 	}
 	if t.session.IsAttached {
 		return colorSurfaceActive
 	}
-	return colorSurface
+	return lipgloss.NoColor{}
 }
 
-func (t SessionTab) accent(bg lipgloss.Color) string {
+func (t SessionTab) accent(bg lipgloss.TerminalColor) string {
 	barBase := lipgloss.NewStyle().Foreground(t.badge.AccentColor())
 	return barBase.Background(bg).Render("▐") + lipgloss.NewStyle().Background(bg).Render(" ")
 }
 
-func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
+func (t SessionTab) renderHeader(bg lipgloss.TerminalColor) []string {
 	s := t.session
 
 	nStyle := lipgloss.NewStyle().Foreground(colorText)
@@ -135,7 +135,7 @@ func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
 	return result
 }
 
-func (t SessionTab) renderWindows(bg lipgloss.Color) []string {
+func (t SessionTab) renderWindows(bg lipgloss.TerminalColor) []string {
 	if len(t.windows) == 0 {
 		return nil
 	}
@@ -158,7 +158,7 @@ func (t SessionTab) renderWindows(bg lipgloss.Color) []string {
 	return lines
 }
 
-func (t SessionTab) padLine(line string, bg lipgloss.Color) string {
+func (t SessionTab) padLine(line string, bg lipgloss.TerminalColor) string {
 	lineWidth := lipgloss.Width(line)
 	if lineWidth < t.width {
 		line += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", t.width-lineWidth))
@@ -166,6 +166,6 @@ func (t SessionTab) padLine(line string, bg lipgloss.Color) string {
 	return line
 }
 
-func (t SessionTab) emptyLine(bg lipgloss.Color) string {
+func (t SessionTab) emptyLine(bg lipgloss.TerminalColor) string {
 	return lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", t.width))
 }
