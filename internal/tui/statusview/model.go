@@ -22,6 +22,7 @@ type tickMsg time.Time
 
 type Model struct {
 	sessions           []session.Session
+	tabs               map[uint]SessionTab
 	windowsBySession   map[string][]tmux.Window
 	currentTmuxSession string
 	paneID             string
@@ -46,6 +47,7 @@ func New() Model {
 	return Model{
 		paneID:             paneID,
 		currentTmuxSession: currentSession,
+		tabs:               make(map[uint]SessionTab),
 		windowsBySession:   make(map[string][]tmux.Window),
 	}
 }
@@ -108,12 +110,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case provider.SessionsStateUpdatedMsg:
 		m.sessions = msg.Sessions
+		m.syncTabs()
 		return m, nil
 
 	case provider.WindowsStateUpdatedMsg:
 		if msg.SessionName != "" {
 			m.windowsBySession[msg.SessionName] = msg.Windows
 		}
+		m.syncTabs()
 		return m, nil
 
 	case provider.SessionSwitchedMsg:
@@ -128,6 +132,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *Model) syncTabs() {
+	ordered := m.orderedActiveSessions()
+	seen := make(map[uint]bool)
+	for i, s := range ordered {
+		seen[s.ID] = true
+		selected := i == m.cursor && m.focused
+		windows := m.windowsBySession[s.TmuxSessionName]
+		tab, ok := m.tabs[s.ID]
+		if !ok {
+			tab = NewSessionTab(s)
+		}
+		m.tabs[s.ID] = tab.Update(s, windows, selected, m.width)
+	}
+	for id := range m.tabs {
+		if !seen[id] {
+			delete(m.tabs, id)
+		}
+	}
 }
 
 func (m Model) focusNextPane() {
@@ -148,11 +172,13 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if m.cursor < len(ordered)-1 {
 			m.cursor++
 		}
+		m.syncTabs()
 		return m, nil
 	case key.Matches(msg, keys.Up):
 		if m.cursor > 0 {
 			m.cursor--
 		}
+		m.syncTabs()
 		return m, nil
 	case key.Matches(msg, keys.Select):
 		if m.cursor < len(ordered) {

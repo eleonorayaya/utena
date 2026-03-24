@@ -1,6 +1,8 @@
 package statusview
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/claude"
 )
@@ -46,6 +48,22 @@ var (
 	reviewBadgeStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#5fafa5"))
 )
+
+func padLine(line string, width int, bg lipgloss.Color) string {
+	lineWidth := lipgloss.Width(line)
+	if lineWidth < width {
+		line += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", width-lineWidth))
+	}
+	return line
+}
+
+func emptyLine(width int, bg lipgloss.Color) string {
+	return lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", width))
+}
+
+func renderAccent(barBase lipgloss.Style, bg lipgloss.Color) string {
+	return barBase.Background(bg).Render("▐") + lipgloss.NewStyle().Background(bg).Render(" ")
+}
 
 func accentBarColor(claudeSessions []claude.ClaudeSession) lipgloss.Color {
 	switch claude.AggregateStatus(claudeSessions) {
