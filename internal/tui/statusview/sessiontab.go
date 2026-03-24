@@ -3,7 +3,9 @@ package statusview
 import (
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tmux"
@@ -12,18 +14,16 @@ import (
 type SessionTab struct {
 	session  session.Session
 	windows  []tmux.Window
-	badge    ClaudeBadge
+	badge    StatusBadge
 	selected bool
 	width    int
 }
 
 func NewSessionTab(s session.Session) SessionTab {
-	tab := SessionTab{
+	return SessionTab{
 		session: s,
-		badge:   NewClaudeBadge(),
+		badge:   NewStatusBadge(s.ClaudeSessions, s.IsAttached),
 	}
-	tab.badge = tab.badge.Update(claudeSessionsMsg{Sessions: s.ClaudeSessions})
-	return tab
 }
 
 type sessionTabMsg struct {
@@ -33,13 +33,20 @@ type sessionTabMsg struct {
 	Width    int
 }
 
-func (t SessionTab) Update(msg sessionTabMsg) SessionTab {
-	t.session = msg.Session
-	t.windows = msg.Windows
-	t.selected = msg.Selected
-	t.width = msg.Width
-	t.badge = t.badge.Update(claudeSessionsMsg{Sessions: msg.Session.ClaudeSessions})
-	return t
+func (t SessionTab) Update(msg tea.Msg) (SessionTab, tea.Cmd) {
+	switch msg := msg.(type) {
+	case sessionTabMsg:
+		t.session = msg.Session
+		t.windows = msg.Windows
+		t.selected = msg.Selected
+		t.width = msg.Width
+		t.badge, _ = t.badge.Update(statusBadgeMsg{
+			ClaudeSessions: msg.Session.ClaudeSessions,
+			Selected:       msg.Selected,
+			IsAttached:     msg.Session.IsAttached,
+		})
+	}
+	return t, nil
 }
 
 func (t SessionTab) View() string {
@@ -55,22 +62,35 @@ func (t SessionTab) View() string {
 	return strings.Join(lines, "\n")
 }
 
-func (t SessionTab) bg() lipgloss.Color {
+func (t SessionTab) bg() lipgloss.TerminalColor {
 	if t.selected {
 		return colorSelection
 	}
 	if t.session.IsAttached {
 		return colorSurfaceActive
 	}
-	return colorSurface
+	return lipgloss.NoColor{}
 }
 
-func (t SessionTab) accent(bg lipgloss.Color) string {
-	barBase := lipgloss.NewStyle().Foreground(t.badge.AccentColor())
+func (t SessionTab) accentColor() lipgloss.Color {
+	switch claude.AggregateStatus(t.session.ClaudeSessions) {
+	case claude.StatusNeedsAttention:
+		return colorPrimary
+	case claude.StatusWorking:
+		return colorAccentLavender
+	case claude.StatusReadyForReview:
+		return colorAccentMint
+	default:
+		return colorSurfaceVariant
+	}
+}
+
+func (t SessionTab) accent(bg lipgloss.TerminalColor) string {
+	barBase := lipgloss.NewStyle().Foreground(t.accentColor())
 	return barBase.Background(bg).Render("▐") + lipgloss.NewStyle().Background(bg).Render(" ")
 }
 
-func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
+func (t SessionTab) renderHeader(bg lipgloss.TerminalColor) []string {
 	s := t.session
 
 	nStyle := lipgloss.NewStyle().Foreground(colorText)
@@ -79,7 +99,7 @@ func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
 	}
 	nStyle = nStyle.Background(bg)
 
-	badgeStr := t.badge.Render(bg)
+	badgeStr := t.badge.View()
 	accent := t.accent(bg)
 	accentWidth := 2
 
@@ -129,7 +149,7 @@ func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
 	return result
 }
 
-func (t SessionTab) renderWindows(bg lipgloss.Color) []string {
+func (t SessionTab) renderWindows(bg lipgloss.TerminalColor) []string {
 	if len(t.windows) == 0 {
 		return nil
 	}
@@ -152,7 +172,7 @@ func (t SessionTab) renderWindows(bg lipgloss.Color) []string {
 	return lines
 }
 
-func (t SessionTab) padLine(line string, bg lipgloss.Color) string {
+func (t SessionTab) padLine(line string, bg lipgloss.TerminalColor) string {
 	lineWidth := lipgloss.Width(line)
 	if lineWidth < t.width {
 		line += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", t.width-lineWidth))
@@ -160,6 +180,6 @@ func (t SessionTab) padLine(line string, bg lipgloss.Color) string {
 	return line
 }
 
-func (t SessionTab) emptyLine(bg lipgloss.Color) string {
+func (t SessionTab) emptyLine(bg lipgloss.TerminalColor) string {
 	return lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", t.width))
 }
