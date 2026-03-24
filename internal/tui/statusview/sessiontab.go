@@ -10,31 +10,40 @@ import (
 )
 
 type SessionTab struct {
+	session  session.Session
+	windows  []tmux.Window
+	badge    ClaudeBadge
+	selected bool
+	width    int
+}
+
+func NewSessionTab(s session.Session) SessionTab {
+	tab := SessionTab{
+		session: s,
+		badge:   NewClaudeBadge(),
+	}
+	tab.badge = tab.badge.Update(claudeSessionsMsg{Sessions: s.ClaudeSessions})
+	return tab
+}
+
+type sessionTabMsg struct {
 	Session  session.Session
 	Windows  []tmux.Window
 	Selected bool
 	Width    int
-	badge    ClaudeBadge
 }
 
-func NewSessionTab(s session.Session) SessionTab {
-	return SessionTab{
-		Session: s,
-		badge:   NewClaudeBadge(s.ClaudeSessions),
-	}
-}
-
-func (t SessionTab) Update(s session.Session, windows []tmux.Window, selected bool, width int) SessionTab {
-	t.Session = s
-	t.Windows = windows
-	t.Selected = selected
-	t.Width = width
-	t.badge = NewClaudeBadge(s.ClaudeSessions)
+func (t SessionTab) Update(msg sessionTabMsg) SessionTab {
+	t.session = msg.Session
+	t.windows = msg.Windows
+	t.selected = msg.Selected
+	t.width = msg.Width
+	t.badge = t.badge.Update(claudeSessionsMsg{Sessions: msg.Session.ClaudeSessions})
 	return t
 }
 
 func (t SessionTab) View() string {
-	if t.Width < 1 {
+	if t.width < 1 {
 		return ""
 	}
 	bg := t.bg()
@@ -47,10 +56,10 @@ func (t SessionTab) View() string {
 }
 
 func (t SessionTab) bg() lipgloss.Color {
-	if t.Selected {
+	if t.selected {
 		return colorSelection
 	}
-	if t.Session.IsAttached {
+	if t.session.IsAttached {
 		return colorSurfaceActive
 	}
 	return colorSurface
@@ -62,7 +71,7 @@ func (t SessionTab) accent(bg lipgloss.Color) string {
 }
 
 func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
-	s := t.Session
+	s := t.session
 
 	nStyle := lipgloss.NewStyle().Foreground(colorText)
 	if s.IsAttached {
@@ -74,7 +83,7 @@ func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
 	accent := t.accent(bg)
 	accentWidth := 2
 
-	maxName := t.Width - accentWidth - lipgloss.Width(badgeStr)
+	maxName := t.width - accentWidth - lipgloss.Width(badgeStr)
 	if badgeStr != "" {
 		maxName--
 	}
@@ -89,7 +98,7 @@ func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
 	nameLine := accent + nameStr
 	if badgeStr != "" {
 		usedWidth := accentWidth + lipgloss.Width(truncName) + lipgloss.Width(badgeStr)
-		pad := t.Width - usedWidth
+		pad := t.width - usedWidth
 		if pad < 1 {
 			pad = 1
 		}
@@ -121,14 +130,14 @@ func (t SessionTab) renderHeader(bg lipgloss.Color) []string {
 }
 
 func (t SessionTab) renderWindows(bg lipgloss.Color) []string {
-	if len(t.Windows) == 0 {
+	if len(t.windows) == 0 {
 		return nil
 	}
 
 	accent := t.accent(bg)
 
 	var lines []string
-	for _, w := range t.Windows {
+	for _, w := range t.windows {
 		marker := "  "
 		wStyle := lipgloss.NewStyle().Foreground(colorTextMuted)
 		if w.Active {
@@ -145,12 +154,12 @@ func (t SessionTab) renderWindows(bg lipgloss.Color) []string {
 
 func (t SessionTab) padLine(line string, bg lipgloss.Color) string {
 	lineWidth := lipgloss.Width(line)
-	if lineWidth < t.Width {
-		line += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", t.Width-lineWidth))
+	if lineWidth < t.width {
+		line += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", t.width-lineWidth))
 	}
 	return line
 }
 
 func (t SessionTab) emptyLine(bg lipgloss.Color) string {
-	return lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", t.Width))
+	return lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", t.width))
 }

@@ -6,15 +6,24 @@ import (
 )
 
 type ClaudeBadge struct {
-	Status claude.ClaudeSessionStatus
+	status claude.ClaudeSessionStatus
 }
 
-func NewClaudeBadge(sessions []claude.ClaudeSession) ClaudeBadge {
-	return ClaudeBadge{Status: claude.AggregateStatus(sessions)}
+func NewClaudeBadge() ClaudeBadge {
+	return ClaudeBadge{}
+}
+
+type claudeSessionsMsg struct {
+	Sessions []claude.ClaudeSession
+}
+
+func (b ClaudeBadge) Update(msg claudeSessionsMsg) ClaudeBadge {
+	b.status = claude.AggregateStatus(msg.Sessions)
+	return b
 }
 
 func (b ClaudeBadge) AccentColor() lipgloss.Color {
-	switch b.Status {
+	switch b.status {
 	case claude.StatusNeedsAttention:
 		return colorPrimary
 	case claude.StatusWorking:
@@ -39,7 +48,7 @@ func (b ClaudeBadge) Width() int {
 }
 
 func (b ClaudeBadge) parts() (*lipgloss.Style, string) {
-	switch b.Status {
+	switch b.status {
 	case claude.StatusNeedsAttention:
 		s := lipgloss.NewStyle().
 			Bold(true).

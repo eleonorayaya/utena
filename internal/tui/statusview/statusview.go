@@ -146,7 +146,12 @@ func (m *Model) syncTabs() {
 		if !ok {
 			tab = NewSessionTab(s)
 		}
-		m.tabs[s.ID] = tab.Update(s, windows, selected, m.width)
+		m.tabs[s.ID] = tab.Update(sessionTabMsg{
+			Session:  s,
+			Windows:  windows,
+			Selected: selected,
+			Width:    m.width,
+		})
 	}
 	for id := range m.tabs {
 		if !seen[id] {
