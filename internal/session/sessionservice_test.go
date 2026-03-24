@@ -477,6 +477,36 @@ func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testi
 	require.Equal(t, ResourceReady, retrieved.Resources.Worktree.Status)
 }
 
+func TestSessionService_CreateSession_WithWorktree_ReusesLocalOnlyBranch(t *testing.T) {
+	repoPath := initTestRepo(t)
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+
+	ctx := context.Background()
+	branchName := "feature/local-only"
+	worktreePath := filepath.Join(repoPath, ".worktrees", "feature-local-only")
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, "main")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "pre-create worktree failed: %s", string(out))
+
+	session := &Session{
+		Name:        branchName,
+		WorkspaceID: wsGitID,
+		Branch:      branchName,
+	}
+
+	err = service.CreateSession(ctx, session, true)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+
+	require.Equal(t, worktreePath, retrieved.WorktreePath)
+	require.Equal(t, ResourceReady, retrieved.Resources.Branch.Status)
+	require.Equal(t, ResourceReady, retrieved.Resources.Worktree.Status)
+}
+
 func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	repoPath := initTestRepo(t)
 	service, sessionStore, mock, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())

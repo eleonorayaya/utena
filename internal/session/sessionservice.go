@@ -201,9 +201,40 @@ func (s *SessionService) setupBranch(ctx context.Context, sess *Session, ws *wor
 		pullBranch = sess.BaseBranch
 	}
 
+	hasRemote, err := s.gitService.HasRemoteBranch(ctx, ws.Path, pullBranch)
+	if err != nil {
+		return fmt.Errorf("failed to check remote branch %q: %v", pullBranch, err)
+	}
+
+	if !hasRemote {
+		hasLocal, err := s.gitService.HasBranch(ctx, ws.Path, pullBranch)
+		if err != nil {
+			return fmt.Errorf("failed to check local branch %q: %v", pullBranch, err)
+		}
+		if !hasLocal {
+			return fmt.Errorf("branch %q does not exist locally or on remote", pullBranch)
+		}
+		return nil
+	}
+
+	checkPath := s.gitService.WorktreePath(ws.Path, pullBranch)
+	if _, err := os.Stat(checkPath); os.IsNotExist(err) {
+		checkPath = ws.Path
+	}
+
+	dirty, err := s.gitService.IsDirty(ctx, checkPath)
+	if err != nil {
+		return fmt.Errorf("failed to check dirty state for %q: %v", pullBranch, err)
+	}
+
+	if dirty {
+		return nil
+	}
+
 	if err := s.gitService.Pull(ctx, ws.Path, pullBranch); err != nil {
 		return fmt.Errorf("failed to pull branch %q: %v", pullBranch, err)
 	}
+
 	return nil
 }
 
