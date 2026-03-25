@@ -22,12 +22,12 @@ func (c *ClaudeController) HandleHookEvent(w http.ResponseWriter, r *http.Reques
 
 	data := &HookEventRequest{}
 	if err := render.Bind(r, data); err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	if err := c.service.HandleHookEvent(ctx, data); err != nil {
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -39,7 +39,7 @@ func (c *ClaudeController) ListClaudeSessions(w http.ResponseWriter, r *http.Req
 
 	sessions, err := c.service.ListAll(ctx)
 	if err != nil {
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 

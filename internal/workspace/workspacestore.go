@@ -11,18 +11,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/spf13/afero"
 	"gorm.io/gorm"
 )
-
-type WorkspaceNotFoundError struct {
-	WorkspaceID string
-}
-
-func (e *WorkspaceNotFoundError) Error() string {
-	return "workspace not found: " + e.WorkspaceID
-}
 
 type config struct {
 	WorkspaceRoots []string `json:"workspace_roots"`
@@ -51,7 +44,7 @@ func (s *WorkspaceStore) GetByID(id uint) (*Workspace, error) {
 	var ws Workspace
 	if err := s.db.First(&ws, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, &WorkspaceNotFoundError{WorkspaceID: fmt.Sprintf("%d", id)}
+			return nil, common.NewNotFound(fmt.Sprintf("workspace not found: %d", id))
 		}
 		return nil, err
 	}
@@ -62,7 +55,7 @@ func (s *WorkspaceStore) GetByPath(path string) (*Workspace, error) {
 	var ws Workspace
 	if err := s.db.First(&ws, "path = ?", path).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, &WorkspaceNotFoundError{WorkspaceID: path}
+			return nil, common.NewNotFound("workspace not found: " + path)
 		}
 		return nil, err
 	}
@@ -114,7 +107,7 @@ func (s *WorkspaceStore) Update(ws *Workspace) error {
 	var existing Workspace
 	if err := s.db.First(&existing, "id = ?", ws.ID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return &WorkspaceNotFoundError{WorkspaceID: fmt.Sprintf("%d", ws.ID)}
+			return common.NewNotFound(fmt.Sprintf("workspace not found: %d", ws.ID))
 		}
 		return err
 	}

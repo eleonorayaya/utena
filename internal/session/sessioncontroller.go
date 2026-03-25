@@ -1,12 +1,10 @@
 package session
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/eleonorayaya/utena/internal/common"
-	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
 )
@@ -35,7 +33,7 @@ func (c *SessionController) ListSessions(w http.ResponseWriter, r *http.Request)
 
 	sessions, err := c.service.ListSessions(ctx)
 	if err != nil {
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -47,13 +45,13 @@ func (c *SessionController) GetSessionByID(w http.ResponseWriter, r *http.Reques
 	ctx := r.Context()
 	id, err := parseUintParam(r, "id")
 	if err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	session, err := c.service.GetSession(ctx, id)
 	if err != nil {
-		render.Render(w, r, common.ErrNotFound())
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -65,13 +63,13 @@ func (c *SessionController) ListSessionsByWorkspace(w http.ResponseWriter, r *ht
 	raw := chi.URLParam(r, "workspaceId")
 	workspaceID, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	sessions, err := c.service.ListSessionsByWorkspace(ctx, uint(workspaceID))
 	if err != nil {
-		render.Render(w, r, common.ErrNotFound())
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -84,7 +82,7 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 
 	data := &CreateSessionRequest{}
 	if err := render.Bind(r, data); err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
@@ -97,12 +95,7 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := c.service.CreateSession(ctx, session, data.CreateWorktree); err != nil {
-		var wsNotFound *workspace.WorkspaceNotFoundError
-		if errors.Is(err, ErrSessionAlreadyExists) || errors.As(err, &wsNotFound) {
-			render.Render(w, r, common.ErrInvalidRequest(err))
-			return
-		}
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -114,25 +107,20 @@ func (c *SessionController) UpdateSession(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	id, err := parseUintParam(r, "id")
 	if err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	data := &UpdateSessionRequest{}
 	if err := render.Bind(r, data); err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	data.Session.ID = id
 
 	if err := c.service.UpdateSession(ctx, data.Session); err != nil {
-		var wsNotFound *workspace.WorkspaceNotFoundError
-		if errors.As(err, &wsNotFound) {
-			render.Render(w, r, common.ErrInvalidRequest(err))
-			return
-		}
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -143,22 +131,14 @@ func (c *SessionController) DeleteSession(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	id, err := parseUintParam(r, "id")
 	if err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	deleteBranch := r.URL.Query().Get("delete_branch") != "false"
 
 	if err := c.service.DeleteSession(ctx, id, deleteBranch); err != nil {
-		if errors.Is(err, ErrSessionNotFound) {
-			render.Render(w, r, common.ErrNotFound())
-			return
-		}
-		if errors.Is(err, ErrSessionAttached) {
-			render.Render(w, r, common.ErrInvalidRequest(err))
-			return
-		}
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -169,19 +149,13 @@ func (c *SessionController) ActivateSession(w http.ResponseWriter, r *http.Reque
 	ctx := r.Context()
 	id, err := parseUintParam(r, "id")
 	if err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	session, err := c.service.ActivateSession(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrSessionNotFound) {
-			render.Render(w, r, common.ErrNotFound())
-		} else if errors.Is(err, ErrCannotActivate) {
-			render.Render(w, r, common.ErrInvalidRequest(err))
-		} else {
-			render.Render(w, r, common.ErrUnknown(err))
-		}
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -192,19 +166,13 @@ func (c *SessionController) RepairSession(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	id, err := parseUintParam(r, "id")
 	if err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	session, err := c.service.RepairSession(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrSessionNotFound) {
-			render.Render(w, r, common.ErrNotFound())
-		} else if errors.Is(err, ErrSessionNotBroken) {
-			render.Render(w, r, common.ErrInvalidRequest(err))
-		} else {
-			render.Render(w, r, common.ErrUnknown(err))
-		}
+		common.RenderError(w, r, err)
 		return
 	}
 

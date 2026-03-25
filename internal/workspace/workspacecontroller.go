@@ -28,7 +28,7 @@ func (c *WorkspaceController) ListWorkspaces(w http.ResponseWriter, r *http.Requ
 
 	workspaces, err := c.service.ListWorkspaces(ctx)
 	if err != nil {
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -41,13 +41,13 @@ func (c *WorkspaceController) GetWorkspaceByID(w http.ResponseWriter, r *http.Re
 	raw := chi.URLParam(r, "id")
 	id, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	workspace, err := c.service.GetWorkspace(ctx, uint(id))
 	if err != nil {
-		render.Render(w, r, common.ErrNotFound())
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -60,13 +60,13 @@ func (c *WorkspaceController) AddWorkspace(w http.ResponseWriter, r *http.Reques
 
 	var req AddWorkspaceRequest
 	if err := render.Bind(r, &req); err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	ws, err := c.service.AddWorkspace(ctx, req.Path, req.AsRoot)
 	if err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.WrapInvalidRequest("add workspace failed", err))
 		return
 	}
 
@@ -84,24 +84,24 @@ func (c *WorkspaceController) ListBranches(w http.ResponseWriter, r *http.Reques
 	raw := chi.URLParam(r, "id")
 	id, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	ws, err := c.service.GetWorkspace(ctx, uint(id))
 	if err != nil {
-		render.Render(w, r, common.ErrNotFound())
+		common.RenderError(w, r, err)
 		return
 	}
 
 	if !ws.IsGitRepo {
-		render.Render(w, r, common.ErrInvalidRequest(fmt.Errorf("workspace is not a git repository")))
+		common.RenderError(w, r, common.NewInvalidRequest(fmt.Sprintf("workspace %q is not a git repository", ws.Name)))
 		return
 	}
 
 	branches, err := c.gitService.ListBranches(ctx, ws.Path)
 	if err != nil {
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 

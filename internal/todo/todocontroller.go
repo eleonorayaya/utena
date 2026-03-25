@@ -24,7 +24,7 @@ func (c *TodoController) ListTodos(w http.ResponseWriter, r *http.Request) {
 
 	todos, err := c.service.List(ctx)
 	if err != nil {
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -37,13 +37,13 @@ func (c *TodoController) CreateTodo(w http.ResponseWriter, r *http.Request) {
 
 	data := &CreateTodoRequest{}
 	if err := render.Bind(r, data); err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	t, err := c.service.Create(ctx, data.Name, data.Description, data.WorkspaceID)
 	if err != nil {
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -56,16 +56,12 @@ func (c *TodoController) DeleteTodo(w http.ResponseWriter, r *http.Request) {
 	raw := chi.URLParam(r, "id")
 	id, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
 	if err := c.service.Delete(ctx, uint(id)); err != nil {
-		if err == ErrTodoNotFound {
-			render.Render(w, r, common.ErrNotFound())
-			return
-		}
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 
