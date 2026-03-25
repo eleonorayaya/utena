@@ -1,57 +1,108 @@
 package common
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/render"
 )
 
-type ErrResponse struct {
-	Err            error `json:"-"` // low-level runtime error
-	HTTPStatusCode int   `json:"-"` // http response status code
+type ErrorCategory int
 
-	StatusText string `json:"status"`          // user-level status message
-	AppCode    int64  `json:"code,omitempty"`  // application-specific error code
-	ErrorText  string `json:"error,omitempty"` // application-level error message, for debugging
+const (
+	CategoryNotFound ErrorCategory = iota
+	CategoryInvalidRequest
+	CategoryConflict
+)
+
+type AppError struct {
+	Category ErrorCategory
+	Message  string
+	Err      error
 }
 
-func (e *ErrResponse) Render(w http.ResponseWriter, r *http.Request) error {
+func (e *AppError) Error() string {
+	if e.Err != nil {
+		return e.Message + ": " + e.Err.Error()
+	}
+	return e.Message
+}
+
+func (e *AppError) Unwrap() error {
+	return e.Err
+}
+
+func NewNotFound(msg string) *AppError {
+	return &AppError{Category: CategoryNotFound, Message: msg}
+}
+
+func NewInvalidRequest(msg string) *AppError {
+	return &AppError{Category: CategoryInvalidRequest, Message: msg}
+}
+
+func NewConflict(msg string) *AppError {
+	return &AppError{Category: CategoryConflict, Message: msg}
+}
+
+func WrapNotFound(msg string, err error) *AppError {
+	return &AppError{Category: CategoryNotFound, Message: msg, Err: err}
+}
+
+func WrapInvalidRequest(msg string, err error) *AppError {
+	return &AppError{Category: CategoryInvalidRequest, Message: msg, Err: err}
+}
+
+func WrapConflict(msg string, err error) *AppError {
+	return &AppError{Category: CategoryConflict, Message: msg, Err: err}
+}
+
+type errResponse struct {
+	Err            error `json:"-"`
+	HTTPStatusCode int   `json:"-"`
+
+	StatusText string `json:"status"`
+	ErrorText  string `json:"error,omitempty"`
+}
+
+func (e *errResponse) Render(w http.ResponseWriter, r *http.Request) error {
 	render.Status(r, e.HTTPStatusCode)
 	return nil
 }
 
-func ErrInvalidRequest(err error) render.Renderer {
-	return &ErrResponse{
-		Err:            err,
-		HTTPStatusCode: 400,
-		StatusText:     "Invalid request.",
-		ErrorText:      err.Error(),
-	}
-}
+func RenderError(w http.ResponseWriter, r *http.Request, err error) {
+	var appErr *AppError
+	if errors.As(err, &appErr) {
+		var statusCode int
+		var statusText string
 
-func ErrRender(err error) render.Renderer {
-	return &ErrResponse{
-		Err:            err,
-		HTTPStatusCode: 422,
-		StatusText:     "Error rendering response.",
-		ErrorText:      err.Error(),
-	}
-}
+		switch appErr.Category {
+		case CategoryNotFound:
+			statusCode = http.StatusNotFound
+			statusText = "Resource not found."
+		case CategoryInvalidRequest:
+			statusCode = http.StatusBadRequest
+			statusText = "Invalid request."
+		case CategoryConflict:
+			statusCode = http.StatusConflict
+			statusText = "Conflict."
+		default:
+			statusCode = http.StatusInternalServerError
+			statusText = "Internal server error."
+		}
 
-func ErrUnknown(err error) render.Renderer {
-	return &ErrResponse{
-		Err:            err,
-		HTTPStatusCode: 500,
-		StatusText:     "Error rendering response.",
-		ErrorText:      err.Error(),
+		render.Render(w, r, &errResponse{
+			Err:            appErr,
+			HTTPStatusCode: statusCode,
+			StatusText:     statusText,
+			ErrorText:      appErr.Error(),
+		})
+		return
 	}
-}
 
-func ErrNotFound() render.Renderer {
-	return &ErrResponse{
-		Err:            nil,
-		HTTPStatusCode: 404,
-		StatusText:     "Resource not found.",
-		ErrorText:      "The requested resource does not exist.",
-	}
+	render.Render(w, r, &errResponse{
+		Err:            err,
+		HTTPStatusCode: http.StatusInternalServerError,
+		StatusText:     "Internal server error.",
+		ErrorText:      err.Error(),
+	})
 }

@@ -1,12 +1,11 @@
 package claude
 
 import (
-	"errors"
-
+	"github.com/eleonorayaya/utena/internal/common"
 	"gorm.io/gorm"
 )
 
-var ErrClaudeSessionNotFound = errors.New("claude session not found")
+var ErrClaudeSessionNotFound = common.NewNotFound("claude session not found")
 
 type ClaudeSessionStatus string
 

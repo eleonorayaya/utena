@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
@@ -106,7 +107,7 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 			session.TmuxSessionName = SanitizeTmuxName(session.Name)
 		}
 	default:
-		return fmt.Errorf("session name or branch is required")
+		return common.NewInvalidRequest("session name or branch is required")
 	}
 
 	res := &Resources{
@@ -513,7 +514,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 	}
 
 	if session.Status == StatusCreating {
-		return fmt.Errorf("cannot delete session while it is being created")
+		return common.NewInvalidRequest("cannot delete session while it is being created")
 	}
 
 	if session.Resources == nil {
