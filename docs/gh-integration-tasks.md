@@ -121,7 +121,7 @@ Create the shared signal types used by all modules.
 - `internal/git/prstore_test.go`
 
 **Work:**
-- Define `PRState` constants: `open`, `closed`, `merged`, `draft`
+- Define `PRState` constants: `open`, `closed`, `merged` (draft is a boolean flag, not a lifecycle state)
 - Define `PullRequest` struct with GORM tags (composite unique on RepoID+Number, HeadBranchID index)
 - Implement `PRStore`: `Add`, `GetByID`, `GetByRepoAndNumber`, `ListByRepo`, `ListByBranch`, `ListByState`, `Upsert`, `Update`
 - `ListByBranch` filters by `HeadBranchID`
@@ -137,7 +137,8 @@ Create the shared signal types used by all modules.
 - Upsert creates/updates
 - Signals: open PR returns info signal
 - Signals: merged PR returns info signal with "merged" label
-- Signals: draft PR returns info signal with "draft" label
+- Signals: open + IsDraft PR returns info signal with "draft" label
+- State and IsDraft are independent (open+draft, open+not-draft both valid)
 
 **Dependencies:** Task 1.1, Task 1.2, Task 1.3
 
@@ -291,7 +292,7 @@ These tasks build the service layer on top of the models and stores.
 - `parseRepoFullName` returns error for invalid URLs
 - Existing test coverage remains passing (updated for unexported methods)
 
-**Dependencies:** Phase 1 complete (specifically Task 1.2, 1.3, 1.4 for types)
+**Dependencies:** None (pure refactor of existing code — rename + unexport)
 
 ---
 
@@ -326,7 +327,7 @@ These tasks build the service layer on top of the models and stores.
 - `IsHealthy` returns false when worktree has wrong branch
 - `HasWorktree` returns true/false correctly
 
-**Dependencies:** Task 1.2, 1.3, 1.4, Task 2.1
+**Dependencies:** Task 1.2, 1.3, 1.4, 2.1
 
 ---
 
@@ -386,6 +387,8 @@ These tasks build the service layer on top of the models and stores.
 - `GetPRsForBranch` returns correct PRs
 - `GetPRDiff` returns structured diff
 - `SyncBranches` calls SyncBranch for each tracked branch
+- `SyncAssignedPRs` with nil GitHubClient (degraded mode) returns empty result, no error
+- `SyncRepoPRs` with nil GitHubClient skips GitHub fetch, returns without error
 
 **Dependencies:** Task 2.2, Task 2.3, Task 1.5, Task 1.6
 
@@ -399,26 +402,29 @@ These tasks build the service layer on top of the models and stores.
 - `internal/tmux/tmuxservice_test.go`
 
 **Work:**
-- Rewrite `TmuxService` to hold `*gotmux.Tmux` directly (no `TmuxClient` interface layer)
-- Add `*TmuxStore` dependency for persistence
-- `CreateSession(name, startDir, env)` → creates tmux session via gotmux + inserts TmuxSession DB record → returns `*TmuxSession`
+- Define internal `tmuxRunner` interface (unexported) wrapping gotmux operations: `newSession`, `killSession`, `hasSession`, `switchClient`, `listSessionNames`, `command`
+- Implement `gotmuxRunner` struct wrapping `*gotmux.Tmux`
+- Rewrite `TmuxService` to depend on `tmuxRunner` interface + `*TmuxStore` + `eventbus.EventBus`
+- `CreateSession(name, startDir, env)` → creates tmux session via runner + inserts TmuxSession DB record → returns `*TmuxSession`
 - `KillSession(id)` → kills tmux session + deletes DB record
 - `RecreateSession(id)` → loads TmuxSession from DB → creates tmux session with stored name/startDir/env → sets IsAlive=true
-- `HasSession(name)` → live check via gotmux
-- `SwitchClient(targetSession)` → delegates to gotmux
-- Hook handlers: update `IsAlive` on DB record, publish events
-- Remove `TmuxClient` interface
-- For testability: accept gotmux instance as parameter (nil = tmux not available). Tests can provide a mock or nil.
-- `GetCurrentSessionName`, `SyncWindows`, `GetWindows`, `ListSessionNames` — preserved with gotmux direct calls
+- `HasSession(name)` → live check via runner
+- `SwitchClient(targetSession)` → delegates to runner
+- Hook handlers: update `IsAlive` on DB record, publish events. **Skip sessions in `creating` status** (activation goroutine is the authority)
+- Remove public `TmuxClient` interface and `gotmuxClient` struct
+- `GetCurrentSessionName`, `SyncWindows`, `GetWindows`, `ListSessionNames` — preserved via runner
+- Window state remains in-memory (intentionally ephemeral)
 
-**Tests (in-memory SQLite, nil gotmux for DB-only tests):**
+**Tests (in-memory SQLite + mock tmuxRunner):**
 - CreateSession persists TmuxSession record with correct fields
-- KillSession deletes record
+- CreateSession calls runner.newSession with correct args
+- KillSession deletes record and calls runner.killSession
 - RecreateSession loads record and sets IsAlive=true
 - HandleSessionClosed sets IsAlive=false and publishes event
 - HandleSessionCreated sets IsAlive=true and publishes event
 - GetSession/GetSessionByName load correctly
-- Service works gracefully when gotmux is nil (returns ErrTmuxNotAvailable)
+- Service works gracefully when runner is nil (returns ErrTmuxNotAvailable)
+- Env map round-trips correctly through JSON serialization
 
 **Dependencies:** Task 1.7
 
@@ -472,13 +478,15 @@ These tasks build the service layer on top of the models and stores.
 ## Phase 2 Parallelism Summary
 
 ```
-Can run in parallel after Phase 1:
-  Task 2.1 (gitCLI rename)
-  Task 2.3 (GitHub client)
-  Task 2.5 (consolidated tmux service)
+Can start immediately (no Phase 1 dependency):
+  Task 2.1 (gitCLI rename) — pure refactor, can run in parallel with Phase 1
 
-After 2.1:
-  Task 2.2 (GitService facade) — needs gitCLI
+Can run in parallel after Phase 1:
+  Task 2.3 (GitHub client) — needs 1.5
+  Task 2.5 (consolidated tmux service) — needs 1.7
+
+After 2.1 + 1.2-1.4:
+  Task 2.2 (GitService facade) — needs gitCLI + model stores
 
 After 2.2 + 2.3:
   Task 2.4 (GitService PR ops) — needs facade + GitHub client
@@ -531,10 +539,11 @@ These tasks wire the new modules together and update existing modules.
 - `internal/session/sessionstore_test.go`
 
 **Work:**
-- Add new statuses: `StatusPending`, `StatusActive`, `StatusInactive`, `StatusArchived`
-- Rename `StatusReady` → `StatusActive` (or add as alias during migration)
+- **Rename** `StatusReady` → `StatusActive` (existing status, new name)
+- **Preserve** `StatusCreating`, `StatusBroken`, `StatusDeleted` (unchanged)
+- **Add new** statuses: `StatusPending`, `StatusInactive`, `StatusArchived`
 - Remove fields: `TmuxSessionName`, `Branch`, `BaseBranch`, `WorktreePath`, `Resources`
-- Add fields: `BranchID *uint`, `TmuxSessionID *uint`
+- Add fields: `BranchID *uint`, `TmuxSessionID *uint`, `StatusError string`
 - Add relationships: `GitBranch *git.Branch`, `TmuxSession *tmux.TmuxSession`
 - Update `SessionStore.GetByID` to Joins GitBranch and TmuxSession
 - Update `SessionStore.List` to Joins GitBranch and TmuxSession
@@ -566,17 +575,18 @@ These tasks wire the new modules together and update existing modules.
 - Accept `*git.GitModule` and `*tmux.TmuxModule` (modules, not services) in constructor
 - Extract services internally: `gitMod.Service`, `tmuxMod.Service`
 - **Rewrite `CreateSession`**: creates session record with BranchID (find/create Branch via git module). For pending sessions, just creates the record. For immediate sessions, sets status=creating and launches async setup.
-- **Implement async `ActivateSession`**: always returns 202. Launches background goroutine. Handles pending (full setup), inactive (tmux recreation), active (client switch).
+- **Implement async `ActivateSession`**: always returns 202. Rejects if status is `creating` (concurrency guard). For pending/inactive: sets `creating`, launches background goroutine. For active: stays `active`, launches client switch in background.
 - **Implement `ArchiveSession`**: validates active/inactive, calls `gitService.CleanupBranch`, calls `tmuxService.KillSession`, sets archived
 - **Implement `DismissSession`**: validates pending, creates DismissedPR record, deletes session
 - **Rewrite tmux event handlers**:
-  - `handleTmuxSessionClosed`: find session by TmuxSessionID → set status=inactive (not broken)
-  - `handleTmuxSessionCreated`: find session by TmuxSessionID → if inactive, set active
+  - `handleTmuxSessionClosed`: find session by TmuxSessionID → **skip if status=creating** → set status=inactive (not broken)
+  - `handleTmuxSessionCreated`: find session by TmuxSessionID → **skip if status=creating** → if inactive, set active
   - `handleTmuxClientSessionChanged`: update IsAttached flags
 - **Rewrite `RefreshSession`** → `ReconcileSession`: checks git health via `gitService.IsHealthy`, checks tmux via TmuxSession.IsAlive. Transitions as needed.
-- **Rewrite `RepairSession`**: sets creating, launches async setup to fix git state
+- **Rewrite `RepairSession`**: sets creating, clears StatusError, launches async setup to fix git state
 - **Rewrite `DeleteSession`**: cleanup git + tmux, set deleted
-- **Subscribe to `git.pr_discovered`**: check for existing session with matching BranchID, check DismissedPR, create pending session if appropriate
+- **Subscribe to `git.pr_discovered`**: check for existing session with matching BranchID, check DismissedPR, create pending session. Use most recently used workspace when multiple match.
+- **Subscribe to `git.pr_state_changed`**: when PR transitions to merged, check if all PRs for the branch are merged/closed. If so, add signal "All PRs merged — archive?" (no auto-transition, user decides).
 - **RegisterSyncTasks**: register `session.reconcile` task
 
 **Tests (in-memory SQLite + mock git/tmux services):**
@@ -586,13 +596,17 @@ These tasks wire the new modules together and update existing modules.
 - ActivateSession from inactive → creating → active (tmux recreated)
 - ActivateSession from active → switches client
 - ActivateSession from broken/archived → error
+- ActivateSession from creating → error (concurrency guard)
+- ActivateSession from active → stays active (no creating transition), switches client
 - ArchiveSession from active → cleans up, sets archived
 - ArchiveSession from inactive → sets archived
 - ArchiveSession from pending → error
 - DismissSession from pending → creates DismissedPR, deletes session
 - DismissSession from non-pending → error
 - handleTmuxSessionClosed → session goes inactive (NOT broken)
+- handleTmuxSessionClosed → skips session in creating status
 - handleTmuxSessionCreated → inactive session goes active
+- handleTmuxSessionCreated → skips session in creating status
 - handleTmuxClientSessionChanged → IsAttached flags updated
 - ReconcileSession: active + tmux dead → inactive
 - ReconcileSession: active + worktree gone → broken
@@ -600,8 +614,14 @@ These tasks wire the new modules together and update existing modules.
 - git.pr_discovered creates pending session when no existing session for branch
 - git.pr_discovered skips when session exists for branch
 - git.pr_discovered skips when PR is dismissed
+- git.pr_discovered uses most recently used workspace when multiple match same repo
+- git.pr_state_changed to merged → signal surfaced on linked session
+- git.pr_state_changed to merged when all PRs merged → "archive?" signal
+- Activation from pending runs worktree-init scripts when worktree is newly created
+- Activation failure persists error in StatusError field
+- StatusError is cleared on next successful activation
 - DeleteSession cleans up all resources
-- RepairSession from broken → creating → re-runs setup
+- RepairSession from broken → creating → re-runs setup, clears StatusError
 
 **Dependencies:** Task 3.2, Task 2.6, Task 2.7, Task 1.8
 
@@ -686,6 +706,7 @@ These tasks wire the new modules together and update existing modules.
   - Update `sessionModule` creation (pass all modules)
   - Create `syncManager`, register tasks, add to lifecycle
 - Add `gitModule` to `modules()` list
+- **Module order in `modules()` must be: git, tmux, workspace, claude, session** — ensures GORM creates git/tmux tables before session table references them via FKs
 - Update `OnStart`: start sync manager after all modules
 - Update `OnEnd`: stop sync manager before stopping modules
 - Add config fields: `GitHubSyncInterval`, `BranchSyncInterval`, `SessionReconcileInterval`, `GitHubEnabled`
@@ -697,10 +718,12 @@ These tasks wire the new modules together and update existing modules.
 ## Phase 3 Parallelism Summary
 
 ```
+Can run as soon as Task 1.1 completes (during Phase 1/2):
+  Task 3.6 (claude signals) — only needs Signal types
+
 Can run in parallel after Phase 2:
   Task 3.1 (workspace update) — needs GitModule
   Task 3.2 (session model) — needs Branch + TmuxSession models
-  Task 3.6 (claude signals) — needs Signal types only
 
 After 3.2 + Phase 2:
   Task 3.3 (session service) — needs everything
@@ -779,48 +802,49 @@ After all:
 ## Full Dependency Graph
 
 ```
-Phase 1 (Foundation):
-  1.1 ─────────────────────────────────┐
-  1.2 ──────────┬──────────┬───────────┤
-  1.6 ──────────│──────────│───────────┤
-  1.7 ──────────│──────────│───────────┤
-  1.8 ──────────│──────────│───────────┤
-  1.9 ──────────│──────────│───────────┤
-                │          │           │
-  1.3 ◄─── 1.1 + 1.2      │           │
-                │          │           │
-  1.4 ◄─── 1.2 + 1.3      │           │
-                │          │           │
-  1.5 ◄─── 1.1 + 1.2 + 1.3            │
-                                       │
-Phase 2 (Services):                    │
-  2.1 ◄─── Phase 1                     │
-  2.3 ◄─── 1.5                        │
-  2.5 ◄─── 1.7                        │
-                                       │
-  2.2 ◄─── 2.1 + 1.2-1.4             │
-  2.7 ◄─── 2.5                        │
-                                       │
-  2.4 ◄─── 2.2 + 2.3 + 1.5 + 1.6    │
-                                       │
-  2.6 ◄─── 2.2 + 2.4                  │
-                                       │
-Phase 3 (Integration):                │
-  3.1 ◄─── 2.6                        │
-  3.2 ◄─── 1.3 + 1.7                  │
-  3.6 ◄─── 1.1                        │
-                                       │
-  3.3 ◄─── 3.2 + 2.6 + 2.7 + 1.8    │
-  3.4 ◄─── 3.3                        │
-  3.5 ◄─── 3.3 + 3.4                  │
-                                       │
-  3.7 ◄─── 2.6 + 2.7 + 3.5 + 1.9    │
-                                       │
-Phase 4 (Integration Tests):          │
-  4.1 ◄─── 3.7                        │
-  4.2 ◄─── 2.6                        │
-  4.3 ◄─── 1.9 + 3.7                  │
+Phase 1 (Foundation) — all can start immediately unless noted:
+  1.1 (signals)        — no deps
+  1.2 (repo)           — no deps
+  1.6 (diff parser)    — no deps
+  1.7 (tmux session)   — no deps
+  1.8 (dismissed PR)   — no deps
+  1.9 (sync manager)   — no deps
+
+  1.3 (branch)         ◄── 1.1 + 1.2
+  1.4 (worktree)       ◄── 1.2 + 1.3
+  1.5 (pull request)   ◄── 1.1 + 1.2 + 1.3
+
+Phase 2 (Services):
+  2.1 (gitCLI rename)  — no deps (can start immediately, parallel with Phase 1)
+  2.3 (GitHub client)  ◄── 1.5
+  2.5 (tmux service)   ◄── 1.7
+
+  2.2 (GitService)     ◄── 2.1 + 1.2 + 1.3 + 1.4
+  2.7 (TmuxModule)     ◄── 2.5
+
+  2.4 (GitService PR)  ◄── 2.2 + 2.3 + 1.5 + 1.6
+  2.6 (GitModule)      ◄── 2.2 + 2.4
+
+Phase 3 (Integration):
+  3.6 (claude signals) ◄── 1.1 (can start during Phase 1)
+  3.1 (workspace)      ◄── 2.6
+  3.2 (session model)  ◄── 1.3 + 1.7
+
+  3.3 (session service)◄── 3.2 + 2.6 + 2.7 + 1.8
+  3.4 (session ctrl)   ◄── 3.3
+  3.5 (session module) ◄── 3.3 + 3.4
+
+  3.7 (app wiring)     ◄── 2.6 + 2.7 + 3.5 + 1.9
+
+Phase 4 (Integration Tests):
+  4.1 (E2E session)    ◄── 3.7
+  4.2 (git sync)       ◄── 2.6 (can start during Phase 3)
+  4.3 (sync manager)   ◄── 1.9 + 3.7
 ```
+
+**Critical path:** 1.1 → 1.3 → 1.4 → 2.2 → 2.4 → 2.6 → 3.3 → 3.4 → 3.5 → 3.7 → 4.1 (11 sequential steps)
+
+Note: Task 2.1 runs parallel with Phase 1, and Task 3.6 can start as soon as 1.1 completes. Task 4.2 can start as soon as 2.6 completes (during Phase 3).
 
 ---
 

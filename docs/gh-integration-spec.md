@@ -18,6 +18,7 @@ This specification describes a restructuring of utena's data model and session l
 - PR creation, review, or approval from utena
 - PR check status, review decisions, additions/deletions/changed files tracking
 - Syntax-highlighted diff rendering
+- PRs from forked repositories (head branch in a different repo than base)
 
 ---
 
@@ -92,7 +93,6 @@ const (
     PRStateOpen   PRState = "open"
     PRStateClosed PRState = "closed"
     PRStateMerged PRState = "merged"
-    PRStateDraft  PRState = "draft"
 )
 
 type PullRequest struct {
@@ -101,12 +101,12 @@ type PullRequest struct {
     RepoID       uint      `gorm:"uniqueIndex:idx_pr_repo"`
     Title        string
     Body         string
-    State        PRState
+    State        PRState   // open, closed, merged (lifecycle state)
+    IsDraft      bool      // orthogonal to State — a PR can be open and draft simultaneously
     URL          string
     HeadBranchID uint      `gorm:"index"`
     BaseBranchID *uint
     AuthorLogin  string
-    IsDraft      bool
     MergedAt     *time.Time
     LastSyncedAt time.Time
 
@@ -365,7 +365,20 @@ type TmuxService struct {
 }
 ```
 
-The `TmuxClient` interface is removed. `TmuxService` calls `gotmux` directly and manages DB persistence in the same operations.
+The public `TmuxClient` interface is removed. Internally, `TmuxService` depends on a small unexported `tmuxRunner` interface for the gotmux dependency, enabling test doubles:
+
+```go
+type tmuxRunner interface {
+    newSession(name, startDir string, env map[string]string) error
+    killSession(name string) error
+    hasSession(name string) bool
+    switchClient(target string) error
+    listSessionNames() ([]string, error)
+    command(args ...string) (string, error)
+}
+```
+
+The production implementation wraps `*gotmux.Tmux`. Tests provide a mock `tmuxRunner`. This keeps testability without exposing the interface to other modules — external consumers depend on `*TmuxService` directly.
 
 #### Methods
 
@@ -384,8 +397,8 @@ The `TmuxClient` interface is removed. `TmuxService` calls `gotmux` directly and
 | `HandleClientSessionChanged(ctx, tmuxName) error` | Hook: publishes event |
 | `HandleClientAttached(ctx, tmuxName) error` | Hook: publishes event |
 | `HandleClientDetached(ctx, tmuxName) error` | Hook: publishes event |
-| `SyncWindows(ctx, tmuxName, windows)` | Updates window state (existing functionality) |
-| `GetWindows(ctx, tmuxName) []Window` | Returns window state (existing functionality) |
+| `SyncWindows(ctx, tmuxName, windows)` | Updates window state in memory (intentionally ephemeral — lost on daemon restart) |
+| `GetWindows(ctx, tmuxName) []Window` | Returns window state from memory |
 | `ListSessionNames() ([]string, error)` | Lists all live tmux session names |
 
 For testing, the gotmux dependency can be injected as an interface at the `TmuxService` level if needed, but this is an internal concern — external modules only see `TmuxService`.
@@ -519,12 +532,16 @@ const (
 
 ### 5.4 Key Design Decisions
 
-**All activation is async.** Every call to `ActivateSession` returns `202 Accepted` immediately and runs setup in a background goroutine. This is true for all source states:
+**All activation is async.** Every call to `ActivateSession` returns `202 Accepted` immediately and runs setup in a background goroutine:
 - Pending → sets `creating`, launches full setup (branch + worktree + tmux)
 - Inactive → sets `creating`, launches tmux recreation (+ validates git state)
-- Active → sets `creating`, launches tmux client switch (fast, but still async for consistency)
+- Active → stays `active`, launches tmux client switch in background (no status change since nothing is being created)
 
 The TUI polls or receives updates to reflect the final state.
+
+**Concurrency guard.** If a session is already in `creating` status, `ActivateSession` rejects with an error. This prevents double-activation races (e.g., user double-clicks). The `creating` status itself acts as the lock.
+
+**Tmux hook / activation race.** If a tmux hook fires while `runActivation` is still running (e.g., `session_created` hook fires before the goroutine updates status to `active`), the hook handler skips sessions in `creating` status. The activation goroutine is the sole authority for transitioning out of `creating`.
 
 **Tmux restart → inactive, not broken.** When `tmux.session_closed` fires, the session transitions to `inactive`. The branch and worktree still exist. `TmuxSession.IsAlive` is set to false. Reactivation recreates the tmux session.
 
@@ -541,6 +558,7 @@ type Session struct {
     BranchID      *uint                        `json:"branch_id,omitempty" gorm:"index"`
     TmuxSessionID *uint                        `json:"tmux_session_id,omitempty" gorm:"index"`
     Status        SessionStatus                `json:"status"`
+    StatusError   string                       `json:"status_error,omitempty"` // error detail when broken/failed
     IsAttached    bool                         `json:"is_attached"`
     LastUsedAt    time.Time                    `json:"last_used_at"`
 
@@ -553,7 +571,9 @@ type Session struct {
 
 **Removed from current model:** `TmuxSessionName`, `Branch`, `BaseBranch`, `WorktreePath`, `Resources`
 
-**Added:** `BranchID`, `TmuxSessionID`
+**Added:** `BranchID`, `TmuxSessionID`, `StatusError`
+
+**Status rename:** `StatusReady` → `StatusActive`. `StatusCreating`, `StatusBroken`, `StatusDeleted` are preserved. New statuses: `StatusPending`, `StatusInactive`, `StatusArchived`.
 
 State is derived from associated models rather than a `Resources` JSON blob:
 - Git ready = `BranchID` is set and `gitService.HasWorktree(branchID)` is true
@@ -587,15 +607,17 @@ When the session module receives a `git.pr_discovered` event, it checks this tab
 ```
 ActivateSession(ctx, id uint) → (202 Accepted)
     1. Load session + associations
-    2. Validate status is activatable (pending, inactive, active)
-    3. Set status = creating
-    4. Persist
-    5. Launch goroutine: runActivation(session.ID)
-    6. Return 202
+    2. If status == creating → return error (concurrent activation guard)
+    3. If status in (broken, archived, deleted) → return error
+    4. Record previousStatus = session.Status
+    5. If status != active → set status = creating, clear StatusError
+    6. Persist
+    7. Launch goroutine: runActivation(session.ID, previousStatus)
+    8. Return 202
 
-runActivation(sessionID):
+runActivation(sessionID, previousStatus):
     Load session
-    Switch on previous status:
+    Switch on previousStatus:
 
     was pending:
         a. Generate tmux session name (workspace + session name)
@@ -607,21 +629,21 @@ runActivation(sessionID):
 
     was inactive:
         a. Validate git state (gitService.IsHealthy(branchID))
-        b. If unhealthy → status = broken, return
+        b. If unhealthy → status = broken, StatusError = reason, return
         c. tmuxService.RecreateSession(tmuxSessionID)
         d. Set status = active
 
     was active:
         a. tmuxService.SwitchClient(tmuxSession.Name)
-        b. Status stays active
+        b. Status stays active (was never changed to creating)
 
     Set IsAttached = true, LastUsedAt = now
     Persist
 
     On any error:
-        If git-related → status = broken
-        If tmux-related → status = inactive
-        Persist error details (TBD: error field on session or log)
+        If git-related → status = broken, StatusError = err.Error()
+        If tmux-related → status = inactive, StatusError = err.Error()
+        Persist
 ```
 
 ### 5.9 Session API
@@ -709,7 +731,7 @@ func (m *SyncManager) Stop()
 func (m *SyncManager) TriggerSync(ctx context.Context, taskName string) error
 ```
 
-Each registered task runs in its own goroutine on a `time.Ticker`. Errors are logged but do not stop the loop. `TriggerSync` allows manual triggering (e.g., from other services that want an immediate refresh).
+Each registered task runs in its own goroutine on a `time.Ticker`. Errors are logged but do not stop the loop. `TriggerSync` allows manual triggering (e.g., from other services that want an immediate refresh). Internally, each task has a `chan struct{}` (capacity 1) for trigger signals — `TriggerSync` sends on the channel (non-blocking), and the task goroutine selects between the ticker and the trigger channel. If a task is already running when triggered, the trigger is buffered and runs after the current execution completes.
 
 ### 6.2 Registered Tasks
 
@@ -804,20 +826,33 @@ When building a session response:
 
 ---
 
-## 8. Pending Session Creation
+## 8. Session Event Subscriptions
 
-### 8.1 Flow
+### 8.1 PR State Changes (`git.pr_state_changed`)
+
+The session module subscribes to `git.pr_state_changed` to surface PR lifecycle changes as signals. When a PR transitions to `merged`:
+
+1. Find session where `BranchID == event.HeadBranchID`
+2. If no matching session → skip
+3. Check if any other open PRs exist for the same branch (`gitService.GetPRsForBranch`)
+4. If all PRs for the branch are merged/closed → add a `warning` signal: "All PRs merged — archive?"
+5. The session status is **not** automatically changed. The user decides when to archive via the TUI or API.
+
+This satisfies the "auto-transition session status based on PR status" requirement through signals rather than forced transitions, since the user explicitly requested prompt-to-archive rather than auto-archive.
+
+### 8.2 Pending Session Creation (`git.pr_discovered`)
 
 During the `git.prs` sync task:
 1. `gitService.SyncAssignedPRs(ctx)` fetches PRs assigned to the authenticated user
 2. For newly discovered PRs, the git module publishes `git.pr_discovered` events
 
 The session module subscribes to `git.pr_discovered`:
-1. Find workspace where `workspace.RepoID == event.RepoID`
+1. Find workspaces where `workspace.RepoID == event.RepoID`
 2. If no matching workspace → skip
-3. Check if any existing session has `BranchID == event.HeadBranchID` → skip
-4. Check `DismissedPR` table for `event.PRID` → skip if dismissed
-5. Create pending session:
+3. If multiple workspaces match → use the most recently used (highest `LastUsedAt`)
+4. Check if any existing session has `BranchID == event.HeadBranchID` → skip
+5. Check `DismissedPR` table for `event.PRID` → skip if dismissed
+6. Create pending session:
    - `Status = StatusPending`
    - `BranchID = event.HeadBranchID`
    - `WorkspaceID = workspace.ID`
@@ -869,6 +904,8 @@ gitModule.RegisterSyncTasks(syncManager)
 sessionModule.RegisterSyncTasks(syncManager)
 ```
 
+**GORM migration order:** The `app.modules()` list determines `collectModels()` order. Git and Tmux modules must appear before Session in this list so their tables (Repo, Branch, Worktree, PullRequest, TmuxSession) are created before Session's foreign keys reference them. The order in `modules()` is: git, tmux, workspace, claude, session.
+
 ---
 
 ## 10. Configuration
@@ -897,3 +934,8 @@ sessionModule.RegisterSyncTasks(syncManager)
 | Worktree deleted externally | Branch sync detects → deletes Worktree record. Session reconcile → broken |
 | Dismissed PR | DismissedPR record prevents pending session re-creation |
 | Stacked PRs (multiple PRs, same branch) | All loaded via branch association. Session shows all. Archives when all merged/closed |
+| Multiple workspaces for same repo | Pending session created in most recently used workspace (`LastUsedAt`) |
+| Concurrent activation | Rejected if session is already `creating`. `creating` status acts as a lock |
+| Tmux hook during activation | Hooks skip sessions in `creating` status. Activation goroutine is sole authority for `creating → active` |
+| Fork PRs | Not supported this phase. PRs with head branches from forked repos are skipped during sync |
+| Daemon restart | Window state (in-memory) is lost. TmuxSession records persist. Session reconcile task re-syncs IsAlive |
