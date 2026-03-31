@@ -4,6 +4,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/claude"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
 type StatusBadge struct {
@@ -37,10 +38,10 @@ func (b StatusBadge) Update(msg tea.Msg) (StatusBadge, tea.Cmd) {
 
 func (b StatusBadge) bg() lipgloss.TerminalColor {
 	if b.selected {
-		return colorSelection
+		return theme.Current.Selection
 	}
 	if b.isAttached {
-		return colorSurfaceActive
+		return theme.Current.SurfaceActive
 	}
 	return lipgloss.NoColor{}
 }
@@ -62,17 +63,17 @@ func (b StatusBadge) parts() (*lipgloss.Style, string) {
 	case claude.StatusNeedsAttention:
 		s := lipgloss.NewStyle().
 			Bold(true).
-			Foreground(colorTextOnPrimary).
-			Background(colorPrimaryVariant)
+			Foreground(theme.Current.TextOnPrimary).
+			Background(theme.Current.PrimaryVariant)
 		return &s, " ! "
 	case claude.StatusWorking:
-		s := lipgloss.NewStyle().Foreground(colorSecondary)
+		s := lipgloss.NewStyle().Foreground(theme.Current.Secondary)
 		return &s, " ~ "
 	case claude.StatusReadyForReview:
-		s := lipgloss.NewStyle().Foreground(colorAccentMint)
+		s := lipgloss.NewStyle().Foreground(theme.Current.AccentMint)
 		return &s, " ✓ "
 	case claude.StatusDone:
-		s := lipgloss.NewStyle().Foreground(colorTextMuted)
+		s := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
 		return &s, " ✓ "
 	default:
 		return nil, ""

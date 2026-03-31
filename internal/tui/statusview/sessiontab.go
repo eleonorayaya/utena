@@ -9,6 +9,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tmux"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
 type SessionTab struct {
@@ -64,10 +65,10 @@ func (t SessionTab) View() string {
 
 func (t SessionTab) bg() lipgloss.TerminalColor {
 	if t.selected {
-		return colorSelection
+		return theme.Current.Selection
 	}
 	if t.session.IsAttached {
-		return colorSurfaceActive
+		return theme.Current.SurfaceActive
 	}
 	return lipgloss.NoColor{}
 }
@@ -75,13 +76,13 @@ func (t SessionTab) bg() lipgloss.TerminalColor {
 func (t SessionTab) accentColor() lipgloss.Color {
 	switch claude.AggregateStatus(t.session.ClaudeSessions) {
 	case claude.StatusNeedsAttention:
-		return colorPrimary
+		return theme.Current.Primary
 	case claude.StatusWorking:
-		return colorAccentLavender
+		return theme.Current.AccentLavender
 	case claude.StatusReadyForReview:
-		return colorAccentMint
+		return theme.Current.AccentMint
 	default:
-		return colorSurfaceVariant
+		return theme.Current.SurfaceVariant
 	}
 }
 
@@ -93,9 +94,9 @@ func (t SessionTab) accent(bg lipgloss.TerminalColor) string {
 func (t SessionTab) renderHeader(bg lipgloss.TerminalColor) []string {
 	s := t.session
 
-	nStyle := lipgloss.NewStyle().Foreground(colorText)
+	nStyle := lipgloss.NewStyle().Foreground(theme.Current.Text)
 	if s.IsAttached {
-		nStyle = lipgloss.NewStyle().Foreground(colorTextEmphasis).Bold(true)
+		nStyle = lipgloss.NewStyle().Foreground(theme.Current.TextEmphasis).Bold(true)
 	}
 	nStyle = nStyle.Background(bg)
 
@@ -135,10 +136,10 @@ func (t SessionTab) renderHeader(bg lipgloss.TerminalColor) []string {
 		wsName = s.Workspace.Name
 	}
 	if wsName != "" {
-		wsStyle := lipgloss.NewStyle().Foreground(colorTertiary).Background(bg)
+		wsStyle := lipgloss.NewStyle().Foreground(theme.Current.Tertiary).Background(bg)
 		timeStr := ""
 		if !s.LastUsedAt.IsZero() {
-			tStyle := lipgloss.NewStyle().Foreground(colorTextMuted).Background(bg)
+			tStyle := lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Background(bg)
 			timeStr = tStyle.Render(" · " + common.TimeAgo(s.LastUsedAt))
 		}
 		wsLine := accent + wsStyle.Render(wsName) + timeStr
@@ -159,10 +160,10 @@ func (t SessionTab) renderWindows(bg lipgloss.TerminalColor) []string {
 	var lines []string
 	for _, w := range t.windows {
 		marker := "  "
-		wStyle := lipgloss.NewStyle().Foreground(colorTextMuted)
+		wStyle := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
 		if w.Active {
 			marker = "› "
-			wStyle = lipgloss.NewStyle().Foreground(colorAccentBlue)
+			wStyle = lipgloss.NewStyle().Foreground(theme.Current.AccentBlue)
 		}
 		wStyle = wStyle.Background(bg)
 		line := accent + wStyle.Render(marker+w.Name)
