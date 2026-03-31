@@ -9,9 +9,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
-var debugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+func debugStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.StatusPending) }
 
 type Model struct {
 	logPath   string
@@ -53,7 +54,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 
 func (m Model) View() string {
 	var b strings.Builder
-	b.WriteString(debugStyle.Render("Debug Info") + "\n\n")
+	b.WriteString(debugStyle().Render("Debug Info") + "\n\n")
 
 	lines := []struct{ label, value string }{
 		{"daemon", m.daemonURL},
@@ -65,7 +66,7 @@ func (m Model) View() string {
 		if v == "" {
 			v = "(not set)"
 		}
-		b.WriteString(fmt.Sprintf("  %s: %s\n", debugStyle.Render(l.label), v))
+		b.WriteString(fmt.Sprintf("  %s: %s\n", debugStyle().Render(l.label), v))
 	}
 
 	return b.String()

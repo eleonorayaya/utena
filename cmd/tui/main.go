@@ -12,6 +12,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/shellinit"
 	"github.com/eleonorayaya/utena/internal/tui"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
 var (
@@ -52,9 +53,21 @@ func setupLogging() string {
 	return resolvedLogPath
 }
 
+func loadTheme() {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	themePath := filepath.Join(homeDir, ".config", "utena", "theme.json")
+	if err := theme.Load(themePath); err != nil {
+		log.Printf("warning: failed to load theme: %v", err)
+	}
+}
+
 func runTUI(cmd *cobra.Command, args []string) error {
 	port, _ := cmd.Flags().GetString("port")
 	resolvedLogPath := setupLogging()
+	loadTheme()
 
 	p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, router.SessionListView))
 	if _, err := p.Run(); err != nil {
@@ -71,6 +84,7 @@ func todosCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
 			resolvedLogPath := setupLogging()
+			loadTheme()
 
 			p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, router.TodoListView))
 			if _, err := p.Run(); err != nil {
@@ -90,6 +104,7 @@ func newTaskCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
 			resolvedLogPath := setupLogging()
+			loadTheme()
 
 			p := tea.NewProgram(tui.NewApp(
 				resolvedLogPath, port, router.TodoListView,
@@ -112,6 +127,7 @@ func statusCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
 			resolvedLogPath := setupLogging()
+			loadTheme()
 
 			p := tea.NewProgram(
 				tui.NewApp(resolvedLogPath, port, router.StatusView),

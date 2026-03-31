@@ -9,15 +9,14 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/filepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
-var (
-	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	promptStyle = lipgloss.NewStyle().Bold(true)
-	pathStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
-)
+func errStyle() lipgloss.Style    { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
+func promptStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
+func pathStyle() lipgloss.Style   { return lipgloss.NewStyle().Foreground(theme.Current.Path) }
 
 type step int
 
@@ -258,7 +257,7 @@ func (m Model) View() string {
 	case filePickerStep:
 		return m.filePicker.View()
 	case dirTypeChoiceStep:
-		return promptStyle.Render("Add: ") + pathStyle.Render(workspacepicker.AbbreviatePath(m.selectedDirPath)) +
+		return promptStyle().Render("Add: ") + pathStyle().Render(workspacepicker.AbbreviatePath(m.selectedDirPath)) +
 			"\n\n" +
 			"  w  add as workspace\n" +
 			"  r  add as root\n\n" +
@@ -268,11 +267,11 @@ func (m Model) View() string {
 		if m.selectedWorkspace != nil {
 			wsName = m.selectedWorkspace.Name
 		}
-		view := promptStyle.Render("Workspace: ") + wsName + "\n\n"
+		view := promptStyle().Render("Workspace: ") + wsName + "\n\n"
 		view += m.nameInput.View() + "\n"
 		view += m.descInput.View() + "\n"
 		if m.nameErr != "" {
-			view += errStyle.Render(m.nameErr)
+			view += errStyle().Render(m.nameErr)
 		}
 		return view
 	default:

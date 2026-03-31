@@ -12,15 +12,16 @@ import (
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
-var (
-	titleStyle   = lipgloss.NewStyle().Bold(true)
-	readyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	pendingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	activeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	failedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-)
+func titleStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
+func readyStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.StatusReady) }
+func pendingStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.StatusPending)
+}
+func activeStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.StatusActive) }
+func failedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
 
 type tickMsg time.Time
 
@@ -148,7 +149,7 @@ func (m Model) View() string {
 	if m.session != nil && m.session.Name != "" {
 		name = m.session.Name
 	}
-	b.WriteString(titleStyle.Render("Creating session: " + name))
+	b.WriteString(titleStyle().Render("Creating session: " + name))
 	b.WriteString("\n\n")
 
 	if m.session != nil && m.session.Resources != nil {
@@ -170,13 +171,13 @@ func (m Model) View() string {
 			b.WriteString("\n")
 		}
 	} else {
-		b.WriteString(pendingStyle.Render("  Loading..."))
+		b.WriteString(pendingStyle().Render("  Loading..."))
 		b.WriteString("\n")
 	}
 
 	if m.err != nil {
 		b.WriteString("\n")
-		b.WriteString(failedStyle.Render("Error: " + m.err.Error()))
+		b.WriteString(failedStyle().Render("Error: " + m.err.Error()))
 		b.WriteString("\n")
 	}
 
@@ -188,7 +189,7 @@ func resourceLine(name string, rs *session.ResourceState) string {
 	style := statusStyle(rs.Status)
 	line := fmt.Sprintf("  %s %s", icon, style.Render(name))
 	if rs.Error != "" {
-		line += " " + failedStyle.Render("— "+rs.Error)
+		line += " " + failedStyle().Render("— "+rs.Error)
 	}
 	return line
 }
@@ -196,15 +197,15 @@ func resourceLine(name string, rs *session.ResourceState) string {
 func statusIcon(s session.ResourceStatus) string {
 	switch s {
 	case session.ResourceReady:
-		return readyStyle.Render("✓")
+		return readyStyle().Render("✓")
 	case session.ResourceCreating:
-		return activeStyle.Render("●")
+		return activeStyle().Render("●")
 	case session.ResourcePending:
-		return pendingStyle.Render("○")
+		return pendingStyle().Render("○")
 	case session.ResourceFailed:
-		return failedStyle.Render("✗")
+		return failedStyle().Render("✗")
 	case session.ResourceRemoved:
-		return failedStyle.Render("–")
+		return failedStyle().Render("–")
 	default:
 		return " "
 	}
@@ -213,12 +214,12 @@ func statusIcon(s session.ResourceStatus) string {
 func statusStyle(s session.ResourceStatus) lipgloss.Style {
 	switch s {
 	case session.ResourceReady:
-		return readyStyle
+		return readyStyle()
 	case session.ResourceCreating:
-		return activeStyle
+		return activeStyle()
 	case session.ResourceFailed, session.ResourceRemoved:
-		return failedStyle
+		return failedStyle()
 	default:
-		return pendingStyle
+		return pendingStyle()
 	}
 }
