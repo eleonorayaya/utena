@@ -289,7 +289,7 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 func (s *SessionService) setupTmux(ctx context.Context, sess *Session) error {
 	startDir := s.resolveStartDir(ctx, sess)
 	env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", sess.ID)}
-	if err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir, env); err != nil {
+	if _, err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir, env); err != nil {
 		return fmt.Errorf("failed to create tmux session: %v", err)
 	}
 	return nil
@@ -460,7 +460,7 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 	if !s.tmuxService.HasSession(session.TmuxSessionName) {
 		startDir := s.resolveStartDir(ctx, session)
 		env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", session.ID)}
-		if err := s.tmuxService.CreateSession(session.TmuxSessionName, startDir, env); err != nil {
+		if _, err := s.tmuxService.CreateSession(session.TmuxSessionName, startDir, env); err != nil {
 			return nil, fmt.Errorf("failed to revive tmux session: %w", err)
 		}
 		session.Status = StatusReady
@@ -542,7 +542,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 		}
 	}
 
-	if err := s.tmuxService.KillSession(session.TmuxSessionName); err != nil {
+	if err := s.tmuxService.KillSessionByName(session.TmuxSessionName); err != nil {
 		slog.Info("tmux session already gone or failed to kill", "session", session.TmuxSessionName, "error", err)
 	} else if session.Resources.Tmux != nil {
 		session.Resources.Tmux.Status = ResourceRemoved

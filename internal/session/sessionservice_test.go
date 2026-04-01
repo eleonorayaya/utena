@@ -6,10 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
@@ -18,74 +18,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type mockTmuxClient struct {
-	mu        sync.Mutex
-	sessions  map[string]bool
-	createErr error
-	killErr   error
+func createTmuxService(t *testing.T, database db.Database, mock *utmux.MockRunner, bus eventbus.EventBus) *utmux.TmuxService {
+	t.Helper()
+	tmuxStore := utmux.NewTmuxStore(database)
+	module := utmux.NewTmuxModuleWithRunner(mock, tmuxStore, bus)
+	return module.Service
 }
 
-func newMockTmuxClient() *mockTmuxClient {
-	return &mockTmuxClient{sessions: make(map[string]bool)}
-}
-
-func (m *mockTmuxClient) CreateSession(name, startDir string, env map[string]string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.createErr != nil {
-		return m.createErr
-	}
-	m.sessions[name] = true
-	return nil
-}
-
-func (m *mockTmuxClient) KillSession(name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.killErr != nil {
-		return m.killErr
-	}
-	delete(m.sessions, name)
-	return nil
-}
-
-func (m *mockTmuxClient) HasSession(name string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.sessions[name]
-}
-
-func (m *mockTmuxClient) ListSessionNames() ([]string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	names := make([]string, 0, len(m.sessions))
-	for name := range m.sessions {
-		names = append(names, name)
-	}
-	return names, nil
-}
-
-func (m *mockTmuxClient) SwitchClient(targetSession string) error {
-	return nil
-}
-
-func (m *mockTmuxClient) RunCommand(cmd ...string) (string, error) {
-	return "", nil
-}
-
-func (m *mockTmuxClient) setCreateErr(err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.createErr = err
-}
-
-func (m *mockTmuxClient) removeSession(name string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.sessions, name)
-}
-
-func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *mockTmuxClient, uint, uint) {
+func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *utmux.MockRunner, uint, uint) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -98,10 +38,14 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	workspaceStore.Add(ws1)
 	workspaceStore.Add(ws2)
 
-	mock := newMockTmuxClient()
-	tmuxService := utmux.NewTmuxService(mock, bus)
+	mock := utmux.NewMockRunner()
+	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitService := git.NewGitService()
+	gitDB, err := db.OpenInMemory()
+	require.NoError(t, err)
+	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
+	t.Cleanup(func() { gitDB.Close() })
+	gitService := git.NewGitService(gitDB)
 	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 	return service, sessionStore, workspaceStore, mock, ws1.ID, ws2.ID
 }
@@ -242,12 +186,12 @@ func TestSessionService_CreateSession(t *testing.T) {
 	require.Equal(t, "session-1", retrieved.Name)
 	require.False(t, retrieved.LastUsedAt.IsZero())
 	require.Equal(t, ResourceReady, retrieved.Resources.Tmux.Status)
-	require.True(t, tmux.HasSession("utena-session-1"))
+	require.True(t, tmux.HasSessionByName("utena-session-1"))
 }
 
 func TestSessionService_CreateSession_TmuxFails(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
-	tmux.setCreateErr(fmt.Errorf("connection refused"))
+	tmux.SetCreateErr(fmt.Errorf("connection refused"))
 
 	session := &Session{
 		Name:        "fail-session",
@@ -335,7 +279,7 @@ func TestSessionService_DeleteSession(t *testing.T) {
 		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
-	tmux.sessions["session-1"] = true
+	tmux.Sessions["session-1"] = true
 
 	ctx := context.Background()
 	err := service.DeleteSession(ctx, session.ID, true)
@@ -345,7 +289,7 @@ func TestSessionService_DeleteSession(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusDeleted, retrieved.Status)
 	require.Equal(t, ResourceRemoved, retrieved.Resources.Tmux.Status)
-	require.False(t, tmux.HasSession("session-1"))
+	require.False(t, tmux.HasSessionByName("session-1"))
 }
 
 func TestSessionService_DeleteSession_NotFound(t *testing.T) {
@@ -389,7 +333,7 @@ func initTestRepo(t *testing.T) string {
 	return dir
 }
 
-func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *mockTmuxClient, uint) {
+func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *utmux.MockRunner, uint) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -399,10 +343,14 @@ func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string
 	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
 	workspaceStore.Add(wsGit)
 
-	mock := newMockTmuxClient()
-	tmuxService := utmux.NewTmuxService(mock, bus)
+	mock := utmux.NewMockRunner()
+	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitService := git.NewGitService()
+	gitDB, err := db.OpenInMemory()
+	require.NoError(t, err)
+	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
+	t.Cleanup(func() { gitDB.Close() })
+	gitService := git.NewGitService(gitDB)
 	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir)
 	return service, sessionStore, mock, wsGit.ID
 }
@@ -441,7 +389,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	require.True(t, info.IsDir())
 
 	require.Equal(t, "main", retrieved.BaseBranch)
-	require.True(t, mock.HasSession("git-repo-my-feature"))
+	require.True(t, mock.HasSessionByName("git-repo-my-feature"))
 }
 
 func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testing.T) {
@@ -528,7 +476,7 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	require.Equal(t, StatusBroken, retrieved.Status)
 	require.Equal(t, ResourceFailed, retrieved.Resources.Branch.Status)
 	require.NotEmpty(t, retrieved.Resources.Branch.Error)
-	require.False(t, mock.HasSession("git-repo-my-feature"))
+	require.False(t, mock.HasSessionByName("git-repo-my-feature"))
 }
 
 func TestSessionService_CreateSession_WithName_ComputesID(t *testing.T) {
@@ -602,10 +550,14 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	wsNoGit := &workspace.Workspace{Name: "plain", Path: "/tmp/plain", IsGitRepo: false}
 	workspaceStore.Add(wsNoGit)
 
-	mock := newMockTmuxClient()
-	tmuxService := utmux.NewTmuxService(mock, bus)
+	mock := utmux.NewMockRunner()
+	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitService := git.NewGitService()
+	gitDB, err := db.OpenInMemory()
+	require.NoError(t, err)
+	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
+	t.Cleanup(func() { gitDB.Close() })
+	gitService := git.NewGitService(gitDB)
 	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 
 	session := &Session{
@@ -615,7 +567,7 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err = service.CreateSession(ctx, session, false)
 	require.NoError(t, err)
 
 	require.Equal(t, "plain-my-session", session.TmuxSessionName)
@@ -647,7 +599,7 @@ func TestSessionService_CreateSession_TouchesWorkspace(t *testing.T) {
 func TestSessionService_ActivateSession_TouchesWorkspace(t *testing.T) {
 	service, sessionStore, workspaceStore, tmux, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["session-1"] = true
+	tmux.Sessions["session-1"] = true
 	session := &Session{
 		Name:            "session-1",
 		TmuxSessionName: "session-1",
@@ -704,13 +656,13 @@ func TestSessionService_ActivateSession_RecreatesMissingTmux(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusReady, result.Status)
 	require.True(t, result.IsAttached)
-	require.True(t, tmux.HasSession("session-1"))
+	require.True(t, tmux.HasSessionByName("session-1"))
 }
 
 func TestSessionService_RefreshSession_DetectsMissingTmux(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["session-1"] = true
+	tmux.Sessions["session-1"] = true
 	session := &Session{
 		Name:            "session-1",
 		TmuxSessionName: "session-1",
@@ -721,7 +673,7 @@ func TestSessionService_RefreshSession_DetectsMissingTmux(t *testing.T) {
 	}
 	sessionStore.Add(session)
 
-	tmux.removeSession("session-1")
+	tmux.RemoveSession("session-1")
 
 	ctx := context.Background()
 	refreshed, err := service.RefreshSession(ctx, session.ID)
@@ -733,7 +685,7 @@ func TestSessionService_RefreshSession_DetectsMissingTmux(t *testing.T) {
 func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["session-1"] = true
+	tmux.Sessions["session-1"] = true
 	session := &Session{
 		Name:            "session-1",
 		TmuxSessionName: "session-1",
@@ -777,12 +729,12 @@ func TestSessionService_RepairSession_RecoversBroken(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusReady, retrieved.Status)
 	require.Equal(t, ResourceReady, retrieved.Resources.Tmux.Status)
-	require.True(t, tmux.HasSession("broken-session"))
+	require.True(t, tmux.HasSessionByName("broken-session"))
 }
 
 func TestSessionService_RepairSession_StillFailing(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
-	tmux.setCreateErr(fmt.Errorf("still broken"))
+	tmux.SetCreateErr(fmt.Errorf("still broken"))
 
 	session := &Session{
 		Name:            "broken-session",
@@ -813,7 +765,7 @@ func TestSessionService_RepairSession_StillFailing(t *testing.T) {
 func TestSessionService_RepairSession_AlreadyReady(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["ok-session"] = true
+	tmux.Sessions["ok-session"] = true
 	session := &Session{
 		Name:            "ok-session",
 		TmuxSessionName: "ok-session",
@@ -833,7 +785,7 @@ func TestSessionService_RepairSession_AlreadyReady(t *testing.T) {
 func TestSessionService_RepairSession_NotBroken(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["session-1"] = true
+	tmux.Sessions["session-1"] = true
 	session := &Session{
 		Name:            "session-1",
 		TmuxSessionName: "session-1",
@@ -875,7 +827,7 @@ func TestSessionService_Reconcile_MarksMissingTmuxBroken(t *testing.T) {
 func TestSessionService_Reconcile_KeepsHealthyReady(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["session-1"] = true
+	tmux.Sessions["session-1"] = true
 	session := &Session{
 		Name:            "session-1",
 		TmuxSessionName: "session-1",
@@ -1033,7 +985,7 @@ func TestSessionService_WorktreeInit_FailingScriptContinues(t *testing.T) {
 	require.Equal(t, StatusReady, retrieved.Status)
 	require.Equal(t, ResourceReady, retrieved.Resources.WorktreeInit.Status)
 	require.NotEmpty(t, retrieved.Resources.WorktreeInit.Error)
-	require.True(t, mock.HasSession("git-repo-fail-init"))
+	require.True(t, mock.HasSessionByName("git-repo-fail-init"))
 }
 
 func TestSessionService_WorktreeInit_MissingScriptsSkipped(t *testing.T) {

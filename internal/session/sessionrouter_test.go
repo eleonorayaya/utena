@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
@@ -17,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace.WorkspaceStore, *mockTmuxClient, uint, uint) {
+func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace.WorkspaceStore, *utmux.MockRunner, uint, uint) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -30,10 +31,14 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 	workspaceStore.Add(ws1)
 	workspaceStore.Add(ws2)
 
-	mock := newMockTmuxClient()
-	tmuxService := utmux.NewTmuxService(mock, bus)
+	mock := utmux.NewMockRunner()
+	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitService := git.NewGitService()
+	gitDB, err := db.OpenInMemory()
+	require.NoError(t, err)
+	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
+	t.Cleanup(func() { gitDB.Close() })
+	gitService := git.NewGitService(gitDB)
 	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
@@ -166,7 +171,7 @@ func TestSessionRouter_CreateSession(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "utena-session-1", retrieved.TmuxSessionName)
 	require.Equal(t, ws1ID, retrieved.WorkspaceID)
-	require.True(t, tmux.HasSession("utena-session-1"))
+	require.True(t, tmux.HasSessionByName("utena-session-1"))
 }
 
 func TestSessionRouter_CreateSession_WithName(t *testing.T) {
@@ -268,7 +273,7 @@ func TestSessionRouter_UpdateSession(t *testing.T) {
 func TestSessionRouter_DeleteSession(t *testing.T) {
 	router, sessionStore, _, tmux, ws1ID, _ := setupSessionRouter(t)
 
-	tmux.sessions["session-1"] = true
+	tmux.Sessions["session-1"] = true
 	session := &Session{
 		TmuxSessionName: "session-1",
 		WorkspaceID:     ws1ID,
@@ -289,7 +294,7 @@ func TestSessionRouter_DeleteSession(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusDeleted, retrieved.Status)
 	require.Equal(t, ResourceRemoved, retrieved.Resources.Tmux.Status)
-	require.False(t, tmux.HasSession("session-1"))
+	require.False(t, tmux.HasSessionByName("session-1"))
 }
 
 func TestSessionRouter_RepairSession(t *testing.T) {
@@ -334,7 +339,7 @@ func TestSessionRouter_RepairSession_NotFound(t *testing.T) {
 func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
 	router, sessionStore, _, tmux, ws1ID, _ := setupSessionRouter(t)
 
-	tmux.sessions["alive-session"] = true
+	tmux.Sessions["alive-session"] = true
 	session := &Session{
 		TmuxSessionName: "alive-session",
 		WorkspaceID:     ws1ID,

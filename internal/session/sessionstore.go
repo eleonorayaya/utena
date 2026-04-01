@@ -22,7 +22,7 @@ func NewSessionStore(database db.Database) *SessionStore {
 
 func (s *SessionStore) GetByID(id uint) (*Session, error) {
 	var session Session
-	if err := s.db.Joins("Workspace").First(&session, "sessions.id = ?", id).Error; err != nil {
+	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").First(&session, "sessions.id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound
 		}
@@ -33,7 +33,7 @@ func (s *SessionStore) GetByID(id uint) (*Session, error) {
 
 func (s *SessionStore) GetByTmuxName(tmuxName string) (*Session, error) {
 	var session Session
-	if err := s.db.Joins("Workspace").First(&session, "tmux_session_name = ?", tmuxName).Error; err != nil {
+	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").First(&session, "tmux_session_name = ?", tmuxName).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound
 		}
@@ -44,13 +44,13 @@ func (s *SessionStore) GetByTmuxName(tmuxName string) (*Session, error) {
 
 func (s *SessionStore) List() []Session {
 	var sessions []Session
-	s.db.Joins("Workspace").Preload("ClaudeSessions").Order("sessions.last_used_at DESC").Find(&sessions)
+	s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Order("sessions.last_used_at DESC").Find(&sessions)
 	return sessions
 }
 
 func (s *SessionStore) ListByWorkspace(workspaceID uint) []Session {
 	var sessions []Session
-	s.db.Joins("Workspace").Preload("ClaudeSessions").Where("sessions.workspace_id = ?", workspaceID).Order("sessions.last_used_at DESC").Find(&sessions)
+	s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Where("sessions.workspace_id = ?", workspaceID).Order("sessions.last_used_at DESC").Find(&sessions)
 	return sessions
 }
 
@@ -59,7 +59,7 @@ func (s *SessionStore) Add(session *Session) error {
 		return errors.New("session cannot be nil")
 	}
 
-	if err := s.db.Omit("Workspace", "ClaudeSessions").Create(session).Error; err != nil {
+	if err := s.db.Omit("Workspace", "ClaudeSessions", "GitBranch", "TmuxSession").Create(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueConstraintError(err) {
 			return fmt.Errorf("session '%s' already exists: %w", session.TmuxSessionName, ErrSessionAlreadyExists)
 		}
@@ -84,7 +84,7 @@ func (s *SessionStore) Update(session *Session) error {
 		return err
 	}
 
-	return s.db.Omit("Workspace", "ClaudeSessions").Save(session).Error
+	return s.db.Omit("Workspace", "ClaudeSessions", "GitBranch", "TmuxSession").Save(session).Error
 }
 
 func (s *SessionStore) Delete(id uint) error {
@@ -101,6 +101,28 @@ func (s *SessionStore) Delete(id uint) error {
 	}
 
 	return s.db.Delete(&Session{}, "id = ?", id).Error
+}
+
+func (s *SessionStore) GetByBranchID(branchID uint) (*Session, error) {
+	var session Session
+	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").First(&session, "sessions.branch_id = ?", branchID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return &session, nil
+}
+
+func (s *SessionStore) GetByTmuxSessionID(tmuxSessionID uint) (*Session, error) {
+	var session Session
+	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").First(&session, "sessions.tmux_session_id = ?", tmuxSessionID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return &session, nil
 }
 
 func (s *SessionStore) OnAppStart(ctx context.Context) error {

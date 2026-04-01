@@ -21,7 +21,7 @@ func setupWorkspaceRouter(t *testing.T) (*WorkspaceRouter, *WorkspaceStore) {
 
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	database.Migrate(&Workspace{})
+	database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 	t.Cleanup(func() { database.Close() })
 
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
@@ -32,7 +32,7 @@ func setupWorkspaceRouter(t *testing.T) (*WorkspaceRouter, *WorkspaceStore) {
 	store.Add(ws2)
 
 	service := NewWorkspaceService(store)
-	gitService := git.NewGitService()
+	gitService := git.NewGitService(database)
 	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 
@@ -106,7 +106,7 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	database.Migrate(&Workspace{})
+	database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 	t.Cleanup(func() { database.Close() })
 
 	store := NewWorkspaceStore(database, fs, configDir)
@@ -114,7 +114,7 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 	wsDir := t.TempDir()
 
 	service := NewWorkspaceService(store)
-	gitService := git.NewGitService()
+	gitService := git.NewGitService(database)
 	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 
@@ -158,7 +158,7 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	database.Migrate(&Workspace{})
+	database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 	t.Cleanup(func() { database.Close() })
 
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
@@ -166,7 +166,7 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	store.Add(wsGit)
 
 	service := NewWorkspaceService(store)
-	gitService := git.NewGitService()
+	gitService := git.NewGitService(database)
 	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 

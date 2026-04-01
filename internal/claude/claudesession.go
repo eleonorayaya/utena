@@ -2,7 +2,9 @@ package claude
 
 import (
 	"errors"
+	"fmt"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"gorm.io/gorm"
 )
 
@@ -24,6 +26,36 @@ type ClaudeSession struct {
 	SessionID       uint                `json:"session_id" gorm:"index"`
 	Status          ClaudeSessionStatus `json:"status"`
 	CWD             string              `json:"cwd,omitempty"`
+}
+
+func (cs *ClaudeSession) Signals() []common.Signal {
+	var severity common.SignalSeverity
+	var label string
+	switch cs.Status {
+	case StatusNeedsAttention:
+		severity = common.SeverityUrgent
+		label = "needs attention"
+	case StatusWorking:
+		severity = common.SeverityActive
+		label = "working"
+	case StatusReadyForReview:
+		severity = common.SeverityWarning
+		label = "ready for review"
+	case StatusDone:
+		severity = common.SeveritySuccess
+		label = "done"
+	case StatusIdle:
+		severity = common.SeverityInfo
+		label = "idle"
+	default:
+		return nil
+	}
+	return []common.Signal{{
+		Source:   "claude",
+		Key:      fmt.Sprintf("claude:%d", cs.ID),
+		Severity: severity,
+		Label:    label,
+	}}
 }
 
 func AggregateStatus(sessions []ClaudeSession) ClaudeSessionStatus {

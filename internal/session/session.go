@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/claude"
+	"github.com/eleonorayaya/utena/internal/git"
+	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"gorm.io/gorm"
 )
@@ -21,8 +23,12 @@ type SessionStatus string
 const (
 	StatusCreating SessionStatus = "creating"
 	StatusReady    SessionStatus = "ready"
+	StatusActive   SessionStatus = "active"
 	StatusBroken   SessionStatus = "broken"
 	StatusDeleted  SessionStatus = "deleted"
+	StatusPending  SessionStatus = "pending"
+	StatusInactive SessionStatus = "inactive"
+	StatusArchived SessionStatus = "archived"
 )
 
 type Session struct {
@@ -40,6 +46,11 @@ type Session struct {
 	LastUsedAt      time.Time              `json:"last_used_at"`
 	Workspace       *workspace.Workspace   `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID"`
 	ClaudeSessions  []claude.ClaudeSession `json:"claude_sessions,omitempty" gorm:"foreignKey:SessionID"`
+	BranchID        *uint                  `json:"branch_id,omitempty" gorm:"index"`
+	TmuxSessionID   *uint                  `json:"tmux_session_id,omitempty" gorm:"index"`
+	StatusError     string                 `json:"status_error,omitempty"`
+	GitBranch       *git.Branch            `json:"git_branch,omitempty" gorm:"foreignKey:BranchID"`
+	TmuxSession     *utmux.TmuxSession     `json:"tmux_session,omitempty" gorm:"foreignKey:TmuxSessionID"`
 }
 
 func SanitizeTmuxName(name string) string {

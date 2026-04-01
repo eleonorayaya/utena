@@ -17,10 +17,9 @@ type WorkspaceModule struct {
 	GitService *git.GitService
 }
 
-func NewWorkspaceModule(database db.Database, fs afero.Fs, configDir string) *WorkspaceModule {
+func NewWorkspaceModule(database db.Database, fs afero.Fs, configDir string, gitService *git.GitService) *WorkspaceModule {
 	store := NewWorkspaceStore(database, fs, configDir)
 	service := NewWorkspaceService(store)
-	gitService := git.NewGitService()
 	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 

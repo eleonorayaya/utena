@@ -9,6 +9,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/todo"
@@ -32,17 +33,26 @@ func NewApp(cfg Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newApp(gormDB, tmux.NewGotmuxClient(), afero.NewOsFs(), cfg), nil
+	return newApp(gormDB, afero.NewOsFs(), cfg), nil
 }
 
-func newApp(gormDB *gorm.DB, tmuxClient tmux.TmuxClient, fs afero.Fs, cfg Config) *App {
-	bus := eventbus.NewEventBus()
+func newApp(gormDB *gorm.DB, fs afero.Fs, cfg Config) *App {
+	return buildApp(gormDB, fs, cfg, nil, nil)
+}
+
+func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxModule, bus eventbus.EventBus) *App {
+	if bus == nil {
+		bus = eventbus.NewEventBus()
+	}
 
 	dbModule := db.NewDatabaseModule(gormDB)
 	database := dbModule.Service
 
-	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir)
-	tmuxModule := tmux.NewTmuxModule(tmuxClient, bus)
+	gitService := git.NewGitService(database)
+	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir, gitService)
+	if tmuxModule == nil {
+		tmuxModule = tmux.NewTmuxModule(bus, database)
+	}
 	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir)
 
 	app := &App{

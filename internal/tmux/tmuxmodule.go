@@ -3,6 +3,7 @@ package tmux
 import (
 	"context"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/go-chi/chi/v5"
 )
@@ -13,8 +14,17 @@ type TmuxModule struct {
 	Router     *TmuxRouter
 }
 
-func NewTmuxModule(client TmuxClient, bus eventbus.EventBus) *TmuxModule {
-	service := NewTmuxService(client, bus)
+func NewTmuxModule(bus eventbus.EventBus, database db.Database) *TmuxModule {
+	runner := newGotmuxRunner()
+	store := NewTmuxStore(database)
+	service := NewTmuxService(runner, store, bus)
+	controller := NewTmuxController(service)
+	router := NewTmuxRouter(controller)
+	return &TmuxModule{Service: service, Controller: controller, Router: router}
+}
+
+func NewTmuxModuleWithRunner(runner tmuxRunner, store *TmuxStore, bus eventbus.EventBus) *TmuxModule {
+	service := NewTmuxService(runner, store, bus)
 	controller := NewTmuxController(service)
 	router := NewTmuxRouter(controller)
 	return &TmuxModule{Service: service, Controller: controller, Router: router}
@@ -30,4 +40,8 @@ func (m *TmuxModule) OnAppEnd(ctx context.Context) error {
 
 func (m *TmuxModule) Routes() chi.Router {
 	return m.Router.Routes()
+}
+
+func (m *TmuxModule) Models() []any {
+	return []any{&TmuxSession{}}
 }

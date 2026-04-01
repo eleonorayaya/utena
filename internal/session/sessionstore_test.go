@@ -10,6 +10,8 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/git"
+	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +22,7 @@ func setupTestDB(t *testing.T) db.Database {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database.Migrate(&workspace.Workspace{}, &Session{}, &claude.ClaudeSession{})
+	database.Migrate(&workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{})
 	t.Cleanup(func() { database.Close() })
 	return database
 }
@@ -309,4 +311,177 @@ func TestSessionStore_OnAppEnd(t *testing.T) {
 	ctx := context.Background()
 	err := store.OnAppEnd(ctx)
 	require.NoError(t, err)
+}
+
+func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *utmux.TmuxSession) {
+	t.Helper()
+	database, err := db.OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	database.Migrate(&workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{})
+	t.Cleanup(func() { database.Close() })
+
+	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
+	database.Create(ws)
+
+	repo := &git.Repo{Path: "/tmp/utena", FullName: "eleonorayaya/utena"}
+	database.Create(repo)
+
+	branch := &git.Branch{Name: "feature-x", RepoID: repo.ID, ExistsLocal: true}
+	database.Create(branch)
+
+	ts := &utmux.TmuxSession{Name: "utena-feature-x", StartDir: "/tmp/utena", IsAlive: true}
+	database.Create(ts)
+
+	return database, ws.ID, branch, ts
+}
+
+func TestSessionStore_GetByID_LoadsGitBranchAndTmuxSession(t *testing.T) {
+	database, wsID, branch, ts := setupTestDBWithGitAndTmux(t)
+	store := NewSessionStore(database)
+
+	session := &Session{
+		TmuxSessionName: "utena-feature-x",
+		WorkspaceID:     wsID,
+		BranchID:        &branch.ID,
+		TmuxSessionID:   &ts.ID,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
+	}
+	require.NoError(t, store.Add(session))
+
+	retrieved, err := store.GetByID(session.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved.GitBranch)
+	require.Equal(t, "feature-x", retrieved.GitBranch.Name)
+	require.NotNil(t, retrieved.TmuxSession)
+	require.Equal(t, "utena-feature-x", retrieved.TmuxSession.Name)
+	require.True(t, retrieved.TmuxSession.IsAlive)
+}
+
+func TestSessionStore_GetByBranchID(t *testing.T) {
+	database, wsID, branch, ts := setupTestDBWithGitAndTmux(t)
+	store := NewSessionStore(database)
+
+	session := &Session{
+		TmuxSessionName: "utena-feature-x",
+		WorkspaceID:     wsID,
+		BranchID:        &branch.ID,
+		TmuxSessionID:   &ts.ID,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
+	}
+	require.NoError(t, store.Add(session))
+
+	retrieved, err := store.GetByBranchID(branch.ID)
+	require.NoError(t, err)
+	require.Equal(t, session.ID, retrieved.ID)
+	require.NotNil(t, retrieved.GitBranch)
+	require.Equal(t, "feature-x", retrieved.GitBranch.Name)
+}
+
+func TestSessionStore_GetByBranchID_NotFound(t *testing.T) {
+	store, _, _ := setupSessionStore(t)
+	_, err := store.GetByBranchID(99999)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrSessionNotFound)
+}
+
+func TestSessionStore_GetByTmuxSessionID(t *testing.T) {
+	database, wsID, branch, ts := setupTestDBWithGitAndTmux(t)
+	store := NewSessionStore(database)
+
+	session := &Session{
+		TmuxSessionName: "utena-feature-x",
+		WorkspaceID:     wsID,
+		BranchID:        &branch.ID,
+		TmuxSessionID:   &ts.ID,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
+	}
+	require.NoError(t, store.Add(session))
+
+	retrieved, err := store.GetByTmuxSessionID(ts.ID)
+	require.NoError(t, err)
+	require.Equal(t, session.ID, retrieved.ID)
+	require.NotNil(t, retrieved.TmuxSession)
+	require.Equal(t, "utena-feature-x", retrieved.TmuxSession.Name)
+}
+
+func TestSessionStore_GetByTmuxSessionID_NotFound(t *testing.T) {
+	store, _, _ := setupSessionStore(t)
+	_, err := store.GetByTmuxSessionID(99999)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrSessionNotFound)
+}
+
+func TestSessionStore_NullableForeignKeys(t *testing.T) {
+	store, wsID, _ := setupSessionStore(t)
+
+	session := &Session{
+		TmuxSessionName: "no-fk-session",
+		WorkspaceID:     wsID,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
+	}
+	require.NoError(t, store.Add(session))
+
+	retrieved, err := store.GetByID(session.ID)
+	require.NoError(t, err)
+	require.Nil(t, retrieved.BranchID)
+	require.Nil(t, retrieved.TmuxSessionID)
+	require.Nil(t, retrieved.GitBranch)
+	require.Zero(t, retrieved.TmuxSession.ID)
+}
+
+func TestSessionStore_List_LoadsNewRelationships(t *testing.T) {
+	database, wsID, branch, ts := setupTestDBWithGitAndTmux(t)
+	store := NewSessionStore(database)
+
+	session1 := &Session{
+		TmuxSessionName: "utena-feature-x",
+		WorkspaceID:     wsID,
+		BranchID:        &branch.ID,
+		TmuxSessionID:   &ts.ID,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now(),
+	}
+	session2 := &Session{
+		TmuxSessionName: "utena-no-fk",
+		WorkspaceID:     wsID,
+		Status:          StatusReady,
+		LastUsedAt:      time.Now().Add(-1 * time.Hour),
+	}
+	require.NoError(t, store.Add(session1))
+	require.NoError(t, store.Add(session2))
+
+	list := store.List()
+	require.Len(t, list, 2)
+
+	require.NotNil(t, list[0].GitBranch)
+	require.Equal(t, "feature-x", list[0].GitBranch.Name)
+	require.NotNil(t, list[0].TmuxSession)
+	require.Equal(t, "utena-feature-x", list[0].TmuxSession.Name)
+
+	require.Nil(t, list[1].GitBranch)
+	require.Zero(t, list[1].TmuxSession.ID)
+}
+
+func TestSessionStore_StatusError(t *testing.T) {
+	store, wsID, _ := setupSessionStore(t)
+
+	session := &Session{
+		TmuxSessionName: "broken-session",
+		WorkspaceID:     wsID,
+		Status:          StatusBroken,
+		StatusError:     "worktree creation failed",
+		LastUsedAt:      time.Now(),
+	}
+	require.NoError(t, store.Add(session))
+
+	retrieved, err := store.GetByID(session.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusBroken, retrieved.Status)
+	require.Equal(t, "worktree creation failed", retrieved.StatusError)
 }
