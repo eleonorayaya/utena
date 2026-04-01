@@ -210,3 +210,36 @@ func (c *SessionController) RepairSession(w http.ResponseWriter, r *http.Request
 
 	render.Render(w, r, NewSessionResponse(session))
 }
+
+func (c *SessionController) ArchiveSession(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
+
+	session, err := c.service.ArchiveSession(ctx, id)
+	if err != nil {
+		render.Render(w, r, common.ErrUnknown(err))
+		return
+	}
+
+	render.Render(w, r, NewSessionResponse(session))
+}
+
+func (c *SessionController) DismissSession(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		render.Render(w, r, common.ErrInvalidRequest(err))
+		return
+	}
+
+	if err := c.service.DismissSession(ctx, id); err != nil {
+		render.Render(w, r, common.ErrUnknown(err))
+		return
+	}
+
+	render.JSON(w, r, map[string]string{"status": "ok"})
+}

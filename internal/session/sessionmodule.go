@@ -2,9 +2,11 @@ package session
 
 import (
 	"context"
+	"time"
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
+	usync "github.com/eleonorayaya/utena/internal/sync"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
@@ -19,7 +21,8 @@ type SessionModule struct {
 
 func NewSessionModule(tmuxService *utmux.TmuxService, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string, configDir string) *SessionModule {
 	store := NewSessionStore(database)
-	service := NewSessionService(store, workspaceModule.Service, workspaceModule.GitService, tmuxService, bus, branchPrefix, configDir)
+	dismissedPRStore := NewDismissedPRStore(database)
+	service := NewSessionService(store, dismissedPRStore, workspaceModule.Service, workspaceModule.GitService, tmuxService, bus, branchPrefix, configDir)
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
@@ -56,9 +59,29 @@ func (m *SessionModule) OnAppEnd(ctx context.Context) error {
 }
 
 func (m *SessionModule) Models() []any {
-	return []any{&Session{}}
+	return []any{&Session{}, &DismissedPR{}}
 }
 
 func (m *SessionModule) Routes() chi.Router {
 	return m.Router.Routes()
+}
+
+type reconcileSyncTask struct {
+	service *SessionService
+}
+
+func (t *reconcileSyncTask) Name() string               { return "session.reconcile" }
+func (t *reconcileSyncTask) Interval() time.Duration     { return 1 * time.Minute }
+func (t *reconcileSyncTask) Run(ctx context.Context) error {
+	sessions := t.service.store.List()
+	for _, sess := range sessions {
+		if sess.Status != StatusDeleted && sess.Status != StatusArchived && sess.Status != StatusCreating {
+			t.service.ReconcileSession(ctx, sess.ID)
+		}
+	}
+	return nil
+}
+
+func (m *SessionModule) RegisterSyncTasks(manager *usync.SyncManager) {
+	manager.Register(&reconcileSyncTask{service: m.Service})
 }

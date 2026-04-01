@@ -39,7 +39,8 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 	t.Cleanup(func() { gitDB.Close() })
 	gitService := git.NewGitService(gitDB)
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
+	dismissedPRStore := NewDismissedPRStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 

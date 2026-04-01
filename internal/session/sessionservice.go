@@ -18,6 +18,7 @@ import (
 
 type SessionService struct {
 	store            *SessionStore
+	dismissedPRStore *DismissedPRStore
 	workspaceService *workspace.WorkspaceService
 	gitService       *git.GitService
 	tmuxService      *utmux.TmuxService
@@ -26,9 +27,10 @@ type SessionService struct {
 	configDir        string
 }
 
-func NewSessionService(store *SessionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string) *SessionService {
+func NewSessionService(store *SessionStore, dismissedPRStore *DismissedPRStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string) *SessionService {
 	return &SessionService{
 		store:            store,
+		dismissedPRStore: dismissedPRStore,
 		workspaceService: workspaceService,
 		gitService:       gitService,
 		tmuxService:      tmuxService,
@@ -44,6 +46,8 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.eventBus.Subscribe(eventbus.TmuxClientSessionChanged, s.handleTmuxClientSessionChanged)
 	s.eventBus.Subscribe(eventbus.TmuxClientAttached, s.handleTmuxClientAttached)
 	s.eventBus.Subscribe(eventbus.TmuxClientDetached, s.handleTmuxClientDetached)
+	s.eventBus.Subscribe(git.EventPRDiscovered, s.handlePRDiscovered)
+	s.eventBus.Subscribe(git.EventPRStateChanged, s.handlePRStateChanged)
 	s.reconcileTmuxState(ctx)
 	return nil
 }
@@ -289,9 +293,11 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 func (s *SessionService) setupTmux(ctx context.Context, sess *Session) error {
 	startDir := s.resolveStartDir(ctx, sess)
 	env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", sess.ID)}
-	if _, err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir, env); err != nil {
+	ts, err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir, env)
+	if err != nil {
 		return fmt.Errorf("failed to create tmux session: %v", err)
 	}
+	sess.TmuxSessionID = &ts.ID
 	return nil
 }
 
@@ -668,4 +674,136 @@ func (s *SessionService) reconcileTmuxState(ctx context.Context) {
 			s.RefreshSession(ctx, sess.ID)
 		}
 	}
+}
+
+func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session, error) {
+	sess, err := s.store.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if sess.Status != StatusReady && sess.Status != StatusActive && sess.Status != StatusInactive {
+		return nil, fmt.Errorf("cannot archive session in status %s", sess.Status)
+	}
+
+	if sess.BranchID != nil && sess.GitBranch != nil {
+		ws, _ := s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID)
+		if ws != nil {
+			s.gitService.CleanupBranch(ctx, sess.GitBranch, ws.Path, false)
+		}
+	}
+
+	if sess.TmuxSessionID != nil {
+		s.tmuxService.KillSession(*sess.TmuxSessionID)
+	} else if sess.TmuxSessionName != "" {
+		s.tmuxService.KillSessionByName(sess.TmuxSessionName)
+	}
+
+	sess.Status = StatusArchived
+	sess.IsAttached = false
+	if err := s.store.Update(sess); err != nil {
+		return nil, err
+	}
+	return sess, nil
+}
+
+func (s *SessionService) DismissSession(ctx context.Context, id uint) error {
+	sess, err := s.store.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if sess.Status != StatusPending {
+		return fmt.Errorf("can only dismiss pending sessions")
+	}
+
+	if sess.BranchID != nil && s.dismissedPRStore != nil {
+		prs := s.gitService.GetPRsForBranch(*sess.BranchID)
+		for _, pr := range prs {
+			s.dismissedPRStore.Add(&DismissedPR{
+				PullRequestID: pr.ID,
+				DismissedAt:   time.Now(),
+			})
+		}
+	}
+
+	return s.store.Delete(sess.ID)
+}
+
+func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Session, error) {
+	sess, err := s.store.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if sess.Status == StatusCreating || sess.Status == StatusDeleted || sess.Status == StatusArchived || sess.Status == StatusPending {
+		return sess, nil
+	}
+
+	tmuxAlive := false
+	if sess.TmuxSessionID != nil {
+		ts, tsErr := s.tmuxService.GetSession(*sess.TmuxSessionID)
+		if tsErr == nil {
+			tmuxAlive = ts.IsAlive
+		}
+	} else if sess.TmuxSessionName != "" {
+		tmuxAlive = s.tmuxService.HasSession(sess.TmuxSessionName)
+	}
+
+	gitHealthy := true
+	if sess.BranchID != nil && sess.GitBranch != nil {
+		ws, _ := s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID)
+		if ws != nil {
+			gitHealthy = s.gitService.IsHealthy(ctx, sess.GitBranch, ws.Path)
+		}
+	}
+
+	if !gitHealthy {
+		sess.Status = StatusBroken
+		sess.StatusError = "worktree or branch is unhealthy"
+	} else if !tmuxAlive {
+		if sess.Status == StatusReady || sess.Status == StatusActive {
+			sess.Status = StatusInactive
+		}
+	} else {
+		if sess.Status == StatusInactive {
+			sess.Status = StatusActive
+		}
+	}
+
+	s.store.Update(sess)
+	return sess, nil
+}
+
+func (s *SessionService) handlePRDiscovered(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(git.PRDiscoveredEvent)
+	if !ok {
+		return nil
+	}
+
+	if data.PullRequest.HeadBranchID == nil {
+		return nil
+	}
+
+	_, err := s.store.GetByBranchID(*data.PullRequest.HeadBranchID)
+	if err == nil {
+		return nil
+	}
+
+	if s.dismissedPRStore != nil && s.dismissedPRStore.IsDismissed(data.PullRequest.ID) {
+		return nil
+	}
+
+	slog.Info("PR discovered, could create pending session", "pr", data.PullRequest.Number, "branch", data.PullRequest.HeadBranchID)
+	return nil
+}
+
+func (s *SessionService) handlePRStateChanged(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(git.PRStateChangedEvent)
+	if !ok {
+		return nil
+	}
+
+	if data.NewState == git.PRStateMerged && data.PullRequest.HeadBranchID != nil {
+		slog.Info("PR merged", "pr", data.PullRequest.Number, "branch_id", *data.PullRequest.HeadBranchID)
+	}
+	return nil
 }

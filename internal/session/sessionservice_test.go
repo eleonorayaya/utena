@@ -46,7 +46,8 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 	t.Cleanup(func() { gitDB.Close() })
 	gitService := git.NewGitService(gitDB)
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
+	dismissedPRStore := NewDismissedPRStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 	return service, sessionStore, workspaceStore, mock, ws1.ID, ws2.ID
 }
 
@@ -351,7 +352,8 @@ func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string
 	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 	t.Cleanup(func() { gitDB.Close() })
 	gitService := git.NewGitService(gitDB)
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir)
+	dismissedPRStore := NewDismissedPRStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir)
 	return service, sessionStore, mock, wsGit.ID
 }
 
@@ -558,7 +560,8 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 	t.Cleanup(func() { gitDB.Close() })
 	gitService := git.NewGitService(gitDB)
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
+	dismissedPRStore := NewDismissedPRStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 
 	session := &Session{
 		Name:        "my-session",

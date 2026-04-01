@@ -11,6 +11,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
+	usync "github.com/eleonorayaya/utena/internal/sync"
 	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/todo"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -21,11 +22,13 @@ import (
 
 type App struct {
 	DB        *db.DatabaseModule
+	Git       *git.GitModule
 	Workspace *workspace.WorkspaceModule
 	Session   *session.SessionModule
 	Tmux      *tmux.TmuxModule
 	Claude    *claude.ClaudeModule
 	Todo      *todo.TodoModule
+	Sync      *usync.SyncManager
 }
 
 func NewApp(cfg Config) (*App, error) {
@@ -48,20 +51,26 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxMod
 	dbModule := db.NewDatabaseModule(gormDB)
 	database := dbModule.Service
 
-	gitService := git.NewGitService(database)
-	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir, gitService)
+	gitModule := git.NewGitModule(database, bus)
+	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir, gitModule.Service)
 	if tmuxModule == nil {
 		tmuxModule = tmux.NewTmuxModule(bus, database)
 	}
 	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir)
 
+	syncManager := usync.NewSyncManager()
+	gitModule.RegisterSyncTasks(syncManager)
+	sessionModule.RegisterSyncTasks(syncManager)
+
 	app := &App{
 		DB:        dbModule,
+		Git:       gitModule,
 		Workspace: workspaceModule,
 		Session:   sessionModule,
 		Tmux:      tmuxModule,
 		Claude:    claude.NewClaudeModule(database),
 		Todo:      todo.NewTodoModule(workspaceModule, database),
+		Sync:      syncManager,
 	}
 
 	database.RegisterModels(app.collectModels()...)
@@ -81,10 +90,21 @@ func (a *App) OnStart(ctx context.Context) error {
 		}
 		slog.Info("Initialized module", "module", m.name)
 	}
+
+	if a.Sync != nil {
+		a.Sync.Start(ctx)
+		slog.Info("Started sync manager")
+	}
+
 	return nil
 }
 
 func (a *App) OnEnd(ctx context.Context) {
+	if a.Sync != nil {
+		a.Sync.Stop()
+		slog.Info("Stopped sync manager")
+	}
+
 	modules := a.modules()
 	for i := len(modules) - 1; i >= 0; i-- {
 		m := modules[i]
@@ -123,10 +143,11 @@ func (a *App) collectModels() []any {
 
 func (a *App) modules() []moduleEntry {
 	return []moduleEntry{
-		{"workspace", "/workspaces", a.Workspace},
+		{"git", "/git", a.Git},
 		{"tmux", "/tmux", a.Tmux},
-		{"session", "/sessions", a.Session},
+		{"workspace", "/workspaces", a.Workspace},
 		{"claude", "/claude", a.Claude},
+		{"session", "/sessions", a.Session},
 		{"todo", "/todos", a.Todo},
 	}
 }
