@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
@@ -293,11 +292,6 @@ func (s *GitService) CleanupBranch(ctx context.Context, branch *Branch, repoPath
 	return nil
 }
 
-func (s *GitService) RepoStore() *RepoStore         { return s.repoStore }
-func (s *GitService) BranchStore() *BranchStore     { return s.branchStore }
-func (s *GitService) WorktreeStore() *WorktreeStore { return s.worktreeStore }
-func (s *GitService) PRStore() *PRStore             { return s.prStore }
-
 func (s *GitService) GetPR(id uint) (*PullRequest, error) {
 	return s.prStore.GetByID(id)
 }
@@ -322,14 +316,14 @@ func (s *GitService) GetPRDiff(ctx context.Context, prID uint) (*Diff, error) {
 	if err != nil {
 		return nil, err
 	}
-	parts := strings.SplitN(repo.FullName, "/", 2)
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid repo full name: %s", repo.FullName)
+	owner, name, err := repo.OwnerAndName()
+	if err != nil {
+		return nil, err
 	}
 	if s.githubClient == nil {
 		return nil, fmt.Errorf("GitHub client not available")
 	}
-	raw, err := s.githubClient.GetPRDiff(ctx, parts[0], parts[1], pr.Number)
+	raw, err := s.githubClient.GetPRDiff(ctx, owner, name, pr.Number)
 	if err != nil {
 		return nil, err
 	}
@@ -340,11 +334,11 @@ func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 	if s.githubClient == nil {
 		return nil
 	}
-	parts := strings.SplitN(repo.FullName, "/", 2)
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid repo full name: %s", repo.FullName)
+	owner, name, err := repo.OwnerAndName()
+	if err != nil {
+		return err
 	}
-	rawPRs, err := s.githubClient.ListRepoPRs(ctx, parts[0], parts[1])
+	rawPRs, err := s.githubClient.ListRepoPRs(ctx, owner, name)
 	if err != nil {
 		return err
 	}
@@ -358,16 +352,7 @@ func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 		}
 
 		existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, raw.Number)
-		pr := &PullRequest{
-			RepoID:       repo.ID,
-			Number:       raw.Number,
-			HeadBranchID: &branch.ID,
-			Title:        raw.Title,
-			State:        raw.ToPRState(),
-			IsDraft:      raw.Draft,
-			HTMLURL:      raw.HTMLURL,
-			AuthorLogin:  raw.User.Login,
-		}
+		pr := rawPRToPullRequest(raw, repo.ID, branch.ID)
 
 		if existing != nil {
 			oldState := existing.State
@@ -422,16 +407,7 @@ func (s *GitService) SyncAssignedPRs(ctx context.Context) ([]PullRequest, error)
 			branch = &Branch{Name: raw.Head.Ref, RepoID: repo.ID, ExistsRemote: true}
 			s.branchStore.Upsert(branch)
 		}
-		pr := &PullRequest{
-			RepoID:       repo.ID,
-			Number:       raw.Number,
-			HeadBranchID: &branch.ID,
-			Title:        raw.Title,
-			State:        raw.ToPRState(),
-			IsDraft:      raw.Draft,
-			HTMLURL:      raw.HTMLURL,
-			AuthorLogin:  raw.User.Login,
-		}
+		pr := rawPRToPullRequest(raw, repo.ID, branch.ID)
 		s.prStore.Upsert(pr)
 		discovered = append(discovered, *pr)
 		if s.eventBus != nil {
@@ -442,6 +418,19 @@ func (s *GitService) SyncAssignedPRs(ctx context.Context) ([]PullRequest, error)
 		}
 	}
 	return discovered, nil
+}
+
+func rawPRToPullRequest(raw RawPR, repoID uint, branchID uint) *PullRequest {
+	return &PullRequest{
+		RepoID:       repoID,
+		Number:       raw.Number,
+		HeadBranchID: &branchID,
+		Title:        raw.Title,
+		State:        raw.ToPRState(),
+		IsDraft:      raw.Draft,
+		HTMLURL:      raw.HTMLURL,
+		AuthorLogin:  raw.User.Login,
+	}
 }
 
 func (s *GitService) SyncBranches(ctx context.Context, repoID uint, repoPath string) error {

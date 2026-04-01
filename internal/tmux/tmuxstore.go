@@ -3,7 +3,6 @@ package tmux
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"gorm.io/gorm"
@@ -25,7 +24,7 @@ func (s *TmuxStore) Add(session *TmuxSession) error {
 	}
 
 	if err := s.db.Create(session).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueConstraintError(err) {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return fmt.Errorf("tmux session '%s' already exists: %w", session.Name, ErrTmuxSessionAlreadyExists)
 		}
 		return err
@@ -94,11 +93,4 @@ func (s *TmuxStore) Delete(id uint) error {
 	}
 
 	return s.db.Delete(&TmuxSession{}, "id = ?", id).Error
-}
-
-func isUniqueConstraintError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

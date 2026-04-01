@@ -24,7 +24,7 @@ func (s *PRStore) Add(pr *PullRequest) error {
 	}
 
 	if err := s.db.Create(pr).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueConstraintError(err) {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return fmt.Errorf("pull request #%d in repo %d already exists: %w", pr.Number, pr.RepoID, ErrPRAlreadyExists)
 		}
 		return err

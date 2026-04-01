@@ -24,7 +24,7 @@ func (s *BranchStore) Add(branch *Branch) error {
 	}
 
 	if err := s.db.Create(branch).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueConstraintError(err) {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return fmt.Errorf("branch '%s' in repo %d already exists: %w", branch.Name, branch.RepoID, ErrBranchAlreadyExists)
 		}
 		return err

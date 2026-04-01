@@ -3,7 +3,6 @@ package git
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"gorm.io/gorm"
@@ -25,7 +24,7 @@ func (s *RepoStore) Add(repo *Repo) error {
 	}
 
 	if err := s.db.Create(repo).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueConstraintError(err) {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return fmt.Errorf("repo '%s' already exists: %w", repo.Path, ErrRepoAlreadyExists)
 		}
 		return err
@@ -106,11 +105,4 @@ func (s *RepoStore) Upsert(repo *Repo) error {
 
 	repo.ID = existing.ID
 	return s.db.Save(repo).Error
-}
-
-func isUniqueConstraintError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

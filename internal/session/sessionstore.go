@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"gorm.io/gorm"
@@ -60,7 +59,7 @@ func (s *SessionStore) Add(session *Session) error {
 	}
 
 	if err := s.db.Omit("Workspace", "ClaudeSessions", "GitBranch", "TmuxSession").Create(session).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueConstraintError(err) {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return fmt.Errorf("session '%s' already exists: %w", session.TmuxSessionName, ErrSessionAlreadyExists)
 		}
 		return err
@@ -133,9 +132,3 @@ func (s *SessionStore) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
-func isUniqueConstraintError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "UNIQUE constraint failed")
-}

@@ -24,7 +24,7 @@ func (s *WorktreeStore) Add(worktree *Worktree) error {
 	}
 
 	if err := s.db.Create(worktree).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueConstraintError(err) {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return fmt.Errorf("worktree already exists: %w", ErrWorktreeAlreadyExists)
 		}
 		return err
