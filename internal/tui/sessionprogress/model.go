@@ -96,7 +96,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.session = &s
 		switch s.Status {
-		case session.StatusReady:
+		case session.StatusActive:
 			m.done = true
 			return m, provider.ActivateSession(s.ID)
 		case session.StatusBroken:

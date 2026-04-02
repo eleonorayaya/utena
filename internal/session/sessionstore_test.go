@@ -51,7 +51,7 @@ func TestSessionStore_Add(t *testing.T) {
 		TmuxSessionName: "session-1",
 		WorkspaceID:     ws1ID,
 		IsAttached:      true,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		LastUsedAt:      time.Now(),
 	}
 
@@ -102,7 +102,7 @@ func TestSessionStore_GetByID(t *testing.T) {
 		TmuxSessionName: "session-1",
 		WorkspaceID:     ws1ID,
 		IsAttached:      false,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		LastUsedAt:      time.Now(),
 	}
 
@@ -190,7 +190,7 @@ func TestSessionStore_Update(t *testing.T) {
 		TmuxSessionName: "session-1",
 		WorkspaceID:     ws1ID,
 		IsAttached:      false,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		LastUsedAt:      time.Now(),
 	}
 
@@ -346,7 +346,7 @@ func TestSessionStore_GetByID_LoadsGitBranchAndTmuxSession(t *testing.T) {
 		WorkspaceID:     wsID,
 		BranchID:        &branch.ID,
 		TmuxSessionID:   &ts.ID,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		LastUsedAt:      time.Now(),
 	}
 	require.NoError(t, store.Add(session))
@@ -369,7 +369,7 @@ func TestSessionStore_GetByBranchID(t *testing.T) {
 		WorkspaceID:     wsID,
 		BranchID:        &branch.ID,
 		TmuxSessionID:   &ts.ID,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		LastUsedAt:      time.Now(),
 	}
 	require.NoError(t, store.Add(session))
@@ -397,7 +397,7 @@ func TestSessionStore_GetByTmuxSessionID(t *testing.T) {
 		WorkspaceID:     wsID,
 		BranchID:        &branch.ID,
 		TmuxSessionID:   &ts.ID,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		LastUsedAt:      time.Now(),
 	}
 	require.NoError(t, store.Add(session))
@@ -422,7 +422,7 @@ func TestSessionStore_NullableForeignKeys(t *testing.T) {
 	session := &Session{
 		TmuxSessionName: "no-fk-session",
 		WorkspaceID:     wsID,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		LastUsedAt:      time.Now(),
 	}
 	require.NoError(t, store.Add(session))
@@ -444,13 +444,13 @@ func TestSessionStore_List_LoadsNewRelationships(t *testing.T) {
 		WorkspaceID:     wsID,
 		BranchID:        &branch.ID,
 		TmuxSessionID:   &ts.ID,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		LastUsedAt:      time.Now(),
 	}
 	session2 := &Session{
 		TmuxSessionName: "utena-no-fk",
 		WorkspaceID:     wsID,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		LastUsedAt:      time.Now().Add(-1 * time.Hour),
 	}
 	require.NoError(t, store.Add(session1))

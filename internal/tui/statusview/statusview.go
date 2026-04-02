@@ -248,7 +248,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) activeSessions() []session.Session {
 	var result []session.Session
 	for _, s := range m.sessions {
-		if s.Status == session.StatusReady || s.Status == session.StatusCreating {
+		if s.Status == session.StatusActive || s.Status == session.StatusCreating {
 			result = append(result, s)
 		}
 	}

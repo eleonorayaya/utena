@@ -51,8 +51,8 @@ func TestSessionRouter_ListSessions(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, ws2ID := setupSessionRouter(t)
 
 	now := time.Now()
-	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: now}
-	session2 := &Session{TmuxSessionName: "session-2", WorkspaceID: ws2ID, Status: StatusReady, LastUsedAt: now}
+	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, Status: StatusActive, LastUsedAt: now}
+	session2 := &Session{TmuxSessionName: "session-2", WorkspaceID: ws2ID, Status: StatusActive, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 
@@ -83,7 +83,7 @@ func TestSessionRouter_GetSessionByID(t *testing.T) {
 		TmuxSessionName: "session-1",
 		WorkspaceID:     ws1ID,
 		IsAttached:      true,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
 		LastUsedAt:      time.Now(),
 	}
@@ -102,7 +102,7 @@ func TestSessionRouter_GetSessionByID(t *testing.T) {
 	require.Equal(t, session.ID, response.ID)
 	require.Equal(t, ws1ID, response.WorkspaceID)
 	require.True(t, response.IsAttached)
-	require.Equal(t, StatusReady, response.Status)
+	require.Equal(t, StatusActive, response.Status)
 	require.NotNil(t, response.Resources)
 	require.Equal(t, ResourceReady, response.Resources.Tmux.Status)
 }
@@ -122,9 +122,9 @@ func TestSessionRouter_ListSessionsByWorkspace(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, ws2ID := setupSessionRouter(t)
 
 	now := time.Now()
-	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: now}
-	session2 := &Session{TmuxSessionName: "session-2", WorkspaceID: ws2ID, Status: StatusReady, LastUsedAt: now}
-	session3 := &Session{TmuxSessionName: "session-3", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: now}
+	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, Status: StatusActive, LastUsedAt: now}
+	session2 := &Session{TmuxSessionName: "session-2", WorkspaceID: ws2ID, Status: StatusActive, LastUsedAt: now}
+	session3 := &Session{TmuxSessionName: "session-3", WorkspaceID: ws1ID, Status: StatusActive, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 	sessionStore.Add(session3)
@@ -166,7 +166,7 @@ func TestSessionRouter_CreateSession(t *testing.T) {
 	require.Equal(t, "session-1", resp.Name)
 	require.Equal(t, StatusCreating, resp.Status)
 
-	waitForStatus(t, sessionStore, resp.ID, StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, resp.ID, StatusActive, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID(resp.ID)
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestSessionRouter_CreateSession_WithName(t *testing.T) {
 	require.Equal(t, "utena-main", resp.TmuxSessionName)
 	require.Equal(t, "main", resp.Name)
 
-	waitForStatus(t, sessionStore, resp.ID, StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, resp.ID, StatusActive, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID(resp.ID)
 	require.NoError(t, err)
@@ -220,7 +220,7 @@ func TestSessionRouter_CreateSession_ExistingBranch(t *testing.T) {
 	require.Equal(t, "utena-main", resp.TmuxSessionName)
 	require.Equal(t, "main", resp.Name)
 
-	waitForStatus(t, sessionStore, resp.ID, StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, resp.ID, StatusActive, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID(resp.ID)
 	require.NoError(t, err)
@@ -249,7 +249,7 @@ func TestSessionRouter_UpdateSession(t *testing.T) {
 		TmuxSessionName: "session-1",
 		WorkspaceID:     ws1ID,
 		IsAttached:      false,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
@@ -278,7 +278,7 @@ func TestSessionRouter_DeleteSession(t *testing.T) {
 	session := &Session{
 		TmuxSessionName: "session-1",
 		WorkspaceID:     ws1ID,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
 		LastUsedAt:      time.Now(),
 	}
@@ -323,7 +323,7 @@ func TestSessionRouter_RepairSession(t *testing.T) {
 	require.Equal(t, session.ID, response.ID)
 	require.Equal(t, StatusCreating, response.Status)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 }
 
 func TestSessionRouter_RepairSession_NotFound(t *testing.T) {
@@ -344,7 +344,7 @@ func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
 	session := &Session{
 		TmuxSessionName: "alive-session",
 		WorkspaceID:     ws1ID,
-		Status:          StatusReady,
+		Status:          StatusActive,
 		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
 		LastUsedAt:      time.Now(),
 	}

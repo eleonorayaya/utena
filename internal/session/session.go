@@ -22,7 +22,6 @@ type SessionStatus string
 
 const (
 	StatusCreating SessionStatus = "creating"
-	StatusReady    SessionStatus = "ready"
 	StatusActive   SessionStatus = "active"
 	StatusBroken   SessionStatus = "broken"
 	StatusDeleted  SessionStatus = "deleted"

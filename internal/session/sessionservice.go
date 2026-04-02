@@ -195,7 +195,7 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace) {
 		s.store.Update(sess)
 	}
 
-	sess.Status = StatusReady
+	sess.Status = StatusActive
 	s.store.Update(sess)
 }
 
@@ -389,7 +389,7 @@ func (s *SessionService) RefreshSession(ctx context.Context, id uint) (*Session,
 
 	if sess.Status != StatusCreating && sess.Status != StatusDeleted {
 		if sess.Resources.AllReady() {
-			sess.Status = StatusReady
+			sess.Status = StatusActive
 		} else {
 			sess.Status = StatusBroken
 		}
@@ -405,7 +405,7 @@ func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, 
 		return nil, err
 	}
 
-	if sess.Status == StatusReady {
+	if sess.Status == StatusActive {
 		return sess, nil
 	}
 
@@ -469,7 +469,7 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		if _, err := s.tmuxService.CreateSession(session.TmuxSessionName, startDir, env); err != nil {
 			return nil, fmt.Errorf("failed to revive tmux session: %w", err)
 		}
-		session.Status = StatusReady
+		session.Status = StatusActive
 		if session.Resources != nil && session.Resources.Tmux != nil {
 			session.Resources.Tmux.Status = ResourceReady
 			session.Resources.Tmux.Error = ""
@@ -681,7 +681,7 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 	if err != nil {
 		return nil, err
 	}
-	if sess.Status != StatusReady && sess.Status != StatusActive && sess.Status != StatusInactive {
+	if sess.Status != StatusActive && sess.Status != StatusInactive {
 		return nil, fmt.Errorf("cannot archive session in status %s", sess.Status)
 	}
 
@@ -760,7 +760,7 @@ func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Sessio
 		sess.Status = StatusBroken
 		sess.StatusError = "worktree or branch is unhealthy"
 	} else if !tmuxAlive {
-		if sess.Status == StatusReady || sess.Status == StatusActive {
+		if sess.Status == StatusActive {
 			sess.Status = StatusInactive
 		}
 	} else {
