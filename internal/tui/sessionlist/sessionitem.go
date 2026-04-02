@@ -15,7 +15,10 @@ func (i sessionItem) displayName() string {
 	if i.session.Name != "" {
 		return i.session.Name
 	}
-	return i.session.TmuxSessionName
+	if i.session.TmuxSession != nil {
+		return i.session.TmuxSession.Name
+	}
+	return ""
 }
 
 func (i sessionItem) Title() string {

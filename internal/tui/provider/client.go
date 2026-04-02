@@ -137,11 +137,17 @@ func (c *client) activateSession(id uint) tea.Cmd {
 		}
 
 		var resp struct {
-			TmuxSessionName string `json:"tmux_session_name"`
+			TmuxSession *struct {
+				Name string `json:"name"`
+			} `json:"tmux_session"`
 		}
 		json.NewDecoder(res.Body).Decode(&resp)
 
-		return sessionActivatedMsg{tmuxSessionName: resp.TmuxSessionName}
+		tmuxName := ""
+		if resp.TmuxSession != nil {
+			tmuxName = resp.TmuxSession.Name
+		}
+		return sessionActivatedMsg{tmuxSessionName: tmuxName}
 	}
 }
 

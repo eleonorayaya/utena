@@ -74,8 +74,12 @@ func (s *SessionService) GetSession(ctx context.Context, id uint) (*Session, err
 	return s.store.GetByID(id)
 }
 
-func (s *SessionService) GetSessionByTmuxName(ctx context.Context, tmuxName string) (*Session, error) {
-	return s.store.GetByTmuxName(tmuxName)
+func (s *SessionService) findSessionByTmuxName(tmuxName string) (*Session, error) {
+	ts, err := s.tmuxService.GetSessionByName(tmuxName)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.GetByTmuxSessionID(ts.ID)
 }
 
 func (s *SessionService) CreateSession(ctx context.Context, session *Session, createWorktree bool) error {
@@ -93,21 +97,22 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 		createWorktree = true
 	}
 
+	var tmuxName string
 	switch {
 	case session.Name != "":
 		if ws != nil {
-			session.TmuxSessionName = BuildTmuxSessionName(ws.Name, session.Name)
+			tmuxName = BuildTmuxSessionName(ws.Name, session.Name)
 		} else {
-			session.TmuxSessionName = SanitizeTmuxName(session.Name)
+			tmuxName = SanitizeTmuxName(session.Name)
 		}
 	case session.Branch != "":
 		if session.Name == "" {
 			session.Name = session.Branch
 		}
 		if ws != nil {
-			session.TmuxSessionName = BuildTmuxSessionName(ws.Name, session.Name)
+			tmuxName = BuildTmuxSessionName(ws.Name, session.Name)
 		} else {
-			session.TmuxSessionName = SanitizeTmuxName(session.Name)
+			tmuxName = SanitizeTmuxName(session.Name)
 		}
 	default:
 		return fmt.Errorf("session name or branch is required")
@@ -127,12 +132,12 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 		s.workspaceService.Touch(ctx, session.WorkspaceID)
 	}
 
-	go s.runSetup(session.ID, ws)
+	go s.runSetup(session.ID, ws, tmuxName)
 
 	return nil
 }
 
-func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace) {
+func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxName string) {
 	ctx := context.Background()
 
 	sess, err := s.store.GetByID(sessionID)
@@ -166,7 +171,7 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace) {
 		}
 	}
 
-	if err := s.setupTmux(ctx, sess); err != nil {
+	if err := s.setupTmux(ctx, sess, tmuxName); err != nil {
 		sess.Status = StatusBroken
 		sess.StatusError = fmt.Sprintf("tmux setup failed: %v", err)
 		s.store.Update(sess)
@@ -269,10 +274,10 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 	return true, nil
 }
 
-func (s *SessionService) setupTmux(ctx context.Context, sess *Session) error {
+func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string) error {
 	startDir := s.resolveStartDir(ctx, sess)
 	env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", sess.ID)}
-	ts, err := s.tmuxService.CreateSession(sess.TmuxSessionName, startDir, env)
+	ts, err := s.tmuxService.CreateSession(tmuxName, startDir, env)
 	if err != nil {
 		return fmt.Errorf("failed to create tmux session: %v", err)
 	}
@@ -364,7 +369,8 @@ func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, 
 		ws, _ = s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID)
 	}
 
-	go s.runSetup(sess.ID, ws)
+	tmuxName := s.computeTmuxName(sess, ws)
+	go s.runSetup(sess.ID, ws, tmuxName)
 	return sess, nil
 }
 
@@ -396,12 +402,29 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		return nil, ErrCannotActivate
 	}
 
-	if !s.tmuxService.HasSession(session.TmuxSessionName) {
+	tmuxName := ""
+	if session.TmuxSessionID != nil {
+		ts, tsErr := s.tmuxService.GetSession(*session.TmuxSessionID)
+		if tsErr == nil {
+			tmuxName = ts.Name
+		}
+	}
+	if tmuxName == "" {
+		var ws *workspace.Workspace
+		if session.WorkspaceID != 0 {
+			ws, _ = s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
+		}
+		tmuxName = s.computeTmuxName(session, ws)
+	}
+
+	if !s.tmuxService.HasSession(tmuxName) {
 		startDir := s.resolveStartDir(ctx, session)
 		env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", session.ID)}
-		if _, err := s.tmuxService.CreateSession(session.TmuxSessionName, startDir, env); err != nil {
-			return nil, fmt.Errorf("failed to revive tmux session: %w", err)
+		ts, createErr := s.tmuxService.CreateSession(tmuxName, startDir, env)
+		if createErr != nil {
+			return nil, fmt.Errorf("failed to revive tmux session: %w", createErr)
 		}
+		session.TmuxSessionID = &ts.ID
 		session.Status = StatusActive
 		session.StatusError = ""
 	}
@@ -432,7 +455,7 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 
 	s.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionActivated,
-		Data: eventbus.SessionActivatedEvent{SessionName: session.TmuxSessionName},
+		Data: eventbus.SessionActivatedEvent{SessionName: tmuxName},
 	})
 
 	return session, nil
@@ -470,13 +493,22 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 		}
 	}
 
-	if err := s.tmuxService.KillSessionByName(session.TmuxSessionName); err != nil {
-		slog.Info("tmux session already gone or failed to kill", "session", session.TmuxSessionName, "error", err)
+	if session.TmuxSessionID != nil {
+		if err := s.tmuxService.KillSession(*session.TmuxSessionID); err != nil {
+			slog.Info("failed to kill tmux session", "error", err)
+		}
 	}
 
 	session.Status = StatusDeleted
 
 	return s.store.Update(session)
+}
+
+func (s *SessionService) computeTmuxName(sess *Session, ws *workspace.Workspace) string {
+	if ws != nil {
+		return BuildTmuxSessionName(ws.Name, sess.Name)
+	}
+	return SanitizeTmuxName(sess.Name)
 }
 
 func (s *SessionService) resolveStartDir(ctx context.Context, session *Session) string {
@@ -498,7 +530,7 @@ func (s *SessionService) handleTmuxSessionCreated(ctx context.Context, event eve
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.store.GetByTmuxName(data.TmuxSessionName)
+	sess, err := s.findSessionByTmuxName(data.TmuxSessionName)
 	if err != nil {
 		slog.Debug("session not found for session-created hook", "tmux_name", data.TmuxSessionName, "error", err)
 		return nil
@@ -514,7 +546,7 @@ func (s *SessionService) handleTmuxSessionClosed(ctx context.Context, event even
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.store.GetByTmuxName(data.TmuxSessionName)
+	sess, err := s.findSessionByTmuxName(data.TmuxSessionName)
 	if err != nil {
 		slog.Debug("session not found for session-closed hook", "tmux_name", data.TmuxSessionName, "error", err)
 		return nil
@@ -541,7 +573,7 @@ func (s *SessionService) handleTmuxClientSessionChanged(ctx context.Context, eve
 		}
 	}
 
-	sess, err := s.store.GetByTmuxName(data.TmuxSessionName)
+	sess, err := s.findSessionByTmuxName(data.TmuxSessionName)
 	if err != nil {
 		slog.Debug("session not found for client-session-changed hook", "tmux_name", data.TmuxSessionName, "error", err)
 		return nil
@@ -558,7 +590,7 @@ func (s *SessionService) handleTmuxClientAttached(ctx context.Context, event eve
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.store.GetByTmuxName(data.TmuxSessionName)
+	sess, err := s.findSessionByTmuxName(data.TmuxSessionName)
 	if err != nil {
 		slog.Debug("session not found for client-attached hook", "tmux_name", data.TmuxSessionName, "error", err)
 		return nil
@@ -575,7 +607,7 @@ func (s *SessionService) handleTmuxClientDetached(ctx context.Context, event eve
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.store.GetByTmuxName(data.TmuxSessionName)
+	sess, err := s.findSessionByTmuxName(data.TmuxSessionName)
 	if err != nil {
 		slog.Debug("session not found for client-detached hook", "tmux_name", data.TmuxSessionName, "error", err)
 		return nil
@@ -611,8 +643,6 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 
 	if sess.TmuxSessionID != nil {
 		s.tmuxService.KillSession(*sess.TmuxSessionID)
-	} else if sess.TmuxSessionName != "" {
-		s.tmuxService.KillSessionByName(sess.TmuxSessionName)
 	}
 
 	sess.Status = StatusArchived
@@ -661,8 +691,6 @@ func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Sessio
 		if tsErr == nil {
 			tmuxAlive = ts.IsAlive
 		}
-	} else if sess.TmuxSessionName != "" {
-		tmuxAlive = s.tmuxService.HasSession(sess.TmuxSessionName)
 	}
 
 	gitHealthy := true

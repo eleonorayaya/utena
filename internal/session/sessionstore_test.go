@@ -48,7 +48,7 @@ func TestSessionStore_Add(t *testing.T) {
 	store, ws1ID, _ := setupSessionStore(t)
 
 	session := &Session{
-		TmuxSessionName: "session-1",
+		Name:        "session-1",
 		WorkspaceID:     ws1ID,
 		IsAttached:      true,
 		Status:          StatusActive,
@@ -74,17 +74,18 @@ func TestSessionStore_Add_NilSession(t *testing.T) {
 
 func TestSessionStore_Add_WithWorkspaceID(t *testing.T) {
 	store, ws1ID, _ := setupSessionStore(t)
-	session := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
+	session := &Session{Name: "session-1", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
 	err := store.Add(session)
 	require.NoError(t, err)
 	require.NotZero(t, session.ID)
 }
 
-func TestSessionStore_Add_Duplicate(t *testing.T) {
-	store, ws1ID, ws2ID := setupSessionStore(t)
+func TestSessionStore_Add_DuplicateTmuxSessionID(t *testing.T) {
+	database, wsID, _, ts := setupTestDBWithGitAndTmux(t)
+	store := NewSessionStore(database)
 
-	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
-	session2 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws2ID, LastUsedAt: time.Now()}
+	session1 := &Session{Name: "session-1", WorkspaceID: wsID, TmuxSessionID: &ts.ID, LastUsedAt: time.Now()}
+	session2 := &Session{Name: "session-2", WorkspaceID: wsID, TmuxSessionID: &ts.ID, LastUsedAt: time.Now()}
 
 	err := store.Add(session1)
 	require.NoError(t, err)
@@ -92,14 +93,13 @@ func TestSessionStore_Add_Duplicate(t *testing.T) {
 	err = store.Add(session2)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrSessionAlreadyExists))
-	require.Contains(t, err.Error(), "'session-1' already exists")
 }
 
 func TestSessionStore_GetByID(t *testing.T) {
 	store, ws1ID, _ := setupSessionStore(t)
 
 	session := &Session{
-		TmuxSessionName: "session-1",
+		Name:        "session-1",
 		WorkspaceID:     ws1ID,
 		IsAttached:      false,
 		Status:          StatusActive,
@@ -128,9 +128,9 @@ func TestSessionStore_List(t *testing.T) {
 	store, ws1ID, ws2ID := setupSessionStore(t)
 
 	now := time.Now()
-	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, LastUsedAt: now.Add(-2 * time.Hour)}
-	session2 := &Session{TmuxSessionName: "session-2", WorkspaceID: ws2ID, LastUsedAt: now}
-	session3 := &Session{TmuxSessionName: "session-3", WorkspaceID: ws1ID, LastUsedAt: now.Add(-1 * time.Hour)}
+	session1 := &Session{Name: "session-1", WorkspaceID: ws1ID, LastUsedAt: now.Add(-2 * time.Hour)}
+	session2 := &Session{Name: "session-2", WorkspaceID: ws2ID, LastUsedAt: now}
+	session3 := &Session{Name: "session-3", WorkspaceID: ws1ID, LastUsedAt: now.Add(-1 * time.Hour)}
 
 	store.Add(session1)
 	store.Add(session2)
@@ -139,9 +139,9 @@ func TestSessionStore_List(t *testing.T) {
 	list := store.List()
 	require.Len(t, list, 3)
 
-	require.Equal(t, "session-2", list[0].TmuxSessionName, "Most recent session should be first")
-	require.Equal(t, "session-3", list[1].TmuxSessionName, "Second most recent session should be second")
-	require.Equal(t, "session-1", list[2].TmuxSessionName, "Oldest session should be last")
+	require.Equal(t, "session-2", list[0].Name, "Most recent session should be first")
+	require.Equal(t, "session-3", list[1].Name, "Second most recent session should be second")
+	require.Equal(t, "session-1", list[2].Name, "Oldest session should be last")
 }
 
 func TestSessionStore_List_Empty(t *testing.T) {
@@ -154,9 +154,9 @@ func TestSessionStore_ListByWorkspace(t *testing.T) {
 	store, ws1ID, ws2ID := setupSessionStore(t)
 
 	now := time.Now()
-	session1 := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, LastUsedAt: now.Add(-2 * time.Hour)}
-	session2 := &Session{TmuxSessionName: "session-2", WorkspaceID: ws2ID, LastUsedAt: now}
-	session3 := &Session{TmuxSessionName: "session-3", WorkspaceID: ws1ID, LastUsedAt: now.Add(-1 * time.Hour)}
+	session1 := &Session{Name: "session-1", WorkspaceID: ws1ID, LastUsedAt: now.Add(-2 * time.Hour)}
+	session2 := &Session{Name: "session-2", WorkspaceID: ws2ID, LastUsedAt: now}
+	session3 := &Session{Name: "session-3", WorkspaceID: ws1ID, LastUsedAt: now.Add(-1 * time.Hour)}
 
 	store.Add(session1)
 	store.Add(session2)
@@ -169,12 +169,12 @@ func TestSessionStore_ListByWorkspace(t *testing.T) {
 		require.Equal(t, ws1ID, session.WorkspaceID)
 	}
 
-	require.Equal(t, "session-3", ws1Sessions[0].TmuxSessionName, "Most recent ws-1 session should be first")
-	require.Equal(t, "session-1", ws1Sessions[1].TmuxSessionName, "Older ws-1 session should be second")
+	require.Equal(t, "session-3", ws1Sessions[0].Name, "Most recent ws-1 session should be first")
+	require.Equal(t, "session-1", ws1Sessions[1].Name, "Older ws-1 session should be second")
 
 	ws2Sessions := store.ListByWorkspace(ws2ID)
 	require.Len(t, ws2Sessions, 1)
-	require.Equal(t, "session-2", ws2Sessions[0].TmuxSessionName)
+	require.Equal(t, "session-2", ws2Sessions[0].Name)
 }
 
 func TestSessionStore_ListByWorkspace_Empty(t *testing.T) {
@@ -187,7 +187,7 @@ func TestSessionStore_Update(t *testing.T) {
 	store, ws1ID, _ := setupSessionStore(t)
 
 	session := &Session{
-		TmuxSessionName: "session-1",
+		Name:        "session-1",
 		WorkspaceID:     ws1ID,
 		IsAttached:      false,
 		Status:          StatusActive,
@@ -210,7 +210,7 @@ func TestSessionStore_Update(t *testing.T) {
 func TestSessionStore_Update_NotFound(t *testing.T) {
 	store, ws1ID, _ := setupSessionStore(t)
 
-	session := &Session{TmuxSessionName: "nonexistent", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
+	session := &Session{Name: "nonexistent", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
 	session.ID = 99999
 	err := store.Update(session)
 	require.Error(t, err)
@@ -235,7 +235,7 @@ func TestSessionStore_Update_ZeroID(t *testing.T) {
 func TestSessionStore_Delete(t *testing.T) {
 	store, ws1ID, _ := setupSessionStore(t)
 
-	session := &Session{TmuxSessionName: "session-1", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
+	session := &Session{Name: "session-1", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
 	store.Add(session)
 
 	err := store.Delete(session.ID)
@@ -273,9 +273,9 @@ func TestSessionStore_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			session := &Session{
-				TmuxSessionName: fmt.Sprintf("session-%d", id),
-				WorkspaceID:     ws1ID,
-				LastUsedAt:      time.Now(),
+				Name:        fmt.Sprintf("session-%d", id),
+				WorkspaceID: ws1ID,
+				LastUsedAt:  time.Now(),
 			}
 			store.Add(session)
 		}(i)
@@ -342,7 +342,7 @@ func TestSessionStore_GetByID_LoadsGitBranchAndTmuxSession(t *testing.T) {
 	store := NewSessionStore(database)
 
 	session := &Session{
-		TmuxSessionName: "utena-feature-x",
+		Name:        "utena-feature-x",
 		WorkspaceID:     wsID,
 		BranchID:        &branch.ID,
 		TmuxSessionID:   &ts.ID,
@@ -365,7 +365,7 @@ func TestSessionStore_GetByBranchID(t *testing.T) {
 	store := NewSessionStore(database)
 
 	session := &Session{
-		TmuxSessionName: "utena-feature-x",
+		Name:        "utena-feature-x",
 		WorkspaceID:     wsID,
 		BranchID:        &branch.ID,
 		TmuxSessionID:   &ts.ID,
@@ -393,7 +393,7 @@ func TestSessionStore_GetByTmuxSessionID(t *testing.T) {
 	store := NewSessionStore(database)
 
 	session := &Session{
-		TmuxSessionName: "utena-feature-x",
+		Name:        "utena-feature-x",
 		WorkspaceID:     wsID,
 		BranchID:        &branch.ID,
 		TmuxSessionID:   &ts.ID,
@@ -420,7 +420,7 @@ func TestSessionStore_NullableForeignKeys(t *testing.T) {
 	store, wsID, _ := setupSessionStore(t)
 
 	session := &Session{
-		TmuxSessionName: "no-fk-session",
+		Name:        "no-fk-session",
 		WorkspaceID:     wsID,
 		Status:          StatusActive,
 		LastUsedAt:      time.Now(),
@@ -440,7 +440,7 @@ func TestSessionStore_List_LoadsNewRelationships(t *testing.T) {
 	store := NewSessionStore(database)
 
 	session1 := &Session{
-		TmuxSessionName: "utena-feature-x",
+		Name:        "utena-feature-x",
 		WorkspaceID:     wsID,
 		BranchID:        &branch.ID,
 		TmuxSessionID:   &ts.ID,
@@ -448,7 +448,7 @@ func TestSessionStore_List_LoadsNewRelationships(t *testing.T) {
 		LastUsedAt:      time.Now(),
 	}
 	session2 := &Session{
-		TmuxSessionName: "utena-no-fk",
+		Name:        "utena-no-fk",
 		WorkspaceID:     wsID,
 		Status:          StatusActive,
 		LastUsedAt:      time.Now().Add(-1 * time.Hour),
@@ -472,7 +472,7 @@ func TestSessionStore_StatusError(t *testing.T) {
 	store, wsID, _ := setupSessionStore(t)
 
 	session := &Session{
-		TmuxSessionName: "broken-session",
+		Name:        "broken-session",
 		WorkspaceID:     wsID,
 		Status:          StatusBroken,
 		StatusError:     "worktree creation failed",

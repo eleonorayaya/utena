@@ -105,7 +105,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			tick(),
 		}
 		for _, s := range m.activeSessions() {
-			cmds = append(cmds, provider.FetchWindows(s.TmuxSessionName))
+			cmds = append(cmds, provider.FetchWindows(sessionTmuxName(s)))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -140,7 +140,7 @@ func (m *Model) syncTabs() tea.Cmd {
 	for i, s := range ordered {
 		seen[s.ID] = true
 		selected := i == m.cursor && m.focused
-		windows := m.windowsBySession[s.TmuxSessionName]
+		windows := m.windowsBySession[sessionTmuxName(s)]
 		tab, ok := m.tabs[s.ID]
 		if !ok {
 			tab = NewSessionTab(s)
@@ -267,7 +267,14 @@ func sessionDisplayName(s session.Session) string {
 	if s.Name != "" {
 		return s.Name
 	}
-	return s.TmuxSessionName
+	return sessionTmuxName(s)
+}
+
+func sessionTmuxName(s session.Session) string {
+	if s.TmuxSession != nil {
+		return s.TmuxSession.Name
+	}
+	return ""
 }
 
 func truncate(s string, maxLen int) string {

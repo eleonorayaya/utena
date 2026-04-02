@@ -30,16 +30,6 @@ func (s *SessionStore) GetByID(id uint) (*Session, error) {
 	return &session, nil
 }
 
-func (s *SessionStore) GetByTmuxName(tmuxName string) (*Session, error) {
-	var session Session
-	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").First(&session, "tmux_session_name = ?", tmuxName).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrSessionNotFound
-		}
-		return nil, err
-	}
-	return &session, nil
-}
 
 func (s *SessionStore) List() []Session {
 	var sessions []Session
@@ -60,7 +50,7 @@ func (s *SessionStore) Add(session *Session) error {
 
 	if err := s.db.Omit("Workspace", "ClaudeSessions", "GitBranch", "TmuxSession").Create(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return fmt.Errorf("session '%s' already exists: %w", session.TmuxSessionName, ErrSessionAlreadyExists)
+			return fmt.Errorf("session '%s' already exists: %w", session.Name, ErrSessionAlreadyExists)
 		}
 		return err
 	}

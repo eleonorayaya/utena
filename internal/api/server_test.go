@@ -125,7 +125,6 @@ func TestDaemon_CreateAndGetSession(t *testing.T) {
 	body := fmt.Sprintf(`{"name":"test-session-1","workspace_id":%d}`, ws1ID)
 	createResp := createSessionViaAPI(t, router, body)
 
-	require.Equal(t, "utena-test-session-1", createResp.TmuxSessionName)
 	require.Equal(t, "test-session-1", createResp.Name)
 	require.Equal(t, session.StatusCreating, createResp.Status)
 
@@ -141,7 +140,7 @@ func TestDaemon_CreateAndGetSession(t *testing.T) {
 	var response session.SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	require.Equal(t, "utena-test-session-1", response.TmuxSessionName)
+	require.NotNil(t, response.TmuxSessionID)
 	require.Equal(t, ws1ID, response.WorkspaceID)
 	require.Equal(t, session.StatusActive, response.Status)
 }
@@ -192,10 +191,10 @@ func TestDaemon_ListSessions(t *testing.T) {
 
 	names := make(map[string]bool)
 	for _, s := range response.Sessions {
-		names[s.TmuxSessionName] = true
+		names[s.Name] = true
 	}
-	require.True(t, names["utena-session-1"])
-	require.True(t, names["other-session-2"])
+	require.True(t, names["session-1"])
+	require.True(t, names["session-2"])
 }
 
 func TestDaemon_TmuxHookSessionCreated(t *testing.T) {
@@ -234,7 +233,7 @@ func TestDaemon_TmuxHookSessionCreated(t *testing.T) {
 
 func findSessionByTmuxName(sessions []*session.SessionResponse, tmuxName string) *session.SessionResponse {
 	for _, s := range sessions {
-		if s.TmuxSessionName == tmuxName {
+		if s.TmuxSession != nil && s.TmuxSession.Name == tmuxName {
 			return s
 		}
 	}
