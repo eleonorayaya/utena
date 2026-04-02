@@ -163,8 +163,7 @@ func TestDaemon_CreateSession_TmuxFails(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Equal(t, session.StatusBroken, response.Status)
-	require.Equal(t, session.ResourceFailed, response.Resources.Tmux.Status)
-	require.Contains(t, response.Resources.Tmux.Error, "tmux server not running")
+	require.Contains(t, response.StatusError, "tmux")
 }
 
 func TestDaemon_ListSessions(t *testing.T) {
@@ -298,6 +297,5 @@ func TestDaemon_RepairSession_AfterTmuxFailure(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Equal(t, session.StatusActive, response.Status)
-	require.Equal(t, session.ResourceReady, response.Resources.Tmux.Status)
 	require.True(t, mock.HasSessionByName("utena-repair-me"))
 }

@@ -84,7 +84,6 @@ func TestSessionRouter_GetSessionByID(t *testing.T) {
 		WorkspaceID:     ws1ID,
 		IsAttached:      true,
 		Status:          StatusActive,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
 		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
@@ -103,8 +102,6 @@ func TestSessionRouter_GetSessionByID(t *testing.T) {
 	require.Equal(t, ws1ID, response.WorkspaceID)
 	require.True(t, response.IsAttached)
 	require.Equal(t, StatusActive, response.Status)
-	require.NotNil(t, response.Resources)
-	require.Equal(t, ResourceReady, response.Resources.Tmux.Status)
 }
 
 func TestSessionRouter_GetSessionByID_NotFound(t *testing.T) {
@@ -279,7 +276,6 @@ func TestSessionRouter_DeleteSession(t *testing.T) {
 		TmuxSessionName: "session-1",
 		WorkspaceID:     ws1ID,
 		Status:          StatusActive,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
 		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
@@ -294,7 +290,6 @@ func TestSessionRouter_DeleteSession(t *testing.T) {
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusDeleted, retrieved.Status)
-	require.Equal(t, ResourceRemoved, retrieved.Resources.Tmux.Status)
 	require.False(t, tmux.HasSessionByName("session-1"))
 }
 
@@ -305,7 +300,6 @@ func TestSessionRouter_RepairSession(t *testing.T) {
 		TmuxSessionName: "broken-session",
 		WorkspaceID:     ws1ID,
 		Status:          StatusBroken,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceRemoved}},
 		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
@@ -345,7 +339,6 @@ func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
 		TmuxSessionName: "alive-session",
 		WorkspaceID:     ws1ID,
 		Status:          StatusActive,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
 		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
@@ -355,7 +348,7 @@ func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
 
 	router.Routes().ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestSessionRouter_ActivateSession_RejectsBrokenSession(t *testing.T) {
@@ -365,7 +358,6 @@ func TestSessionRouter_ActivateSession_RejectsBrokenSession(t *testing.T) {
 		TmuxSessionName: "broken-session",
 		WorkspaceID:     ws1ID,
 		Status:          StatusBroken,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceRemoved}},
 		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
@@ -378,19 +370,14 @@ func TestSessionRouter_ActivateSession_RejectsBrokenSession(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestSessionRouter_GetSessionByID_ShowsResourceState(t *testing.T) {
+func TestSessionRouter_GetSessionByID_ShowsCreatingStatus(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 
 	session := &Session{
 		TmuxSessionName: "creating-session",
 		WorkspaceID:     ws1ID,
 		Status:          StatusCreating,
-		Resources: &Resources{
-			Branch:   &ResourceState{Status: ResourceReady},
-			Worktree: &ResourceState{Status: ResourceCreating},
-			Tmux:     &ResourceState{Status: ResourcePending},
-		},
-		LastUsedAt: time.Now(),
+		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -405,24 +392,17 @@ func TestSessionRouter_GetSessionByID_ShowsResourceState(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Equal(t, StatusCreating, response.Status)
-	require.Equal(t, ResourceReady, response.Resources.Branch.Status)
-	require.Equal(t, ResourceCreating, response.Resources.Worktree.Status)
-	require.Equal(t, ResourcePending, response.Resources.Tmux.Status)
 }
 
-func TestSessionRouter_GetSessionByID_ShowsBrokenResourceError(t *testing.T) {
+func TestSessionRouter_GetSessionByID_ShowsBrokenStatusError(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 
 	session := &Session{
 		TmuxSessionName: "broken-session",
 		WorkspaceID:     ws1ID,
 		Status:          StatusBroken,
-		Resources: &Resources{
-			Branch:   &ResourceState{Status: ResourceReady},
-			Worktree: &ResourceState{Status: ResourceFailed, Error: "failed to create worktree: timeout"},
-			Tmux:     &ResourceState{Status: ResourcePending},
-		},
-		LastUsedAt: time.Now(),
+		StatusError:     "worktree setup failed: timeout",
+		LastUsedAt:      time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -437,6 +417,5 @@ func TestSessionRouter_GetSessionByID_ShowsBrokenResourceError(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Equal(t, StatusBroken, response.Status)
-	require.Equal(t, ResourceFailed, response.Resources.Worktree.Status)
-	require.Equal(t, "failed to create worktree: timeout", response.Resources.Worktree.Error)
+	require.Equal(t, "worktree setup failed: timeout", response.StatusError)
 }

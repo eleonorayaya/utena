@@ -40,7 +40,6 @@ type Session struct {
 	BaseBranch      string                 `json:"base_branch,omitempty"`
 	WorktreePath    string                 `json:"worktree_path,omitempty"`
 	Status          SessionStatus          `json:"status"`
-	Resources       *Resources             `json:"resources,omitempty" gorm:"serializer:json"`
 	IsAttached      bool                   `json:"is_attached"`
 	LastUsedAt      time.Time              `json:"last_used_at"`
 	Workspace       *workspace.Workspace   `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID"`

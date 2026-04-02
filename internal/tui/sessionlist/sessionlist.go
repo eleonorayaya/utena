@@ -125,10 +125,8 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 					), true
 				}
 				errMsg := "broken"
-				if item.session.Resources != nil {
-					if e := item.session.Resources.FirstError(); e != "" {
-						errMsg = e
-					}
+				if item.session.StatusError != "" {
+					errMsg = item.session.StatusError
 				}
 				m.pendingRepairID = item.session.ID
 				return m, m.list.NewStatusMessage(errMsg + " — press enter again to repair"), true

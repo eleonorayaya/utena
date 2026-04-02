@@ -113,15 +113,6 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, cr
 		return fmt.Errorf("session name or branch is required")
 	}
 
-	res := &Resources{
-		Tmux: &ResourceState{Status: ResourcePending},
-	}
-	if ws != nil && ws.IsGitRepo && createWorktree {
-		res.Branch = &ResourceState{Status: ResourcePending}
-		res.Worktree = &ResourceState{Status: ResourcePending}
-		res.WorktreeInit = &ResourceState{Status: ResourcePending}
-	}
-	session.Resources = res
 	session.Status = StatusCreating
 
 	if session.LastUsedAt.IsZero() {
@@ -152,50 +143,38 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace) {
 
 	var worktreeCreated bool
 
-	steps := []struct {
-		resource        *ResourceState
-		run             func() error
-		continueOnError bool
-	}{
-		{sess.Resources.Branch, func() error { return s.setupBranch(ctx, sess, ws) }, false},
-		{sess.Resources.Worktree, func() error {
-			created, err := s.setupWorktree(ctx, sess, ws)
-			worktreeCreated = created
-			return err
-		}, false},
-		{sess.Resources.WorktreeInit, func() error {
-			return s.setupWorktreeInit(ctx, sess, ws, worktreeCreated)
-		}, true},
-		{sess.Resources.Tmux, func() error { return s.setupTmux(ctx, sess) }, false},
-	}
-
-	for _, step := range steps {
-		if step.resource == nil || step.resource.Status == ResourceReady {
-			continue
-		}
-		step.resource.Status = ResourceCreating
-		s.store.Update(sess)
-
-		if err := step.run(); err != nil {
-			if step.continueOnError {
-				slog.Warn("setup step failed, continuing", "error", err)
-				step.resource.Status = ResourceReady
-				step.resource.Error = err.Error()
-				s.store.Update(sess)
-				continue
-			}
-			step.resource.Status = ResourceFailed
-			step.resource.Error = err.Error()
+	needsGitSetup := ws != nil && ws.IsGitRepo && (sess.Branch != "" || sess.BaseBranch != "")
+	if needsGitSetup {
+		if err := s.setupBranch(ctx, sess, ws); err != nil {
 			sess.Status = StatusBroken
+			sess.StatusError = fmt.Sprintf("branch setup failed: %v", err)
 			s.store.Update(sess)
 			return
 		}
 
-		step.resource.Status = ResourceReady
+		created, err := s.setupWorktree(ctx, sess, ws)
+		if err != nil {
+			sess.Status = StatusBroken
+			sess.StatusError = fmt.Sprintf("worktree setup failed: %v", err)
+			s.store.Update(sess)
+			return
+		}
+		worktreeCreated = created
+
+		if err := s.setupWorktreeInit(ctx, sess, ws, worktreeCreated); err != nil {
+			slog.Warn("worktree init failed, continuing", "error", err)
+		}
+	}
+
+	if err := s.setupTmux(ctx, sess); err != nil {
+		sess.Status = StatusBroken
+		sess.StatusError = fmt.Sprintf("tmux setup failed: %v", err)
 		s.store.Update(sess)
+		return
 	}
 
 	sess.Status = StatusActive
+	sess.StatusError = ""
 	s.store.Update(sess)
 }
 
@@ -364,65 +343,20 @@ func (s *SessionService) runScript(ctx context.Context, path string, workDir str
 }
 
 func (s *SessionService) RefreshSession(ctx context.Context, id uint) (*Session, error) {
+	return s.ReconcileSession(ctx, id)
+}
+
+func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, error) {
 	sess, err := s.store.GetByID(id)
 	if err != nil {
 		return nil, err
 	}
-
-	if sess.Resources == nil {
-		return sess, nil
-	}
-
-	if sess.Resources.Worktree != nil && sess.Resources.Worktree.Status == ResourceReady {
-		if sess.WorktreePath != "" {
-			if _, err := os.Stat(sess.WorktreePath); os.IsNotExist(err) {
-				sess.Resources.Worktree.Status = ResourceRemoved
-			}
-		}
-	}
-
-	if sess.Resources.Tmux != nil && sess.Resources.Tmux.Status == ResourceReady {
-		if !s.tmuxService.HasSession(sess.TmuxSessionName) {
-			sess.Resources.Tmux.Status = ResourceRemoved
-		}
-	}
-
-	if sess.Status != StatusCreating && sess.Status != StatusDeleted {
-		if sess.Resources.AllReady() {
-			sess.Status = StatusActive
-		} else {
-			sess.Status = StatusBroken
-		}
-	}
-
-	s.store.Update(sess)
-	return sess, nil
-}
-
-func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, error) {
-	sess, err := s.RefreshSession(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	if sess.Status == StatusActive {
-		return sess, nil
-	}
-
 	if sess.Status != StatusBroken {
 		return nil, ErrSessionNotBroken
 	}
 
-	if sess.Resources != nil {
-		for _, rs := range []*ResourceState{sess.Resources.Branch, sess.Resources.Worktree, sess.Resources.WorktreeInit, sess.Resources.Tmux} {
-			if rs != nil && rs.Status != ResourceReady {
-				rs.Status = ResourcePending
-				rs.Error = ""
-			}
-		}
-	}
-
 	sess.Status = StatusCreating
+	sess.StatusError = ""
 	s.store.Update(sess)
 
 	var ws *workspace.Workspace
@@ -431,7 +365,6 @@ func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, 
 	}
 
 	go s.runSetup(sess.ID, ws)
-
 	return sess, nil
 }
 
@@ -470,10 +403,7 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 			return nil, fmt.Errorf("failed to revive tmux session: %w", err)
 		}
 		session.Status = StatusActive
-		if session.Resources != nil && session.Resources.Tmux != nil {
-			session.Resources.Tmux.Status = ResourceReady
-			session.Resources.Tmux.Error = ""
-		}
+		session.StatusError = ""
 	}
 
 	if session.IsAttached {
@@ -522,25 +452,17 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 		return fmt.Errorf("cannot delete session while it is being created")
 	}
 
-	if session.Resources == nil {
-		session.Resources = &Resources{}
-	}
-
 	if session.WorkspaceID != 0 {
 		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
 		if err == nil {
 			if session.WorktreePath != "" {
 				if rmErr := s.gitService.RemoveWorktree(ctx, ws.Path, session.WorktreePath); rmErr != nil {
 					slog.Warn("failed to remove worktree", "error", rmErr)
-				} else if session.Resources.Worktree != nil {
-					session.Resources.Worktree.Status = ResourceRemoved
 				}
 			}
 			if deleteBranch && session.Branch != "" {
 				if brErr := s.gitService.DeleteBranch(ctx, ws.Path, session.Branch); brErr != nil {
 					slog.Warn("failed to delete branch", "error", brErr)
-				} else if session.Resources.Branch != nil {
-					session.Resources.Branch.Status = ResourceRemoved
 				}
 			}
 		} else {
@@ -550,8 +472,6 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 
 	if err := s.tmuxService.KillSessionByName(session.TmuxSessionName); err != nil {
 		slog.Info("tmux session already gone or failed to kill", "session", session.TmuxSessionName, "error", err)
-	} else if session.Resources.Tmux != nil {
-		session.Resources.Tmux.Status = ResourceRemoved
 	}
 
 	session.Status = StatusDeleted
@@ -601,9 +521,6 @@ func (s *SessionService) handleTmuxSessionClosed(ctx context.Context, event even
 	}
 
 	sess.IsAttached = false
-	if sess.Resources != nil && sess.Resources.Tmux != nil {
-		sess.Resources.Tmux.Status = ResourceRemoved
-	}
 	sess.Status = StatusBroken
 	return s.store.Update(sess)
 }
