@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -102,7 +103,14 @@ func (s *gitCLI) hasRemoteBranch(ctx context.Context, repoPath string, branch st
 func (s *gitCLI) hasBranch(ctx context.Context, repoPath string, branch string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--verify", "refs/heads/"+branch)
 	if err := cmd.Run(); err != nil {
-		return false, nil
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return false, nil
+		}
+		return false, err
 	}
 	return true, nil
 }

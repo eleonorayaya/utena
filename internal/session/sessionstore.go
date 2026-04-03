@@ -31,16 +31,20 @@ func (s *SessionStore) GetByID(id uint) (*Session, error) {
 }
 
 
-func (s *SessionStore) List() []Session {
+func (s *SessionStore) List() ([]Session, error) {
 	var sessions []Session
-	s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Order("sessions.last_used_at DESC").Find(&sessions)
-	return sessions
+	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Order("sessions.last_used_at DESC").Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	return sessions, nil
 }
 
-func (s *SessionStore) ListByWorkspace(workspaceID uint) []Session {
+func (s *SessionStore) ListByWorkspace(workspaceID uint) ([]Session, error) {
 	var sessions []Session
-	s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Where("sessions.workspace_id = ?", workspaceID).Order("sessions.last_used_at DESC").Find(&sessions)
-	return sessions
+	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Where("sessions.workspace_id = ?", workspaceID).Order("sessions.last_used_at DESC").Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	return sessions, nil
 }
 
 func (s *SessionStore) Add(session *Session) error {

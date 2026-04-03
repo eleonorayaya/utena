@@ -47,7 +47,7 @@ func (s *WorktreeStore) GetByBranchID(branchID uint) (*Worktree, error) {
 	var worktree Worktree
 	if err := s.db.First(&worktree, "branch_id = ?", branchID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+			return nil, ErrWorktreeNotFound
 		}
 		return nil, err
 	}

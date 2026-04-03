@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/db"
@@ -73,7 +74,10 @@ type reconcileSyncTask struct {
 func (t *reconcileSyncTask) Name() string               { return "session.reconcile" }
 func (t *reconcileSyncTask) Interval() time.Duration     { return 1 * time.Minute }
 func (t *reconcileSyncTask) Run(ctx context.Context) error {
-	sessions := t.service.store.List()
+	sessions, err := t.service.store.List()
+	if err != nil {
+		return fmt.Errorf("failed to list sessions: %w", err)
+	}
 	for _, sess := range sessions {
 		if sess.Status != StatusDeleted && sess.Status != StatusArchived && sess.Status != StatusCreating {
 			t.service.ReconcileSession(ctx, sess.ID)

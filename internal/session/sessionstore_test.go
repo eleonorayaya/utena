@@ -40,7 +40,7 @@ func setupSessionStore(t *testing.T) (*SessionStore, uint, uint) {
 func TestNewSessionStore(t *testing.T) {
 	store, _, _ := setupSessionStore(t)
 	require.NotNil(t, store)
-	list := store.List()
+	list, _ := store.List()
 	require.Empty(t, list)
 }
 
@@ -136,7 +136,7 @@ func TestSessionStore_List(t *testing.T) {
 	store.Add(session2)
 	store.Add(session3)
 
-	list := store.List()
+	list, _ := store.List()
 	require.Len(t, list, 3)
 
 	require.Equal(t, "session-2", list[0].Name, "Most recent session should be first")
@@ -146,7 +146,7 @@ func TestSessionStore_List(t *testing.T) {
 
 func TestSessionStore_List_Empty(t *testing.T) {
 	store, _, _ := setupSessionStore(t)
-	list := store.List()
+	list, _ := store.List()
 	require.Empty(t, list)
 }
 
@@ -162,7 +162,8 @@ func TestSessionStore_ListByWorkspace(t *testing.T) {
 	store.Add(session2)
 	store.Add(session3)
 
-	ws1Sessions := store.ListByWorkspace(ws1ID)
+	ws1Sessions, err := store.ListByWorkspace(ws1ID)
+	require.NoError(t, err)
 	require.Len(t, ws1Sessions, 2)
 
 	for _, session := range ws1Sessions {
@@ -172,14 +173,15 @@ func TestSessionStore_ListByWorkspace(t *testing.T) {
 	require.Equal(t, "session-3", ws1Sessions[0].Name, "Most recent ws-1 session should be first")
 	require.Equal(t, "session-1", ws1Sessions[1].Name, "Older ws-1 session should be second")
 
-	ws2Sessions := store.ListByWorkspace(ws2ID)
+	ws2Sessions, err := store.ListByWorkspace(ws2ID)
+	require.NoError(t, err)
 	require.Len(t, ws2Sessions, 1)
 	require.Equal(t, "session-2", ws2Sessions[0].Name)
 }
 
 func TestSessionStore_ListByWorkspace_Empty(t *testing.T) {
 	store, _, _ := setupSessionStore(t)
-	list := store.ListByWorkspace(99999)
+	list, _ := store.ListByWorkspace(99999)
 	require.Empty(t, list)
 }
 
@@ -287,13 +289,13 @@ func TestSessionStore_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			store.List()
+			_, _ = store.List()
 		}()
 	}
 
 	wg.Wait()
 
-	list := store.List()
+	list, _ := store.List()
 	require.Len(t, list, numGoroutines)
 }
 
@@ -456,7 +458,7 @@ func TestSessionStore_List_LoadsNewRelationships(t *testing.T) {
 	require.NoError(t, store.Add(session1))
 	require.NoError(t, store.Add(session2))
 
-	list := store.List()
+	list, _ := store.List()
 	require.Len(t, list, 2)
 
 	require.NotNil(t, list[0].GitBranch)

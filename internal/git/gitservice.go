@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -151,7 +152,10 @@ func (s *GitService) FindOrCreateBranch(ctx context.Context, name string, repoID
 }
 
 func (s *GitService) CreateBranch(ctx context.Context, repoPath string, branchName string, baseBranch string, repoID uint) (*Branch, *Worktree, error) {
-	baseBranchRecord, _ := s.branchStore.GetByNameAndRepo(baseBranch, repoID)
+	baseBranchRecord, err := s.branchStore.GetByNameAndRepo(baseBranch, repoID)
+	if err != nil && !errors.Is(err, ErrBranchNotFound) {
+		return nil, nil, fmt.Errorf("failed to look up base branch %s: %w", baseBranch, err)
+	}
 
 	wtPath, err := s.cli.createWorktree(ctx, repoPath, branchName, baseBranch)
 	if err != nil {
@@ -194,8 +198,11 @@ func (s *GitService) ListBranchesByRepo(repoID uint) []Branch {
 
 func (s *GitService) EnsureWorktree(ctx context.Context, branch *Branch, repoPath string) (string, error) {
 	existing, err := s.worktreeStore.GetByBranchID(branch.ID)
-	if err == nil && existing != nil {
+	if err == nil {
 		return existing.Path, nil
+	}
+	if !errors.Is(err, ErrWorktreeNotFound) {
+		return "", fmt.Errorf("failed to check existing worktree: %w", err)
 	}
 
 	if branch.ExistsRemote {
@@ -223,21 +230,24 @@ func (s *GitService) EnsureWorktree(ctx context.Context, branch *Branch, repoPat
 
 func (s *GitService) GetStartDir(branch *Branch, repoPath string) string {
 	wt, err := s.worktreeStore.GetByBranchID(branch.ID)
-	if err == nil && wt != nil {
+	if err == nil {
 		return wt.Path
 	}
 	return repoPath
 }
 
 func (s *GitService) HasWorktree(branchID uint) bool {
-	wt, _ := s.worktreeStore.GetByBranchID(branchID)
-	return wt != nil
+	_, err := s.worktreeStore.GetByBranchID(branchID)
+	return err == nil
 }
 
 func (s *GitService) IsHealthy(ctx context.Context, branch *Branch, repoPath string) bool {
-	wt, _ := s.worktreeStore.GetByBranchID(branch.ID)
-	if wt == nil {
+	wt, err := s.worktreeStore.GetByBranchID(branch.ID)
+	if errors.Is(err, ErrWorktreeNotFound) {
 		return true
+	}
+	if err != nil {
+		return false
 	}
 	valid, err := s.cli.validateWorktree(ctx, wt.Path, branch.Name)
 	if err != nil || !valid {
@@ -259,13 +269,16 @@ func (s *GitService) SyncBranch(ctx context.Context, branch *Branch, repoPath st
 	isDirty := false
 	wtPath := s.cli.worktreePath(repoPath, branch.Name)
 
-	wt, _ := s.worktreeStore.GetByBranchID(branch.ID)
+	wt, wtErr := s.worktreeStore.GetByBranchID(branch.ID)
+	if wtErr != nil && !errors.Is(wtErr, ErrWorktreeNotFound) {
+		return fmt.Errorf("failed to look up worktree for branch %s: %w", branch.Name, wtErr)
+	}
 
 	if existsLocal {
 		if valid, err := s.cli.validateWorktree(ctx, wtPath, branch.Name); err != nil {
 			slog.Warn("failed to validate worktree", "path", wtPath, "error", err)
 		} else if valid {
-			if wt == nil {
+			if errors.Is(wtErr, ErrWorktreeNotFound) {
 				wt = &Worktree{Path: wtPath, BranchID: branch.ID, RepoID: branch.RepoID}
 				if err := s.worktreeStore.Add(wt); err != nil {
 					slog.Warn("failed to add worktree record", "path", wtPath, "error", err)
@@ -283,7 +296,7 @@ func (s *GitService) SyncBranch(ctx context.Context, branch *Branch, repoPath st
 		}
 	} else if wt != nil {
 		if err := s.worktreeStore.Delete(wt.ID); err != nil {
-			slog.Warn("failed to delete worktree record for missing branch", "id", wt.ID, "error", err)
+			slog.Warn("failed to delete worktree record for missing local branch", "id", wt.ID, "error", err)
 		}
 	}
 
@@ -294,7 +307,10 @@ func (s *GitService) SyncBranch(ctx context.Context, branch *Branch, repoPath st
 }
 
 func (s *GitService) CleanupBranch(ctx context.Context, branch *Branch, repoPath string, deleteBranch bool) error {
-	wt, _ := s.worktreeStore.GetByBranchID(branch.ID)
+	wt, err := s.worktreeStore.GetByBranchID(branch.ID)
+	if err != nil && !errors.Is(err, ErrWorktreeNotFound) {
+		return fmt.Errorf("failed to look up worktree: %w", err)
+	}
 	if wt != nil {
 		if err := s.cli.removeWorktree(ctx, repoPath, wt.Path); err != nil {
 			return err

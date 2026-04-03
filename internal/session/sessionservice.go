@@ -57,8 +57,7 @@ func (s *SessionService) OnAppEnd(ctx context.Context) error {
 }
 
 func (s *SessionService) ListSessions(ctx context.Context) ([]Session, error) {
-	sessions := s.store.List()
-	return sessions, nil
+	return s.store.List()
 }
 
 func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceID uint) ([]Session, error) {
@@ -67,7 +66,7 @@ func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceI
 		return nil, err
 	}
 
-	return s.store.ListByWorkspace(workspaceID), nil
+	return s.store.ListByWorkspace(workspaceID)
 }
 
 func (s *SessionService) GetSession(ctx context.Context, id uint) (*Session, error) {
@@ -445,11 +444,13 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		return session, nil
 	}
 
-	for _, existing := range s.store.List() {
-		if existing.IsAttached {
-			slog.Info("clearing attached flag", "session", existing.ID)
-			existing.IsAttached = false
-			s.store.Update(&existing)
+	if allSessions, err := s.store.List(); err == nil {
+		for _, existing := range allSessions {
+			if existing.IsAttached {
+				slog.Info("clearing attached flag", "session", existing.ID)
+				existing.IsAttached = false
+				s.store.Update(&existing)
+			}
 		}
 	}
 
@@ -570,7 +571,7 @@ func (s *SessionService) handleTmuxClientSessionChanged(ctx context.Context, eve
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sessions := s.store.List()
+	sessions, _ := s.store.List()
 	for _, sess := range sessions {
 		if sess.IsAttached {
 			sess.IsAttached = false
@@ -625,7 +626,12 @@ func (s *SessionService) handleTmuxClientDetached(ctx context.Context, event eve
 }
 
 func (s *SessionService) reconcileTmuxState(ctx context.Context) {
-	for _, sess := range s.store.List() {
+	sessions, err := s.store.List()
+	if err != nil {
+		slog.Error("failed to list sessions for reconciliation", "error", err)
+		return
+	}
+	for _, sess := range sessions {
 		if sess.Status != StatusDeleted {
 			s.RefreshSession(ctx, sess.ID)
 		}

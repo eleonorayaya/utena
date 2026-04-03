@@ -16,12 +16,17 @@ type GitModule struct {
 }
 
 func NewGitModule(database db.Database, bus eventbus.EventBus) *GitModule {
-	ghClient, _ := NewGitHubClient(context.Background())
-	service := NewGitService(database, WithGitHubClient(ghClient), WithEventBus(bus))
+	service := NewGitService(database, WithEventBus(bus))
 	return &GitModule{Service: service}
 }
 
 func (m *GitModule) OnAppStart(ctx context.Context) error {
+	ghClient, err := NewGitHubClient(ctx)
+	if err != nil {
+		slog.Info("GitHub client unavailable, PR sync disabled", "error", err)
+		return nil
+	}
+	m.Service.githubClient = ghClient
 	return nil
 }
 

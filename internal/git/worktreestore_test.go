@@ -90,21 +90,19 @@ func TestWorktreeStore_DeleteByBranchID(t *testing.T) {
 
 	require.NoError(t, store.DeleteByBranchID(branch.ID))
 
-	found, err := store.GetByBranchID(branch.ID)
-	require.NoError(t, err)
-	require.Nil(t, found)
+	_, err := store.GetByBranchID(branch.ID)
+	require.ErrorIs(t, err, ErrWorktreeNotFound)
 
 	worktrees := store.ListByRepo(repo.ID)
 	require.Empty(t, worktrees)
 }
 
-func TestWorktreeStore_GetByBranchID_ReturnsNilWhenNotFound(t *testing.T) {
+func TestWorktreeStore_GetByBranchID_ReturnsErrorWhenNotFound(t *testing.T) {
 	database := setupWorktreeTestDB(t)
 	store := NewWorktreeStore(database)
 
-	found, err := store.GetByBranchID(999)
-	require.NoError(t, err)
-	require.Nil(t, found)
+	_, err := store.GetByBranchID(999)
+	require.ErrorIs(t, err, ErrWorktreeNotFound)
 }
 
 func TestWorktreeStore_ListByRepo(t *testing.T) {
