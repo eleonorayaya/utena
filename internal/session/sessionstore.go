@@ -30,7 +30,6 @@ func (s *SessionStore) GetByID(id uint) (*Session, error) {
 	return &session, nil
 }
 
-
 func (s *SessionStore) List() ([]Session, error) {
 	var sessions []Session
 	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Order("sessions.last_used_at DESC").Find(&sessions).Error; err != nil {
@@ -125,4 +124,3 @@ func (s *SessionStore) OnAppStart(ctx context.Context) error {
 func (s *SessionStore) OnAppEnd(ctx context.Context) error {
 	return nil
 }
-

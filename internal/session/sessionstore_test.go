@@ -49,10 +49,10 @@ func TestSessionStore_Add(t *testing.T) {
 
 	session := &Session{
 		Name:        "session-1",
-		WorkspaceID:     ws1ID,
-		IsAttached:      true,
-		Status:          StatusActive,
-		LastUsedAt:      time.Now(),
+		WorkspaceID: ws1ID,
+		IsAttached:  true,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
 	}
 
 	err := store.Add(session)
@@ -100,10 +100,10 @@ func TestSessionStore_GetByID(t *testing.T) {
 
 	session := &Session{
 		Name:        "session-1",
-		WorkspaceID:     ws1ID,
-		IsAttached:      false,
-		Status:          StatusActive,
-		LastUsedAt:      time.Now(),
+		WorkspaceID: ws1ID,
+		IsAttached:  false,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
 	}
 
 	store.Add(session)
@@ -190,10 +190,10 @@ func TestSessionStore_Update(t *testing.T) {
 
 	session := &Session{
 		Name:        "session-1",
-		WorkspaceID:     ws1ID,
-		IsAttached:      false,
-		Status:          StatusActive,
-		LastUsedAt:      time.Now(),
+		WorkspaceID: ws1ID,
+		IsAttached:  false,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
 	}
 
 	store.Add(session)
@@ -344,12 +344,12 @@ func TestSessionStore_GetByID_LoadsGitBranchAndTmuxSession(t *testing.T) {
 	store := NewSessionStore(database)
 
 	session := &Session{
-		Name:        "utena-feature-x",
-		WorkspaceID:     wsID,
-		BranchID:        &branch.ID,
-		TmuxSessionID:   &ts.ID,
-		Status:          StatusActive,
-		LastUsedAt:      time.Now(),
+		Name:          "utena-feature-x",
+		WorkspaceID:   wsID,
+		BranchID:      &branch.ID,
+		TmuxSessionID: &ts.ID,
+		Status:        StatusActive,
+		LastUsedAt:    time.Now(),
 	}
 	require.NoError(t, store.Add(session))
 
@@ -367,12 +367,12 @@ func TestSessionStore_GetByBranchID(t *testing.T) {
 	store := NewSessionStore(database)
 
 	session := &Session{
-		Name:        "utena-feature-x",
-		WorkspaceID:     wsID,
-		BranchID:        &branch.ID,
-		TmuxSessionID:   &ts.ID,
-		Status:          StatusActive,
-		LastUsedAt:      time.Now(),
+		Name:          "utena-feature-x",
+		WorkspaceID:   wsID,
+		BranchID:      &branch.ID,
+		TmuxSessionID: &ts.ID,
+		Status:        StatusActive,
+		LastUsedAt:    time.Now(),
 	}
 	require.NoError(t, store.Add(session))
 
@@ -395,12 +395,12 @@ func TestSessionStore_GetByTmuxSessionID(t *testing.T) {
 	store := NewSessionStore(database)
 
 	session := &Session{
-		Name:        "utena-feature-x",
-		WorkspaceID:     wsID,
-		BranchID:        &branch.ID,
-		TmuxSessionID:   &ts.ID,
-		Status:          StatusActive,
-		LastUsedAt:      time.Now(),
+		Name:          "utena-feature-x",
+		WorkspaceID:   wsID,
+		BranchID:      &branch.ID,
+		TmuxSessionID: &ts.ID,
+		Status:        StatusActive,
+		LastUsedAt:    time.Now(),
 	}
 	require.NoError(t, store.Add(session))
 
@@ -423,9 +423,9 @@ func TestSessionStore_NullableForeignKeys(t *testing.T) {
 
 	session := &Session{
 		Name:        "no-fk-session",
-		WorkspaceID:     wsID,
-		Status:          StatusActive,
-		LastUsedAt:      time.Now(),
+		WorkspaceID: wsID,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
 	}
 	require.NoError(t, store.Add(session))
 
@@ -442,18 +442,18 @@ func TestSessionStore_List_LoadsNewRelationships(t *testing.T) {
 	store := NewSessionStore(database)
 
 	session1 := &Session{
-		Name:        "utena-feature-x",
-		WorkspaceID:     wsID,
-		BranchID:        &branch.ID,
-		TmuxSessionID:   &ts.ID,
-		Status:          StatusActive,
-		LastUsedAt:      time.Now(),
+		Name:          "utena-feature-x",
+		WorkspaceID:   wsID,
+		BranchID:      &branch.ID,
+		TmuxSessionID: &ts.ID,
+		Status:        StatusActive,
+		LastUsedAt:    time.Now(),
 	}
 	session2 := &Session{
 		Name:        "utena-no-fk",
-		WorkspaceID:     wsID,
-		Status:          StatusActive,
-		LastUsedAt:      time.Now().Add(-1 * time.Hour),
+		WorkspaceID: wsID,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now().Add(-1 * time.Hour),
 	}
 	require.NoError(t, store.Add(session1))
 	require.NoError(t, store.Add(session2))
@@ -475,10 +475,10 @@ func TestSessionStore_StatusError(t *testing.T) {
 
 	session := &Session{
 		Name:        "broken-session",
-		WorkspaceID:     wsID,
-		Status:          StatusBroken,
-		StatusError:     "worktree creation failed",
-		LastUsedAt:      time.Now(),
+		WorkspaceID: wsID,
+		Status:      StatusBroken,
+		StatusError: "worktree creation failed",
+		LastUsedAt:  time.Now(),
 	}
 	require.NoError(t, store.Add(session))
 

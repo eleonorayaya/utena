@@ -71,8 +71,8 @@ type reconcileSyncTask struct {
 	service *SessionService
 }
 
-func (t *reconcileSyncTask) Name() string               { return "session.reconcile" }
-func (t *reconcileSyncTask) Interval() time.Duration     { return 1 * time.Minute }
+func (t *reconcileSyncTask) Name() string            { return "session.reconcile" }
+func (t *reconcileSyncTask) Interval() time.Duration { return 1 * time.Minute }
 func (t *reconcileSyncTask) Run(ctx context.Context) error {
 	sessions, err := t.service.store.List()
 	if err != nil {

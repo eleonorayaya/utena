@@ -170,4 +170,3 @@ func TestBranchStore_UpsertUpdates(t *testing.T) {
 	require.Equal(t, originalID, found.ID)
 	require.True(t, found.ExistsRemote)
 }
-

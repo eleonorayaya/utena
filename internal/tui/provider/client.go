@@ -290,7 +290,6 @@ func (c *client) fetchTodos() tea.Cmd {
 	}
 }
 
-
 func (c *client) createTodo(name, description string, workspaceID *uint) tea.Cmd {
 	return func() tea.Msg {
 		body := map[string]interface{}{

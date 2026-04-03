@@ -162,4 +162,3 @@ func TestPRStore_UpsertUpdates(t *testing.T) {
 	require.Equal(t, "Updated", found.Title)
 	require.Equal(t, PRStateMerged, found.State)
 }
-

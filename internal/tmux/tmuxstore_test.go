@@ -115,4 +115,3 @@ func TestList(t *testing.T) {
 	list := store.List()
 	assert.Len(t, list, 3)
 }
-

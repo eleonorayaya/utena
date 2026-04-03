@@ -50,7 +50,7 @@ type prSyncTask struct {
 	service *GitService
 }
 
-func (t *prSyncTask) Name() string           { return "git.prs" }
+func (t *prSyncTask) Name() string            { return "git.prs" }
 func (t *prSyncTask) Interval() time.Duration { return 5 * time.Minute }
 func (t *prSyncTask) Run(ctx context.Context) error {
 	repos := t.service.repoStore.List()
@@ -69,7 +69,7 @@ type branchSyncTask struct {
 	service *GitService
 }
 
-func (t *branchSyncTask) Name() string           { return "git.branches" }
+func (t *branchSyncTask) Name() string            { return "git.branches" }
 func (t *branchSyncTask) Interval() time.Duration { return 2 * time.Minute }
 func (t *branchSyncTask) Run(ctx context.Context) error {
 	repos := t.service.repoStore.List()
