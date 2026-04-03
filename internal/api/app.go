@@ -11,7 +11,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
-	usync "github.com/eleonorayaya/utena/internal/sync"
+	"github.com/eleonorayaya/utena/internal/jobs"
 	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/todo"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -28,7 +28,7 @@ type App struct {
 	Tmux      *tmux.TmuxModule
 	Claude    *claude.ClaudeModule
 	Todo      *todo.TodoModule
-	Sync      *usync.SyncManager
+	Jobs      *jobs.JobsModule
 }
 
 func NewApp(cfg Config) (*App, error) {
@@ -61,9 +61,9 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxMod
 	}
 	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir)
 
-	syncManager := usync.NewSyncManager()
-	gitModule.RegisterSyncTasks(syncManager)
-	sessionModule.RegisterSyncTasks(syncManager)
+	jobsModule := jobs.NewJobsModule()
+	gitModule.RegisterJobs(jobsModule.Service)
+	sessionModule.RegisterJobs(jobsModule.Service)
 
 	app := &App{
 		DB:        dbModule,
@@ -73,7 +73,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxMod
 		Tmux:      tmuxModule,
 		Claude:    claude.NewClaudeModule(database),
 		Todo:      todo.NewTodoModule(workspaceModule, database),
-		Sync:      syncManager,
+		Jobs:      jobsModule,
 	}
 
 	database.RegisterModels(app.collectModels()...)
@@ -94,20 +94,10 @@ func (a *App) OnStart(ctx context.Context) error {
 		slog.Info("Initialized module", "module", m.name)
 	}
 
-	if a.Sync != nil {
-		a.Sync.Start(ctx)
-		slog.Info("Started sync manager")
-	}
-
 	return nil
 }
 
 func (a *App) OnEnd(ctx context.Context) {
-	if a.Sync != nil {
-		a.Sync.Stop()
-		slog.Info("Stopped sync manager")
-	}
-
 	modules := a.modules()
 	for i := len(modules) - 1; i >= 0; i-- {
 		m := modules[i]
@@ -152,5 +142,6 @@ func (a *App) modules() []moduleEntry {
 		{"claude", "/claude", a.Claude},
 		{"session", "/sessions", a.Session},
 		{"todo", "/todos", a.Todo},
+		{"jobs", "/jobs", a.Jobs},
 	}
 }

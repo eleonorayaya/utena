@@ -8,7 +8,7 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
-	usync "github.com/eleonorayaya/utena/internal/sync"
+	"github.com/eleonorayaya/utena/internal/jobs"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -81,7 +81,7 @@ func (t *branchSyncTask) Run(ctx context.Context) error {
 	return nil
 }
 
-func (m *GitModule) RegisterSyncTasks(manager *usync.SyncManager) {
-	manager.Register(&prSyncTask{service: m.Service})
-	manager.Register(&branchSyncTask{service: m.Service})
+func (m *GitModule) RegisterJobs(svc *jobs.JobService) {
+	svc.Register(&prSyncTask{service: m.Service})
+	svc.Register(&branchSyncTask{service: m.Service})
 }

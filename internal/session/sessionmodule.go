@@ -7,7 +7,7 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
-	usync "github.com/eleonorayaya/utena/internal/sync"
+	"github.com/eleonorayaya/utena/internal/jobs"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
@@ -86,6 +86,6 @@ func (t *reconcileSyncTask) Run(ctx context.Context) error {
 	return nil
 }
 
-func (m *SessionModule) RegisterSyncTasks(manager *usync.SyncManager) {
-	manager.Register(&reconcileSyncTask{service: m.Service})
+func (m *SessionModule) RegisterJobs(svc *jobs.JobService) {
+	svc.Register(&reconcileSyncTask{service: m.Service})
 }
