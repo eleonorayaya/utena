@@ -3,8 +3,6 @@ package session
 import (
 	"errors"
 	"net/http"
-
-	"github.com/go-chi/render"
 )
 
 type SessionResponse struct {
@@ -33,15 +31,6 @@ func NewSessionListResponse(sessions []Session) *SessionListResponse {
 
 func (slr *SessionListResponse) Render(w http.ResponseWriter, r *http.Request) error {
 	return nil
-}
-
-func RenderSessionList(sessions []Session) []render.Renderer {
-	list := make([]render.Renderer, len(sessions))
-	for i, session := range sessions {
-		s := session
-		list[i] = NewSessionResponse(&s)
-	}
-	return list
 }
 
 type CreateSessionRequest struct {

@@ -56,8 +56,26 @@ func (s *SessionService) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
+func (s *SessionService) populateWindows(ctx context.Context, sess *Session) {
+	if sess.TmuxSessionID == nil {
+		return
+	}
+	ts, err := s.tmuxService.GetSession(*sess.TmuxSessionID)
+	if err != nil {
+		return
+	}
+	sess.Windows = s.tmuxService.GetWindows(ctx, ts.Name)
+}
+
 func (s *SessionService) ListSessions(ctx context.Context) ([]Session, error) {
-	return s.store.List()
+	sessions, err := s.store.List()
+	if err != nil {
+		return nil, err
+	}
+	for i := range sessions {
+		s.populateWindows(ctx, &sessions[i])
+	}
+	return sessions, nil
 }
 
 func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceID uint) ([]Session, error) {
@@ -65,12 +83,23 @@ func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceI
 	if err != nil {
 		return nil, err
 	}
-
-	return s.store.ListByWorkspace(workspaceID)
+	sessions, err := s.store.ListByWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range sessions {
+		s.populateWindows(ctx, &sessions[i])
+	}
+	return sessions, nil
 }
 
 func (s *SessionService) GetSession(ctx context.Context, id uint) (*Session, error) {
-	return s.store.GetByID(id)
+	sess, err := s.store.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	s.populateWindows(ctx, sess)
+	return sess, nil
 }
 
 func (s *SessionService) findSessionByTmuxName(tmuxName string) (*Session, error) {

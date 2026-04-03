@@ -39,8 +39,7 @@ func (c *SessionController) ListSessions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	response := NewSessionListResponse(sessions)
-	render.Render(w, r, response)
+	render.Render(w, r, NewSessionListResponse(sessions))
 }
 
 func (c *SessionController) GetSessionByID(w http.ResponseWriter, r *http.Request) {
@@ -75,8 +74,7 @@ func (c *SessionController) ListSessionsByWorkspace(w http.ResponseWriter, r *ht
 		return
 	}
 
-	response := NewSessionListResponse(sessions)
-	render.Render(w, r, response)
+	render.Render(w, r, NewSessionListResponse(sessions))
 }
 
 func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request) {

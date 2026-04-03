@@ -45,6 +45,7 @@ type Session struct {
 	StatusError    string                 `json:"status_error,omitempty"`
 	GitBranch      *git.Branch            `json:"git_branch,omitempty" gorm:"foreignKey:BranchID"`
 	TmuxSession    *utmux.TmuxSession     `json:"tmux_session,omitempty" gorm:"foreignKey:TmuxSessionID"`
+	Windows        []utmux.Window         `json:"windows,omitempty" gorm:"-"`
 }
 
 func SanitizeTmuxName(name string) string {
