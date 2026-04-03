@@ -91,12 +91,10 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 	session := &Session{
 		Name:        data.Name,
 		WorkspaceID: data.WorkspaceID,
-		Branch:      data.Branch,
-		BaseBranch:  data.BaseBranch,
 		TodoID:      data.TodoID,
 	}
 
-	if err := c.service.CreateSession(ctx, session, data.CreateWorktree); err != nil {
+	if err := c.service.CreateSession(ctx, session, data.Branch, data.BaseBranch, data.CreateWorktree); err != nil {
 		var wsNotFound *workspace.WorkspaceNotFoundError
 		if errors.Is(err, ErrSessionAlreadyExists) || errors.As(err, &wsNotFound) {
 			render.Render(w, r, common.ErrInvalidRequest(err))

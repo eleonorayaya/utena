@@ -173,7 +173,7 @@ func TestSessionService_CreateSession(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
 	require.Equal(t, StatusCreating, session.Status)
@@ -198,7 +198,7 @@ func TestSessionService_CreateSession_TmuxFails(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusBroken, 2*time.Second)
@@ -219,7 +219,7 @@ func TestSessionService_CreateSession_InvalidWorkspace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
@@ -275,7 +275,7 @@ func TestSessionService_DeleteSession(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
@@ -363,27 +363,20 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	session := &Session{
 		Name:        "my-feature",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
-
 	expectedPath := filepath.Join(repoPath, ".worktrees", "eqt-my-feature")
-	require.Equal(t, expectedPath, retrieved.WorktreePath)
-	require.Equal(t, "eqt/my-feature", retrieved.Branch)
 
 	info, err := os.Stat(expectedPath)
 	require.NoError(t, err)
 	require.True(t, info.IsDir())
 
-	require.Equal(t, "main", retrieved.BaseBranch)
 	require.True(t, mock.HasSessionByName("git-repo-my-feature"))
 }
 
@@ -405,18 +398,12 @@ func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testi
 	session := &Session{
 		Name:        branchName,
 		WorkspaceID: wsGitID,
-		Branch:      branchName,
 	}
 
-	err = service.CreateSession(ctx, session, true)
+	err = service.CreateSession(ctx, session, branchName, "", true)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
-
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
-
-	require.Equal(t, worktreePath, retrieved.WorktreePath)
 }
 
 func TestSessionService_CreateSession_WithWorktree_ReusesLocalOnlyBranch(t *testing.T) {
@@ -433,18 +420,12 @@ func TestSessionService_CreateSession_WithWorktree_ReusesLocalOnlyBranch(t *test
 	session := &Session{
 		Name:        branchName,
 		WorkspaceID: wsGitID,
-		Branch:      branchName,
 	}
 
-	err = service.CreateSession(ctx, session, true)
+	err = service.CreateSession(ctx, session, branchName, "", true)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
-
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
-
-	require.Equal(t, worktreePath, retrieved.WorktreePath)
 }
 
 func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
@@ -454,11 +435,10 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	session := &Session{
 		Name:        "my-feature",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "nonexistent",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "nonexistent", true)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusBroken, 5*time.Second)
@@ -479,7 +459,7 @@ func TestSessionService_CreateSession_WithName_ComputesID(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
 	require.Equal(t, "main", session.Name)
@@ -502,7 +482,7 @@ func TestSessionService_CreateSession_WithName_NoWorkspace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
@@ -522,14 +502,10 @@ func TestSessionService_CreateSession_NoBranch_SkipsWorktree(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
-
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
-	require.Empty(t, retrieved.WorktreePath)
 }
 
 func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T) {
@@ -554,18 +530,13 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	session := &Session{
 		Name:        "my-session",
 		WorkspaceID: wsNoGit.ID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err = service.CreateSession(ctx, session, false)
+	err = service.CreateSession(ctx, session, "", "main", false)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
-
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
-	require.Empty(t, retrieved.WorktreePath)
 }
 
 func TestSessionService_CreateSession_TouchesWorkspace(t *testing.T) {
@@ -577,7 +548,7 @@ func TestSessionService_CreateSession_TouchesWorkspace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
 	ws, err := workspaceStore.GetByID(ws1ID)
@@ -651,7 +622,7 @@ func TestSessionService_RefreshSession_DetectsMissingTmux(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 
@@ -672,7 +643,7 @@ func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 
@@ -777,7 +748,7 @@ func TestSessionService_Reconcile_MarksMissingTmuxBroken(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 
@@ -804,7 +775,7 @@ func TestSessionService_Reconcile_KeepsHealthyReady(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 
@@ -853,11 +824,10 @@ func TestSessionService_WorktreeInit_RunsUserLevelScript(t *testing.T) {
 	session := &Session{
 		Name:        "init-test",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -878,11 +848,10 @@ func TestSessionService_WorktreeInit_RunsRepoLevelScript(t *testing.T) {
 	session := &Session{
 		Name:        "repo-init",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -914,11 +883,10 @@ func TestSessionService_WorktreeInit_SkipsWhenReusingWorktree(t *testing.T) {
 	session := &Session{
 		Name:        branchName,
 		WorkspaceID: wsGitID,
-		Branch:      branchName,
 	}
 
 	ctx := context.Background()
-	err = service.CreateSession(ctx, session, true)
+	err = service.CreateSession(ctx, session, branchName, "", true)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -938,11 +906,10 @@ func TestSessionService_WorktreeInit_FailingScriptContinues(t *testing.T) {
 	session := &Session{
 		Name:        "fail-init",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -960,11 +927,10 @@ func TestSessionService_WorktreeInit_MissingScriptsSkipped(t *testing.T) {
 	session := &Session{
 		Name:        "no-scripts",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -986,11 +952,10 @@ func TestSessionService_WorktreeInit_WorkingDirIsWorktree(t *testing.T) {
 	session := &Session{
 		Name:        "wd-test",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -998,6 +963,6 @@ func TestSessionService_WorktreeInit_WorkingDirIsWorktree(t *testing.T) {
 	data, err := os.ReadFile(markerFile)
 	require.NoError(t, err)
 
-	retrieved, _ := sessionStore.GetByID(session.ID)
-	require.Contains(t, string(data), retrieved.WorktreePath)
+	expectedPath := filepath.Join(repoPath, ".worktrees", "eqt-wd-test")
+	require.Contains(t, string(data), expectedPath)
 }

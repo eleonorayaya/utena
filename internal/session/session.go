@@ -35,9 +35,6 @@ type Session struct {
 	Name           string                 `json:"name,omitempty"`
 	WorkspaceID    uint                   `json:"workspace_id" gorm:"index"`
 	TodoID         *uint                  `json:"todo_id,omitempty" gorm:"index"`
-	Branch         string                 `json:"branch,omitempty"`
-	BaseBranch     string                 `json:"base_branch,omitempty"`
-	WorktreePath   string                 `json:"worktree_path,omitempty"`
 	Status         SessionStatus          `json:"status"`
 	IsAttached     bool                   `json:"is_attached"`
 	LastUsedAt     time.Time              `json:"last_used_at"`

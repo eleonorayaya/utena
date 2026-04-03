@@ -219,7 +219,6 @@ func TestSessionRouter_CreateSession_ExistingBranch(t *testing.T) {
 	retrieved, err := sessionStore.GetByID(resp.ID)
 	require.NoError(t, err)
 	require.Equal(t, "main", retrieved.Name)
-	require.Equal(t, "main", retrieved.Branch)
 }
 
 func TestSessionRouter_CreateSession_InvalidWorkspace(t *testing.T) {
