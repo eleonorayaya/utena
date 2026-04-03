@@ -181,14 +181,12 @@ func (c *client) createSession(name string, workspaceID uint, branch string, bas
 		if name != "" {
 			body["name"] = name
 		}
-		if branch != "" || baseBranch != "" {
+		if branch != "" {
+			body["branch"] = branch
+		}
+		if baseBranch != "" {
+			body["base_branch"] = baseBranch
 			body["create_worktree"] = true
-			if branch != "" {
-				body["branch"] = branch
-			}
-			if baseBranch != "" {
-				body["base_branch"] = baseBranch
-			}
 		}
 		if todoID != nil {
 			body["todo_id"] = *todoID
