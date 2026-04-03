@@ -221,7 +221,7 @@ func (s *SessionService) setupBranch(ctx context.Context, ws *workspace.Workspac
 	}
 
 	if err := s.gitService.Pull(ctx, ws.Path, pullBranch); err != nil {
-		return fmt.Errorf("failed to pull branch %q: %v", pullBranch, err)
+		slog.Warn("failed to pull branch, continuing with local state", "branch", pullBranch, "error", err)
 	}
 
 	return nil
