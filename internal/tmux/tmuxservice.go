@@ -122,11 +122,21 @@ func (t *TmuxService) GetCurrentSessionName(paneID string) (string, error) {
 }
 
 func (t *TmuxService) GetSession(id uint) (*TmuxSession, error) {
-	return t.store.GetByID(id)
+	ts, err := t.store.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	ts.Windows = t.windowsBySession[ts.Name]
+	return ts, nil
 }
 
 func (t *TmuxService) GetSessionByName(name string) (*TmuxSession, error) {
-	return t.store.GetByName(name)
+	ts, err := t.store.GetByName(name)
+	if err != nil {
+		return nil, err
+	}
+	ts.Windows = t.windowsBySession[ts.Name]
+	return ts, nil
 }
 
 func (t *TmuxService) ListSessionNames() ([]string, error) {

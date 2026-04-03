@@ -17,4 +17,5 @@ type TmuxSession struct {
 	StartDir string            `json:"start_dir"`
 	Env      map[string]string `json:"env" gorm:"serializer:json"`
 	IsAlive  bool              `json:"is_alive"`
+	Windows  []Window          `json:"windows,omitempty" gorm:"-"`
 }
