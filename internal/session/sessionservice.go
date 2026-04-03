@@ -172,7 +172,7 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 		}
 	}
 
-	if err := s.setupTmux(ctx, sess, tmuxName); err != nil {
+	if err := s.setupTmux(ctx, sess, tmuxName, worktreePath); err != nil {
 		sess.Status = StatusBroken
 		sess.StatusError = fmt.Sprintf("tmux setup failed: %v", err)
 		s.store.Update(sess)
@@ -246,6 +246,15 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 		return false, "", fmt.Errorf("branch %q does not exist; provide a base branch to create it", finalBranchName)
 	}
 
+	if ws.RepoID != nil {
+		branch, err := s.gitService.FindOrCreateBranch(ctx, finalBranchName, *ws.RepoID)
+		if err != nil {
+			return false, "", fmt.Errorf("failed to find/create branch record: %v", err)
+		}
+		sess.BranchID = &branch.ID
+		s.store.Update(sess)
+	}
+
 	worktreePath := s.gitService.WorktreePath(ws.Path, finalBranchName)
 
 	exists, err := s.gitService.ValidateWorktree(ctx, worktreePath, finalBranchName)
@@ -270,8 +279,11 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 	return true, path, nil
 }
 
-func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string) error {
-	startDir := s.resolveStartDir(ctx, sess)
+func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string, worktreePath string) error {
+	startDir := worktreePath
+	if startDir == "" {
+		startDir = s.resolveStartDir(ctx, sess)
+	}
 	env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", sess.ID)}
 	ts, err := s.tmuxService.CreateSession(tmuxName, startDir, env)
 	if err != nil {
