@@ -3,7 +3,6 @@ package git
 import (
 	"testing"
 
-	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/stretchr/testify/require"
 )
@@ -172,30 +171,3 @@ func TestBranchStore_UpsertUpdates(t *testing.T) {
 	require.True(t, found.ExistsRemote)
 }
 
-func TestBranch_Signals_Dirty(t *testing.T) {
-	branch := &Branch{IsDirty: true, ExistsLocal: true}
-	branch.ID = 1
-
-	signals := branch.Signals()
-	require.Len(t, signals, 1)
-	require.Equal(t, common.SeverityWarning, signals[0].Severity)
-	require.Equal(t, "uncommitted changes", signals[0].Label)
-	require.Equal(t, "git", signals[0].Source)
-}
-
-func TestBranch_Signals_RemoteOnly(t *testing.T) {
-	branch := &Branch{ExistsRemote: true, ExistsLocal: false}
-	branch.ID = 2
-
-	signals := branch.Signals()
-	require.Len(t, signals, 1)
-	require.Equal(t, common.SeverityInfo, signals[0].Severity)
-	require.Equal(t, "remote only", signals[0].Label)
-}
-
-func TestBranch_Signals_Clean(t *testing.T) {
-	branch := &Branch{ExistsLocal: true, ExistsRemote: true, IsDirty: false}
-
-	signals := branch.Signals()
-	require.Empty(t, signals)
-}

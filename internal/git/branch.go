@@ -2,9 +2,7 @@ package git
 
 import (
 	"errors"
-	"fmt"
 
-	"github.com/eleonorayaya/utena/internal/common"
 	"gorm.io/gorm"
 )
 
@@ -22,25 +20,4 @@ type Branch struct {
 	ExistsLocal  bool    `json:"exists_local"`
 	ExistsRemote bool    `json:"exists_remote"`
 	IsDirty      bool    `json:"is_dirty"`
-}
-
-func (b *Branch) Signals() []common.Signal {
-	var signals []common.Signal
-	if b.IsDirty {
-		signals = append(signals, common.Signal{
-			Source:   "git",
-			Key:      fmt.Sprintf("branch:%d:dirty", b.ID),
-			Severity: common.SeverityWarning,
-			Label:    "uncommitted changes",
-		})
-	}
-	if b.ExistsRemote && !b.ExistsLocal {
-		signals = append(signals, common.Signal{
-			Source:   "git",
-			Key:      fmt.Sprintf("branch:%d:remote-only", b.ID),
-			Severity: common.SeverityInfo,
-			Label:    "remote only",
-		})
-	}
-	return signals
 }

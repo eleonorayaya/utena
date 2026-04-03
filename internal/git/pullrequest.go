@@ -2,9 +2,7 @@ package git
 
 import (
 	"errors"
-	"fmt"
 
-	"github.com/eleonorayaya/utena/internal/common"
 	"gorm.io/gorm"
 )
 
@@ -32,29 +30,4 @@ type PullRequest struct {
 	IsDraft      bool    `json:"is_draft"`
 	HTMLURL      string  `json:"html_url"`
 	AuthorLogin  string  `json:"author_login"`
-}
-
-func (pr *PullRequest) Signals() []common.Signal {
-	switch pr.State {
-	case PRStateMerged:
-		return []common.Signal{{
-			Source:   "github",
-			Key:      fmt.Sprintf("pr:%d:merged", pr.ID),
-			Severity: common.SeverityInfo,
-			Label:    "merged",
-		}}
-	case PRStateOpen:
-		label := "open"
-		if pr.IsDraft {
-			label = "draft"
-		}
-		return []common.Signal{{
-			Source:   "github",
-			Key:      fmt.Sprintf("pr:%d:open", pr.ID),
-			Severity: common.SeverityInfo,
-			Label:    label,
-		}}
-	default:
-		return nil
-	}
 }

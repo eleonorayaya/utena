@@ -3,7 +3,6 @@ package git
 import (
 	"testing"
 
-	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/stretchr/testify/require"
 )
@@ -164,68 +163,3 @@ func TestPRStore_UpsertUpdates(t *testing.T) {
 	require.Equal(t, PRStateMerged, found.State)
 }
 
-func TestPullRequest_Signals_Open(t *testing.T) {
-	pr := &PullRequest{State: PRStateOpen, IsDraft: false}
-	pr.ID = 1
-
-	signals := pr.Signals()
-	require.Len(t, signals, 1)
-	require.Equal(t, common.SeverityInfo, signals[0].Severity)
-	require.Equal(t, "open", signals[0].Label)
-	require.Equal(t, "github", signals[0].Source)
-}
-
-func TestPullRequest_Signals_Merged(t *testing.T) {
-	pr := &PullRequest{State: PRStateMerged}
-	pr.ID = 2
-
-	signals := pr.Signals()
-	require.Len(t, signals, 1)
-	require.Equal(t, common.SeverityInfo, signals[0].Severity)
-	require.Equal(t, "merged", signals[0].Label)
-	require.Equal(t, "github", signals[0].Source)
-}
-
-func TestPullRequest_Signals_Draft(t *testing.T) {
-	pr := &PullRequest{State: PRStateOpen, IsDraft: true}
-	pr.ID = 3
-
-	signals := pr.Signals()
-	require.Len(t, signals, 1)
-	require.Equal(t, common.SeverityInfo, signals[0].Severity)
-	require.Equal(t, "draft", signals[0].Label)
-	require.Equal(t, "github", signals[0].Source)
-}
-
-func TestPullRequest_Signals_Closed(t *testing.T) {
-	pr := &PullRequest{State: PRStateClosed}
-	pr.ID = 4
-
-	signals := pr.Signals()
-	require.Empty(t, signals)
-}
-
-func TestPullRequest_StateAndDraftIndependent(t *testing.T) {
-	openNotDraft := &PullRequest{State: PRStateOpen, IsDraft: false}
-	openNotDraft.ID = 1
-	signals := openNotDraft.Signals()
-	require.Len(t, signals, 1)
-	require.Equal(t, "open", signals[0].Label)
-
-	openDraft := &PullRequest{State: PRStateOpen, IsDraft: true}
-	openDraft.ID = 2
-	signals = openDraft.Signals()
-	require.Len(t, signals, 1)
-	require.Equal(t, "draft", signals[0].Label)
-
-	mergedDraft := &PullRequest{State: PRStateMerged, IsDraft: true}
-	mergedDraft.ID = 3
-	signals = mergedDraft.Signals()
-	require.Len(t, signals, 1)
-	require.Equal(t, "merged", signals[0].Label)
-
-	closedDraft := &PullRequest{State: PRStateClosed, IsDraft: true}
-	closedDraft.ID = 4
-	signals = closedDraft.Signals()
-	require.Empty(t, signals)
-}

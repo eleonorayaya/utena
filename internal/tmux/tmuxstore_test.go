@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -117,16 +116,3 @@ func TestList(t *testing.T) {
 	assert.Len(t, list, 3)
 }
 
-func TestSignalsAlive(t *testing.T) {
-	session := &TmuxSession{IsAlive: true}
-	assert.Nil(t, session.Signals())
-}
-
-func TestSignalsDead(t *testing.T) {
-	session := &TmuxSession{IsAlive: false}
-	signals := session.Signals()
-	require.Len(t, signals, 1)
-	assert.Equal(t, "tmux", signals[0].Source)
-	assert.Equal(t, common.SeverityInfo, signals[0].Severity)
-	assert.Equal(t, "tmux stopped", signals[0].Label)
-}
