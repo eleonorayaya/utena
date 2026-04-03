@@ -131,12 +131,12 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, br
 		s.workspaceService.Touch(ctx, session.WorkspaceID)
 	}
 
-	go s.runSetup(session.ID, ws, tmuxName, branchName, baseBranchName)
+	go s.runSetup(session.ID, ws, tmuxName, branchName, baseBranchName, createWorktree)
 
 	return nil
 }
 
-func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxName string, branchName string, baseBranchName string) {
+func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxName string, branchName string, baseBranchName string, createWorktree bool) {
 	ctx := context.Background()
 
 	sess, err := s.store.GetByID(sessionID)
@@ -148,8 +148,8 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 	var worktreeCreated bool
 	var worktreePath string
 
-	needsGitSetup := ws != nil && ws.IsGitRepo && (branchName != "" || baseBranchName != "")
-	if needsGitSetup {
+	hasBranch := ws != nil && ws.IsGitRepo && (branchName != "" || baseBranchName != "")
+	if hasBranch {
 		if err := s.setupBranch(ctx, ws, branchName, baseBranchName); err != nil {
 			sess.Status = StatusBroken
 			sess.StatusError = fmt.Sprintf("branch setup failed: %v", err)
@@ -157,18 +157,34 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 			return
 		}
 
-		created, wtPath, err := s.setupWorktree(ctx, sess, ws, branchName, baseBranchName)
-		if err != nil {
-			sess.Status = StatusBroken
-			sess.StatusError = fmt.Sprintf("worktree setup failed: %v", err)
-			s.store.Update(sess)
-			return
+		finalBranchName := branchName
+		if baseBranchName != "" {
+			finalBranchName = s.branchPrefix + sess.Name
 		}
-		worktreeCreated = created
-		worktreePath = wtPath
+		if ws.RepoID != nil {
+			branch, err := s.gitService.FindOrCreateBranch(ctx, finalBranchName, *ws.RepoID)
+			if err != nil {
+				slog.Warn("failed to create branch record", "branch", finalBranchName, "error", err)
+			} else {
+				sess.BranchID = &branch.ID
+				s.store.Update(sess)
+			}
+		}
 
-		if err := s.setupWorktreeInit(ctx, sess, ws, worktreeCreated, worktreePath, branchName, baseBranchName); err != nil {
-			slog.Warn("worktree init failed, continuing", "error", err)
+		if createWorktree {
+			created, wtPath, err := s.setupWorktree(ctx, sess, ws, branchName, baseBranchName)
+			if err != nil {
+				sess.Status = StatusBroken
+				sess.StatusError = fmt.Sprintf("worktree setup failed: %v", err)
+				s.store.Update(sess)
+				return
+			}
+			worktreeCreated = created
+			worktreePath = wtPath
+
+			if err := s.setupWorktreeInit(ctx, sess, ws, worktreeCreated, worktreePath, branchName, baseBranchName); err != nil {
+				slog.Warn("worktree init failed, continuing", "error", err)
+			}
 		}
 	}
 
@@ -244,15 +260,6 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 	}
 	if !creatingNewBranch && !branchExists {
 		return false, "", fmt.Errorf("branch %q does not exist; provide a base branch to create it", finalBranchName)
-	}
-
-	if ws.RepoID != nil {
-		branch, err := s.gitService.FindOrCreateBranch(ctx, finalBranchName, *ws.RepoID)
-		if err != nil {
-			return false, "", fmt.Errorf("failed to find/create branch record: %v", err)
-		}
-		sess.BranchID = &branch.ID
-		s.store.Update(sess)
 	}
 
 	worktreePath := s.gitService.WorktreePath(ws.Path, finalBranchName)
@@ -392,7 +399,8 @@ func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, 
 	}
 
 	tmuxName := s.computeTmuxName(sess, ws)
-	go s.runSetup(sess.ID, ws, tmuxName, branchName, baseBranchName)
+	hasWorktree := sess.BranchID != nil && s.gitService.HasWorktree(*sess.BranchID)
+	go s.runSetup(sess.ID, ws, tmuxName, branchName, baseBranchName, hasWorktree)
 	return sess, nil
 }
 
