@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/db"
@@ -47,10 +48,12 @@ func (t *prSyncTask) Run(ctx context.Context) error {
 	repos := t.service.repoStore.List()
 	for _, repo := range repos {
 		if err := t.service.SyncRepoPRs(ctx, &repo); err != nil {
-			continue
+			slog.Warn("failed to sync PRs for repo", "repo", repo.FullName, "error", err)
 		}
 	}
-	_, _ = t.service.SyncAssignedPRs(ctx)
+	if _, err := t.service.SyncAssignedPRs(ctx); err != nil {
+		slog.Warn("failed to sync assigned PRs", "error", err)
+	}
 	return nil
 }
 
@@ -64,7 +67,7 @@ func (t *branchSyncTask) Run(ctx context.Context) error {
 	repos := t.service.repoStore.List()
 	for _, repo := range repos {
 		if err := t.service.SyncBranches(ctx, repo.ID, repo.Path); err != nil {
-			continue
+			slog.Warn("failed to sync branches for repo", "repo", repo.FullName, "error", err)
 		}
 	}
 	return nil

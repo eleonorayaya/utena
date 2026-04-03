@@ -151,7 +151,7 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 
 	needsGitSetup := ws != nil && ws.IsGitRepo && (branchName != "" || baseBranchName != "")
 	if needsGitSetup {
-		if err := s.setupBranch(ctx, sess, ws, branchName, baseBranchName); err != nil {
+		if err := s.setupBranch(ctx, ws, branchName, baseBranchName); err != nil {
 			sess.Status = StatusBroken
 			sess.StatusError = fmt.Sprintf("branch setup failed: %v", err)
 			s.store.Update(sess)
@@ -185,7 +185,7 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 	s.store.Update(sess)
 }
 
-func (s *SessionService) setupBranch(ctx context.Context, sess *Session, ws *workspace.Workspace, branchName string, baseBranchName string) error {
+func (s *SessionService) setupBranch(ctx context.Context, ws *workspace.Workspace, branchName string, baseBranchName string) error {
 	pullBranch := branchName
 	if baseBranchName != "" {
 		pullBranch = baseBranchName
