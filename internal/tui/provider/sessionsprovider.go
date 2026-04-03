@@ -3,24 +3,14 @@ package provider
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/session"
-	"github.com/eleonorayaya/utena/internal/tmux"
 )
 
 type SessionsStateUpdatedMsg struct {
 	Sessions []session.Session
 }
 
-type WindowsStateUpdatedMsg struct {
-	SessionName string
-	Windows     []tmux.Window
-}
-
 func FetchSessions() tea.Cmd {
 	return func() tea.Msg { return fetchSessionsIntentMsg{} }
-}
-
-func FetchWindows(sessionName string) tea.Cmd {
-	return func() tea.Msg { return fetchWindowsIntentMsg{sessionName: sessionName} }
 }
 
 func RequestSessionsState() tea.Cmd {
@@ -87,15 +77,6 @@ type repairSessionIntentMsg struct {
 
 type deleteSessionIntentMsg struct {
 	id uint
-}
-
-type fetchWindowsIntentMsg struct {
-	sessionName string
-}
-
-type windowsLoadedMsg struct {
-	sessionName string
-	windows     []tmux.Window
 }
 
 type setActiveWorkspaceMsg struct {
@@ -177,14 +158,6 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 
 	case fetchSessionsIntentMsg:
 		return p, p.client.fetchSessions()
-
-	case fetchWindowsIntentMsg:
-		return p, p.client.fetchWindows(msg.sessionName)
-
-	case windowsLoadedMsg:
-		return p, func() tea.Msg {
-			return WindowsStateUpdatedMsg{SessionName: msg.sessionName, Windows: msg.windows}
-		}
 
 	case requestSessionsStateMsg:
 		return p, p.emitState()

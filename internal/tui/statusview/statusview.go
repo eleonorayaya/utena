@@ -25,7 +25,6 @@ type tickMsg time.Time
 type Model struct {
 	sessions           []session.Session
 	tabs               map[uint]SessionTab
-	windowsBySession   map[string][]tmux.Window
 	currentTmuxSession string
 	paneID             string
 	focused            bool
@@ -50,20 +49,15 @@ func New() Model {
 		paneID:             paneID,
 		currentTmuxSession: currentSession,
 		tabs:               make(map[uint]SessionTab),
-		windowsBySession:   make(map[string][]tmux.Window),
 	}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
-	cmds := []tea.Cmd{
+	return m, tea.Batch(
 		provider.FetchSessions(),
 		tick(),
 		router.SetHelpVisible(false),
-	}
-	if m.currentTmuxSession != "" {
-		cmds = append(cmds, provider.FetchWindows(m.currentTmuxSession))
-	}
-	return m, tea.Batch(cmds...)
+	)
 }
 
 func (m Model) Keys() help.KeyMap {
@@ -101,23 +95,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, m.syncTabs()
 
 	case tickMsg:
-		cmds := []tea.Cmd{
-			provider.FetchSessions(),
-			tick(),
-		}
-		for _, s := range m.activeSessions() {
-			cmds = append(cmds, provider.FetchWindows(sessionTmuxName(s)))
-		}
-		return m, tea.Batch(cmds...)
+		return m, tea.Batch(provider.FetchSessions(), tick())
 
 	case provider.SessionsStateUpdatedMsg:
 		m.sessions = msg.Sessions
-		return m, m.syncTabs()
-
-	case provider.WindowsStateUpdatedMsg:
-		if msg.SessionName != "" {
-			m.windowsBySession[msg.SessionName] = msg.Windows
-		}
 		return m, m.syncTabs()
 
 	case provider.SessionSwitchedMsg:
@@ -141,7 +122,10 @@ func (m *Model) syncTabs() tea.Cmd {
 	for i, s := range ordered {
 		seen[s.ID] = true
 		selected := i == m.cursor && m.focused
-		windows := m.windowsBySession[sessionTmuxName(s)]
+		var windows []tmux.Window
+		if s.TmuxSession != nil {
+			windows = s.TmuxSession.Windows
+		}
 		tab, ok := m.tabs[s.ID]
 		if !ok {
 			tab = NewSessionTab(s)
