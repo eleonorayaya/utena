@@ -40,10 +40,10 @@ func NewApp(cfg Config) (*App, error) {
 }
 
 func newApp(gormDB *gorm.DB, fs afero.Fs, cfg Config) *App {
-	return buildApp(gormDB, fs, cfg, nil, nil)
+	return buildApp(gormDB, fs, cfg, nil, nil, nil)
 }
 
-func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxModule, bus eventbus.EventBus) *App {
+func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxModule, gitMod *git.GitModule, bus eventbus.EventBus) *App {
 	if bus == nil {
 		bus = eventbus.NewEventBus()
 	}
@@ -51,7 +51,10 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxMod
 	dbModule := db.NewDatabaseModule(gormDB)
 	database := dbModule.Service
 
-	gitModule := git.NewGitModule(database, bus)
+	gitModule := gitMod
+	if gitModule == nil {
+		gitModule = git.NewGitModule(database, bus)
+	}
 	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir, gitModule.Service)
 	if tmuxModule == nil {
 		tmuxModule = tmux.NewTmuxModule(bus, database)

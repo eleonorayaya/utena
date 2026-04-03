@@ -12,6 +12,7 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -32,7 +33,8 @@ func setupTestRouter(t *testing.T) (*App, chi.Router, *tmux.MockRunner, uint, ui
 	mock := tmux.NewMockRunner()
 	tmuxStore := tmux.NewTmuxStore(database)
 	tmuxModule := tmux.NewTmuxModuleWithRunner(mock, tmuxStore, bus)
-	app := buildApp(gormDB, afero.NewMemMapFs(), cfg, tmuxModule, bus)
+	gitModule := git.NewGitModule(database, bus)
+	app := buildApp(gormDB, afero.NewMemMapFs(), cfg, tmuxModule, gitModule, bus)
 
 	err = app.OnStart(context.Background())
 	require.NoError(t, err)

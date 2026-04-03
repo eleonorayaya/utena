@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -21,10 +22,12 @@ func NewGitModule(database db.Database, bus eventbus.EventBus) *GitModule {
 }
 
 func (m *GitModule) OnAppStart(ctx context.Context) error {
+	if m.Service.githubClient != nil {
+		return nil
+	}
 	ghClient, err := NewGitHubClient(ctx)
 	if err != nil {
-		slog.Info("GitHub client unavailable, PR sync disabled", "error", err)
-		return nil
+		return fmt.Errorf("failed to initialize GitHub client: %w", err)
 	}
 	m.Service.githubClient = ghClient
 	return nil
