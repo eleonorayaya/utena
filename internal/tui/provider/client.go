@@ -13,7 +13,6 @@ import (
 	"github.com/GianlucaP106/gotmux/gotmux"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/session"
-	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/todo"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
@@ -137,11 +136,17 @@ func (c *client) activateSession(id uint) tea.Cmd {
 		}
 
 		var resp struct {
-			TmuxSessionName string `json:"tmux_session_name"`
+			TmuxSession *struct {
+				Name string `json:"name"`
+			} `json:"tmux_session"`
 		}
 		json.NewDecoder(res.Body).Decode(&resp)
 
-		return sessionActivatedMsg{tmuxSessionName: resp.TmuxSessionName}
+		tmuxName := ""
+		if resp.TmuxSession != nil {
+			tmuxName = resp.TmuxSession.Name
+		}
+		return sessionActivatedMsg{tmuxSessionName: tmuxName}
 	}
 }
 
@@ -175,14 +180,12 @@ func (c *client) createSession(name string, workspaceID uint, branch string, bas
 		if name != "" {
 			body["name"] = name
 		}
-		if branch != "" || baseBranch != "" {
+		if branch != "" {
+			body["branch"] = branch
+		}
+		if baseBranch != "" {
+			body["base_branch"] = baseBranch
 			body["create_worktree"] = true
-			if branch != "" {
-				body["branch"] = branch
-			}
-			if baseBranch != "" {
-				body["base_branch"] = baseBranch
-			}
 		}
 		if todoID != nil {
 			body["todo_id"] = *todoID
@@ -284,30 +287,6 @@ func (c *client) fetchTodos() tea.Cmd {
 			todos[i] = *tr.Todo
 		}
 		return todosLoadedMsg{todos}
-	}
-}
-
-func (c *client) fetchWindows(sessionName string) tea.Cmd {
-	return func() tea.Msg {
-		res, err := c.httpClient.Get(c.baseURL + "/tmux/windows/" + sessionName)
-		if err != nil {
-			log.Printf("[ERROR] fetch windows: %v", err)
-			return windowsLoadedMsg{sessionName: sessionName}
-		}
-		defer res.Body.Close()
-
-		if res.StatusCode != http.StatusOK {
-			log.Printf("[ERROR] fetch windows: status %d", res.StatusCode)
-			return windowsLoadedMsg{sessionName: sessionName}
-		}
-
-		var windows []tmux.Window
-		if err := json.NewDecoder(res.Body).Decode(&windows); err != nil {
-			log.Printf("[ERROR] decode windows: %v", err)
-			return windowsLoadedMsg{sessionName: sessionName}
-		}
-
-		return windowsLoadedMsg{sessionName: sessionName, windows: windows}
 	}
 }
 

@@ -2,143 +2,497 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
+	"log/slog"
+
+	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/eventbus"
 )
 
-type GitService struct{}
+const (
+	EventPRDiscovered   = "git.pr_discovered"
+	EventPRStateChanged = "git.pr_state_changed"
+)
 
-func NewGitService() *GitService {
-	return &GitService{}
+type PRDiscoveredEvent struct {
+	PullRequest *PullRequest
+	Repo        *Repo
+}
+
+type PRStateChangedEvent struct {
+	PullRequest *PullRequest
+	OldState    PRState
+	NewState    PRState
+}
+
+type GitService struct {
+	cli           *gitCLI
+	repoStore     *RepoStore
+	branchStore   *BranchStore
+	worktreeStore *WorktreeStore
+	prStore       *PRStore
+	githubClient  GitHubClient
+	eventBus      eventbus.EventBus
+}
+
+type GitServiceOption func(*GitService)
+
+func WithGitHubClient(client GitHubClient) GitServiceOption {
+	return func(s *GitService) { s.githubClient = client }
+}
+
+func WithEventBus(bus eventbus.EventBus) GitServiceOption {
+	return func(s *GitService) { s.eventBus = bus }
+}
+
+func NewGitService(database db.Database, opts ...GitServiceOption) *GitService {
+	s := &GitService{
+		cli:           newGitCLI(),
+		repoStore:     NewRepoStore(database),
+		branchStore:   NewBranchStore(database),
+		worktreeStore: NewWorktreeStore(database),
+		prStore:       NewPRStore(database),
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *GitService) ListBranches(ctx context.Context, repoPath string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "branch", "--format=%(refname:short)")
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list branches: %w", err)
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	branches := []string{}
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			branches = append(branches, trimmed)
-		}
-	}
-
-	for i, b := range branches {
-		if b == "main" {
-			branches = append(branches[:i], branches[i+1:]...)
-			branches = append([]string{"main"}, branches...)
-			break
-		}
-	}
-
-	return branches, nil
+	return s.cli.listBranches(ctx, repoPath)
 }
 
 func (s *GitService) Pull(ctx context.Context, repoPath string, branch string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "fetch", "origin", branch+":"+branch)
-	if _, err := cmd.CombinedOutput(); err != nil {
-		fallback := exec.CommandContext(ctx, "git", "-C", repoPath, "pull", "origin", branch)
-		if output, err := fallback.CombinedOutput(); err != nil {
-			return fmt.Errorf("git pull failed: %s: %w", string(output), err)
-		}
-	}
-	return nil
+	return s.cli.pull(ctx, repoPath, branch)
 }
 
 func (s *GitService) CreateWorktree(ctx context.Context, repoPath string, branchName string, baseBranch string) (string, error) {
-	worktreePath := s.WorktreePath(repoPath, branchName)
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, baseBranch)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
-	}
-	return worktreePath, nil
+	return s.cli.createWorktree(ctx, repoPath, branchName, baseBranch)
 }
 
 func (s *GitService) CheckoutWorktree(ctx context.Context, repoPath string, branch string) (string, error) {
-	worktreePath := s.WorktreePath(repoPath, branch)
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", worktreePath, branch)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
-	}
-	return worktreePath, nil
+	return s.cli.checkoutWorktree(ctx, repoPath, branch)
 }
 
 func (s *GitService) CurrentBranch(ctx context.Context, repoPath string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "branch", "--show-current")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to get current branch: %w", err)
-	}
-	return strings.TrimSpace(string(output)), nil
+	return s.cli.currentBranch(ctx, repoPath)
 }
 
 func (s *GitService) IsDirty(ctx context.Context, repoPath string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "status", "--porcelain")
-	output, err := cmd.Output()
-	if err != nil {
-		return false, fmt.Errorf("git status failed: %w", err)
-	}
-	return strings.TrimSpace(string(output)) != "", nil
+	return s.cli.isDirty(ctx, repoPath)
 }
 
 func (s *GitService) HasRemoteBranch(ctx context.Context, repoPath string, branch string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "ls-remote", "--heads", "origin", "refs/heads/"+branch)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return false, fmt.Errorf("git ls-remote failed: %s: %w", strings.TrimSpace(string(output)), err)
-	}
-	return strings.TrimSpace(string(output)) != "", nil
+	return s.cli.hasRemoteBranch(ctx, repoPath, branch)
 }
 
 func (s *GitService) HasBranch(ctx context.Context, repoPath string, branch string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--verify", "refs/heads/"+branch)
-	if err := cmd.Run(); err != nil {
-		return false, nil
-	}
-	return true, nil
+	return s.cli.hasBranch(ctx, repoPath, branch)
 }
 
 func (s *GitService) ValidateWorktree(ctx context.Context, worktreePath string, expectedBranch string) (bool, error) {
-	info, err := os.Stat(worktreePath)
-	if err != nil || !info.IsDir() {
-		return false, nil
-	}
-
-	currentBranch, err := s.CurrentBranch(ctx, worktreePath)
-	if err != nil {
-		return false, fmt.Errorf("worktree exists at %s but failed to read branch: %w", worktreePath, err)
-	}
-	if currentBranch != expectedBranch {
-		return false, fmt.Errorf("worktree at %s has branch %q, expected %q", worktreePath, currentBranch, expectedBranch)
-	}
-	return true, nil
+	return s.cli.validateWorktree(ctx, worktreePath, expectedBranch)
 }
 
 func (s *GitService) WorktreePath(repoPath string, branch string) string {
-	dirName := strings.ReplaceAll(branch, "/", "-")
-	return filepath.Join(repoPath, ".worktrees", dirName)
+	return s.cli.worktreePath(repoPath, branch)
 }
 
 func (s *GitService) RemoveWorktree(ctx context.Context, repoPath string, worktreePath string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "remove", worktreePath, "--force")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git worktree remove failed: %s: %w", string(output), err)
+	return s.cli.removeWorktree(ctx, repoPath, worktreePath)
+}
+
+func (s *GitService) DeleteBranch(ctx context.Context, repoPath string, branchName string) error {
+	return s.cli.deleteBranch(ctx, repoPath, branchName)
+}
+
+func (s *GitService) FindOrCreateRepo(ctx context.Context, repoPath string) (*Repo, error) {
+	existing, err := s.repoStore.GetByPath(repoPath)
+	if err == nil {
+		return existing, nil
+	}
+	url, err := s.cli.remoteURL(ctx, repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get remote URL: %w", err)
+	}
+	owner, name, err := s.cli.parseRepoFullName(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse repo name: %w", err)
+	}
+	repo := &Repo{
+		Path:     repoPath,
+		FullName: owner + "/" + name,
+	}
+	if err := s.repoStore.Upsert(repo); err != nil {
+		return nil, err
+	}
+	return repo, nil
+}
+
+func (s *GitService) GetRepo(id uint) (*Repo, error) {
+	return s.repoStore.GetByID(id)
+}
+
+func (s *GitService) GetRepoByPath(path string) (*Repo, error) {
+	return s.repoStore.GetByPath(path)
+}
+
+func (s *GitService) FindOrCreateBranch(ctx context.Context, name string, repoID uint) (*Branch, error) {
+	existing, err := s.branchStore.GetByNameAndRepo(name, repoID)
+	if err == nil {
+		return existing, nil
+	}
+	branch := &Branch{Name: name, RepoID: repoID}
+	if err := s.branchStore.Upsert(branch); err != nil {
+		return nil, err
+	}
+	return branch, nil
+}
+
+func (s *GitService) CreateBranch(ctx context.Context, repoPath string, branchName string, baseBranch string, repoID uint) (*Branch, *Worktree, error) {
+	baseBranchRecord, err := s.branchStore.GetByNameAndRepo(baseBranch, repoID)
+	if err != nil && !errors.Is(err, ErrBranchNotFound) {
+		return nil, nil, fmt.Errorf("failed to look up base branch %s: %w", baseBranch, err)
+	}
+
+	wtPath, err := s.cli.createWorktree(ctx, repoPath, branchName, baseBranch)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var baseBranchID *uint
+	if baseBranchRecord != nil {
+		baseBranchID = &baseBranchRecord.ID
+	}
+	branch := &Branch{
+		Name:         branchName,
+		RepoID:       repoID,
+		BaseBranchID: baseBranchID,
+		ExistsLocal:  true,
+	}
+	if err := s.branchStore.Upsert(branch); err != nil {
+		return nil, nil, err
+	}
+
+	wt := &Worktree{
+		Path:     wtPath,
+		BranchID: branch.ID,
+		RepoID:   repoID,
+	}
+	if err := s.worktreeStore.Add(wt); err != nil {
+		return nil, nil, err
+	}
+
+	return branch, wt, nil
+}
+
+func (s *GitService) GetBranch(id uint) (*Branch, error) {
+	return s.branchStore.GetByID(id)
+}
+
+func (s *GitService) ListBranchesByRepo(repoID uint) []Branch {
+	return s.branchStore.ListByRepo(repoID)
+}
+
+func (s *GitService) EnsureWorktree(ctx context.Context, branch *Branch, repoPath string) (string, error) {
+	existing, err := s.worktreeStore.GetByBranchID(branch.ID)
+	if err == nil {
+		return existing.Path, nil
+	}
+	if !errors.Is(err, ErrWorktreeNotFound) {
+		return "", fmt.Errorf("failed to check existing worktree: %w", err)
+	}
+
+	if branch.ExistsRemote {
+		if err := s.cli.pull(ctx, repoPath, branch.Name); err != nil {
+			slog.Warn("failed to pull branch before worktree checkout", "branch", branch.Name, "error", err)
+		}
+	}
+
+	wtPath, err := s.cli.checkoutWorktree(ctx, repoPath, branch.Name)
+	if err != nil {
+		return "", err
+	}
+
+	wt := &Worktree{
+		Path:     wtPath,
+		BranchID: branch.ID,
+		RepoID:   branch.RepoID,
+	}
+	if err := s.worktreeStore.Add(wt); err != nil {
+		return "", err
+	}
+
+	return wtPath, nil
+}
+
+func (s *GitService) GetStartDir(branch *Branch, repoPath string) string {
+	wt, err := s.worktreeStore.GetByBranchID(branch.ID)
+	if err == nil {
+		return wt.Path
+	}
+	return repoPath
+}
+
+func (s *GitService) HasWorktree(branchID uint) bool {
+	_, err := s.worktreeStore.GetByBranchID(branchID)
+	return err == nil
+}
+
+func (s *GitService) IsHealthy(ctx context.Context, branch *Branch, repoPath string) bool {
+	wt, err := s.worktreeStore.GetByBranchID(branch.ID)
+	if errors.Is(err, ErrWorktreeNotFound) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	valid, err := s.cli.validateWorktree(ctx, wt.Path, branch.Name)
+	if err != nil || !valid {
+		return false
+	}
+	return true
+}
+
+func (s *GitService) SyncBranch(ctx context.Context, branch *Branch, repoPath string) error {
+	existsLocal, err := s.cli.hasBranch(ctx, repoPath, branch.Name)
+	if err != nil {
+		return fmt.Errorf("failed to check local branch %s: %w", branch.Name, err)
+	}
+	existsRemote, err := s.cli.hasRemoteBranch(ctx, repoPath, branch.Name)
+	if err != nil {
+		return fmt.Errorf("failed to check remote branch %s: %w", branch.Name, err)
+	}
+
+	isDirty := false
+	wtPath := s.cli.worktreePath(repoPath, branch.Name)
+
+	wt, wtErr := s.worktreeStore.GetByBranchID(branch.ID)
+	if wtErr != nil && !errors.Is(wtErr, ErrWorktreeNotFound) {
+		return fmt.Errorf("failed to look up worktree for branch %s: %w", branch.Name, wtErr)
+	}
+
+	if existsLocal {
+		if valid, err := s.cli.validateWorktree(ctx, wtPath, branch.Name); err != nil {
+			slog.Warn("failed to validate worktree", "path", wtPath, "error", err)
+		} else if valid {
+			if errors.Is(wtErr, ErrWorktreeNotFound) {
+				wt = &Worktree{Path: wtPath, BranchID: branch.ID, RepoID: branch.RepoID}
+				if err := s.worktreeStore.Add(wt); err != nil {
+					slog.Warn("failed to add worktree record", "path", wtPath, "error", err)
+				}
+			}
+			if dirty, err := s.cli.isDirty(ctx, wtPath); err != nil {
+				slog.Warn("failed to check dirty state", "path", wtPath, "error", err)
+			} else {
+				isDirty = dirty
+			}
+		} else if wt != nil {
+			if err := s.worktreeStore.Delete(wt.ID); err != nil {
+				slog.Warn("failed to delete stale worktree record", "id", wt.ID, "error", err)
+			}
+		}
+	} else if wt != nil {
+		if err := s.worktreeStore.Delete(wt.ID); err != nil {
+			slog.Warn("failed to delete worktree record for missing local branch", "id", wt.ID, "error", err)
+		}
+	}
+
+	branch.ExistsLocal = existsLocal
+	branch.ExistsRemote = existsRemote
+	branch.IsDirty = isDirty
+	return s.branchStore.Update(branch)
+}
+
+func (s *GitService) CleanupBranch(ctx context.Context, branch *Branch, repoPath string, deleteBranch bool) error {
+	wt, err := s.worktreeStore.GetByBranchID(branch.ID)
+	if err != nil && !errors.Is(err, ErrWorktreeNotFound) {
+		return fmt.Errorf("failed to look up worktree: %w", err)
+	}
+	if wt != nil {
+		if err := s.cli.removeWorktree(ctx, repoPath, wt.Path); err != nil {
+			return err
+		}
+		if err := s.worktreeStore.Delete(wt.ID); err != nil {
+			return fmt.Errorf("failed to delete worktree record: %w", err)
+		}
+	}
+	if deleteBranch {
+		if err := s.cli.deleteBranch(ctx, repoPath, branch.Name); err != nil {
+			return err
+		}
+		branch.ExistsLocal = false
+		return s.branchStore.Update(branch)
 	}
 	return nil
 }
 
-func (s *GitService) DeleteBranch(ctx context.Context, repoPath string, branchName string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "branch", "-D", branchName)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git branch delete failed: %s: %w", string(output), err)
+func (s *GitService) GetPR(id uint) (*PullRequest, error) {
+	return s.prStore.GetByID(id)
+}
+
+func (s *GitService) GetPRsForBranch(branchID uint) []PullRequest {
+	return s.prStore.ListByBranch(branchID)
+}
+
+func (s *GitService) SearchPRs(repoID uint, state PRState) []PullRequest {
+	if state != "" {
+		return s.prStore.ListByState(repoID, state)
+	}
+	return s.prStore.ListByRepo(repoID)
+}
+
+func (s *GitService) GetPRDiff(ctx context.Context, prID uint) (*Diff, error) {
+	pr, err := s.prStore.GetByID(prID)
+	if err != nil {
+		return nil, err
+	}
+	repo, err := s.repoStore.GetByID(pr.RepoID)
+	if err != nil {
+		return nil, err
+	}
+	owner, name, err := repo.OwnerAndName()
+	if err != nil {
+		return nil, err
+	}
+	if s.githubClient == nil {
+		return nil, fmt.Errorf("GitHub client not available")
+	}
+	raw, err := s.githubClient.GetPRDiff(ctx, owner, name, pr.Number)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUnifiedDiff(raw)
+}
+
+func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
+	if s.githubClient == nil {
+		return nil
+	}
+	owner, name, err := repo.OwnerAndName()
+	if err != nil {
+		return err
+	}
+	rawPRs, err := s.githubClient.ListRepoPRs(ctx, owner, name)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, raw := range rawPRs {
+		branch, _ := s.branchStore.GetByNameAndRepo(raw.Head.Ref, repo.ID)
+		if branch == nil {
+			branch = &Branch{Name: raw.Head.Ref, RepoID: repo.ID, ExistsRemote: true}
+			if err := s.branchStore.Upsert(branch); err != nil {
+				slog.Warn("failed to upsert branch for PR", "branch", raw.Head.Ref, "error", err)
+				errs = append(errs, err)
+				continue
+			}
+		}
+
+		existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, raw.Number)
+		pr := rawPRToPullRequest(raw, repo.ID, branch.ID)
+
+		if existing != nil {
+			oldState := existing.State
+			pr.Model = existing.Model
+			if err := s.prStore.Update(pr); err != nil {
+				slog.Warn("failed to update PR", "number", raw.Number, "error", err)
+				errs = append(errs, err)
+				continue
+			}
+			if oldState != pr.State && s.eventBus != nil {
+				s.eventBus.Publish(ctx, eventbus.Event{
+					Type: EventPRStateChanged,
+					Data: PRStateChangedEvent{PullRequest: pr, OldState: oldState, NewState: pr.State},
+				})
+			}
+		} else {
+			if err := s.prStore.Upsert(pr); err != nil {
+				slog.Warn("failed to upsert PR", "number", raw.Number, "error", err)
+				errs = append(errs, err)
+				continue
+			}
+			if s.eventBus != nil {
+				s.eventBus.Publish(ctx, eventbus.Event{
+					Type: EventPRDiscovered,
+					Data: PRDiscoveredEvent{PullRequest: pr, Repo: repo},
+				})
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("SyncRepoPRs: %d errors (first: %w)", len(errs), errs[0])
+	}
+	return nil
+}
+
+func (s *GitService) SyncAssignedPRs(ctx context.Context) ([]PullRequest, error) {
+	if s.githubClient == nil {
+		return nil, nil
+	}
+	rawPRs, err := s.githubClient.ListAssignedPRs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var discovered []PullRequest
+	for _, raw := range rawPRs {
+		if raw.Head.Repo == nil {
+			continue
+		}
+		repo, err := s.repoStore.GetByFullName(raw.Head.Repo.FullName)
+		if err != nil {
+			slog.Debug("skipping assigned PR for untracked repo", "repo", raw.Head.Repo.FullName)
+			continue
+		}
+		existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, raw.Number)
+		if existing != nil {
+			continue
+		}
+		branch, _ := s.branchStore.GetByNameAndRepo(raw.Head.Ref, repo.ID)
+		if branch == nil {
+			branch = &Branch{Name: raw.Head.Ref, RepoID: repo.ID, ExistsRemote: true}
+			if err := s.branchStore.Upsert(branch); err != nil {
+				slog.Warn("failed to upsert branch for assigned PR", "branch", raw.Head.Ref, "error", err)
+				continue
+			}
+		}
+		pr := rawPRToPullRequest(raw, repo.ID, branch.ID)
+		if err := s.prStore.Upsert(pr); err != nil {
+			slog.Warn("failed to upsert assigned PR", "number", raw.Number, "error", err)
+			continue
+		}
+		discovered = append(discovered, *pr)
+		if s.eventBus != nil {
+			s.eventBus.Publish(ctx, eventbus.Event{
+				Type: EventPRDiscovered,
+				Data: PRDiscoveredEvent{PullRequest: pr, Repo: repo},
+			})
+		}
+	}
+	return discovered, nil
+}
+
+func rawPRToPullRequest(raw RawPR, repoID uint, branchID uint) *PullRequest {
+	return &PullRequest{
+		RepoID:       repoID,
+		Number:       raw.Number,
+		HeadBranchID: &branchID,
+		Title:        raw.Title,
+		State:        raw.ToPRState(),
+		IsDraft:      raw.Draft,
+		HTMLURL:      raw.HTMLURL,
+		AuthorLogin:  raw.User.Login,
+	}
+}
+
+func (s *GitService) SyncBranches(ctx context.Context, repoID uint, repoPath string) error {
+	branches := s.branchStore.ListByRepo(repoID)
+	for i := range branches {
+		if err := s.SyncBranch(ctx, &branches[i], repoPath); err != nil {
+			slog.Warn("failed to sync branch", "branch", branches[i].Name, "error", err)
+		}
 	}
 	return nil
 }

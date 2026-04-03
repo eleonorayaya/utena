@@ -7,30 +7,30 @@ import (
 	"github.com/GianlucaP106/gotmux/gotmux"
 )
 
-type TmuxClient interface {
-	CreateSession(name, startDir string, env map[string]string) error
-	KillSession(name string) error
-	HasSession(name string) bool
-	ListSessionNames() ([]string, error)
-	SwitchClient(targetSession string) error
-	RunCommand(cmd ...string) (string, error)
+type tmuxRunner interface {
+	newSession(name, startDir string, env map[string]string) error
+	killSession(name string) error
+	hasSession(name string) bool
+	switchClient(targetSession string) error
+	listSessionNames() ([]string, error)
+	command(args ...string) (string, error)
 }
 
-type gotmuxClient struct {
+type gotmuxRunner struct {
 	tmux *gotmux.Tmux
 }
 
-func NewGotmuxClient() TmuxClient {
+func newGotmuxRunner() tmuxRunner {
 	t, err := gotmux.DefaultTmux()
 	if err != nil {
 		slog.Warn("failed to initialize gotmux", "error", err)
 		return nil
 	}
-	return &gotmuxClient{tmux: t}
+	return &gotmuxRunner{tmux: t}
 }
 
-func (c *gotmuxClient) CreateSession(name, startDir string, env map[string]string) error {
-	_, err := c.tmux.NewSession(&gotmux.SessionOptions{
+func (r *gotmuxRunner) newSession(name, startDir string, env map[string]string) error {
+	_, err := r.tmux.NewSession(&gotmux.SessionOptions{
 		Name:           name,
 		StartDirectory: startDir,
 	})
@@ -38,27 +38,33 @@ func (c *gotmuxClient) CreateSession(name, startDir string, env map[string]strin
 		return err
 	}
 	for k, v := range env {
-		if _, err := c.tmux.Command("set-environment", "-t", name, k, v); err != nil {
+		if _, err := r.tmux.Command("set-environment", "-t", name, k, v); err != nil {
 			return fmt.Errorf("failed to set environment %s: %w", k, err)
 		}
 	}
 	return nil
 }
 
-func (c *gotmuxClient) KillSession(name string) error {
-	sess, err := c.tmux.GetSessionByName(name)
+func (r *gotmuxRunner) killSession(name string) error {
+	sess, err := r.tmux.GetSessionByName(name)
 	if err != nil {
 		return err
 	}
 	return sess.Kill()
 }
 
-func (c *gotmuxClient) HasSession(name string) bool {
-	return c.tmux.HasSession(name)
+func (r *gotmuxRunner) hasSession(name string) bool {
+	return r.tmux.HasSession(name)
 }
 
-func (c *gotmuxClient) ListSessionNames() ([]string, error) {
-	sessions, err := c.tmux.ListSessions()
+func (r *gotmuxRunner) switchClient(targetSession string) error {
+	return r.tmux.SwitchClient(&gotmux.SwitchClientOptions{
+		TargetSession: targetSession,
+	})
+}
+
+func (r *gotmuxRunner) listSessionNames() ([]string, error) {
+	sessions, err := r.tmux.ListSessions()
 	if err != nil {
 		return nil, err
 	}
@@ -69,12 +75,6 @@ func (c *gotmuxClient) ListSessionNames() ([]string, error) {
 	return names, nil
 }
 
-func (c *gotmuxClient) SwitchClient(targetSession string) error {
-	return c.tmux.SwitchClient(&gotmux.SwitchClientOptions{
-		TargetSession: targetSession,
-	})
-}
-
-func (c *gotmuxClient) RunCommand(cmd ...string) (string, error) {
-	return c.tmux.Command(cmd...)
+func (r *gotmuxRunner) command(args ...string) (string, error) {
+	return r.tmux.Command(args...)
 }

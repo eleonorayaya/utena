@@ -7,84 +7,34 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-type testTmuxClient struct {
-	mu        sync.Mutex
-	sessions  map[string]bool
-	createErr error
-}
-
-func newTestTmuxClient() *testTmuxClient {
-	return &testTmuxClient{sessions: make(map[string]bool)}
-}
-
-func (m *testTmuxClient) CreateSession(name, startDir string, env map[string]string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.createErr != nil {
-		return m.createErr
-	}
-	m.sessions[name] = true
-	return nil
-}
-
-func (m *testTmuxClient) KillSession(name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.sessions, name)
-	return nil
-}
-
-func (m *testTmuxClient) HasSession(name string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.sessions[name]
-}
-
-func (m *testTmuxClient) ListSessionNames() ([]string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	names := make([]string, 0, len(m.sessions))
-	for name := range m.sessions {
-		names = append(names, name)
-	}
-	return names, nil
-}
-
-func (m *testTmuxClient) SwitchClient(targetSession string) error {
-	return nil
-}
-
-func (m *testTmuxClient) RunCommand(cmd ...string) (string, error) {
-	return "", nil
-}
-
-func (m *testTmuxClient) setCreateErr(err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.createErr = err
-}
-
-func setupTestRouter(t *testing.T) (*App, chi.Router, *testTmuxClient, uint, uint) {
+func setupTestRouter(t *testing.T) (*App, chi.Router, *tmux.MockRunner, uint, uint) {
 	t.Helper()
 
 	gormDB, err := db.OpenInMemorySQLite()
 	require.NoError(t, err)
 
 	cfg := Config{ConfigDir: "/config"}
-	mock := newTestTmuxClient()
-	app := newApp(gormDB, mock, afero.NewMemMapFs(), cfg)
+	bus := eventbus.NewEventBus()
+	database := db.NewDB(gormDB)
+	mock := tmux.NewMockRunner()
+	tmuxStore := tmux.NewTmuxStore(database)
+	tmuxModule := tmux.NewTmuxModuleWithRunner(mock, tmuxStore, bus)
+	gitModule := git.NewGitModule(database, bus)
+	app := buildApp(gormDB, afero.NewMemMapFs(), cfg, tmuxModule, gitModule, bus)
 
 	err = app.OnStart(context.Background())
 	require.NoError(t, err)
@@ -177,11 +127,10 @@ func TestDaemon_CreateAndGetSession(t *testing.T) {
 	body := fmt.Sprintf(`{"name":"test-session-1","workspace_id":%d}`, ws1ID)
 	createResp := createSessionViaAPI(t, router, body)
 
-	require.Equal(t, "utena-test-session-1", createResp.TmuxSessionName)
 	require.Equal(t, "test-session-1", createResp.Name)
 	require.Equal(t, session.StatusCreating, createResp.Status)
 
-	waitForSessionStatus(t, router, createResp.ID, session.StatusReady, 2*time.Second)
+	waitForSessionStatus(t, router, createResp.ID, session.StatusActive, 2*time.Second)
 
 	req := httptest.NewRequest("GET", fmt.Sprintf("/sessions/%d", createResp.ID), nil)
 	w := httptest.NewRecorder()
@@ -193,14 +142,14 @@ func TestDaemon_CreateAndGetSession(t *testing.T) {
 	var response session.SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	require.Equal(t, "utena-test-session-1", response.TmuxSessionName)
+	require.NotNil(t, response.TmuxSessionID)
 	require.Equal(t, ws1ID, response.WorkspaceID)
-	require.Equal(t, session.StatusReady, response.Status)
+	require.Equal(t, session.StatusActive, response.Status)
 }
 
 func TestDaemon_CreateSession_TmuxFails(t *testing.T) {
-	_, router, tmux, ws1ID, _ := setupTestRouter(t)
-	tmux.setCreateErr(fmt.Errorf("tmux server not running"))
+	_, router, mock, ws1ID, _ := setupTestRouter(t)
+	mock.SetCreateErr(fmt.Errorf("tmux server not running"))
 
 	body := fmt.Sprintf(`{"name":"fail-session","workspace_id":%d}`, ws1ID)
 	createResp := createSessionViaAPI(t, router, body)
@@ -215,8 +164,7 @@ func TestDaemon_CreateSession_TmuxFails(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Equal(t, session.StatusBroken, response.Status)
-	require.Equal(t, session.ResourceFailed, response.Resources.Tmux.Status)
-	require.Contains(t, response.Resources.Tmux.Error, "tmux server not running")
+	require.Contains(t, response.StatusError, "tmux")
 }
 
 func TestDaemon_ListSessions(t *testing.T) {
@@ -228,8 +176,8 @@ func TestDaemon_ListSessions(t *testing.T) {
 	resp1 := createSessionViaAPI(t, router, body1)
 	resp2 := createSessionViaAPI(t, router, body2)
 
-	waitForSessionStatus(t, router, resp1.ID, session.StatusReady, 2*time.Second)
-	waitForSessionStatus(t, router, resp2.ID, session.StatusReady, 2*time.Second)
+	waitForSessionStatus(t, router, resp1.ID, session.StatusActive, 2*time.Second)
+	waitForSessionStatus(t, router, resp2.ID, session.StatusActive, 2*time.Second)
 
 	req := httptest.NewRequest("GET", "/sessions", nil)
 	w := httptest.NewRecorder()
@@ -245,10 +193,10 @@ func TestDaemon_ListSessions(t *testing.T) {
 
 	names := make(map[string]bool)
 	for _, s := range response.Sessions {
-		names[s.TmuxSessionName] = true
+		names[s.Name] = true
 	}
-	require.True(t, names["utena-session-1"])
-	require.True(t, names["other-session-2"])
+	require.True(t, names["session-1"])
+	require.True(t, names["session-2"])
 }
 
 func TestDaemon_TmuxHookSessionCreated(t *testing.T) {
@@ -257,7 +205,7 @@ func TestDaemon_TmuxHookSessionCreated(t *testing.T) {
 	body := fmt.Sprintf(`{"name":"test-session","workspace_id":%d}`, ws1ID)
 	createResp := createSessionViaAPI(t, router, body)
 
-	waitForSessionStatus(t, router, createResp.ID, session.StatusReady, 2*time.Second)
+	waitForSessionStatus(t, router, createResp.ID, session.StatusActive, 2*time.Second)
 
 	hookBody := []byte(`{"session_name":"utena-test-session"}`)
 	req := httptest.NewRequest("PUT", "/tmux/hooks/session-created", bytes.NewReader(hookBody))
@@ -282,12 +230,12 @@ func TestDaemon_TmuxHookSessionCreated(t *testing.T) {
 
 	sess := findSessionByTmuxName(sessionsResponse.Sessions, "utena-test-session")
 	require.NotNil(t, sess)
-	require.Equal(t, session.StatusReady, sess.Status)
+	require.Equal(t, session.StatusActive, sess.Status)
 }
 
 func findSessionByTmuxName(sessions []*session.SessionResponse, tmuxName string) *session.SessionResponse {
 	for _, s := range sessions {
-		if s.TmuxSessionName == tmuxName {
+		if s.TmuxSession != nil && s.TmuxSession.Name == tmuxName {
 			return s
 		}
 	}
@@ -300,7 +248,7 @@ func TestDaemon_TmuxHookSessionClosed(t *testing.T) {
 	body := fmt.Sprintf(`{"name":"test-session","workspace_id":%d}`, ws1ID)
 	createResp := createSessionViaAPI(t, router, body)
 
-	waitForSessionStatus(t, router, createResp.ID, session.StatusReady, 2*time.Second)
+	waitForSessionStatus(t, router, createResp.ID, session.StatusActive, 2*time.Second)
 
 	hookBody := []byte(`{"session_name":"utena-test-session"}`)
 	req := httptest.NewRequest("PUT", "/tmux/hooks/session-closed", bytes.NewReader(hookBody))
@@ -325,22 +273,22 @@ func TestDaemon_TmuxHookSessionClosed(t *testing.T) {
 }
 
 func TestDaemon_RepairSession_AfterTmuxFailure(t *testing.T) {
-	_, router, tmux, ws1ID, _ := setupTestRouter(t)
-	tmux.setCreateErr(fmt.Errorf("tmux down"))
+	_, router, mock, ws1ID, _ := setupTestRouter(t)
+	mock.SetCreateErr(fmt.Errorf("tmux down"))
 
 	body := fmt.Sprintf(`{"name":"repair-me","workspace_id":%d}`, ws1ID)
 	createResp := createSessionViaAPI(t, router, body)
 
 	waitForSessionStatus(t, router, createResp.ID, session.StatusBroken, 2*time.Second)
 
-	tmux.setCreateErr(nil)
+	mock.SetCreateErr(nil)
 
 	req := httptest.NewRequest("PUT", fmt.Sprintf("/sessions/%d/repair", createResp.ID), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	waitForSessionStatus(t, router, createResp.ID, session.StatusReady, 2*time.Second)
+	waitForSessionStatus(t, router, createResp.ID, session.StatusActive, 2*time.Second)
 
 	req = httptest.NewRequest("GET", fmt.Sprintf("/sessions/%d", createResp.ID), nil)
 	w = httptest.NewRecorder()
@@ -349,7 +297,6 @@ func TestDaemon_RepairSession_AfterTmuxFailure(t *testing.T) {
 	var response session.SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	require.Equal(t, session.StatusReady, response.Status)
-	require.Equal(t, session.ResourceReady, response.Resources.Tmux.Status)
-	require.True(t, tmux.HasSession("utena-repair-me"))
+	require.Equal(t, session.StatusActive, response.Status)
+	require.True(t, mock.HasSessionByName("utena-repair-me"))
 }

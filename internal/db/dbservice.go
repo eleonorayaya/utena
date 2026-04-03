@@ -2,9 +2,17 @@ package db
 
 import (
 	"context"
+	"strings"
 
 	"gorm.io/gorm"
 )
+
+func IsUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
 
 type Database interface {
 	Create(value any) *gorm.DB

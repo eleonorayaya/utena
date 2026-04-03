@@ -9,6 +9,8 @@ import (
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/eleonorayaya/utena/internal/git"
+	"github.com/eleonorayaya/utena/internal/jobs"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/todo"
@@ -20,11 +22,13 @@ import (
 
 type App struct {
 	DB        *db.DatabaseModule
+	Git       *git.GitModule
 	Workspace *workspace.WorkspaceModule
 	Session   *session.SessionModule
 	Tmux      *tmux.TmuxModule
 	Claude    *claude.ClaudeModule
 	Todo      *todo.TodoModule
+	Jobs      *jobs.JobsModule
 }
 
 func NewApp(cfg Config) (*App, error) {
@@ -32,26 +36,44 @@ func NewApp(cfg Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newApp(gormDB, tmux.NewGotmuxClient(), afero.NewOsFs(), cfg), nil
+	return newApp(gormDB, afero.NewOsFs(), cfg), nil
 }
 
-func newApp(gormDB *gorm.DB, tmuxClient tmux.TmuxClient, fs afero.Fs, cfg Config) *App {
-	bus := eventbus.NewEventBus()
+func newApp(gormDB *gorm.DB, fs afero.Fs, cfg Config) *App {
+	return buildApp(gormDB, fs, cfg, nil, nil, nil)
+}
+
+func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxModule, gitMod *git.GitModule, bus eventbus.EventBus) *App {
+	if bus == nil {
+		bus = eventbus.NewEventBus()
+	}
 
 	dbModule := db.NewDatabaseModule(gormDB)
 	database := dbModule.Service
 
-	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir)
-	tmuxModule := tmux.NewTmuxModule(tmuxClient, bus)
+	gitModule := gitMod
+	if gitModule == nil {
+		gitModule = git.NewGitModule(database, bus)
+	}
+	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir, gitModule.Service)
+	if tmuxModule == nil {
+		tmuxModule = tmux.NewTmuxModule(bus, database)
+	}
 	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir)
+
+	jobsModule := jobs.NewJobsModule()
+	gitModule.RegisterJobs(jobsModule.Service)
+	sessionModule.RegisterJobs(jobsModule.Service)
 
 	app := &App{
 		DB:        dbModule,
+		Git:       gitModule,
 		Workspace: workspaceModule,
 		Session:   sessionModule,
 		Tmux:      tmuxModule,
 		Claude:    claude.NewClaudeModule(database),
 		Todo:      todo.NewTodoModule(workspaceModule, database),
+		Jobs:      jobsModule,
 	}
 
 	database.RegisterModels(app.collectModels()...)
@@ -71,6 +93,7 @@ func (a *App) OnStart(ctx context.Context) error {
 		}
 		slog.Info("Initialized module", "module", m.name)
 	}
+
 	return nil
 }
 
@@ -113,10 +136,12 @@ func (a *App) collectModels() []any {
 
 func (a *App) modules() []moduleEntry {
 	return []moduleEntry{
-		{"workspace", "/workspaces", a.Workspace},
+		{"git", "/git", a.Git},
 		{"tmux", "/tmux", a.Tmux},
-		{"session", "/sessions", a.Session},
+		{"workspace", "/workspaces", a.Workspace},
 		{"claude", "/claude", a.Claude},
+		{"session", "/sessions", a.Session},
 		{"todo", "/todos", a.Todo},
+		{"jobs", "/jobs", a.Jobs},
 	}
 }

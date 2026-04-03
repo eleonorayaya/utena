@@ -25,7 +25,6 @@ type tickMsg time.Time
 type Model struct {
 	sessions           []session.Session
 	tabs               map[uint]SessionTab
-	windowsBySession   map[string][]tmux.Window
 	currentTmuxSession string
 	paneID             string
 	focused            bool
@@ -50,20 +49,15 @@ func New() Model {
 		paneID:             paneID,
 		currentTmuxSession: currentSession,
 		tabs:               make(map[uint]SessionTab),
-		windowsBySession:   make(map[string][]tmux.Window),
 	}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
-	cmds := []tea.Cmd{
+	return m, tea.Batch(
 		provider.FetchSessions(),
 		tick(),
 		router.SetHelpVisible(false),
-	}
-	if m.currentTmuxSession != "" {
-		cmds = append(cmds, provider.FetchWindows(m.currentTmuxSession))
-	}
-	return m, tea.Batch(cmds...)
+	)
 }
 
 func (m Model) Keys() help.KeyMap {
@@ -101,23 +95,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, m.syncTabs()
 
 	case tickMsg:
-		cmds := []tea.Cmd{
-			provider.FetchSessions(),
-			tick(),
-		}
-		for _, s := range m.activeSessions() {
-			cmds = append(cmds, provider.FetchWindows(s.TmuxSessionName))
-		}
-		return m, tea.Batch(cmds...)
+		return m, tea.Batch(provider.FetchSessions(), tick())
 
 	case provider.SessionsStateUpdatedMsg:
 		m.sessions = msg.Sessions
-		return m, m.syncTabs()
-
-	case provider.WindowsStateUpdatedMsg:
-		if msg.SessionName != "" {
-			m.windowsBySession[msg.SessionName] = msg.Windows
-		}
 		return m, m.syncTabs()
 
 	case provider.SessionSwitchedMsg:
@@ -141,7 +122,10 @@ func (m *Model) syncTabs() tea.Cmd {
 	for i, s := range ordered {
 		seen[s.ID] = true
 		selected := i == m.cursor && m.focused
-		windows := m.windowsBySession[s.TmuxSessionName]
+		var windows []tmux.Window
+		if s.TmuxSession != nil {
+			windows = s.TmuxSession.Windows
+		}
 		tab, ok := m.tabs[s.ID]
 		if !ok {
 			tab = NewSessionTab(s)
@@ -249,7 +233,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) activeSessions() []session.Session {
 	var result []session.Session
 	for _, s := range m.sessions {
-		if s.Status == session.StatusReady || s.Status == session.StatusCreating {
+		if s.Status == session.StatusActive || s.Status == session.StatusCreating {
 			result = append(result, s)
 		}
 	}
@@ -268,7 +252,14 @@ func sessionDisplayName(s session.Session) string {
 	if s.Name != "" {
 		return s.Name
 	}
-	return s.TmuxSessionName
+	return sessionTmuxName(s)
+}
+
+func sessionTmuxName(s session.Session) string {
+	if s.TmuxSession != nil {
+		return s.TmuxSession.Name
+	}
+	return ""
 }
 
 func truncate(s string, maxLen int) string {

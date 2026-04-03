@@ -10,14 +10,16 @@ import (
 var ErrTmuxNotAvailable = errors.New("tmux is not available")
 
 type TmuxService struct {
-	client           TmuxClient
+	runner           tmuxRunner
+	store            *TmuxStore
 	eventBus         eventbus.EventBus
 	windowsBySession map[string][]Window
 }
 
-func NewTmuxService(client TmuxClient, bus eventbus.EventBus) *TmuxService {
+func NewTmuxService(runner tmuxRunner, store *TmuxStore, bus eventbus.EventBus) *TmuxService {
 	return &TmuxService{
-		client:           client,
+		runner:           runner,
+		store:            store,
 		eventBus:         bus,
 		windowsBySession: make(map[string][]Window),
 	}
@@ -31,49 +33,125 @@ func (t *TmuxService) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
-func (t *TmuxService) CreateSession(name, startDir string, env map[string]string) error {
-	if t.client == nil {
-		return ErrTmuxNotAvailable
+func (t *TmuxService) CreateSession(name, startDir string, env map[string]string) (*TmuxSession, error) {
+	if t.runner == nil {
+		return nil, ErrTmuxNotAvailable
 	}
-	return t.client.CreateSession(name, startDir, env)
+	if err := t.runner.newSession(name, startDir, env); err != nil {
+		return nil, err
+	}
+	ts := &TmuxSession{
+		Name:     name,
+		StartDir: startDir,
+		Env:      env,
+		IsAlive:  true,
+	}
+	if err := t.store.Add(ts); err != nil {
+		return nil, err
+	}
+	return ts, nil
 }
 
-func (t *TmuxService) KillSession(name string) error {
-	if t.client == nil {
+func (t *TmuxService) KillSession(id uint) error {
+	if t.runner == nil {
 		return ErrTmuxNotAvailable
 	}
-	return t.client.KillSession(name)
+	ts, err := t.store.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if err := t.runner.killSession(ts.Name); err != nil {
+		return err
+	}
+	ts.IsAlive = false
+	return t.store.Update(ts)
+}
+
+func (t *TmuxService) KillSessionByName(name string) error {
+	if t.runner == nil {
+		return ErrTmuxNotAvailable
+	}
+	if err := t.runner.killSession(name); err != nil {
+		return err
+	}
+	ts, err := t.store.GetByName(name)
+	if err != nil {
+		if errors.Is(err, ErrTmuxSessionNotFound) {
+			return nil
+		}
+		return err
+	}
+	ts.IsAlive = false
+	return t.store.Update(ts)
+}
+
+func (t *TmuxService) RecreateSession(id uint) error {
+	if t.runner == nil {
+		return ErrTmuxNotAvailable
+	}
+	ts, err := t.store.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if err := t.runner.newSession(ts.Name, ts.StartDir, ts.Env); err != nil {
+		return err
+	}
+	ts.IsAlive = true
+	return t.store.Update(ts)
 }
 
 func (t *TmuxService) HasSession(name string) bool {
-	if t.client == nil {
+	if t.runner == nil {
 		return false
 	}
-	return t.client.HasSession(name)
-}
-
-func (t *TmuxService) ListSessionNames() ([]string, error) {
-	if t.client == nil {
-		return nil, ErrTmuxNotAvailable
-	}
-	return t.client.ListSessionNames()
+	return t.runner.hasSession(name)
 }
 
 func (t *TmuxService) SwitchClient(targetSession string) error {
-	if t.client == nil {
+	if t.runner == nil {
 		return ErrTmuxNotAvailable
 	}
-	return t.client.SwitchClient(targetSession)
+	return t.runner.switchClient(targetSession)
 }
 
 func (t *TmuxService) GetCurrentSessionName(paneID string) (string, error) {
-	if t.client == nil {
+	if t.runner == nil {
 		return "", ErrTmuxNotAvailable
 	}
-	return t.client.RunCommand("display-message", "-p", "-t", paneID, "#{session_name}")
+	return t.runner.command("display-message", "-p", "-t", paneID, "#{session_name}")
+}
+
+func (t *TmuxService) GetSession(id uint) (*TmuxSession, error) {
+	ts, err := t.store.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	ts.Windows = t.windowsBySession[ts.Name]
+	return ts, nil
+}
+
+func (t *TmuxService) GetSessionByName(name string) (*TmuxSession, error) {
+	ts, err := t.store.GetByName(name)
+	if err != nil {
+		return nil, err
+	}
+	ts.Windows = t.windowsBySession[ts.Name]
+	return ts, nil
+}
+
+func (t *TmuxService) ListSessionNames() ([]string, error) {
+	if t.runner == nil {
+		return nil, ErrTmuxNotAvailable
+	}
+	return t.runner.listSessionNames()
 }
 
 func (t *TmuxService) HandleSessionCreated(ctx context.Context, tmuxName string) error {
+	ts, err := t.store.GetByName(tmuxName)
+	if err == nil {
+		ts.IsAlive = true
+		t.store.Update(ts)
+	}
 	return t.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.TmuxSessionCreated,
 		Data: eventbus.TmuxHookEvent{TmuxSessionName: tmuxName},
@@ -81,6 +159,11 @@ func (t *TmuxService) HandleSessionCreated(ctx context.Context, tmuxName string)
 }
 
 func (t *TmuxService) HandleSessionClosed(ctx context.Context, tmuxName string) error {
+	ts, err := t.store.GetByName(tmuxName)
+	if err == nil {
+		ts.IsAlive = false
+		t.store.Update(ts)
+	}
 	delete(t.windowsBySession, tmuxName)
 	return t.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.TmuxSessionClosed,

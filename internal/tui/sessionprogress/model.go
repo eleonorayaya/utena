@@ -16,11 +16,9 @@ import (
 )
 
 func titleStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
-func readyStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.StatusReady) }
 func pendingStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(theme.Current.StatusPending)
 }
-func activeStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.StatusActive) }
 func failedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
 
 type tickMsg time.Time
@@ -97,16 +95,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.session = &s
 		switch s.Status {
-		case session.StatusReady:
+		case session.StatusActive:
 			m.done = true
 			return m, provider.ActivateSession(s.ID)
 		case session.StatusBroken:
 			m.done = true
 			errMsg := "session creation failed"
-			if s.Resources != nil {
-				if e := s.Resources.FirstError(); e != "" {
-					errMsg = e
-				}
+			if s.StatusError != "" {
+				errMsg = s.StatusError
 			}
 			m.err = fmt.Errorf("%s", errMsg)
 			return m, nil
@@ -152,26 +148,11 @@ func (m Model) View() string {
 	b.WriteString(titleStyle().Render("Creating session: " + name))
 	b.WriteString("\n\n")
 
-	if m.session != nil && m.session.Resources != nil {
-		res := m.session.Resources
-		if res.Branch != nil {
-			b.WriteString(resourceLine("Branch", res.Branch))
-			b.WriteString("\n")
-		}
-		if res.Worktree != nil {
-			b.WriteString(resourceLine("Worktree", res.Worktree))
-			b.WriteString("\n")
-		}
-		if res.WorktreeInit != nil {
-			b.WriteString(resourceLine("Setup", res.WorktreeInit))
-			b.WriteString("\n")
-		}
-		if res.Tmux != nil {
-			b.WriteString(resourceLine("Tmux", res.Tmux))
-			b.WriteString("\n")
-		}
-	} else {
+	if m.session == nil {
 		b.WriteString(pendingStyle().Render("  Loading..."))
+		b.WriteString("\n")
+	} else if m.session.Status == session.StatusCreating {
+		b.WriteString(pendingStyle().Render("  Setting up..."))
 		b.WriteString("\n")
 	}
 
@@ -182,44 +163,4 @@ func (m Model) View() string {
 	}
 
 	return b.String()
-}
-
-func resourceLine(name string, rs *session.ResourceState) string {
-	icon := statusIcon(rs.Status)
-	style := statusStyle(rs.Status)
-	line := fmt.Sprintf("  %s %s", icon, style.Render(name))
-	if rs.Error != "" {
-		line += " " + failedStyle().Render("— "+rs.Error)
-	}
-	return line
-}
-
-func statusIcon(s session.ResourceStatus) string {
-	switch s {
-	case session.ResourceReady:
-		return readyStyle().Render("✓")
-	case session.ResourceCreating:
-		return activeStyle().Render("●")
-	case session.ResourcePending:
-		return pendingStyle().Render("○")
-	case session.ResourceFailed:
-		return failedStyle().Render("✗")
-	case session.ResourceRemoved:
-		return failedStyle().Render("–")
-	default:
-		return " "
-	}
-}
-
-func statusStyle(s session.ResourceStatus) lipgloss.Style {
-	switch s {
-	case session.ResourceReady:
-		return readyStyle()
-	case session.ResourceCreating:
-		return activeStyle()
-	case session.ResourceFailed, session.ResourceRemoved:
-		return failedStyle()
-	default:
-		return pendingStyle()
-	}
 }

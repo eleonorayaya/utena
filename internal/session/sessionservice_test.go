@@ -6,10 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
@@ -18,74 +18,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type mockTmuxClient struct {
-	mu        sync.Mutex
-	sessions  map[string]bool
-	createErr error
-	killErr   error
+func createTmuxService(t *testing.T, database db.Database, mock *utmux.MockRunner, bus eventbus.EventBus) *utmux.TmuxService {
+	t.Helper()
+	tmuxStore := utmux.NewTmuxStore(database)
+	module := utmux.NewTmuxModuleWithRunner(mock, tmuxStore, bus)
+	return module.Service
 }
 
-func newMockTmuxClient() *mockTmuxClient {
-	return &mockTmuxClient{sessions: make(map[string]bool)}
-}
-
-func (m *mockTmuxClient) CreateSession(name, startDir string, env map[string]string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.createErr != nil {
-		return m.createErr
-	}
-	m.sessions[name] = true
-	return nil
-}
-
-func (m *mockTmuxClient) KillSession(name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.killErr != nil {
-		return m.killErr
-	}
-	delete(m.sessions, name)
-	return nil
-}
-
-func (m *mockTmuxClient) HasSession(name string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.sessions[name]
-}
-
-func (m *mockTmuxClient) ListSessionNames() ([]string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	names := make([]string, 0, len(m.sessions))
-	for name := range m.sessions {
-		names = append(names, name)
-	}
-	return names, nil
-}
-
-func (m *mockTmuxClient) SwitchClient(targetSession string) error {
-	return nil
-}
-
-func (m *mockTmuxClient) RunCommand(cmd ...string) (string, error) {
-	return "", nil
-}
-
-func (m *mockTmuxClient) setCreateErr(err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.createErr = err
-}
-
-func (m *mockTmuxClient) removeSession(name string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.sessions, name)
-}
-
-func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *mockTmuxClient, uint, uint) {
+func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *utmux.MockRunner, uint, uint) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -98,11 +38,16 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	workspaceStore.Add(ws1)
 	workspaceStore.Add(ws2)
 
-	mock := newMockTmuxClient()
-	tmuxService := utmux.NewTmuxService(mock, bus)
+	mock := utmux.NewMockRunner()
+	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
+	gitDB, err := db.OpenInMemory()
+	require.NoError(t, err)
+	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
+	t.Cleanup(func() { gitDB.Close() })
+	gitService := git.NewGitService(gitDB)
+	dismissedPRStore := NewDismissedPRStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 	return service, sessionStore, workspaceStore, mock, ws1.ID, ws2.ID
 }
 
@@ -145,8 +90,8 @@ func TestSessionService_ListSessions(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, ws2ID := setupSessionService(t)
 
 	now := time.Now()
-	session1 := &Session{TmuxSessionName: "session-1", Name: "session-1", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: now.Add(-1 * time.Hour)}
-	session2 := &Session{TmuxSessionName: "session-2", Name: "session-2", WorkspaceID: ws2ID, Status: StatusReady, LastUsedAt: now}
+	session1 := &Session{Name: "session-1", WorkspaceID: ws1ID, Status: StatusActive, LastUsedAt: now.Add(-1 * time.Hour)}
+	session2 := &Session{Name: "session-2", WorkspaceID: ws2ID, Status: StatusActive, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 
@@ -155,16 +100,16 @@ func TestSessionService_ListSessions(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sessions, 2)
 
-	require.Equal(t, "session-2", sessions[0].TmuxSessionName, "Most recent session should be first")
+	require.Equal(t, "session-2", sessions[0].Name, "Most recent session should be first")
 }
 
 func TestSessionService_ListSessionsByWorkspace(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, ws2ID := setupSessionService(t)
 
 	now := time.Now()
-	session1 := &Session{TmuxSessionName: "session-1", Name: "session-1", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: now.Add(-1 * time.Hour)}
-	session2 := &Session{TmuxSessionName: "session-2", Name: "session-2", WorkspaceID: ws2ID, Status: StatusReady, LastUsedAt: now}
-	session3 := &Session{TmuxSessionName: "session-3", Name: "session-3", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: now}
+	session1 := &Session{Name: "session-1", WorkspaceID: ws1ID, Status: StatusActive, LastUsedAt: now.Add(-1 * time.Hour)}
+	session2 := &Session{Name: "session-2", WorkspaceID: ws2ID, Status: StatusActive, LastUsedAt: now}
+	session3 := &Session{Name: "session-3", WorkspaceID: ws1ID, Status: StatusActive, LastUsedAt: now}
 	sessionStore.Add(session1)
 	sessionStore.Add(session2)
 	sessionStore.Add(session3)
@@ -178,7 +123,7 @@ func TestSessionService_ListSessionsByWorkspace(t *testing.T) {
 		require.Equal(t, ws1ID, session.WorkspaceID)
 	}
 
-	require.Equal(t, "session-3", sessions[0].TmuxSessionName, "Most recent ws-1 session should be first")
+	require.Equal(t, "session-3", sessions[0].Name, "Most recent ws-1 session should be first")
 }
 
 func TestSessionService_ListSessionsByWorkspace_InvalidWorkspace(t *testing.T) {
@@ -194,12 +139,11 @@ func TestSessionService_GetSession(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
 
 	session := &Session{
-		TmuxSessionName: "session-1",
-		Name:            "session-1",
-		WorkspaceID:     ws1ID,
-		IsAttached:      true,
-		Status:          StatusReady,
-		LastUsedAt:      time.Now(),
+		Name:        "session-1",
+		WorkspaceID: ws1ID,
+		IsAttached:  true,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -229,25 +173,24 @@ func TestSessionService_CreateSession(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
-	require.Equal(t, "utena-session-1", session.TmuxSessionName)
 	require.Equal(t, StatusCreating, session.Status)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, "session-1", retrieved.Name)
 	require.False(t, retrieved.LastUsedAt.IsZero())
-	require.Equal(t, ResourceReady, retrieved.Resources.Tmux.Status)
-	require.True(t, tmux.HasSession("utena-session-1"))
+	require.NotNil(t, retrieved.TmuxSessionID)
+	require.True(t, tmux.HasSessionByName("utena-session-1"))
 }
 
 func TestSessionService_CreateSession_TmuxFails(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
-	tmux.setCreateErr(fmt.Errorf("connection refused"))
+	tmux.SetCreateErr(fmt.Errorf("connection refused"))
 
 	session := &Session{
 		Name:        "fail-session",
@@ -255,7 +198,7 @@ func TestSessionService_CreateSession_TmuxFails(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusBroken, 2*time.Second)
@@ -263,8 +206,7 @@ func TestSessionService_CreateSession_TmuxFails(t *testing.T) {
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusBroken, retrieved.Status)
-	require.Equal(t, ResourceFailed, retrieved.Resources.Tmux.Status)
-	require.Contains(t, retrieved.Resources.Tmux.Error, "connection refused")
+	require.Contains(t, retrieved.StatusError, "tmux")
 }
 
 func TestSessionService_CreateSession_InvalidWorkspace(t *testing.T) {
@@ -277,7 +219,7 @@ func TestSessionService_CreateSession_InvalidWorkspace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
@@ -286,12 +228,11 @@ func TestSessionService_UpdateSession(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
 
 	session := &Session{
-		TmuxSessionName: "session-1",
-		Name:            "session-1",
-		WorkspaceID:     ws1ID,
-		IsAttached:      false,
-		Status:          StatusReady,
-		LastUsedAt:      time.Now(),
+		Name:        "session-1",
+		WorkspaceID: ws1ID,
+		IsAttached:  false,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -309,10 +250,9 @@ func TestSessionService_UpdateSession_InvalidWorkspace(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
 
 	session := &Session{
-		TmuxSessionName: "session-1",
-		Name:            "session-1",
-		WorkspaceID:     ws1ID,
-		LastUsedAt:      time.Now(),
+		Name:        "session-1",
+		WorkspaceID: ws1ID,
+		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -326,26 +266,30 @@ func TestSessionService_UpdateSession_InvalidWorkspace(t *testing.T) {
 func TestSessionService_DeleteSession(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
+	tmux.Sessions["session-1"] = true
 	session := &Session{
-		Name:            "session-1",
-		TmuxSessionName: "session-1",
-		WorkspaceID:     ws1ID,
-		Status:          StatusReady,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
-		LastUsedAt:      time.Now(),
+		Name:        "session-1",
+		WorkspaceID: ws1ID,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
 	}
-	sessionStore.Add(session)
-	tmux.sessions["session-1"] = true
 
 	ctx := context.Background()
-	err := service.DeleteSession(ctx, session.ID, true)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
+	require.NotNil(t, retrieved.TmuxSessionID)
+
+	err = service.DeleteSession(ctx, retrieved.ID, true)
+	require.NoError(t, err)
+
+	retrieved, err = sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
 	require.Equal(t, StatusDeleted, retrieved.Status)
-	require.Equal(t, ResourceRemoved, retrieved.Resources.Tmux.Status)
-	require.False(t, tmux.HasSession("session-1"))
 }
 
 func TestSessionService_DeleteSession_NotFound(t *testing.T) {
@@ -389,7 +333,7 @@ func initTestRepo(t *testing.T) string {
 	return dir
 }
 
-func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *mockTmuxClient, uint) {
+func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *utmux.MockRunner, uint) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -399,11 +343,16 @@ func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string
 	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
 	workspaceStore.Add(wsGit)
 
-	mock := newMockTmuxClient()
-	tmuxService := utmux.NewTmuxService(mock, bus)
+	mock := utmux.NewMockRunner()
+	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir)
+	gitDB, err := db.OpenInMemory()
+	require.NoError(t, err)
+	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
+	t.Cleanup(func() { gitDB.Close() })
+	gitService := git.NewGitService(gitDB)
+	dismissedPRStore := NewDismissedPRStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir)
 	return service, sessionStore, mock, wsGit.ID
 }
 
@@ -414,34 +363,21 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	session := &Session{
 		Name:        "my-feature",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
-	require.Equal(t, "git-repo-my-feature", session.TmuxSessionName)
-
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
-
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
 	expectedPath := filepath.Join(repoPath, ".worktrees", "eqt-my-feature")
-	require.Equal(t, expectedPath, retrieved.WorktreePath)
-	require.Equal(t, "eqt/my-feature", retrieved.Branch)
-	require.Equal(t, ResourceReady, retrieved.Resources.Branch.Status)
-	require.Equal(t, ResourceReady, retrieved.Resources.Worktree.Status)
-	require.Equal(t, ResourceReady, retrieved.Resources.WorktreeInit.Status)
-	require.Equal(t, ResourceReady, retrieved.Resources.Tmux.Status)
 
 	info, err := os.Stat(expectedPath)
 	require.NoError(t, err)
 	require.True(t, info.IsDir())
 
-	require.Equal(t, "main", retrieved.BaseBranch)
-	require.True(t, mock.HasSession("git-repo-my-feature"))
+	require.True(t, mock.HasSessionByName("git-repo-my-feature"))
 }
 
 func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testing.T) {
@@ -462,19 +398,12 @@ func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testi
 	session := &Session{
 		Name:        branchName,
 		WorkspaceID: wsGitID,
-		Branch:      branchName,
 	}
 
-	err = service.CreateSession(ctx, session, true)
+	err = service.CreateSession(ctx, session, branchName, "", true)
 	require.NoError(t, err)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
-
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
-
-	require.Equal(t, worktreePath, retrieved.WorktreePath)
-	require.Equal(t, ResourceReady, retrieved.Resources.Worktree.Status)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 }
 
 func TestSessionService_CreateSession_WithWorktree_ReusesLocalOnlyBranch(t *testing.T) {
@@ -491,20 +420,12 @@ func TestSessionService_CreateSession_WithWorktree_ReusesLocalOnlyBranch(t *test
 	session := &Session{
 		Name:        branchName,
 		WorkspaceID: wsGitID,
-		Branch:      branchName,
 	}
 
-	err = service.CreateSession(ctx, session, true)
+	err = service.CreateSession(ctx, session, branchName, "", true)
 	require.NoError(t, err)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
-
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
-
-	require.Equal(t, worktreePath, retrieved.WorktreePath)
-	require.Equal(t, ResourceReady, retrieved.Resources.Branch.Status)
-	require.Equal(t, ResourceReady, retrieved.Resources.Worktree.Status)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 }
 
 func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
@@ -514,11 +435,10 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	session := &Session{
 		Name:        "my-feature",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "nonexistent",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "nonexistent", true)
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusBroken, 5*time.Second)
@@ -526,13 +446,12 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusBroken, retrieved.Status)
-	require.Equal(t, ResourceFailed, retrieved.Resources.Branch.Status)
-	require.NotEmpty(t, retrieved.Resources.Branch.Error)
-	require.False(t, mock.HasSession("git-repo-my-feature"))
+	require.Contains(t, retrieved.StatusError, "branch")
+	require.False(t, mock.HasSessionByName("git-repo-my-feature"))
 }
 
 func TestSessionService_CreateSession_WithName_ComputesID(t *testing.T) {
-	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
 	session := &Session{
 		Name:        "main",
@@ -540,18 +459,18 @@ func TestSessionService_CreateSession_WithName_ComputesID(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
-	require.Equal(t, "utena-main", session.TmuxSessionName)
 	require.Equal(t, "main", session.Name)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, "main", retrieved.Name)
-	require.Equal(t, "utena-main", retrieved.TmuxSessionName)
+	require.NotNil(t, retrieved.TmuxSessionID)
+	require.True(t, tmux.HasSessionByName("utena-main"))
 }
 
 func TestSessionService_CreateSession_WithName_NoWorkspace(t *testing.T) {
@@ -563,16 +482,15 @@ func TestSessionService_CreateSession_WithName_NoWorkspace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
-	require.Equal(t, "utena-standalone", session.TmuxSessionName)
-
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, "standalone", retrieved.Name)
+	require.NotNil(t, retrieved.TmuxSessionID)
 }
 
 func TestSessionService_CreateSession_NoBranch_SkipsWorktree(t *testing.T) {
@@ -584,14 +502,10 @@ func TestSessionService_CreateSession_NoBranch_SkipsWorktree(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 2*time.Second)
-
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
-	require.Empty(t, retrieved.WorktreePath)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 }
 
 func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T) {
@@ -602,29 +516,27 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	wsNoGit := &workspace.Workspace{Name: "plain", Path: "/tmp/plain", IsGitRepo: false}
 	workspaceStore.Add(wsNoGit)
 
-	mock := newMockTmuxClient()
-	tmuxService := utmux.NewTmuxService(mock, bus)
+	mock := utmux.NewMockRunner()
+	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitService := git.NewGitService()
-	service := NewSessionService(sessionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
+	gitDB, err := db.OpenInMemory()
+	require.NoError(t, err)
+	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
+	t.Cleanup(func() { gitDB.Close() })
+	gitService := git.NewGitService(gitDB)
+	dismissedPRStore := NewDismissedPRStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 
 	session := &Session{
 		Name:        "my-session",
 		WorkspaceID: wsNoGit.ID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err = service.CreateSession(ctx, session, "", "main", false)
 	require.NoError(t, err)
 
-	require.Equal(t, "plain-my-session", session.TmuxSessionName)
-
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 2*time.Second)
-
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
-	require.Empty(t, retrieved.WorktreePath)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 }
 
 func TestSessionService_CreateSession_TouchesWorkspace(t *testing.T) {
@@ -636,7 +548,7 @@ func TestSessionService_CreateSession_TouchesWorkspace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, false)
+	err := service.CreateSession(ctx, session, "", "", false)
 	require.NoError(t, err)
 
 	ws, err := workspaceStore.GetByID(ws1ID)
@@ -647,14 +559,12 @@ func TestSessionService_CreateSession_TouchesWorkspace(t *testing.T) {
 func TestSessionService_ActivateSession_TouchesWorkspace(t *testing.T) {
 	service, sessionStore, workspaceStore, tmux, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["session-1"] = true
+	tmux.Sessions["utena-session-1"] = true
 	session := &Session{
-		Name:            "session-1",
-		TmuxSessionName: "session-1",
-		WorkspaceID:     ws1ID,
-		Status:          StatusReady,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
-		LastUsedAt:      time.Now().Add(-1 * time.Hour),
+		Name:        "session-1",
+		WorkspaceID: ws1ID,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now().Add(-1 * time.Hour),
 	}
 	sessionStore.Add(session)
 
@@ -671,12 +581,10 @@ func TestSessionService_ActivateSession_RejectsBrokenSession(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
 
 	session := &Session{
-		Name:            "broken-session",
-		TmuxSessionName: "broken-session",
-		WorkspaceID:     ws1ID,
-		Status:          StatusBroken,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceRemoved}},
-		LastUsedAt:      time.Now(),
+		Name:        "broken-session",
+		WorkspaceID: ws1ID,
+		Status:      StatusBroken,
+		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -690,79 +598,68 @@ func TestSessionService_ActivateSession_RecreatesMissingTmux(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
 	session := &Session{
-		Name:            "session-1",
-		TmuxSessionName: "session-1",
-		WorkspaceID:     ws1ID,
-		Status:          StatusReady,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
-		LastUsedAt:      time.Now(),
+		Name:        "session-1",
+		WorkspaceID: ws1ID,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
 	ctx := context.Background()
 	result, err := service.ActivateSession(ctx, session.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusReady, result.Status)
+	require.Equal(t, StatusActive, result.Status)
 	require.True(t, result.IsAttached)
-	require.True(t, tmux.HasSession("session-1"))
+	require.True(t, tmux.HasSessionByName("utena-session-1"))
 }
 
 func TestSessionService_RefreshSession_DetectsMissingTmux(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["session-1"] = true
 	session := &Session{
-		Name:            "session-1",
-		TmuxSessionName: "session-1",
-		WorkspaceID:     ws1ID,
-		Status:          StatusReady,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
-		LastUsedAt:      time.Now(),
+		Name:        "session-1",
+		WorkspaceID: ws1ID,
 	}
-	sessionStore.Add(session)
-
-	tmux.removeSession("session-1")
 
 	ctx := context.Background()
+	err := service.CreateSession(ctx, session, "", "", false)
+	require.NoError(t, err)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
+
+	tmux.RemoveSession("utena-session-1")
+	service.tmuxService.HandleSessionClosed(ctx, "utena-session-1")
+
 	refreshed, err := service.RefreshSession(ctx, session.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusBroken, refreshed.Status)
-	require.Equal(t, ResourceRemoved, refreshed.Resources.Tmux.Status)
+	require.Equal(t, StatusInactive, refreshed.Status)
 }
 
 func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
-	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["session-1"] = true
 	session := &Session{
-		Name:            "session-1",
-		TmuxSessionName: "session-1",
-		WorkspaceID:     ws1ID,
-		Status:          StatusReady,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
-		LastUsedAt:      time.Now(),
+		Name:        "session-1",
+		WorkspaceID: ws1ID,
 	}
-	sessionStore.Add(session)
 
 	ctx := context.Background()
+	err := service.CreateSession(ctx, session, "", "", false)
+	require.NoError(t, err)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
+
 	refreshed, err := service.RefreshSession(ctx, session.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusReady, refreshed.Status)
-	require.Equal(t, ResourceReady, refreshed.Resources.Tmux.Status)
+	require.Equal(t, StatusActive, refreshed.Status)
 }
 
 func TestSessionService_RepairSession_RecoversBroken(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
 	session := &Session{
-		Name:            "broken-session",
-		TmuxSessionName: "broken-session",
-		WorkspaceID:     ws1ID,
-		Status:          StatusBroken,
-		Resources: &Resources{
-			Tmux: &ResourceState{Status: ResourceRemoved},
-		},
-		LastUsedAt: time.Now(),
+		Name:        "broken-session",
+		WorkspaceID: ws1ID,
+		Status:      StatusBroken,
+		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -771,28 +668,23 @@ func TestSessionService_RepairSession_RecoversBroken(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusCreating, result.Status)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 2*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusReady, retrieved.Status)
-	require.Equal(t, ResourceReady, retrieved.Resources.Tmux.Status)
-	require.True(t, tmux.HasSession("broken-session"))
+	require.Equal(t, StatusActive, retrieved.Status)
+	require.True(t, tmux.HasSessionByName("utena-broken-session"))
 }
 
 func TestSessionService_RepairSession_StillFailing(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
-	tmux.setCreateErr(fmt.Errorf("still broken"))
+	tmux.SetCreateErr(fmt.Errorf("still broken"))
 
 	session := &Session{
-		Name:            "broken-session",
-		TmuxSessionName: "broken-session",
-		WorkspaceID:     ws1ID,
-		Status:          StatusBroken,
-		Resources: &Resources{
-			Tmux: &ResourceState{Status: ResourceRemoved},
-		},
-		LastUsedAt: time.Now(),
+		Name:        "broken-session",
+		WorkspaceID: ws1ID,
+		Status:      StatusBroken,
+		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -806,104 +698,102 @@ func TestSessionService_RepairSession_StillFailing(t *testing.T) {
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusBroken, retrieved.Status)
-	require.Equal(t, ResourceFailed, retrieved.Resources.Tmux.Status)
-	require.Contains(t, retrieved.Resources.Tmux.Error, "still broken")
+	require.Contains(t, retrieved.StatusError, "still broken")
 }
 
 func TestSessionService_RepairSession_AlreadyReady(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["ok-session"] = true
+	tmux.Sessions["utena-ok-session"] = true
 	session := &Session{
-		Name:            "ok-session",
-		TmuxSessionName: "ok-session",
-		WorkspaceID:     ws1ID,
-		Status:          StatusBroken,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
-		LastUsedAt:      time.Now(),
+		Name:        "ok-session",
+		WorkspaceID: ws1ID,
+		Status:      StatusBroken,
+		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
 	ctx := context.Background()
 	result, err := service.RepairSession(ctx, session.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusReady, result.Status)
+	require.Equal(t, StatusCreating, result.Status)
+
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 }
 
 func TestSessionService_RepairSession_NotBroken(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["session-1"] = true
+	tmux.Sessions["utena-session-1"] = true
 	session := &Session{
-		Name:            "session-1",
-		TmuxSessionName: "session-1",
-		WorkspaceID:     ws1ID,
-		Status:          StatusReady,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
-		LastUsedAt:      time.Now(),
+		Name:        "session-1",
+		WorkspaceID: ws1ID,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
 	ctx := context.Background()
-	result, err := service.RepairSession(ctx, session.ID)
-	require.NoError(t, err)
-	require.Equal(t, StatusReady, result.Status)
+	_, err := service.RepairSession(ctx, session.ID)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrSessionNotBroken)
 }
 
 func TestSessionService_Reconcile_MarksMissingTmuxBroken(t *testing.T) {
-	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
 	session := &Session{
-		Name:            "session-1",
-		TmuxSessionName: "session-1",
-		WorkspaceID:     ws1ID,
-		Status:          StatusReady,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
-		LastUsedAt:      time.Now(),
+		Name:        "session-1",
+		WorkspaceID: ws1ID,
 	}
-	sessionStore.Add(session)
 
 	ctx := context.Background()
-	service.reconcileTmuxState(ctx)
+	err := service.CreateSession(ctx, session, "", "", false)
+	require.NoError(t, err)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusBroken, retrieved.Status)
-	require.Equal(t, ResourceRemoved, retrieved.Resources.Tmux.Status)
+	require.NotNil(t, retrieved.TmuxSessionID)
+
+	tmux.RemoveSession("utena-session-1")
+	service.tmuxService.HandleSessionClosed(ctx, "utena-session-1")
+
+	service.reconcileTmuxState(ctx)
+
+	retrieved, err = sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusInactive, retrieved.Status)
 }
 
 func TestSessionService_Reconcile_KeepsHealthyReady(t *testing.T) {
-	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
 
-	tmux.sessions["session-1"] = true
 	session := &Session{
-		Name:            "session-1",
-		TmuxSessionName: "session-1",
-		WorkspaceID:     ws1ID,
-		Status:          StatusReady,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceReady}},
-		LastUsedAt:      time.Now(),
+		Name:        "session-1",
+		WorkspaceID: ws1ID,
 	}
-	sessionStore.Add(session)
 
 	ctx := context.Background()
+	err := service.CreateSession(ctx, session, "", "", false)
+	require.NoError(t, err)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
+
 	service.reconcileTmuxState(ctx)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusReady, retrieved.Status)
+	require.Equal(t, StatusActive, retrieved.Status)
 }
 
 func TestSessionService_Reconcile_SkipsDeleted(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
 
 	session := &Session{
-		Name:            "deleted-1",
-		TmuxSessionName: "deleted-1",
-		WorkspaceID:     ws1ID,
-		Status:          StatusDeleted,
-		Resources:       &Resources{Tmux: &ResourceState{Status: ResourceRemoved}},
-		LastUsedAt:      time.Now(),
+		Name:        "deleted-1",
+		WorkspaceID: ws1ID,
+		Status:      StatusDeleted,
+		LastUsedAt:  time.Now(),
 	}
 	sessionStore.Add(session)
 
@@ -934,14 +824,13 @@ func TestSessionService_WorktreeInit_RunsUserLevelScript(t *testing.T) {
 	session := &Session{
 		Name:        "init-test",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
 	data, err := os.ReadFile(markerFile)
 	require.NoError(t, err)
@@ -959,14 +848,13 @@ func TestSessionService_WorktreeInit_RunsRepoLevelScript(t *testing.T) {
 	session := &Session{
 		Name:        "repo-init",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
 	data, err := os.ReadFile(markerFile)
 	require.NoError(t, err)
@@ -995,14 +883,13 @@ func TestSessionService_WorktreeInit_SkipsWhenReusingWorktree(t *testing.T) {
 	session := &Session{
 		Name:        branchName,
 		WorkspaceID: wsGitID,
-		Branch:      branchName,
 	}
 
 	ctx := context.Background()
-	err = service.CreateSession(ctx, session, true)
+	err = service.CreateSession(ctx, session, branchName, "", true)
 	require.NoError(t, err)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
 	_, err = os.Stat(markerFile)
 	require.True(t, os.IsNotExist(err), "script should not have run for reused worktree")
@@ -1019,21 +906,18 @@ func TestSessionService_WorktreeInit_FailingScriptContinues(t *testing.T) {
 	session := &Session{
 		Name:        "fail-init",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusReady, retrieved.Status)
-	require.Equal(t, ResourceReady, retrieved.Resources.WorktreeInit.Status)
-	require.NotEmpty(t, retrieved.Resources.WorktreeInit.Error)
-	require.True(t, mock.HasSession("git-repo-fail-init"))
+	require.Equal(t, StatusActive, retrieved.Status)
+	require.True(t, mock.HasSessionByName("git-repo-fail-init"))
 }
 
 func TestSessionService_WorktreeInit_MissingScriptsSkipped(t *testing.T) {
@@ -1043,20 +927,17 @@ func TestSessionService_WorktreeInit_MissingScriptsSkipped(t *testing.T) {
 	session := &Session{
 		Name:        "no-scripts",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusReady, retrieved.Status)
-	require.Equal(t, ResourceReady, retrieved.Resources.WorktreeInit.Status)
-	require.Empty(t, retrieved.Resources.WorktreeInit.Error)
+	require.Equal(t, StatusActive, retrieved.Status)
 }
 
 func TestSessionService_WorktreeInit_WorkingDirIsWorktree(t *testing.T) {
@@ -1071,18 +952,17 @@ func TestSessionService_WorktreeInit_WorkingDirIsWorktree(t *testing.T) {
 	session := &Session{
 		Name:        "wd-test",
 		WorkspaceID: wsGitID,
-		BaseBranch:  "main",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, true)
+	err := service.CreateSession(ctx, session, "", "main", true)
 	require.NoError(t, err)
 
-	waitForStatus(t, sessionStore, session.ID, StatusReady, 5*time.Second)
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
 	data, err := os.ReadFile(markerFile)
 	require.NoError(t, err)
 
-	retrieved, _ := sessionStore.GetByID(session.ID)
-	require.Contains(t, string(data), retrieved.WorktreePath)
+	expectedPath := filepath.Join(repoPath, ".worktrees", "eqt-wd-test")
+	require.Contains(t, string(data), expectedPath)
 }

@@ -37,8 +37,7 @@ func (c *SessionController) ListSessions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	response := NewSessionListResponse(sessions)
-	render.Render(w, r, response)
+	render.Render(w, r, NewSessionListResponse(sessions))
 }
 
 func (c *SessionController) GetSessionByID(w http.ResponseWriter, r *http.Request) {
@@ -73,8 +72,7 @@ func (c *SessionController) ListSessionsByWorkspace(w http.ResponseWriter, r *ht
 		return
 	}
 
-	response := NewSessionListResponse(sessions)
-	render.Render(w, r, response)
+	render.Render(w, r, NewSessionListResponse(sessions))
 }
 
 func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request) {
@@ -89,12 +87,10 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 	session := &Session{
 		Name:        data.Name,
 		WorkspaceID: data.WorkspaceID,
-		Branch:      data.Branch,
-		BaseBranch:  data.BaseBranch,
 		TodoID:      data.TodoID,
 	}
 
-	if err := c.service.CreateSession(ctx, session, data.CreateWorktree); err != nil {
+	if err := c.service.CreateSession(ctx, session, data.Branch, data.BaseBranch, data.CreateWorktree); err != nil {
 		common.RenderError(w, r, err)
 		return
 	}
@@ -177,4 +173,37 @@ func (c *SessionController) RepairSession(w http.ResponseWriter, r *http.Request
 	}
 
 	render.Render(w, r, NewSessionResponse(session))
+}
+
+func (c *SessionController) ArchiveSession(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	session, err := c.service.ArchiveSession(ctx, id)
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	render.Render(w, r, NewSessionResponse(session))
+}
+
+func (c *SessionController) DismissSession(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	if err := c.service.DismissSession(ctx, id); err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	render.JSON(w, r, map[string]string{"status": "ok"})
 }
