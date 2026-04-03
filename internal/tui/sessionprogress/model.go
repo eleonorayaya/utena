@@ -12,13 +12,14 @@ import (
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
-var (
-	titleStyle   = lipgloss.NewStyle().Bold(true)
-	pendingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	failedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-)
+func titleStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
+func pendingStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.StatusPending)
+}
+func failedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
 
 type tickMsg time.Time
 
@@ -144,20 +145,20 @@ func (m Model) View() string {
 	if m.session != nil && m.session.Name != "" {
 		name = m.session.Name
 	}
-	b.WriteString(titleStyle.Render("Creating session: " + name))
+	b.WriteString(titleStyle().Render("Creating session: " + name))
 	b.WriteString("\n\n")
 
 	if m.session == nil {
-		b.WriteString(pendingStyle.Render("  Loading..."))
+		b.WriteString(pendingStyle().Render("  Loading..."))
 		b.WriteString("\n")
 	} else if m.session.Status == session.StatusCreating {
-		b.WriteString(pendingStyle.Render("  Setting up..."))
+		b.WriteString(pendingStyle().Render("  Setting up..."))
 		b.WriteString("\n")
 	}
 
 	if m.err != nil {
 		b.WriteString("\n")
-		b.WriteString(failedStyle.Render("Error: " + m.err.Error()))
+		b.WriteString(failedStyle().Render("Error: " + m.err.Error()))
 		b.WriteString("\n")
 	}
 

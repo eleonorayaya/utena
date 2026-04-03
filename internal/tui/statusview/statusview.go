@@ -15,6 +15,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
 const collapsedWidth = 14
@@ -199,7 +200,7 @@ func (m Model) expandedView() string {
 	}
 
 	if len(parts) == 0 {
-		empty := lipgloss.NewStyle().Foreground(colorTextMuted)
+		empty := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
 		return empty.Render("  no active sessions")
 	}
 

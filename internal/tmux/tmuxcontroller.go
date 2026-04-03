@@ -24,7 +24,7 @@ func (c *TmuxController) HandleHook(w http.ResponseWriter, r *http.Request) {
 
 	req := &HookEvent{}
 	if err := render.Bind(r, req); err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 
@@ -41,13 +41,12 @@ func (c *TmuxController) HandleHook(w http.ResponseWriter, r *http.Request) {
 	case "client-detached":
 		err = c.service.HandleClientDetached(ctx, req.SessionName)
 	default:
-		render.Status(r, http.StatusBadRequest)
-		render.JSON(w, r, map[string]string{"error": "unknown event: " + event})
+		common.RenderError(w, r, common.NewInvalidRequest("unknown event: "+event))
 		return
 	}
 
 	if err != nil {
-		render.Render(w, r, common.ErrUnknown(err))
+		common.RenderError(w, r, err)
 		return
 	}
 
@@ -59,7 +58,7 @@ func (c *TmuxController) HandleSyncWindows(w http.ResponseWriter, r *http.Reques
 
 	req := &SyncWindowsRequest{}
 	if err := render.Bind(r, req); err != nil {
-		render.Render(w, r, common.ErrInvalidRequest(err))
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
 	}
 

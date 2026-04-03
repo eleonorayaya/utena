@@ -1,22 +1,22 @@
 package session
 
 import (
-	"errors"
 	"strings"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/claude"
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"gorm.io/gorm"
 )
 
-var ErrSessionAlreadyExists = errors.New("session already exists")
-var ErrSessionNotFound = errors.New("session not found")
-var ErrSessionAttached = errors.New("cannot delete attached session")
-var ErrSessionNotBroken = errors.New("session is not broken")
-var ErrCannotActivate = errors.New("cannot activate session in current state")
+var ErrSessionAlreadyExists = common.NewConflict("session already exists")
+var ErrSessionNotFound = common.NewNotFound("session not found")
+var ErrSessionAttached = common.NewInvalidRequest("cannot delete attached session")
+var ErrSessionNotBroken = common.NewInvalidRequest("session is not broken")
+var ErrCannotActivate = common.NewInvalidRequest("cannot activate session in current state")
 
 type SessionStatus string
 

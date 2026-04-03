@@ -1,13 +1,12 @@
 package todo
 
 import (
-	"errors"
-
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"gorm.io/gorm"
 )
 
-var ErrTodoNotFound = errors.New("todo not found")
+var ErrTodoNotFound = common.NewNotFound("todo not found")
 
 type Todo struct {
 	gorm.Model
