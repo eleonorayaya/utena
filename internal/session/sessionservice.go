@@ -695,7 +695,7 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 	if err != nil {
 		return nil, err
 	}
-	if sess.Status != StatusActive && sess.Status != StatusInactive {
+	if sess.Status != StatusActive && sess.Status != StatusInactive && sess.Status != StatusCompleted {
 		return nil, fmt.Errorf("cannot archive session in status %s", sess.Status)
 	}
 

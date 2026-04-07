@@ -256,6 +256,76 @@ func TestHandlePRStateChanged_NoSessionForBranch(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestCompletedCleanupTask_ArchivesStale(t *testing.T) {
+	env := setupPRTestEnv(t)
+	ctx := context.Background()
+
+	branchID := env.branch.ID
+	sess := &Session{
+		Name:        "stale-session",
+		WorkspaceID: env.workspace.ID,
+		BranchID:    &branchID,
+		Status:      StatusCompleted,
+		LastUsedAt:  time.Now().Add(-10 * time.Minute),
+	}
+	require.NoError(t, env.sessionStore.Add(sess))
+
+	task := &completedCleanupTask{service: env.service}
+	err := task.Run(ctx)
+	require.NoError(t, err)
+
+	updated, err := env.sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusArchived, updated.Status)
+}
+
+func TestCompletedCleanupTask_SkipsAttached(t *testing.T) {
+	env := setupPRTestEnv(t)
+	ctx := context.Background()
+
+	branchID := env.branch.ID
+	sess := &Session{
+		Name:        "attached-session",
+		WorkspaceID: env.workspace.ID,
+		BranchID:    &branchID,
+		Status:      StatusCompleted,
+		IsAttached:  true,
+		LastUsedAt:  time.Now().Add(-10 * time.Minute),
+	}
+	require.NoError(t, env.sessionStore.Add(sess))
+
+	task := &completedCleanupTask{service: env.service}
+	err := task.Run(ctx)
+	require.NoError(t, err)
+
+	updated, err := env.sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusCompleted, updated.Status)
+}
+
+func TestCompletedCleanupTask_SkipsRecent(t *testing.T) {
+	env := setupPRTestEnv(t)
+	ctx := context.Background()
+
+	branchID := env.branch.ID
+	sess := &Session{
+		Name:        "recent-session",
+		WorkspaceID: env.workspace.ID,
+		BranchID:    &branchID,
+		Status:      StatusCompleted,
+		LastUsedAt:  time.Now().Add(-1 * time.Minute),
+	}
+	require.NoError(t, env.sessionStore.Add(sess))
+
+	task := &completedCleanupTask{service: env.service}
+	err := task.Run(ctx)
+	require.NoError(t, err)
+
+	updated, err := env.sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusCompleted, updated.Status)
+}
+
 func TestHandlePRDiscovered_SkipsDismissed(t *testing.T) {
 	env := setupPRTestEnv(t)
 	ctx := context.Background()
