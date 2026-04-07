@@ -49,6 +49,7 @@ func (s *JobService) Start(ctx context.Context) {
 func (s *JobService) runLoop(ctx context.Context, job Job, trigger <-chan struct{}) {
 	defer s.wg.Done()
 
+	slog.Info("running job", "job", job.Name(), "trigger", "startup")
 	if err := job.Run(ctx); err != nil {
 		slog.Error("job failed", "job", job.Name(), "error", err)
 	}
@@ -59,10 +60,12 @@ func (s *JobService) runLoop(ctx context.Context, job Job, trigger <-chan struct
 	for {
 		select {
 		case <-ticker.C:
+			slog.Info("running job", "job", job.Name(), "trigger", "interval")
 			if err := job.Run(ctx); err != nil {
 				slog.Error("job failed", "job", job.Name(), "error", err)
 			}
 		case <-trigger:
+			slog.Info("running job", "job", job.Name(), "trigger", "manual")
 			if err := job.Run(ctx); err != nil {
 				slog.Error("job failed", "job", job.Name(), "error", err)
 			}
