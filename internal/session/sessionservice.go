@@ -840,8 +840,28 @@ func (s *SessionService) handlePRStateChanged(ctx context.Context, event eventbu
 		return nil
 	}
 
-	if data.NewState == git.PRStateMerged && data.PullRequest.HeadBranchID != nil {
-		slog.Info("PR merged", "pr", data.PullRequest.Number, "branch_id", *data.PullRequest.HeadBranchID)
+	if data.NewState != git.PRStateMerged {
+		return nil
+	}
+
+	if data.PullRequest.HeadBranchID == nil {
+		return nil
+	}
+
+	sess, err := s.store.GetByBranchID(*data.PullRequest.HeadBranchID)
+	if err != nil {
+		return nil
+	}
+
+	if sess.Status == StatusDeleted || sess.Status == StatusArchived || sess.Status == StatusCompleted {
+		return nil
+	}
+
+	sess.Status = StatusCompleted
+	if err := s.store.Update(sess); err != nil {
+		slog.Warn("failed to mark session completed", "session", sess.ID, "error", err)
+	} else {
+		slog.Info("marked session completed after PR merge", "session", sess.ID, "pr", data.PullRequest.Number)
 	}
 	return nil
 }

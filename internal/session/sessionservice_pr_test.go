@@ -167,6 +167,95 @@ func TestHandlePRDiscovered_SkipsExistingSession(t *testing.T) {
 	require.Len(t, sessions, 1)
 }
 
+func TestHandlePRStateChanged_CompletesSessionOnMerge(t *testing.T) {
+	env := setupPRTestEnv(t)
+	ctx := context.Background()
+
+	branchID := env.branch.ID
+	sess := &Session{
+		Name:        "feature-pr",
+		WorkspaceID: env.workspace.ID,
+		BranchID:    &branchID,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
+	}
+	require.NoError(t, env.sessionStore.Add(sess))
+
+	event := eventbus.Event{
+		Type: git.EventPRStateChanged,
+		Data: git.PRStateChangedEvent{
+			PullRequest: &git.PullRequest{
+				Number:       42,
+				HeadBranchID: &branchID,
+			},
+			OldState: git.PRStateOpen,
+			NewState: git.PRStateMerged,
+		},
+	}
+
+	err := env.service.handlePRStateChanged(ctx, event)
+	require.NoError(t, err)
+
+	updated, err := env.sessionStore.GetByBranchID(branchID)
+	require.NoError(t, err)
+	require.Equal(t, StatusCompleted, updated.Status)
+}
+
+func TestHandlePRStateChanged_IgnoresNonMerge(t *testing.T) {
+	env := setupPRTestEnv(t)
+	ctx := context.Background()
+
+	branchID := env.branch.ID
+	sess := &Session{
+		Name:        "feature-pr",
+		WorkspaceID: env.workspace.ID,
+		BranchID:    &branchID,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
+	}
+	require.NoError(t, env.sessionStore.Add(sess))
+
+	event := eventbus.Event{
+		Type: git.EventPRStateChanged,
+		Data: git.PRStateChangedEvent{
+			PullRequest: &git.PullRequest{
+				Number:       42,
+				HeadBranchID: &branchID,
+			},
+			OldState: git.PRStateOpen,
+			NewState: git.PRStateClosed,
+		},
+	}
+
+	err := env.service.handlePRStateChanged(ctx, event)
+	require.NoError(t, err)
+
+	updated, err := env.sessionStore.GetByBranchID(branchID)
+	require.NoError(t, err)
+	require.Equal(t, StatusActive, updated.Status)
+}
+
+func TestHandlePRStateChanged_NoSessionForBranch(t *testing.T) {
+	env := setupPRTestEnv(t)
+	ctx := context.Background()
+
+	branchID := env.branch.ID
+	event := eventbus.Event{
+		Type: git.EventPRStateChanged,
+		Data: git.PRStateChangedEvent{
+			PullRequest: &git.PullRequest{
+				Number:       42,
+				HeadBranchID: &branchID,
+			},
+			OldState: git.PRStateOpen,
+			NewState: git.PRStateMerged,
+		},
+	}
+
+	err := env.service.handlePRStateChanged(ctx, event)
+	require.NoError(t, err)
+}
+
 func TestHandlePRDiscovered_SkipsDismissed(t *testing.T) {
 	env := setupPRTestEnv(t)
 	ctx := context.Background()
