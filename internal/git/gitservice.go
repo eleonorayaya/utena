@@ -370,6 +370,44 @@ func (s *GitService) GetPRDiff(ctx context.Context, prID uint) (*Diff, error) {
 	return ParseUnifiedDiff(raw)
 }
 
+func (s *GitService) syncRawPR(ctx context.Context, raw RawPR, repo *Repo) error {
+	branch, _ := s.branchStore.GetByNameAndRepo(raw.Head.Ref, repo.ID)
+	if branch == nil {
+		branch = &Branch{Name: raw.Head.Ref, RepoID: repo.ID, ExistsRemote: true}
+		if err := s.branchStore.Upsert(branch); err != nil {
+			return fmt.Errorf("failed to upsert branch %s: %w", raw.Head.Ref, err)
+		}
+	}
+
+	existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, raw.Number)
+	pr := rawPRToPullRequest(raw, repo.ID, branch.ID, s.currentUser)
+
+	if existing != nil {
+		oldState := existing.State
+		pr.Model = existing.Model
+		if err := s.prStore.Update(pr); err != nil {
+			return fmt.Errorf("failed to update PR #%d: %w", raw.Number, err)
+		}
+		if oldState != pr.State && s.eventBus != nil {
+			s.eventBus.Publish(ctx, eventbus.Event{
+				Type: EventPRStateChanged,
+				Data: PRStateChangedEvent{PullRequest: pr, OldState: oldState, NewState: pr.State},
+			})
+		}
+	} else {
+		if err := s.prStore.Upsert(pr); err != nil {
+			return fmt.Errorf("failed to upsert PR #%d: %w", raw.Number, err)
+		}
+		if s.eventBus != nil {
+			s.eventBus.Publish(ctx, eventbus.Event{
+				Type: EventPRDiscovered,
+				Data: PRDiscoveredEvent{PullRequest: pr, Repo: repo},
+			})
+		}
+	}
+	return nil
+}
+
 func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 	if s.githubClient == nil {
 		return ErrNoGitHubClient
@@ -384,45 +422,9 @@ func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 	}
 	var errs []error
 	for _, raw := range rawPRs {
-		branch, _ := s.branchStore.GetByNameAndRepo(raw.Head.Ref, repo.ID)
-		if branch == nil {
-			branch = &Branch{Name: raw.Head.Ref, RepoID: repo.ID, ExistsRemote: true}
-			if err := s.branchStore.Upsert(branch); err != nil {
-				slog.Warn("failed to upsert branch for PR", "branch", raw.Head.Ref, "error", err)
-				errs = append(errs, err)
-				continue
-			}
-		}
-
-		existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, raw.Number)
-		pr := rawPRToPullRequest(raw, repo.ID, branch.ID, s.currentUser)
-
-		if existing != nil {
-			oldState := existing.State
-			pr.Model = existing.Model
-			if err := s.prStore.Update(pr); err != nil {
-				slog.Warn("failed to update PR", "number", raw.Number, "error", err)
-				errs = append(errs, err)
-				continue
-			}
-			if oldState != pr.State && s.eventBus != nil {
-				s.eventBus.Publish(ctx, eventbus.Event{
-					Type: EventPRStateChanged,
-					Data: PRStateChangedEvent{PullRequest: pr, OldState: oldState, NewState: pr.State},
-				})
-			}
-		} else {
-			if err := s.prStore.Upsert(pr); err != nil {
-				slog.Warn("failed to upsert PR", "number", raw.Number, "error", err)
-				errs = append(errs, err)
-				continue
-			}
-			if s.eventBus != nil {
-				s.eventBus.Publish(ctx, eventbus.Event{
-					Type: EventPRDiscovered,
-					Data: PRDiscoveredEvent{PullRequest: pr, Repo: repo},
-				})
-			}
+		if err := s.syncRawPR(ctx, raw, repo); err != nil {
+			slog.Warn("failed to sync PR", "number", raw.Number, "error", err)
+			errs = append(errs, err)
 		}
 	}
 	if len(errs) > 0 {
