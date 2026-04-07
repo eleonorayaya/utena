@@ -404,7 +404,6 @@ func prChanged(previous *PullRequest, current *PullRequest) bool {
 	}
 	return previous.State != current.State ||
 		previous.Title != current.Title ||
-		previous.IsDraft != current.IsDraft ||
 		previous.IsAssignedToMe != current.IsAssignedToMe
 }
 
@@ -446,6 +445,8 @@ func ghPRToPullRequest(ghPR *github.PullRequest, repoID uint, branchID uint, cur
 		state = PRStateMerged
 	} else if ghPR.GetState() == "closed" {
 		state = PRStateClosed
+	} else if ghPR.GetDraft() {
+		state = PRStateDraft
 	}
 	return &PullRequest{
 		RepoID:         repoID,
@@ -453,7 +454,6 @@ func ghPRToPullRequest(ghPR *github.PullRequest, repoID uint, branchID uint, cur
 		HeadBranchID:   &branchID,
 		Title:          ghPR.GetTitle(),
 		State:          state,
-		IsDraft:        ghPR.GetDraft(),
 		IsAssignedToMe: assigned,
 		HTMLURL:        ghPR.GetHTMLURL(),
 		AuthorLogin:    ghPR.GetUser().GetLogin(),

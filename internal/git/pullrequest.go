@@ -15,6 +15,7 @@ type PRState string
 
 const (
 	PRStateOpen   PRState = "open"
+	PRStateDraft  PRState = "draft"
 	PRStateClosed PRState = "closed"
 	PRStateMerged PRState = "merged"
 )
@@ -27,7 +28,6 @@ type PullRequest struct {
 	HeadBranch     *Branch `json:"head_branch,omitempty" gorm:"foreignKey:HeadBranchID"`
 	Title          string  `json:"title"`
 	State          PRState `json:"state"`
-	IsDraft        bool    `json:"is_draft"`
 	IsAssignedToMe bool    `json:"is_assigned_to_me"`
 	HTMLURL        string  `json:"html_url"`
 	AuthorLogin    string  `json:"author_login"`

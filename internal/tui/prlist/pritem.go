@@ -2,7 +2,6 @@ package prlist
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/eleonorayaya/utena/internal/git"
 )
@@ -13,15 +12,8 @@ type prItem struct {
 
 func (i prItem) Title() string {
 	title := fmt.Sprintf("#%d %s", i.pr.Number, i.pr.Title)
-	var badges []string
-	if i.pr.IsDraft {
-		badges = append(badges, "[draft]")
-	}
 	if i.pr.IsAssignedToMe {
-		badges = append(badges, "[assigned]")
-	}
-	if len(badges) > 0 {
-		title += " " + strings.Join(badges, " ")
+		title += " [assigned]"
 	}
 	return title
 }
