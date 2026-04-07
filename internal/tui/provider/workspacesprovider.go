@@ -76,8 +76,6 @@ type workspacesProvider struct {
 	client            *client
 	workspaces        []workspace.Workspace
 	branches          []string
-	prs               []git.PullRequest
-	prWorkspaceID     uint
 	activeWorkspaceID uint
 }
 
@@ -120,10 +118,8 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 		return p, p.client.fetchPRs(msg.workspaceID, msg.state)
 
 	case prsLoadedMsg:
-		p.prs = msg.prs
-		p.prWorkspaceID = msg.workspaceID
-		prs := p.prs
-		wsID := p.prWorkspaceID
+		prs := msg.prs
+		wsID := msg.workspaceID
 		return p, func() tea.Msg { return PRsStateUpdatedMsg{PullRequests: prs, WorkspaceID: wsID} }
 
 	case setActiveWorkspaceMsg:

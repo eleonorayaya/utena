@@ -1,10 +1,7 @@
 package workspacelist
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
-
+	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
@@ -21,20 +18,9 @@ func (i workspaceItem) Title() string {
 }
 
 func (i workspaceItem) Description() string {
-	return abbreviatePath(i.workspace.Path)
+	return workspacepicker.AbbreviatePath(i.workspace.Path)
 }
 
 func (i workspaceItem) FilterValue() string {
 	return i.workspace.Name
-}
-
-func abbreviatePath(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	if strings.HasPrefix(path, home) {
-		return filepath.Join("~", path[len(home):])
-	}
-	return path
 }
