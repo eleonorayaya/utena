@@ -326,19 +326,55 @@ func TestGetPRDiff_ReturnsStructuredDiff(t *testing.T) {
 	assert.Equal(t, "file.go", diff.Files[0].NewPath)
 }
 
-func TestSyncRepoPRs_NilGitHubClient_ReturnsNoError(t *testing.T) {
+func TestSyncRepoPRs_NilGitHubClient_ReturnsError(t *testing.T) {
 	database, repo := setupGitServiceTest(t)
 	svc := NewGitService(database)
 
 	err := svc.SyncRepoPRs(context.Background(), repo)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, ErrNoGitHubClient)
 }
 
-func TestSyncAssignedPRs_NilGitHubClient_ReturnsEmptyResult(t *testing.T) {
+func TestSyncRepoPRs_SetsIsAssignedToMe(t *testing.T) {
+	database, repo := setupGitServiceTest(t)
+	raw := makeRawPR(1, "Assigned PR", "feature-a", "open", false)
+	raw.Assignees = []struct {
+		Login string `json:"login"`
+	}{{Login: "myself"}}
+	ghClient := &mockGitHubClient{repoPRs: []RawPR{raw}}
+	svc := NewGitService(database, WithGitHubClient(ghClient))
+	svc.currentUser = "myself"
+
+	err := svc.SyncRepoPRs(context.Background(), repo)
+	require.NoError(t, err)
+
+	prs := svc.prStore.ListByRepo(repo.ID)
+	require.Len(t, prs, 1)
+	assert.True(t, prs[0].IsAssignedToMe)
+}
+
+func TestSyncRepoPRs_NotAssigned(t *testing.T) {
+	database, repo := setupGitServiceTest(t)
+	raw := makeRawPR(1, "Someone elses PR", "feature-b", "open", false)
+	raw.Assignees = []struct {
+		Login string `json:"login"`
+	}{{Login: "someone-else"}}
+	ghClient := &mockGitHubClient{repoPRs: []RawPR{raw}}
+	svc := NewGitService(database, WithGitHubClient(ghClient))
+	svc.currentUser = "myself"
+
+	err := svc.SyncRepoPRs(context.Background(), repo)
+	require.NoError(t, err)
+
+	prs := svc.prStore.ListByRepo(repo.ID)
+	require.Len(t, prs, 1)
+	assert.False(t, prs[0].IsAssignedToMe)
+}
+
+func TestSyncAssignedPRs_NilGitHubClient_ReturnsError(t *testing.T) {
 	database, _ := setupGitServiceTest(t)
 	svc := NewGitService(database)
 
 	discovered, err := svc.SyncAssignedPRs(context.Background())
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, ErrNoGitHubClient)
 	assert.Nil(t, discovered)
 }

@@ -21,13 +21,16 @@ type GitHubClient interface {
 }
 
 type RawPR struct {
-	Number   int     `json:"number"`
-	Title    string  `json:"title"`
-	State    string  `json:"state"`
-	Draft    bool    `json:"draft"`
-	HTMLURL  string  `json:"html_url"`
-	MergedAt *string `json:"merged_at"`
-	User     struct {
+	Number    int     `json:"number"`
+	Title     string  `json:"title"`
+	State     string  `json:"state"`
+	Draft     bool    `json:"draft"`
+	HTMLURL   string  `json:"html_url"`
+	MergedAt  *string `json:"merged_at"`
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
+	User struct {
 		Login string `json:"login"`
 	} `json:"user"`
 	Head struct {

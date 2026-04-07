@@ -10,6 +10,8 @@ import (
 	"github.com/eleonorayaya/utena/internal/eventbus"
 )
 
+var ErrNoGitHubClient = errors.New("github client not configured")
+
 const (
 	EventPRDiscovered   = "git.pr_discovered"
 	EventPRStateChanged = "git.pr_state_changed"
@@ -34,6 +36,7 @@ type GitService struct {
 	prStore       *PRStore
 	githubClient  GitHubClient
 	eventBus      eventbus.EventBus
+	currentUser   string
 }
 
 type GitServiceOption func(*GitService)
@@ -369,7 +372,7 @@ func (s *GitService) GetPRDiff(ctx context.Context, prID uint) (*Diff, error) {
 
 func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 	if s.githubClient == nil {
-		return nil
+		return ErrNoGitHubClient
 	}
 	owner, name, err := repo.OwnerAndName()
 	if err != nil {
@@ -392,7 +395,7 @@ func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 		}
 
 		existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, raw.Number)
-		pr := rawPRToPullRequest(raw, repo.ID, branch.ID)
+		pr := rawPRToPullRequest(raw, repo.ID, branch.ID, s.currentUser)
 
 		if existing != nil {
 			oldState := existing.State
@@ -430,7 +433,7 @@ func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 
 func (s *GitService) SyncAssignedPRs(ctx context.Context) ([]PullRequest, error) {
 	if s.githubClient == nil {
-		return nil, nil
+		return nil, ErrNoGitHubClient
 	}
 	rawPRs, err := s.githubClient.ListAssignedPRs(ctx)
 	if err != nil {
@@ -458,7 +461,7 @@ func (s *GitService) SyncAssignedPRs(ctx context.Context) ([]PullRequest, error)
 				continue
 			}
 		}
-		pr := rawPRToPullRequest(raw, repo.ID, branch.ID)
+		pr := rawPRToPullRequest(raw, repo.ID, branch.ID, s.currentUser)
 		if err := s.prStore.Upsert(pr); err != nil {
 			slog.Warn("failed to upsert assigned PR", "number", raw.Number, "error", err)
 			continue
@@ -474,16 +477,24 @@ func (s *GitService) SyncAssignedPRs(ctx context.Context) ([]PullRequest, error)
 	return discovered, nil
 }
 
-func rawPRToPullRequest(raw RawPR, repoID uint, branchID uint) *PullRequest {
+func rawPRToPullRequest(raw RawPR, repoID uint, branchID uint, currentUser string) *PullRequest {
+	assigned := false
+	for _, a := range raw.Assignees {
+		if a.Login == currentUser {
+			assigned = true
+			break
+		}
+	}
 	return &PullRequest{
-		RepoID:       repoID,
-		Number:       raw.Number,
-		HeadBranchID: &branchID,
-		Title:        raw.Title,
-		State:        raw.ToPRState(),
-		IsDraft:      raw.Draft,
-		HTMLURL:      raw.HTMLURL,
-		AuthorLogin:  raw.User.Login,
+		RepoID:         repoID,
+		Number:         raw.Number,
+		HeadBranchID:   &branchID,
+		Title:          raw.Title,
+		State:          raw.ToPRState(),
+		IsDraft:        raw.Draft,
+		IsAssignedToMe: assigned,
+		HTMLURL:        raw.HTMLURL,
+		AuthorLogin:    raw.User.Login,
 	}
 }
 
