@@ -38,7 +38,6 @@ func New() Model {
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
-	m.workspace = nil
 	return m, nil
 }
 
