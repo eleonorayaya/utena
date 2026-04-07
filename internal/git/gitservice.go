@@ -12,20 +12,12 @@ import (
 
 var ErrNoGitHubClient = errors.New("github client not configured")
 
-const (
-	EventPRDiscovered   = "git.pr_discovered"
-	EventPRStateChanged = "git.pr_state_changed"
-)
+const EventPRUpdated = "git.pr_updated"
 
-type PRDiscoveredEvent struct {
+type PRUpdatedEvent struct {
 	PullRequest *PullRequest
+	Previous    *PullRequest
 	Repo        *Repo
-}
-
-type PRStateChangedEvent struct {
-	PullRequest *PullRequest
-	OldState    PRState
-	NewState    PRState
 }
 
 type GitService struct {
@@ -382,37 +374,24 @@ func (s *GitService) syncRawPR(ctx context.Context, raw RawPR, repo *Repo) error
 	existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, raw.Number)
 	pr := rawPRToPullRequest(raw, repo.ID, branch.ID, s.currentUser)
 
+	var previous *PullRequest
 	if existing != nil {
-		oldState := existing.State
-		wasAssigned := existing.IsAssignedToMe
+		previous = &PullRequest{}
+		*previous = *existing
 		pr.Model = existing.Model
 		if err := s.prStore.Update(pr); err != nil {
 			return fmt.Errorf("failed to update PR #%d: %w", raw.Number, err)
-		}
-		if s.eventBus != nil {
-			if oldState != pr.State {
-				s.eventBus.Publish(ctx, eventbus.Event{
-					Type: EventPRStateChanged,
-					Data: PRStateChangedEvent{PullRequest: pr, OldState: oldState, NewState: pr.State},
-				})
-			}
-			if !wasAssigned && pr.IsAssignedToMe {
-				s.eventBus.Publish(ctx, eventbus.Event{
-					Type: EventPRDiscovered,
-					Data: PRDiscoveredEvent{PullRequest: pr, Repo: repo},
-				})
-			}
 		}
 	} else {
 		if err := s.prStore.Upsert(pr); err != nil {
 			return fmt.Errorf("failed to upsert PR #%d: %w", raw.Number, err)
 		}
-		if s.eventBus != nil {
-			s.eventBus.Publish(ctx, eventbus.Event{
-				Type: EventPRDiscovered,
-				Data: PRDiscoveredEvent{PullRequest: pr, Repo: repo},
-			})
-		}
+	}
+	if s.eventBus != nil {
+		s.eventBus.Publish(ctx, eventbus.Event{
+			Type: EventPRUpdated,
+			Data: PRUpdatedEvent{PullRequest: pr, Previous: previous, Repo: repo},
+		})
 	}
 	return nil
 }

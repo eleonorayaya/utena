@@ -47,8 +47,7 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.eventBus.Subscribe(eventbus.TmuxClientSessionChanged, s.handleTmuxClientSessionChanged)
 	s.eventBus.Subscribe(eventbus.TmuxClientAttached, s.handleTmuxClientAttached)
 	s.eventBus.Subscribe(eventbus.TmuxClientDetached, s.handleTmuxClientDetached)
-	s.eventBus.Subscribe(git.EventPRDiscovered, s.handlePRDiscovered)
-	s.eventBus.Subscribe(git.EventPRStateChanged, s.handlePRStateChanged)
+	s.eventBus.Subscribe(git.EventPRUpdated, s.handlePRUpdated)
 	s.reconcileTmuxState(ctx)
 	return nil
 }
@@ -787,85 +786,86 @@ func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Sessio
 	return sess, nil
 }
 
-func (s *SessionService) handlePRDiscovered(ctx context.Context, event eventbus.Event) error {
-	data, ok := event.Data.(git.PRDiscoveredEvent)
+func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(git.PRUpdatedEvent)
 	if !ok {
 		return nil
 	}
 
-	if !data.PullRequest.IsAssignedToMe {
+	pr := data.PullRequest
+	if pr.HeadBranchID == nil {
 		return nil
 	}
 
-	if data.PullRequest.HeadBranchID == nil {
-		return nil
+	isNew := data.Previous == nil
+	newlyAssigned := pr.IsAssignedToMe && (isNew || !data.Previous.IsAssignedToMe)
+	newlyMerged := pr.State == git.PRStateMerged && (isNew || data.Previous.State != git.PRStateMerged)
+
+	if newlyAssigned {
+		s.maybeCreatePendingSession(ctx, data)
 	}
 
-	_, err := s.store.GetByBranchID(*data.PullRequest.HeadBranchID)
+	if newlyMerged {
+		s.maybeCompleteSession(ctx, pr)
+	}
+
+	return nil
+}
+
+func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git.PRUpdatedEvent) {
+	pr := data.PullRequest
+
+	_, err := s.store.GetByBranchID(*pr.HeadBranchID)
 	if err == nil {
-		return nil
+		return
 	}
 
-	if s.dismissedPRStore != nil && s.dismissedPRStore.IsDismissed(data.PullRequest.ID) {
-		return nil
+	if s.dismissedPRStore != nil && s.dismissedPRStore.IsDismissed(pr.ID) {
+		return
 	}
 
 	ws, err := s.workspaceService.GetWorkspaceByRepoID(ctx, data.Repo.ID)
 	if err != nil {
 		slog.Debug("no workspace for repo, skipping pending session", "repo_id", data.Repo.ID)
-		return nil
+		return
 	}
 
-	branch, err := s.gitService.GetBranch(*data.PullRequest.HeadBranchID)
+	branch, err := s.gitService.GetBranch(*pr.HeadBranchID)
 	if err != nil {
-		return fmt.Errorf("failed to get branch: %w", err)
+		slog.Warn("failed to get branch for pending session", "error", err)
+		return
 	}
 
 	sess := &Session{
 		Name:        branch.Name,
 		WorkspaceID: ws.ID,
-		BranchID:    data.PullRequest.HeadBranchID,
+		BranchID:    pr.HeadBranchID,
 		Status:      StatusPending,
 		LastUsedAt:  time.Now(),
 	}
 
 	if err := s.store.Add(sess); err != nil {
-		slog.Warn("failed to create pending session for PR", "pr", data.PullRequest.Number, "error", err)
-		return nil
+		slog.Warn("failed to create pending session for PR", "pr", pr.Number, "error", err)
+		return
 	}
 
-	slog.Info("created pending session for assigned PR", "pr", data.PullRequest.Number, "session", sess.ID, "branch", branch.Name)
-	return nil
+	slog.Info("created pending session for assigned PR", "pr", pr.Number, "session", sess.ID, "branch", branch.Name)
 }
 
-func (s *SessionService) handlePRStateChanged(ctx context.Context, event eventbus.Event) error {
-	data, ok := event.Data.(git.PRStateChangedEvent)
-	if !ok {
-		return nil
-	}
-
-	if data.NewState != git.PRStateMerged {
-		return nil
-	}
-
-	if data.PullRequest.HeadBranchID == nil {
-		return nil
-	}
-
-	sess, err := s.store.GetByBranchID(*data.PullRequest.HeadBranchID)
+func (s *SessionService) maybeCompleteSession(_ context.Context, pr *git.PullRequest) {
+	sess, err := s.store.GetByBranchID(*pr.HeadBranchID)
 	if err != nil {
-		return nil
+		return
 	}
 
 	if sess.Status == StatusDeleted || sess.Status == StatusArchived || sess.Status == StatusCompleted {
-		return nil
+		return
 	}
 
 	sess.Status = StatusCompleted
 	if err := s.store.Update(sess); err != nil {
 		slog.Warn("failed to mark session completed", "session", sess.ID, "error", err)
 	} else {
-		slog.Info("marked session completed after PR merge", "session", sess.ID, "pr", data.PullRequest.Number)
+		slog.Info("marked session completed after PR merge", "session", sess.ID, "pr", pr.Number)
 	}
-	return nil
 }

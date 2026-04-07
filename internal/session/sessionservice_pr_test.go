@@ -73,14 +73,14 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 	}
 }
 
-func TestHandlePRDiscovered_CreatesSession(t *testing.T) {
+func TestHandlePRUpdated_NewAssignedPR_CreatesSession(t *testing.T) {
 	env := setupPRTestEnv(t)
 	ctx := context.Background()
 
 	branchID := env.branch.ID
 	event := eventbus.Event{
-		Type: git.EventPRDiscovered,
-		Data: git.PRDiscoveredEvent{
+		Type: git.EventPRUpdated,
+		Data: git.PRUpdatedEvent{
 			PullRequest: &git.PullRequest{
 				RepoID:         env.repo.ID,
 				Number:         42,
@@ -89,11 +89,12 @@ func TestHandlePRDiscovered_CreatesSession(t *testing.T) {
 				State:          git.PRStateOpen,
 				IsAssignedToMe: true,
 			},
-			Repo: env.repo,
+			Previous: nil,
+			Repo:     env.repo,
 		},
 	}
 
-	err := env.service.handlePRDiscovered(ctx, event)
+	err := env.service.handlePRUpdated(ctx, event)
 	require.NoError(t, err)
 
 	sess, err := env.sessionStore.GetByBranchID(branchID)
@@ -103,14 +104,14 @@ func TestHandlePRDiscovered_CreatesSession(t *testing.T) {
 	require.Equal(t, "feature-pr", sess.Name)
 }
 
-func TestHandlePRDiscovered_SkipsUnassigned(t *testing.T) {
+func TestHandlePRUpdated_SkipsUnassigned(t *testing.T) {
 	env := setupPRTestEnv(t)
 	ctx := context.Background()
 
 	branchID := env.branch.ID
 	event := eventbus.Event{
-		Type: git.EventPRDiscovered,
-		Data: git.PRDiscoveredEvent{
+		Type: git.EventPRUpdated,
+		Data: git.PRUpdatedEvent{
 			PullRequest: &git.PullRequest{
 				RepoID:         env.repo.ID,
 				Number:         42,
@@ -119,18 +120,19 @@ func TestHandlePRDiscovered_SkipsUnassigned(t *testing.T) {
 				State:          git.PRStateOpen,
 				IsAssignedToMe: false,
 			},
-			Repo: env.repo,
+			Previous: nil,
+			Repo:     env.repo,
 		},
 	}
 
-	err := env.service.handlePRDiscovered(ctx, event)
+	err := env.service.handlePRUpdated(ctx, event)
 	require.NoError(t, err)
 
 	_, err = env.sessionStore.GetByBranchID(branchID)
 	require.Error(t, err)
 }
 
-func TestHandlePRDiscovered_SkipsExistingSession(t *testing.T) {
+func TestHandlePRUpdated_SkipsExistingSession(t *testing.T) {
 	env := setupPRTestEnv(t)
 	ctx := context.Background()
 
@@ -145,8 +147,8 @@ func TestHandlePRDiscovered_SkipsExistingSession(t *testing.T) {
 	require.NoError(t, env.sessionStore.Add(existing))
 
 	event := eventbus.Event{
-		Type: git.EventPRDiscovered,
-		Data: git.PRDiscoveredEvent{
+		Type: git.EventPRUpdated,
+		Data: git.PRUpdatedEvent{
 			PullRequest: &git.PullRequest{
 				RepoID:         env.repo.ID,
 				Number:         42,
@@ -155,11 +157,12 @@ func TestHandlePRDiscovered_SkipsExistingSession(t *testing.T) {
 				State:          git.PRStateOpen,
 				IsAssignedToMe: true,
 			},
-			Repo: env.repo,
+			Previous: nil,
+			Repo:     env.repo,
 		},
 	}
 
-	err := env.service.handlePRDiscovered(ctx, event)
+	err := env.service.handlePRUpdated(ctx, event)
 	require.NoError(t, err)
 
 	sessions, err := env.sessionStore.List()
@@ -167,7 +170,7 @@ func TestHandlePRDiscovered_SkipsExistingSession(t *testing.T) {
 	require.Len(t, sessions, 1)
 }
 
-func TestHandlePRStateChanged_CompletesSessionOnMerge(t *testing.T) {
+func TestHandlePRUpdated_CompletesSessionOnMerge(t *testing.T) {
 	env := setupPRTestEnv(t)
 	ctx := context.Background()
 
@@ -182,18 +185,19 @@ func TestHandlePRStateChanged_CompletesSessionOnMerge(t *testing.T) {
 	require.NoError(t, env.sessionStore.Add(sess))
 
 	event := eventbus.Event{
-		Type: git.EventPRStateChanged,
-		Data: git.PRStateChangedEvent{
+		Type: git.EventPRUpdated,
+		Data: git.PRUpdatedEvent{
 			PullRequest: &git.PullRequest{
 				Number:       42,
 				HeadBranchID: &branchID,
+				State:        git.PRStateMerged,
 			},
-			OldState: git.PRStateOpen,
-			NewState: git.PRStateMerged,
+			Previous: &git.PullRequest{State: git.PRStateOpen},
+			Repo:     env.repo,
 		},
 	}
 
-	err := env.service.handlePRStateChanged(ctx, event)
+	err := env.service.handlePRUpdated(ctx, event)
 	require.NoError(t, err)
 
 	updated, err := env.sessionStore.GetByBranchID(branchID)
@@ -201,7 +205,7 @@ func TestHandlePRStateChanged_CompletesSessionOnMerge(t *testing.T) {
 	require.Equal(t, StatusCompleted, updated.Status)
 }
 
-func TestHandlePRStateChanged_IgnoresNonMerge(t *testing.T) {
+func TestHandlePRUpdated_IgnoresNonMerge(t *testing.T) {
 	env := setupPRTestEnv(t)
 	ctx := context.Background()
 
@@ -216,18 +220,19 @@ func TestHandlePRStateChanged_IgnoresNonMerge(t *testing.T) {
 	require.NoError(t, env.sessionStore.Add(sess))
 
 	event := eventbus.Event{
-		Type: git.EventPRStateChanged,
-		Data: git.PRStateChangedEvent{
+		Type: git.EventPRUpdated,
+		Data: git.PRUpdatedEvent{
 			PullRequest: &git.PullRequest{
 				Number:       42,
 				HeadBranchID: &branchID,
+				State:        git.PRStateClosed,
 			},
-			OldState: git.PRStateOpen,
-			NewState: git.PRStateClosed,
+			Previous: &git.PullRequest{State: git.PRStateOpen},
+			Repo:     env.repo,
 		},
 	}
 
-	err := env.service.handlePRStateChanged(ctx, event)
+	err := env.service.handlePRUpdated(ctx, event)
 	require.NoError(t, err)
 
 	updated, err := env.sessionStore.GetByBranchID(branchID)
@@ -235,25 +240,33 @@ func TestHandlePRStateChanged_IgnoresNonMerge(t *testing.T) {
 	require.Equal(t, StatusActive, updated.Status)
 }
 
-func TestHandlePRStateChanged_NoSessionForBranch(t *testing.T) {
+func TestHandlePRUpdated_NewlyAssignedExistingPR_CreatesSession(t *testing.T) {
 	env := setupPRTestEnv(t)
 	ctx := context.Background()
 
 	branchID := env.branch.ID
 	event := eventbus.Event{
-		Type: git.EventPRStateChanged,
-		Data: git.PRStateChangedEvent{
+		Type: git.EventPRUpdated,
+		Data: git.PRUpdatedEvent{
 			PullRequest: &git.PullRequest{
-				Number:       42,
-				HeadBranchID: &branchID,
+				RepoID:         env.repo.ID,
+				Number:         42,
+				HeadBranchID:   &branchID,
+				Title:          "Test PR",
+				State:          git.PRStateOpen,
+				IsAssignedToMe: true,
 			},
-			OldState: git.PRStateOpen,
-			NewState: git.PRStateMerged,
+			Previous: &git.PullRequest{State: git.PRStateOpen, IsAssignedToMe: false},
+			Repo:     env.repo,
 		},
 	}
 
-	err := env.service.handlePRStateChanged(ctx, event)
+	err := env.service.handlePRUpdated(ctx, event)
 	require.NoError(t, err)
+
+	sess, err := env.sessionStore.GetByBranchID(branchID)
+	require.NoError(t, err)
+	require.Equal(t, StatusPending, sess.Status)
 }
 
 func TestCompletedCleanupTask_ArchivesStale(t *testing.T) {
@@ -346,14 +359,15 @@ func TestHandlePRDiscovered_SkipsDismissed(t *testing.T) {
 	}))
 
 	event := eventbus.Event{
-		Type: git.EventPRDiscovered,
-		Data: git.PRDiscoveredEvent{
+		Type: git.EventPRUpdated,
+		Data: git.PRUpdatedEvent{
 			PullRequest: pr,
+			Previous:    nil,
 			Repo:        env.repo,
 		},
 	}
 
-	err := env.service.handlePRDiscovered(ctx, event)
+	err := env.service.handlePRUpdated(ctx, event)
 	require.NoError(t, err)
 
 	_, err = env.sessionStore.GetByBranchID(env.branch.ID)

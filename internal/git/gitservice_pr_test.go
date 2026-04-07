@@ -165,13 +165,14 @@ func TestSyncRepoPRs_PublishesStateChangedEvent(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, bus.events, 1)
-	assert.Equal(t, EventPRStateChanged, bus.events[0].Type)
-	data := bus.events[0].Data.(PRStateChangedEvent)
-	assert.Equal(t, PRStateOpen, data.OldState)
-	assert.Equal(t, PRStateMerged, data.NewState)
+	assert.Equal(t, EventPRUpdated, bus.events[0].Type)
+	data := bus.events[0].Data.(PRUpdatedEvent)
+	require.NotNil(t, data.Previous)
+	assert.Equal(t, PRStateOpen, data.Previous.State)
+	assert.Equal(t, PRStateMerged, data.PullRequest.State)
 }
 
-func TestSyncRepoPRs_PublishesPRDiscoveredEvent(t *testing.T) {
+func TestSyncRepoPRs_PublishesPRUpdatedForNewPR(t *testing.T) {
 	database, repo := setupGitServiceTest(t)
 	ghClient := &mockGitHubClient{
 		repoPRs: []RawPR{makeRawPR(1, "New PR", "feature-a", "open", false)},
@@ -183,8 +184,9 @@ func TestSyncRepoPRs_PublishesPRDiscoveredEvent(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, bus.events, 1)
-	assert.Equal(t, EventPRDiscovered, bus.events[0].Type)
-	data := bus.events[0].Data.(PRDiscoveredEvent)
+	assert.Equal(t, EventPRUpdated, bus.events[0].Type)
+	data := bus.events[0].Data.(PRUpdatedEvent)
+	assert.Nil(t, data.Previous)
 	assert.Equal(t, "New PR", data.PullRequest.Title)
 	assert.Equal(t, repo.ID, data.Repo.ID)
 }
