@@ -113,7 +113,7 @@ func (c *githubRESTClient) doRequest(ctx context.Context, method, url string, ac
 }
 
 func (c *githubRESTClient) ListRepoPRs(ctx context.Context, owner, repo string) ([]RawPR, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&per_page=100", c.baseURL, owner, repo)
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls?state=all&per_page=100", c.baseURL, owner, repo)
 	body, err := c.doRequest(ctx, "GET", url, "application/vnd.github+json")
 	if err != nil {
 		return nil, err
