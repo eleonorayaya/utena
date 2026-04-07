@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,7 +13,6 @@ import (
 
 type GitHubClient interface {
 	ListRepoPRs(ctx context.Context, owner, repo string) ([]RawPR, error)
-	ListAssignedPRs(ctx context.Context) ([]RawPR, error)
 	GetPR(ctx context.Context, owner, repo string, number int) (*RawPR, error)
 	GetPRDiff(ctx context.Context, owner, repo string, number int) (string, error)
 	GetCurrentUser(ctx context.Context) (string, error)
@@ -124,52 +122,6 @@ func (c *githubRESTClient) ListRepoPRs(ctx context.Context, owner, repo string) 
 	var prs []RawPR
 	if err := json.Unmarshal(body, &prs); err != nil {
 		return nil, fmt.Errorf("failed to parse PR list: %w", err)
-	}
-	return prs, nil
-}
-
-func (c *githubRESTClient) ListAssignedPRs(ctx context.Context) ([]RawPR, error) {
-	user, err := c.GetCurrentUser(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	url := fmt.Sprintf("%s/search/issues?q=is:pr+is:open+assignee:%s&per_page=100", c.baseURL, user)
-	body, err := c.doRequest(ctx, "GET", url, "application/vnd.github+json")
-	if err != nil {
-		return nil, err
-	}
-
-	var result struct {
-		Items []json.RawMessage `json:"items"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse search results: %w", err)
-	}
-
-	type assignedIssue struct {
-		Number     int `json:"number"`
-		Repository struct {
-			FullName string `json:"full_name"`
-		} `json:"repository"`
-	}
-
-	var prs []RawPR
-	for _, item := range result.Items {
-		var issue assignedIssue
-		if err := json.Unmarshal(item, &issue); err != nil {
-			continue
-		}
-		parts := strings.SplitN(issue.Repository.FullName, "/", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		pr, err := c.GetPR(ctx, parts[0], parts[1], issue.Number)
-		if err != nil {
-			slog.Warn("failed to fetch assigned PR details", "repo", issue.Repository.FullName, "number", issue.Number, "error", err)
-			continue
-		}
-		prs = append(prs, *pr)
 	}
 	return prs, nil
 }

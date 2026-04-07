@@ -192,53 +192,6 @@ func TestAPIError(t *testing.T) {
 	}
 }
 
-func TestListAssignedPRs(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"login": "testuser"})
-	})
-	mux.HandleFunc("/search/issues", func(w http.ResponseWriter, r *http.Request) {
-		item1, _ := json.Marshal(map[string]any{
-			"number": 10,
-			"repository": map[string]string{
-				"full_name": "octocat/hello",
-			},
-		})
-		resp := map[string]any{
-			"total_count": 1,
-			"items":       []json.RawMessage{item1},
-		}
-		json.NewEncoder(w).Encode(resp)
-	})
-	mux.HandleFunc("/repos/octocat/hello/pulls/10", func(w http.ResponseWriter, r *http.Request) {
-		pr := RawPR{
-			Number:  10,
-			Title:   "Assigned PR",
-			State:   "open",
-			HTMLURL: "https://github.com/octocat/hello/pull/10",
-		}
-		pr.User.Login = "someone"
-		pr.Head.Ref = "fix-stuff"
-		pr.Base.Ref = "main"
-		json.NewEncoder(w).Encode(pr)
-	})
-
-	client := setupMockGitHub(t, mux)
-	prs, err := client.ListAssignedPRs(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(prs) != 1 {
-		t.Fatalf("expected 1 PR, got %d", len(prs))
-	}
-	if prs[0].Number != 10 {
-		t.Errorf("expected PR number 10, got %d", prs[0].Number)
-	}
-	if prs[0].Head.Ref != "fix-stuff" {
-		t.Errorf("expected head ref 'fix-stuff', got %q", prs[0].Head.Ref)
-	}
-}
-
 func strPtr(s string) *string {
 	return &s
 }

@@ -433,52 +433,6 @@ func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 	return nil
 }
 
-func (s *GitService) SyncAssignedPRs(ctx context.Context) ([]PullRequest, error) {
-	if s.githubClient == nil {
-		return nil, ErrNoGitHubClient
-	}
-	rawPRs, err := s.githubClient.ListAssignedPRs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var discovered []PullRequest
-	for _, raw := range rawPRs {
-		if raw.Head.Repo == nil {
-			continue
-		}
-		repo, err := s.repoStore.GetByFullName(raw.Head.Repo.FullName)
-		if err != nil {
-			slog.Debug("skipping assigned PR for untracked repo", "repo", raw.Head.Repo.FullName)
-			continue
-		}
-		existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, raw.Number)
-		if existing != nil {
-			continue
-		}
-		branch, _ := s.branchStore.GetByNameAndRepo(raw.Head.Ref, repo.ID)
-		if branch == nil {
-			branch = &Branch{Name: raw.Head.Ref, RepoID: repo.ID, ExistsRemote: true}
-			if err := s.branchStore.Upsert(branch); err != nil {
-				slog.Warn("failed to upsert branch for assigned PR", "branch", raw.Head.Ref, "error", err)
-				continue
-			}
-		}
-		pr := rawPRToPullRequest(raw, repo.ID, branch.ID, s.currentUser)
-		if err := s.prStore.Upsert(pr); err != nil {
-			slog.Warn("failed to upsert assigned PR", "number", raw.Number, "error", err)
-			continue
-		}
-		discovered = append(discovered, *pr)
-		if s.eventBus != nil {
-			s.eventBus.Publish(ctx, eventbus.Event{
-				Type: EventPRDiscovered,
-				Data: PRDiscoveredEvent{PullRequest: pr, Repo: repo},
-			})
-		}
-	}
-	return discovered, nil
-}
-
 func rawPRToPullRequest(raw RawPR, repoID uint, branchID uint, currentUser string) *PullRequest {
 	assigned := false
 	for _, a := range raw.Assignees {

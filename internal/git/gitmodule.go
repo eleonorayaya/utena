@@ -71,13 +71,6 @@ func (t *prSyncTask) Run(ctx context.Context) error {
 			slog.Warn("failed to sync PRs for repo", "repo", repo.FullName, "error", err)
 		}
 	}
-	slog.Info("syncing assigned PRs")
-	if _, err := t.service.SyncAssignedPRs(ctx); err != nil {
-		if errors.Is(err, ErrNoGitHubClient) {
-			return err
-		}
-		slog.Warn("failed to sync assigned PRs", "error", err)
-	}
 	return nil
 }
 

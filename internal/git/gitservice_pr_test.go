@@ -12,7 +12,6 @@ import (
 
 type mockGitHubClient struct {
 	repoPRs     []RawPR
-	assignedPRs []RawPR
 	prByNumber  map[int]*RawPR
 	diffContent string
 	currentUser string
@@ -24,13 +23,6 @@ func (m *mockGitHubClient) ListRepoPRs(ctx context.Context, owner, repo string) 
 		return nil, m.err
 	}
 	return m.repoPRs, nil
-}
-
-func (m *mockGitHubClient) ListAssignedPRs(ctx context.Context) ([]RawPR, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.assignedPRs, nil
 }
 
 func (m *mockGitHubClient) GetPR(ctx context.Context, owner, repo string, number int) (*RawPR, error) {
@@ -212,46 +204,6 @@ func TestSyncRepoPRs_CreatesBranchForUnknownHead(t *testing.T) {
 	assert.True(t, branch.ExistsRemote)
 }
 
-func TestSyncAssignedPRs_ReturnsNewlyDiscoveredPRs(t *testing.T) {
-	database, _ := setupGitServiceTest(t)
-	ghClient := &mockGitHubClient{
-		assignedPRs: []RawPR{makeRawPR(10, "Assigned PR", "feature-x", "open", false)},
-	}
-	svc := NewGitService(database, WithGitHubClient(ghClient))
-
-	discovered, err := svc.SyncAssignedPRs(context.Background())
-	require.NoError(t, err)
-	require.Len(t, discovered, 1)
-	assert.Equal(t, 10, discovered[0].Number)
-	assert.Equal(t, "Assigned PR", discovered[0].Title)
-}
-
-func TestSyncAssignedPRs_SkipsAlreadyKnownPRs(t *testing.T) {
-	database, repo := setupGitServiceTest(t)
-	branchStore := NewBranchStore(database)
-	branch := &Branch{Name: "feature-x", RepoID: repo.ID}
-	require.NoError(t, branchStore.Upsert(branch))
-
-	prStore := NewPRStore(database)
-	require.NoError(t, prStore.Add(&PullRequest{
-		RepoID:       repo.ID,
-		Number:       10,
-		HeadBranchID: &branch.ID,
-		Title:        "Already Known",
-		State:        PRStateOpen,
-		AuthorLogin:  "octocat",
-	}))
-
-	ghClient := &mockGitHubClient{
-		assignedPRs: []RawPR{makeRawPR(10, "Already Known", "feature-x", "open", false)},
-	}
-	svc := NewGitService(database, WithGitHubClient(ghClient))
-
-	discovered, err := svc.SyncAssignedPRs(context.Background())
-	require.NoError(t, err)
-	assert.Empty(t, discovered)
-}
-
 func TestSearchPRs_FiltersByRepoAndState(t *testing.T) {
 	database, repo := setupGitServiceTest(t)
 	branchStore := NewBranchStore(database)
@@ -368,13 +320,4 @@ func TestSyncRepoPRs_NotAssigned(t *testing.T) {
 	prs := svc.prStore.ListByRepo(repo.ID)
 	require.Len(t, prs, 1)
 	assert.False(t, prs[0].IsAssignedToMe)
-}
-
-func TestSyncAssignedPRs_NilGitHubClient_ReturnsError(t *testing.T) {
-	database, _ := setupGitServiceTest(t)
-	svc := NewGitService(database)
-
-	discovered, err := svc.SyncAssignedPRs(context.Background())
-	assert.ErrorIs(t, err, ErrNoGitHubClient)
-	assert.Nil(t, discovered)
 }
