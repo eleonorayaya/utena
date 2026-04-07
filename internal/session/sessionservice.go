@@ -312,6 +312,11 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 
 func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string, worktreePath string) error {
 	if s.tmuxService.HasSession(tmuxName) {
+		if sess.TmuxSessionID == nil {
+			if ts, err := s.tmuxService.GetSessionByName(tmuxName); err == nil {
+				sess.TmuxSessionID = &ts.ID
+			}
+		}
 		return nil
 	}
 

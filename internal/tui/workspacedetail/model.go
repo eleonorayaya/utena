@@ -1,14 +1,13 @@
 package workspacedetail
 
 import (
-	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/tui/prlist"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
@@ -101,25 +100,8 @@ func (m Model) View() string {
 	}
 
 	if !ws.LastUsedAt.IsZero() {
-		b.WriteString(labelStyle().Render("Last used") + valueStyle().Render(timeAgo(ws.LastUsedAt)) + "\n")
+		b.WriteString(labelStyle().Render("Last used") + valueStyle().Render(common.TimeAgo(ws.LastUsedAt)) + "\n")
 	}
 
 	return b.String()
-}
-
-func timeAgo(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		m := int(d.Minutes())
-		return fmt.Sprintf("%dm ago", m)
-	case d < 24*time.Hour:
-		h := int(d.Hours())
-		return fmt.Sprintf("%dh ago", h)
-	default:
-		days := int(d.Hours() / 24)
-		return fmt.Sprintf("%dd ago", days)
-	}
 }

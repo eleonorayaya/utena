@@ -389,13 +389,23 @@ func (s *GitService) syncGitHubPR(ctx context.Context, ghPR *github.PullRequest,
 			return fmt.Errorf("failed to upsert PR #%d: %w", ghPR.GetNumber(), err)
 		}
 	}
-	if s.eventBus != nil {
+	if s.eventBus != nil && prChanged(previous, pr) {
 		s.eventBus.Publish(ctx, eventbus.Event{
 			Type: EventPRUpdated,
 			Data: PRUpdatedEvent{PullRequest: pr, Previous: previous, Repo: repo},
 		})
 	}
 	return nil
+}
+
+func prChanged(previous *PullRequest, current *PullRequest) bool {
+	if previous == nil {
+		return true
+	}
+	return previous.State != current.State ||
+		previous.Title != current.Title ||
+		previous.IsDraft != current.IsDraft ||
+		previous.IsAssignedToMe != current.IsAssignedToMe
 }
 
 func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {

@@ -93,7 +93,10 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 
 func openURL(url string) tea.Cmd {
 	return func() tea.Msg {
-		exec.Command("open", url).Start()
+		cmd := exec.Command("open", url)
+		if err := cmd.Start(); err == nil {
+			go cmd.Wait()
+		}
 		return nil
 	}
 }
