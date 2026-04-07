@@ -2,13 +2,12 @@ package git
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/google/go-github/v72/github"
 )
 
 type GitHubClient interface {
@@ -19,27 +18,19 @@ type GitHubClient interface {
 }
 
 type RawPR struct {
-	Number    int     `json:"number"`
-	Title     string  `json:"title"`
-	State     string  `json:"state"`
-	Draft     bool    `json:"draft"`
-	HTMLURL   string  `json:"html_url"`
-	MergedAt  *string `json:"merged_at"`
-	Assignees []struct {
-		Login string `json:"login"`
-	} `json:"assignees"`
-	User struct {
-		Login string `json:"login"`
-	} `json:"user"`
-	Head struct {
-		Ref  string `json:"ref"`
-		Repo *struct {
-			FullName string `json:"full_name"`
-		} `json:"repo"`
-	} `json:"head"`
-	Base struct {
-		Ref string `json:"ref"`
-	} `json:"base"`
+	Number    int
+	Title     string
+	State     string
+	Draft     bool
+	HTMLURL   string
+	MergedAt  *string
+	Assignees []struct{ Login string }
+	User      struct{ Login string }
+	Head      struct {
+		Ref  string
+		Repo *struct{ FullName string }
+	}
+	Base struct{ Ref string }
 }
 
 func (r *RawPR) ToPRState() PRState {
@@ -56,10 +47,8 @@ func (r *RawPR) ToPRState() PRState {
 
 var getEnv = os.Getenv
 
-type githubRESTClient struct {
-	token      string
-	httpClient *http.Client
-	baseURL    string
+type githubSDKClient struct {
+	client *github.Client
 }
 
 func NewGitHubClient(ctx context.Context) (GitHubClient, error) {
@@ -67,11 +56,13 @@ func NewGitHubClient(ctx context.Context) (GitHubClient, error) {
 	if token == "" {
 		return nil, fmt.Errorf("no GitHub token found: set GITHUB_TOKEN or install gh CLI")
 	}
-	return &githubRESTClient{
-		token:      token,
-		httpClient: &http.Client{},
-		baseURL:    "https://api.github.com",
+	return &githubSDKClient{
+		client: github.NewClient(nil).WithAuthToken(token),
 	}, nil
+}
+
+func newGitHubClientWithBaseClient(httpClient *github.Client) *githubSDKClient {
+	return &githubSDKClient{client: httpClient}
 }
 
 func resolveGitHubToken() string {
@@ -86,81 +77,70 @@ func resolveGitHubToken() string {
 	return strings.TrimSpace(string(out))
 }
 
-func (c *githubRESTClient) doRequest(ctx context.Context, method, url string, accept string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+func (c *githubSDKClient) ListRepoPRs(ctx context.Context, owner, repo string) ([]RawPR, error) {
+	prs, _, err := c.client.PullRequests.List(ctx, owner, repo, &github.PullRequestListOptions{
+		State:       "all",
+		ListOptions: github.ListOptions{PerPage: 100},
+	})
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", accept)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
+	result := make([]RawPR, len(prs))
+	for i, pr := range prs {
+		result[i] = ghPRToRawPR(pr)
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("GitHub API error %d: %s", resp.StatusCode, string(body))
-	}
-
-	return body, nil
+	return result, nil
 }
 
-func (c *githubRESTClient) ListRepoPRs(ctx context.Context, owner, repo string) ([]RawPR, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls?state=all&per_page=100", c.baseURL, owner, repo)
-	body, err := c.doRequest(ctx, "GET", url, "application/vnd.github+json")
+func (c *githubSDKClient) GetPR(ctx context.Context, owner, repo string, number int) (*RawPR, error) {
+	pr, _, err := c.client.PullRequests.Get(ctx, owner, repo, number)
 	if err != nil {
 		return nil, err
 	}
-
-	var prs []RawPR
-	if err := json.Unmarshal(body, &prs); err != nil {
-		return nil, fmt.Errorf("failed to parse PR list: %w", err)
-	}
-	return prs, nil
+	raw := ghPRToRawPR(pr)
+	return &raw, nil
 }
 
-func (c *githubRESTClient) GetPR(ctx context.Context, owner, repo string, number int) (*RawPR, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", c.baseURL, owner, repo, number)
-	body, err := c.doRequest(ctx, "GET", url, "application/vnd.github+json")
-	if err != nil {
-		return nil, err
-	}
-
-	var pr RawPR
-	if err := json.Unmarshal(body, &pr); err != nil {
-		return nil, fmt.Errorf("failed to parse PR: %w", err)
-	}
-	return &pr, nil
-}
-
-func (c *githubRESTClient) GetPRDiff(ctx context.Context, owner, repo string, number int) (string, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", c.baseURL, owner, repo, number)
-	body, err := c.doRequest(ctx, "GET", url, "application/vnd.github.diff")
+func (c *githubSDKClient) GetPRDiff(ctx context.Context, owner, repo string, number int) (string, error) {
+	diff, _, err := c.client.PullRequests.GetRaw(ctx, owner, repo, number, github.RawOptions{Type: github.Diff})
 	if err != nil {
 		return "", err
 	}
-	return string(body), nil
+	return diff, nil
 }
 
-func (c *githubRESTClient) GetCurrentUser(ctx context.Context) (string, error) {
-	url := fmt.Sprintf("%s/user", c.baseURL)
-	body, err := c.doRequest(ctx, "GET", url, "application/vnd.github+json")
+func (c *githubSDKClient) GetCurrentUser(ctx context.Context) (string, error) {
+	user, _, err := c.client.Users.Get(ctx, "")
 	if err != nil {
 		return "", err
 	}
+	return user.GetLogin(), nil
+}
 
-	var user struct {
-		Login string `json:"login"`
+func ghPRToRawPR(pr *github.PullRequest) RawPR {
+	raw := RawPR{
+		Number:  pr.GetNumber(),
+		Title:   pr.GetTitle(),
+		State:   pr.GetState(),
+		Draft:   pr.GetDraft(),
+		HTMLURL: pr.GetHTMLURL(),
 	}
-	if err := json.Unmarshal(body, &user); err != nil {
-		return "", fmt.Errorf("failed to parse user: %w", err)
+
+	if pr.MergedAt != nil {
+		s := pr.MergedAt.String()
+		raw.MergedAt = &s
 	}
-	return user.Login, nil
+
+	for _, a := range pr.Assignees {
+		raw.Assignees = append(raw.Assignees, struct{ Login string }{Login: a.GetLogin()})
+	}
+
+	raw.User.Login = pr.GetUser().GetLogin()
+	raw.Head.Ref = pr.GetHead().GetRef()
+	if pr.GetHead().GetRepo() != nil {
+		raw.Head.Repo = &struct{ FullName string }{FullName: pr.GetHead().GetRepo().GetFullName()}
+	}
+	raw.Base.Ref = pr.GetBase().GetRef()
+
+	return raw
 }

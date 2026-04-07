@@ -83,9 +83,7 @@ func makeRawPR(number int, title, headRef, state string, draft bool) RawPR {
 	}
 	raw.User.Login = "octocat"
 	raw.Head.Ref = headRef
-	raw.Head.Repo = &struct {
-		FullName string `json:"full_name"`
-	}{FullName: "owner/repo"}
+	raw.Head.Repo = &struct{ FullName string }{FullName: "owner/repo"}
 	return raw
 }
 
@@ -291,9 +289,7 @@ func TestSyncRepoPRs_NilGitHubClient_ReturnsError(t *testing.T) {
 func TestSyncRepoPRs_SetsIsAssignedToMe(t *testing.T) {
 	database, repo := setupGitServiceTest(t)
 	raw := makeRawPR(1, "Assigned PR", "feature-a", "open", false)
-	raw.Assignees = []struct {
-		Login string `json:"login"`
-	}{{Login: "myself"}}
+	raw.Assignees = []struct{ Login string }{{Login: "myself"}}
 	ghClient := &mockGitHubClient{repoPRs: []RawPR{raw}}
 	svc := NewGitService(database, WithGitHubClient(ghClient))
 	svc.currentUser = "myself"
@@ -309,9 +305,7 @@ func TestSyncRepoPRs_SetsIsAssignedToMe(t *testing.T) {
 func TestSyncRepoPRs_NotAssigned(t *testing.T) {
 	database, repo := setupGitServiceTest(t)
 	raw := makeRawPR(1, "Someone elses PR", "feature-b", "open", false)
-	raw.Assignees = []struct {
-		Login string `json:"login"`
-	}{{Login: "someone-else"}}
+	raw.Assignees = []struct{ Login string }{{Login: "someone-else"}}
 	ghClient := &mockGitHubClient{repoPRs: []RawPR{raw}}
 	svc := NewGitService(database, WithGitHubClient(ghClient))
 	svc.currentUser = "myself"

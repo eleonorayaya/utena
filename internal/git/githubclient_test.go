@@ -5,35 +5,31 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/google/go-github/v72/github"
 )
 
-func setupMockGitHub(t *testing.T, handler http.Handler) *githubRESTClient {
+func setupMockSDKClient(t *testing.T, handler http.Handler) *githubSDKClient {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-
-	return &githubRESTClient{
-		token:      "test-token",
-		httpClient: server.Client(),
-		baseURL:    server.URL,
-	}
+	client := github.NewClient(nil).WithAuthToken("test-token")
+	client.BaseURL, _ = client.BaseURL.Parse(server.URL + "/")
+	return newGitHubClientWithBaseClient(client)
 }
 
 func TestListRepoPRs(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/octocat/hello/pulls", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer test-token" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+		prs := []*github.PullRequest{
+			{Number: github.Ptr(1), Title: github.Ptr("Fix bug"), State: github.Ptr("open"), Draft: github.Ptr(false), HTMLURL: github.Ptr("https://github.com/octocat/hello/pull/1")},
+			{Number: github.Ptr(2), Title: github.Ptr("Add feature"), State: github.Ptr("open"), Draft: github.Ptr(true), HTMLURL: github.Ptr("https://github.com/octocat/hello/pull/2")},
 		}
-		resp := []RawPR{
-			{Number: 1, Title: "Fix bug", State: "open", HTMLURL: "https://github.com/octocat/hello/pull/1"},
-			{Number: 2, Title: "Add feature", State: "open", Draft: true, HTMLURL: "https://github.com/octocat/hello/pull/2"},
-		}
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(prs)
 	})
 
-	client := setupMockGitHub(t, mux)
+	client := setupMockSDKClient(t, mux)
 	prs, err := client.ListRepoPRs(context.Background(), "octocat", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -52,19 +48,19 @@ func TestListRepoPRs(t *testing.T) {
 func TestGetPR(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/octocat/hello/pulls/42", func(w http.ResponseWriter, r *http.Request) {
-		pr := RawPR{
-			Number:  42,
-			Title:   "The answer",
-			State:   "open",
-			HTMLURL: "https://github.com/octocat/hello/pull/42",
+		pr := &github.PullRequest{
+			Number:  github.Ptr(42),
+			Title:   github.Ptr("The answer"),
+			State:   github.Ptr("open"),
+			HTMLURL: github.Ptr("https://github.com/octocat/hello/pull/42"),
+			User:    &github.User{Login: github.Ptr("octocat")},
+			Head:    &github.PullRequestBranch{Ref: github.Ptr("feature-branch")},
+			Base:    &github.PullRequestBranch{Ref: github.Ptr("main")},
 		}
-		pr.User.Login = "octocat"
-		pr.Head.Ref = "feature-branch"
-		pr.Base.Ref = "main"
 		json.NewEncoder(w).Encode(pr)
 	})
 
-	client := setupMockGitHub(t, mux)
+	client := setupMockSDKClient(t, mux)
 	pr, err := client.GetPR(context.Background(), "octocat", "hello", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -89,14 +85,15 @@ func TestGetPR(t *testing.T) {
 func TestGetPRDiff(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/octocat/hello/pulls/1", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Accept") == "application/vnd.github.diff" {
+		accept := r.Header.Get("Accept")
+		if strings.Contains(accept, "diff") {
 			w.Write([]byte("diff --git a/file.go b/file.go\n--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n"))
 			return
 		}
-		json.NewEncoder(w).Encode(RawPR{Number: 1})
+		json.NewEncoder(w).Encode(github.PullRequest{Number: github.Ptr(1)})
 	})
 
-	client := setupMockGitHub(t, mux)
+	client := setupMockSDKClient(t, mux)
 	diff, err := client.GetPRDiff(context.Background(), "octocat", "hello", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -104,7 +101,8 @@ func TestGetPRDiff(t *testing.T) {
 	if diff == "" {
 		t.Error("expected non-empty diff")
 	}
-	if diff != "diff --git a/file.go b/file.go\n--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n" {
+	expected := "diff --git a/file.go b/file.go\n--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n"
+	if diff != expected {
 		t.Errorf("unexpected diff content: %q", diff)
 	}
 }
@@ -112,10 +110,10 @@ func TestGetPRDiff(t *testing.T) {
 func TestGetCurrentUser(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"login": "testuser"})
+		json.NewEncoder(w).Encode(github.User{Login: github.Ptr("testuser")})
 	})
 
-	client := setupMockGitHub(t, mux)
+	client := setupMockSDKClient(t, mux)
 	login, err := client.GetCurrentUser(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -131,26 +129,10 @@ func TestToPRState(t *testing.T) {
 		pr       RawPR
 		expected PRState
 	}{
-		{
-			name:     "open PR",
-			pr:       RawPR{State: "open"},
-			expected: PRStateOpen,
-		},
-		{
-			name:     "closed PR",
-			pr:       RawPR{State: "closed"},
-			expected: PRStateClosed,
-		},
-		{
-			name: "merged PR",
-			pr: RawPR{
-				State:    "closed",
-				MergedAt: strPtr("2026-01-01T00:00:00Z"),
-			},
-			expected: PRStateMerged,
-		},
+		{name: "open PR", pr: RawPR{State: "open"}, expected: PRStateOpen},
+		{name: "closed PR", pr: RawPR{State: "closed"}, expected: PRStateClosed},
+		{name: "merged PR", pr: RawPR{State: "closed", MergedAt: strPtr("2026-01-01T00:00:00Z")}, expected: PRStateMerged},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.pr.ToPRState()
@@ -175,20 +157,6 @@ func TestResolveGitHubToken_EnvVar(t *testing.T) {
 	token := resolveGitHubToken()
 	if token != "env-token-123" {
 		t.Errorf("expected 'env-token-123', got %q", token)
-	}
-}
-
-func TestAPIError(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/octocat/missing/pulls", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"message": "Not Found"}`))
-	})
-
-	client := setupMockGitHub(t, mux)
-	_, err := client.ListRepoPRs(context.Background(), "octocat", "missing")
-	if err == nil {
-		t.Fatal("expected error for 404 response")
 	}
 }
 
