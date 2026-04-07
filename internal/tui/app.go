@@ -11,9 +11,12 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/sessionform"
 	"github.com/eleonorayaya/utena/internal/tui/sessionlist"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
+	"github.com/eleonorayaya/utena/internal/tui/prlist"
 	"github.com/eleonorayaya/utena/internal/tui/statusview"
 	"github.com/eleonorayaya/utena/internal/tui/todoform"
 	"github.com/eleonorayaya/utena/internal/tui/todolist"
+	"github.com/eleonorayaya/utena/internal/tui/workspacedetail"
+	"github.com/eleonorayaya/utena/internal/tui/workspacelist"
 )
 
 type App struct {
@@ -52,6 +55,9 @@ func NewApp(logPath, port string, initialView router.View, opts ...AppOption) Ap
 		router.TodoFormView:        &router.ViewAdapter[todoform.Model]{Model: todoform.New()},
 		router.DebugView:           &router.ViewAdapter[debug.Model]{Model: debug.New(logPath, baseURL)},
 		router.StatusView:          &router.ViewAdapter[statusview.Model]{Model: statusview.New()},
+		router.WorkspaceListView:   &router.ViewAdapter[workspacelist.Model]{Model: workspacelist.New()},
+		router.WorkspaceDetailView: &router.ViewAdapter[workspacedetail.Model]{Model: workspacedetail.New()},
+		router.PRListView:          &router.ViewAdapter[prlist.Model]{Model: prlist.New()},
 	}
 
 	return App{
