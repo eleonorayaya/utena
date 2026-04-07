@@ -384,15 +384,24 @@ func (s *GitService) syncRawPR(ctx context.Context, raw RawPR, repo *Repo) error
 
 	if existing != nil {
 		oldState := existing.State
+		wasAssigned := existing.IsAssignedToMe
 		pr.Model = existing.Model
 		if err := s.prStore.Update(pr); err != nil {
 			return fmt.Errorf("failed to update PR #%d: %w", raw.Number, err)
 		}
-		if oldState != pr.State && s.eventBus != nil {
-			s.eventBus.Publish(ctx, eventbus.Event{
-				Type: EventPRStateChanged,
-				Data: PRStateChangedEvent{PullRequest: pr, OldState: oldState, NewState: pr.State},
-			})
+		if s.eventBus != nil {
+			if oldState != pr.State {
+				s.eventBus.Publish(ctx, eventbus.Event{
+					Type: EventPRStateChanged,
+					Data: PRStateChangedEvent{PullRequest: pr, OldState: oldState, NewState: pr.State},
+				})
+			}
+			if !wasAssigned && pr.IsAssignedToMe {
+				s.eventBus.Publish(ctx, eventbus.Event{
+					Type: EventPRDiscovered,
+					Data: PRDiscoveredEvent{PullRequest: pr, Repo: repo},
+				})
+			}
 		}
 	} else {
 		if err := s.prStore.Upsert(pr); err != nil {
