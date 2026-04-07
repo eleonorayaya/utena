@@ -312,6 +312,13 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 }
 
 func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string, worktreePath string) error {
+	if sess.TmuxSessionID != nil {
+		if err := s.tmuxService.RecreateSession(*sess.TmuxSessionID); err != nil {
+			return fmt.Errorf("failed to recreate tmux session: %v", err)
+		}
+		return nil
+	}
+
 	startDir := worktreePath
 	if startDir == "" {
 		startDir = s.resolveStartDir(ctx, sess)
@@ -782,6 +789,10 @@ func (s *SessionService) handlePRDiscovered(ctx context.Context, event eventbus.
 		return nil
 	}
 
+	if !data.PullRequest.IsAssignedToMe {
+		return nil
+	}
+
 	if data.PullRequest.HeadBranchID == nil {
 		return nil
 	}
@@ -795,7 +806,31 @@ func (s *SessionService) handlePRDiscovered(ctx context.Context, event eventbus.
 		return nil
 	}
 
-	slog.Info("PR discovered, could create pending session", "pr", data.PullRequest.Number, "branch", data.PullRequest.HeadBranchID)
+	ws, err := s.workspaceService.GetWorkspaceByRepoID(ctx, data.Repo.ID)
+	if err != nil {
+		slog.Debug("no workspace for repo, skipping pending session", "repo_id", data.Repo.ID)
+		return nil
+	}
+
+	branch, err := s.gitService.GetBranch(*data.PullRequest.HeadBranchID)
+	if err != nil {
+		return fmt.Errorf("failed to get branch: %w", err)
+	}
+
+	sess := &Session{
+		Name:        branch.Name,
+		WorkspaceID: ws.ID,
+		BranchID:    data.PullRequest.HeadBranchID,
+		Status:      StatusPending,
+		LastUsedAt:  time.Now(),
+	}
+
+	if err := s.store.Add(sess); err != nil {
+		slog.Warn("failed to create pending session for PR", "pr", data.PullRequest.Number, "error", err)
+		return nil
+	}
+
+	slog.Info("created pending session for assigned PR", "pr", data.PullRequest.Number, "session", sess.ID, "branch", branch.Name)
 	return nil
 }
 
