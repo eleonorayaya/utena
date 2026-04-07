@@ -62,6 +62,17 @@ func (s *WorkspaceStore) GetByPath(path string) (*Workspace, error) {
 	return &ws, nil
 }
 
+func (s *WorkspaceStore) GetByRepoID(repoID uint) (*Workspace, error) {
+	var ws Workspace
+	if err := s.db.First(&ws, "repo_id = ?", repoID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, common.NewNotFound(fmt.Sprintf("workspace not found for repo: %d", repoID))
+		}
+		return nil, err
+	}
+	return &ws, nil
+}
+
 func (s *WorkspaceStore) List() []Workspace {
 	var workspaces []Workspace
 	s.db.Find(&workspaces)

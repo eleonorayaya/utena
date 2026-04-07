@@ -21,13 +21,14 @@ var ErrCannotActivate = common.NewInvalidRequest("cannot activate session in cur
 type SessionStatus string
 
 const (
-	StatusCreating SessionStatus = "creating"
-	StatusActive   SessionStatus = "active"
-	StatusBroken   SessionStatus = "broken"
-	StatusDeleted  SessionStatus = "deleted"
-	StatusPending  SessionStatus = "pending"
-	StatusInactive SessionStatus = "inactive"
-	StatusArchived SessionStatus = "archived"
+	StatusCreating  SessionStatus = "creating"
+	StatusActive    SessionStatus = "active"
+	StatusBroken    SessionStatus = "broken"
+	StatusDeleted   SessionStatus = "deleted"
+	StatusPending   SessionStatus = "pending"
+	StatusInactive  SessionStatus = "inactive"
+	StatusArchived  SessionStatus = "archived"
+	StatusCompleted SessionStatus = "completed"
 )
 
 type Session struct {

@@ -37,6 +37,10 @@ func (s *WorkspaceService) GetWorkspaceByPath(ctx context.Context, path string) 
 	return s.store.GetByPath(path)
 }
 
+func (s *WorkspaceService) GetWorkspaceByRepoID(ctx context.Context, repoID uint) (*Workspace, error) {
+	return s.store.GetByRepoID(repoID)
+}
+
 func (s *WorkspaceService) Touch(ctx context.Context, id uint) error {
 	ws, err := s.store.GetByID(id)
 	if err != nil {

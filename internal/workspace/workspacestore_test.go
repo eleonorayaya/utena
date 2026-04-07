@@ -596,6 +596,24 @@ func TestWorkspaceStore_Persistence(t *testing.T) {
 	require.Equal(t, "test", retrieved.Name)
 }
 
+func TestWorkspaceStore_GetByRepoID(t *testing.T) {
+	store := setupWorkspaceStore(t)
+	repoID := uint(42)
+	ws := &Workspace{Name: "my-ws", Path: "/test/my-ws", IsGitRepo: true, RepoID: &repoID}
+	require.NoError(t, store.Add(ws))
+
+	found, err := store.GetByRepoID(repoID)
+	require.NoError(t, err)
+	require.Equal(t, ws.ID, found.ID)
+	require.Equal(t, repoID, *found.RepoID)
+}
+
+func TestWorkspaceStore_GetByRepoID_NotFound(t *testing.T) {
+	store := setupWorkspaceStore(t)
+	_, err := store.GetByRepoID(999)
+	require.Error(t, err)
+}
+
 func TestWorkspaceStore_OnAppStart_MergesDiscoveredWithPersisted(t *testing.T) {
 	rootDir := t.TempDir()
 	os.MkdirAll(filepath.Join(rootDir, "project-alpha"), 0755)
