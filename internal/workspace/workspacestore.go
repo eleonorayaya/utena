@@ -42,7 +42,7 @@ func (s *WorkspaceStore) configPath() string {
 
 func (s *WorkspaceStore) GetByID(id uint) (*Workspace, error) {
 	var ws Workspace
-	if err := s.db.First(&ws, "id = ?", id).Error; err != nil {
+	if err := s.db.Joins("Repo").First(&ws, "workspaces.id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, common.NewNotFound(fmt.Sprintf("workspace not found: %d", id))
 		}
@@ -53,7 +53,7 @@ func (s *WorkspaceStore) GetByID(id uint) (*Workspace, error) {
 
 func (s *WorkspaceStore) GetByPath(path string) (*Workspace, error) {
 	var ws Workspace
-	if err := s.db.First(&ws, "path = ?", path).Error; err != nil {
+	if err := s.db.Joins("Repo").First(&ws, "workspaces.path = ?", path).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, common.NewNotFound("workspace not found: " + path)
 		}
@@ -64,7 +64,7 @@ func (s *WorkspaceStore) GetByPath(path string) (*Workspace, error) {
 
 func (s *WorkspaceStore) GetByRepoID(repoID uint) (*Workspace, error) {
 	var ws Workspace
-	if err := s.db.First(&ws, "repo_id = ?", repoID).Error; err != nil {
+	if err := s.db.Joins("Repo").First(&ws, "workspaces.repo_id = ?", repoID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, common.NewNotFound(fmt.Sprintf("workspace not found for repo: %d", repoID))
 		}
@@ -75,7 +75,7 @@ func (s *WorkspaceStore) GetByRepoID(repoID uint) (*Workspace, error) {
 
 func (s *WorkspaceStore) List() []Workspace {
 	var workspaces []Workspace
-	s.db.Find(&workspaces)
+	s.db.Joins("Repo").Find(&workspaces)
 
 	sort.Slice(workspaces, func(i, j int) bool {
 		iUsed := !workspaces[i].LastUsedAt.IsZero()
@@ -98,7 +98,7 @@ func (s *WorkspaceStore) Add(ws *Workspace) error {
 		return errors.New("workspace cannot be nil")
 	}
 
-	if err := s.db.Create(ws).Error; err != nil {
+	if err := s.db.Omit("Repo").Create(ws).Error; err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return errors.New("workspace with this path already exists")
 		}
@@ -123,7 +123,7 @@ func (s *WorkspaceStore) Update(ws *Workspace) error {
 		return err
 	}
 
-	return s.db.Save(ws).Error
+	return s.db.Omit("Repo").Save(ws).Error
 }
 
 func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {

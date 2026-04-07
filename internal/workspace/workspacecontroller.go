@@ -112,3 +112,28 @@ func (c *WorkspaceController) ListBranches(w http.ResponseWriter, r *http.Reques
 
 	render.JSON(w, r, BranchListResponse{Branches: branches, CurrentBranch: currentBranch})
 }
+
+func (c *WorkspaceController) ListPRs(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	raw := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	ws, err := c.service.GetWorkspace(ctx, uint(id))
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	if ws.RepoID == nil {
+		common.RenderError(w, r, common.NewInvalidRequest("workspace has no associated repository"))
+		return
+	}
+
+	state := git.PRState(r.URL.Query().Get("state"))
+	prs := c.gitService.SearchPRs(*ws.RepoID, state)
+	render.JSON(w, r, PRListResponse{PullRequests: prs})
+}

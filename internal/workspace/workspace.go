@@ -3,6 +3,7 @@ package workspace
 import (
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/git"
 	"gorm.io/gorm"
 )
 
@@ -12,5 +13,6 @@ type Workspace struct {
 	Path       string    `json:"path" gorm:"uniqueIndex"`
 	IsGitRepo  bool      `json:"is_git_repo"`
 	RepoID     *uint     `json:"repo_id,omitempty" gorm:"index"`
+	Repo       *git.Repo `json:"repo,omitempty" gorm:"foreignKey:RepoID"`
 	LastUsedAt time.Time `json:"last_used_at,omitempty"`
 }
