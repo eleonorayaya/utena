@@ -54,5 +54,6 @@ func main() {
 		}
 	case err := <-serverErr:
 		slog.Error("HTTP server failed", "error", err)
+		stop()
 	}
 }
