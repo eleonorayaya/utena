@@ -312,6 +312,10 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 }
 
 func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string, worktreePath string) error {
+	if s.tmuxService.HasSession(tmuxName) {
+		return nil
+	}
+
 	if sess.TmuxSessionID != nil {
 		if err := s.tmuxService.RecreateSession(*sess.TmuxSessionID); err != nil {
 			return fmt.Errorf("failed to recreate tmux session: %v", err)
