@@ -104,6 +104,8 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, router.NavigateTo(router.SessionFormView), true
 	case key.Matches(msg, keys.Todos):
 		return m, router.NavigateTo(router.TodoListView), true
+	case key.Matches(msg, keys.Workspaces):
+		return m, router.NavigateTo(router.WorkspaceListView), true
 	case key.Matches(msg, keys.Select):
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			if item.session.IsAttached {
