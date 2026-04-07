@@ -37,10 +37,10 @@ func TestListRepoPRs(t *testing.T) {
 	if len(prs) != 2 {
 		t.Fatalf("expected 2 PRs, got %d", len(prs))
 	}
-	if prs[0].Number != 1 || prs[0].Title != "Fix bug" {
+	if prs[0].GetNumber() != 1 || prs[0].GetTitle() != "Fix bug" {
 		t.Errorf("unexpected first PR: %+v", prs[0])
 	}
-	if !prs[1].Draft {
+	if !prs[1].GetDraft() {
 		t.Error("expected second PR to be draft")
 	}
 }
@@ -65,20 +65,20 @@ func TestGetPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if pr.Number != 42 {
-		t.Errorf("expected number 42, got %d", pr.Number)
+	if pr.GetNumber() != 42 {
+		t.Errorf("expected number 42, got %d", pr.GetNumber())
 	}
-	if pr.Title != "The answer" {
-		t.Errorf("expected title 'The answer', got %q", pr.Title)
+	if pr.GetTitle() != "The answer" {
+		t.Errorf("expected title 'The answer', got %q", pr.GetTitle())
 	}
-	if pr.User.Login != "octocat" {
-		t.Errorf("expected user 'octocat', got %q", pr.User.Login)
+	if pr.GetUser().GetLogin() != "octocat" {
+		t.Errorf("expected user 'octocat', got %q", pr.GetUser().GetLogin())
 	}
-	if pr.Head.Ref != "feature-branch" {
-		t.Errorf("expected head ref 'feature-branch', got %q", pr.Head.Ref)
+	if pr.GetHead().GetRef() != "feature-branch" {
+		t.Errorf("expected head ref 'feature-branch', got %q", pr.GetHead().GetRef())
 	}
-	if pr.Base.Ref != "main" {
-		t.Errorf("expected base ref 'main', got %q", pr.Base.Ref)
+	if pr.GetBase().GetRef() != "main" {
+		t.Errorf("expected base ref 'main', got %q", pr.GetBase().GetRef())
 	}
 }
 
@@ -97,9 +97,6 @@ func TestGetPRDiff(t *testing.T) {
 	diff, err := client.GetPRDiff(context.Background(), "octocat", "hello", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if diff == "" {
-		t.Error("expected non-empty diff")
 	}
 	expected := "diff --git a/file.go b/file.go\n--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n"
 	if diff != expected {
@@ -123,26 +120,6 @@ func TestGetCurrentUser(t *testing.T) {
 	}
 }
 
-func TestToPRState(t *testing.T) {
-	tests := []struct {
-		name     string
-		pr       RawPR
-		expected PRState
-	}{
-		{name: "open PR", pr: RawPR{State: "open"}, expected: PRStateOpen},
-		{name: "closed PR", pr: RawPR{State: "closed"}, expected: PRStateClosed},
-		{name: "merged PR", pr: RawPR{State: "closed", MergedAt: strPtr("2026-01-01T00:00:00Z")}, expected: PRStateMerged},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.pr.ToPRState()
-			if got != tt.expected {
-				t.Errorf("expected %q, got %q", tt.expected, got)
-			}
-		})
-	}
-}
-
 func TestResolveGitHubToken_EnvVar(t *testing.T) {
 	original := getEnv
 	t.Cleanup(func() { getEnv = original })
@@ -158,8 +135,4 @@ func TestResolveGitHubToken_EnvVar(t *testing.T) {
 	if token != "env-token-123" {
 		t.Errorf("expected 'env-token-123', got %q", token)
 	}
-}
-
-func strPtr(s string) *string {
-	return &s
 }

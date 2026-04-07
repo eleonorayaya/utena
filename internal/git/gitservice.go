@@ -8,6 +8,7 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/google/go-github/v72/github"
 )
 
 var ErrNoGitHubClient = errors.New("github client not configured")
@@ -362,17 +363,18 @@ func (s *GitService) GetPRDiff(ctx context.Context, prID uint) (*Diff, error) {
 	return ParseUnifiedDiff(raw)
 }
 
-func (s *GitService) syncRawPR(ctx context.Context, raw RawPR, repo *Repo) error {
-	branch, _ := s.branchStore.GetByNameAndRepo(raw.Head.Ref, repo.ID)
+func (s *GitService) syncGitHubPR(ctx context.Context, ghPR *github.PullRequest, repo *Repo) error {
+	headRef := ghPR.GetHead().GetRef()
+	branch, _ := s.branchStore.GetByNameAndRepo(headRef, repo.ID)
 	if branch == nil {
-		branch = &Branch{Name: raw.Head.Ref, RepoID: repo.ID, ExistsRemote: true}
+		branch = &Branch{Name: headRef, RepoID: repo.ID, ExistsRemote: true}
 		if err := s.branchStore.Upsert(branch); err != nil {
-			return fmt.Errorf("failed to upsert branch %s: %w", raw.Head.Ref, err)
+			return fmt.Errorf("failed to upsert branch %s: %w", headRef, err)
 		}
 	}
 
-	existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, raw.Number)
-	pr := rawPRToPullRequest(raw, repo.ID, branch.ID, s.currentUser)
+	existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, ghPR.GetNumber())
+	pr := ghPRToPullRequest(ghPR, repo.ID, branch.ID, s.currentUser)
 
 	var previous *PullRequest
 	if existing != nil {
@@ -380,11 +382,11 @@ func (s *GitService) syncRawPR(ctx context.Context, raw RawPR, repo *Repo) error
 		*previous = *existing
 		pr.Model = existing.Model
 		if err := s.prStore.Update(pr); err != nil {
-			return fmt.Errorf("failed to update PR #%d: %w", raw.Number, err)
+			return fmt.Errorf("failed to update PR #%d: %w", ghPR.GetNumber(), err)
 		}
 	} else {
 		if err := s.prStore.Upsert(pr); err != nil {
-			return fmt.Errorf("failed to upsert PR #%d: %w", raw.Number, err)
+			return fmt.Errorf("failed to upsert PR #%d: %w", ghPR.GetNumber(), err)
 		}
 	}
 	if s.eventBus != nil {
@@ -409,9 +411,9 @@ func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 		return err
 	}
 	var errs []error
-	for _, raw := range rawPRs {
-		if err := s.syncRawPR(ctx, raw, repo); err != nil {
-			slog.Warn("failed to sync PR", "number", raw.Number, "error", err)
+	for _, ghPR := range rawPRs {
+		if err := s.syncGitHubPR(ctx, ghPR, repo); err != nil {
+			slog.Warn("failed to sync PR", "number", ghPR.GetNumber(), "error", err)
 			errs = append(errs, err)
 		}
 	}
@@ -421,24 +423,30 @@ func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 	return nil
 }
 
-func rawPRToPullRequest(raw RawPR, repoID uint, branchID uint, currentUser string) *PullRequest {
+func ghPRToPullRequest(ghPR *github.PullRequest, repoID uint, branchID uint, currentUser string) *PullRequest {
 	assigned := false
-	for _, a := range raw.Assignees {
-		if a.Login == currentUser {
+	for _, a := range ghPR.Assignees {
+		if a.GetLogin() == currentUser {
 			assigned = true
 			break
 		}
 	}
+	state := PRStateOpen
+	if ghPR.MergedAt != nil {
+		state = PRStateMerged
+	} else if ghPR.GetState() == "closed" {
+		state = PRStateClosed
+	}
 	return &PullRequest{
 		RepoID:         repoID,
-		Number:         raw.Number,
+		Number:         ghPR.GetNumber(),
 		HeadBranchID:   &branchID,
-		Title:          raw.Title,
-		State:          raw.ToPRState(),
-		IsDraft:        raw.Draft,
+		Title:          ghPR.GetTitle(),
+		State:          state,
+		IsDraft:        ghPR.GetDraft(),
 		IsAssignedToMe: assigned,
-		HTMLURL:        raw.HTMLURL,
-		AuthorLogin:    raw.User.Login,
+		HTMLURL:        ghPR.GetHTMLURL(),
+		AuthorLogin:    ghPR.GetUser().GetLogin(),
 	}
 }
 
