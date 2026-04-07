@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/db"
@@ -86,6 +87,31 @@ func (t *reconcileSyncTask) Run(ctx context.Context) error {
 	return nil
 }
 
+type completedCleanupTask struct {
+	service *SessionService
+}
+
+func (t *completedCleanupTask) Name() string            { return "session.completed_cleanup" }
+func (t *completedCleanupTask) Interval() time.Duration { return 5 * time.Minute }
+func (t *completedCleanupTask) Run(ctx context.Context) error {
+	sessions, err := t.service.store.List()
+	if err != nil {
+		return fmt.Errorf("failed to list sessions: %w", err)
+	}
+	cutoff := time.Now().Add(-5 * time.Minute)
+	for _, sess := range sessions {
+		if sess.Status == StatusCompleted && !sess.IsAttached && sess.LastUsedAt.Before(cutoff) {
+			if _, err := t.service.ArchiveSession(ctx, sess.ID); err != nil {
+				slog.Warn("failed to auto-archive completed session", "session", sess.ID, "error", err)
+			} else {
+				slog.Info("auto-archived completed session", "session", sess.ID)
+			}
+		}
+	}
+	return nil
+}
+
 func (m *SessionModule) RegisterJobs(svc *jobs.JobService) {
 	svc.Register(&reconcileSyncTask{service: m.Service})
+	svc.Register(&completedCleanupTask{service: m.Service})
 }

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"testing"
 
 	"github.com/eleonorayaya/utena/internal/db"
@@ -38,6 +39,20 @@ func TestGitModule_RegisterJobs(t *testing.T) {
 	assert.NoError(t, svc.TriggerJob("git.prs"))
 	assert.NoError(t, svc.TriggerJob("git.branches"))
 	assert.Error(t, svc.TriggerJob("nonexistent"))
+}
+
+func TestGitModule_OnAppStart_SetsCurrentUser(t *testing.T) {
+	database, err := db.OpenInMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { database.Close() })
+
+	bus := &mockEventBus{}
+	module := NewGitModule(database, bus)
+	module.Service.githubClient = &mockGitHubClient{currentUser: "testuser"}
+
+	err = module.OnAppStart(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "testuser", module.Service.currentUser)
 }
 
 func TestGitModule_InitializesWithoutError(t *testing.T) {

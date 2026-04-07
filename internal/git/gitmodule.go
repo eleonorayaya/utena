@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -22,14 +23,21 @@ func NewGitModule(database db.Database, bus eventbus.EventBus) *GitModule {
 }
 
 func (m *GitModule) OnAppStart(ctx context.Context) error {
-	if m.Service.githubClient != nil {
-		return nil
+	if m.Service.githubClient == nil {
+		ghClient, err := NewGitHubClient(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to initialize GitHub client: %w", err)
+		}
+		m.Service.githubClient = ghClient
 	}
-	ghClient, err := NewGitHubClient(ctx)
+
+	user, err := m.Service.githubClient.GetCurrentUser(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to initialize GitHub client: %w", err)
+		slog.Warn("failed to get current GitHub user", "error", err)
+	} else {
+		m.Service.currentUser = user
 	}
-	m.Service.githubClient = ghClient
+
 	return nil
 }
 
@@ -51,16 +59,17 @@ type prSyncTask struct {
 }
 
 func (t *prSyncTask) Name() string            { return "git.prs" }
-func (t *prSyncTask) Interval() time.Duration { return 5 * time.Minute }
+func (t *prSyncTask) Interval() time.Duration { return 30 * time.Second }
 func (t *prSyncTask) Run(ctx context.Context) error {
 	repos := t.service.repoStore.List()
 	for _, repo := range repos {
+		slog.Info("syncing PRs for repo", "repo", repo.FullName)
 		if err := t.service.SyncRepoPRs(ctx, &repo); err != nil {
+			if errors.Is(err, ErrNoGitHubClient) {
+				return err
+			}
 			slog.Warn("failed to sync PRs for repo", "repo", repo.FullName, "error", err)
 		}
-	}
-	if _, err := t.service.SyncAssignedPRs(ctx); err != nil {
-		slog.Warn("failed to sync assigned PRs", "error", err)
 	}
 	return nil
 }

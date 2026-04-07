@@ -2,6 +2,7 @@ package provider
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
@@ -26,6 +27,15 @@ func RequestBranches(workspaceID uint) tea.Cmd {
 	return func() tea.Msg { return requestBranchesMsg{workspaceID: workspaceID} }
 }
 
+type PRsStateUpdatedMsg struct {
+	PullRequests []git.PullRequest
+	WorkspaceID  uint
+}
+
+func FetchPRs(workspaceID uint, state string) tea.Cmd {
+	return func() tea.Msg { return fetchPRsIntentMsg{workspaceID: workspaceID, state: state} }
+}
+
 func AddWorkspace(path string, asRoot bool) tea.Cmd {
 	return func() tea.Msg { return addWorkspaceIntentMsg{path: path, asRoot: asRoot} }
 }
@@ -40,6 +50,16 @@ type requestBranchesMsg struct {
 type addWorkspaceIntentMsg struct {
 	path   string
 	asRoot bool
+}
+
+type fetchPRsIntentMsg struct {
+	workspaceID uint
+	state       string
+}
+
+type prsLoadedMsg struct {
+	prs         []git.PullRequest
+	workspaceID uint
 }
 
 type workspacesLoadedMsg struct {
@@ -93,6 +113,14 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 
 	case requestBranchesMsg:
 		return p, p.client.fetchBranches(msg.workspaceID)
+
+	case fetchPRsIntentMsg:
+		return p, p.client.fetchPRs(msg.workspaceID, msg.state)
+
+	case prsLoadedMsg:
+		prs := msg.prs
+		wsID := msg.workspaceID
+		return p, func() tea.Msg { return PRsStateUpdatedMsg{PullRequests: prs, WorkspaceID: wsID} }
 
 	case setActiveWorkspaceMsg:
 		p.activeWorkspaceID = msg.workspaceID

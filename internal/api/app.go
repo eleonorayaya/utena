@@ -64,6 +64,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxMod
 	jobsModule := jobs.NewJobsModule()
 	gitModule.RegisterJobs(jobsModule.Service)
 	sessionModule.RegisterJobs(jobsModule.Service)
+	workspaceModule.RegisterJobs(jobsModule.Service)
 
 	app := &App{
 		DB:        dbModule,

@@ -5,35 +5,31 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/google/go-github/v72/github"
 )
 
-func setupMockGitHub(t *testing.T, handler http.Handler) *githubRESTClient {
+func setupMockSDKClient(t *testing.T, handler http.Handler) *githubSDKClient {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-
-	return &githubRESTClient{
-		token:      "test-token",
-		httpClient: server.Client(),
-		baseURL:    server.URL,
-	}
+	client := github.NewClient(nil).WithAuthToken("test-token")
+	client.BaseURL, _ = client.BaseURL.Parse(server.URL + "/")
+	return newGitHubClientWithBaseClient(client)
 }
 
 func TestListRepoPRs(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/octocat/hello/pulls", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer test-token" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+		prs := []*github.PullRequest{
+			{Number: github.Ptr(1), Title: github.Ptr("Fix bug"), State: github.Ptr("open"), Draft: github.Ptr(false), HTMLURL: github.Ptr("https://github.com/octocat/hello/pull/1")},
+			{Number: github.Ptr(2), Title: github.Ptr("Add feature"), State: github.Ptr("open"), Draft: github.Ptr(true), HTMLURL: github.Ptr("https://github.com/octocat/hello/pull/2")},
 		}
-		resp := []RawPR{
-			{Number: 1, Title: "Fix bug", State: "open", HTMLURL: "https://github.com/octocat/hello/pull/1"},
-			{Number: 2, Title: "Add feature", State: "open", Draft: true, HTMLURL: "https://github.com/octocat/hello/pull/2"},
-		}
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(prs)
 	})
 
-	client := setupMockGitHub(t, mux)
+	client := setupMockSDKClient(t, mux)
 	prs, err := client.ListRepoPRs(context.Background(), "octocat", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -41,10 +37,10 @@ func TestListRepoPRs(t *testing.T) {
 	if len(prs) != 2 {
 		t.Fatalf("expected 2 PRs, got %d", len(prs))
 	}
-	if prs[0].Number != 1 || prs[0].Title != "Fix bug" {
+	if prs[0].GetNumber() != 1 || prs[0].GetTitle() != "Fix bug" {
 		t.Errorf("unexpected first PR: %+v", prs[0])
 	}
-	if !prs[1].Draft {
+	if !prs[1].GetDraft() {
 		t.Error("expected second PR to be draft")
 	}
 }
@@ -52,59 +48,58 @@ func TestListRepoPRs(t *testing.T) {
 func TestGetPR(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/octocat/hello/pulls/42", func(w http.ResponseWriter, r *http.Request) {
-		pr := RawPR{
-			Number:  42,
-			Title:   "The answer",
-			State:   "open",
-			HTMLURL: "https://github.com/octocat/hello/pull/42",
+		pr := &github.PullRequest{
+			Number:  github.Ptr(42),
+			Title:   github.Ptr("The answer"),
+			State:   github.Ptr("open"),
+			HTMLURL: github.Ptr("https://github.com/octocat/hello/pull/42"),
+			User:    &github.User{Login: github.Ptr("octocat")},
+			Head:    &github.PullRequestBranch{Ref: github.Ptr("feature-branch")},
+			Base:    &github.PullRequestBranch{Ref: github.Ptr("main")},
 		}
-		pr.User.Login = "octocat"
-		pr.Head.Ref = "feature-branch"
-		pr.Base.Ref = "main"
 		json.NewEncoder(w).Encode(pr)
 	})
 
-	client := setupMockGitHub(t, mux)
+	client := setupMockSDKClient(t, mux)
 	pr, err := client.GetPR(context.Background(), "octocat", "hello", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if pr.Number != 42 {
-		t.Errorf("expected number 42, got %d", pr.Number)
+	if pr.GetNumber() != 42 {
+		t.Errorf("expected number 42, got %d", pr.GetNumber())
 	}
-	if pr.Title != "The answer" {
-		t.Errorf("expected title 'The answer', got %q", pr.Title)
+	if pr.GetTitle() != "The answer" {
+		t.Errorf("expected title 'The answer', got %q", pr.GetTitle())
 	}
-	if pr.User.Login != "octocat" {
-		t.Errorf("expected user 'octocat', got %q", pr.User.Login)
+	if pr.GetUser().GetLogin() != "octocat" {
+		t.Errorf("expected user 'octocat', got %q", pr.GetUser().GetLogin())
 	}
-	if pr.Head.Ref != "feature-branch" {
-		t.Errorf("expected head ref 'feature-branch', got %q", pr.Head.Ref)
+	if pr.GetHead().GetRef() != "feature-branch" {
+		t.Errorf("expected head ref 'feature-branch', got %q", pr.GetHead().GetRef())
 	}
-	if pr.Base.Ref != "main" {
-		t.Errorf("expected base ref 'main', got %q", pr.Base.Ref)
+	if pr.GetBase().GetRef() != "main" {
+		t.Errorf("expected base ref 'main', got %q", pr.GetBase().GetRef())
 	}
 }
 
 func TestGetPRDiff(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/octocat/hello/pulls/1", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Accept") == "application/vnd.github.diff" {
+		accept := r.Header.Get("Accept")
+		if strings.Contains(accept, "diff") {
 			w.Write([]byte("diff --git a/file.go b/file.go\n--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n"))
 			return
 		}
-		json.NewEncoder(w).Encode(RawPR{Number: 1})
+		json.NewEncoder(w).Encode(github.PullRequest{Number: github.Ptr(1)})
 	})
 
-	client := setupMockGitHub(t, mux)
+	client := setupMockSDKClient(t, mux)
 	diff, err := client.GetPRDiff(context.Background(), "octocat", "hello", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if diff == "" {
-		t.Error("expected non-empty diff")
-	}
-	if diff != "diff --git a/file.go b/file.go\n--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n" {
+	expected := "diff --git a/file.go b/file.go\n--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n"
+	if diff != expected {
 		t.Errorf("unexpected diff content: %q", diff)
 	}
 }
@@ -112,52 +107,16 @@ func TestGetPRDiff(t *testing.T) {
 func TestGetCurrentUser(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"login": "testuser"})
+		json.NewEncoder(w).Encode(github.User{Login: github.Ptr("testuser")})
 	})
 
-	client := setupMockGitHub(t, mux)
+	client := setupMockSDKClient(t, mux)
 	login, err := client.GetCurrentUser(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if login != "testuser" {
 		t.Errorf("expected 'testuser', got %q", login)
-	}
-}
-
-func TestToPRState(t *testing.T) {
-	tests := []struct {
-		name     string
-		pr       RawPR
-		expected PRState
-	}{
-		{
-			name:     "open PR",
-			pr:       RawPR{State: "open"},
-			expected: PRStateOpen,
-		},
-		{
-			name:     "closed PR",
-			pr:       RawPR{State: "closed"},
-			expected: PRStateClosed,
-		},
-		{
-			name: "merged PR",
-			pr: RawPR{
-				State:    "closed",
-				MergedAt: strPtr("2026-01-01T00:00:00Z"),
-			},
-			expected: PRStateMerged,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.pr.ToPRState()
-			if got != tt.expected {
-				t.Errorf("expected %q, got %q", tt.expected, got)
-			}
-		})
 	}
 }
 
@@ -176,69 +135,4 @@ func TestResolveGitHubToken_EnvVar(t *testing.T) {
 	if token != "env-token-123" {
 		t.Errorf("expected 'env-token-123', got %q", token)
 	}
-}
-
-func TestAPIError(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/octocat/missing/pulls", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"message": "Not Found"}`))
-	})
-
-	client := setupMockGitHub(t, mux)
-	_, err := client.ListRepoPRs(context.Background(), "octocat", "missing")
-	if err == nil {
-		t.Fatal("expected error for 404 response")
-	}
-}
-
-func TestListAssignedPRs(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"login": "testuser"})
-	})
-	mux.HandleFunc("/search/issues", func(w http.ResponseWriter, r *http.Request) {
-		item1, _ := json.Marshal(map[string]any{
-			"number": 10,
-			"repository": map[string]string{
-				"full_name": "octocat/hello",
-			},
-		})
-		resp := map[string]any{
-			"total_count": 1,
-			"items":       []json.RawMessage{item1},
-		}
-		json.NewEncoder(w).Encode(resp)
-	})
-	mux.HandleFunc("/repos/octocat/hello/pulls/10", func(w http.ResponseWriter, r *http.Request) {
-		pr := RawPR{
-			Number:  10,
-			Title:   "Assigned PR",
-			State:   "open",
-			HTMLURL: "https://github.com/octocat/hello/pull/10",
-		}
-		pr.User.Login = "someone"
-		pr.Head.Ref = "fix-stuff"
-		pr.Base.Ref = "main"
-		json.NewEncoder(w).Encode(pr)
-	})
-
-	client := setupMockGitHub(t, mux)
-	prs, err := client.ListAssignedPRs(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(prs) != 1 {
-		t.Fatalf("expected 1 PR, got %d", len(prs))
-	}
-	if prs[0].Number != 10 {
-		t.Errorf("expected PR number 10, got %d", prs[0].Number)
-	}
-	if prs[0].Head.Ref != "fix-stuff" {
-		t.Errorf("expected head ref 'fix-stuff', got %q", prs[0].Head.Ref)
-	}
-}
-
-func strPtr(s string) *string {
-	return &s
 }

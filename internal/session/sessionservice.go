@@ -47,8 +47,7 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.eventBus.Subscribe(eventbus.TmuxClientSessionChanged, s.handleTmuxClientSessionChanged)
 	s.eventBus.Subscribe(eventbus.TmuxClientAttached, s.handleTmuxClientAttached)
 	s.eventBus.Subscribe(eventbus.TmuxClientDetached, s.handleTmuxClientDetached)
-	s.eventBus.Subscribe(git.EventPRDiscovered, s.handlePRDiscovered)
-	s.eventBus.Subscribe(git.EventPRStateChanged, s.handlePRStateChanged)
+	s.eventBus.Subscribe(git.EventPRUpdated, s.handlePRUpdated)
 	s.reconcileTmuxState(ctx)
 	return nil
 }
@@ -312,6 +311,22 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 }
 
 func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string, worktreePath string) error {
+	if s.tmuxService.HasSession(tmuxName) {
+		if sess.TmuxSessionID == nil {
+			if ts, err := s.tmuxService.GetSessionByName(tmuxName); err == nil {
+				sess.TmuxSessionID = &ts.ID
+			}
+		}
+		return nil
+	}
+
+	if sess.TmuxSessionID != nil {
+		if err := s.tmuxService.RecreateSession(*sess.TmuxSessionID); err != nil {
+			return fmt.Errorf("failed to recreate tmux session: %v", err)
+		}
+		return nil
+	}
+
 	startDir := worktreePath
 	if startDir == "" {
 		startDir = s.resolveStartDir(ctx, sess)
@@ -688,7 +703,7 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 	if err != nil {
 		return nil, err
 	}
-	if sess.Status != StatusActive && sess.Status != StatusInactive {
+	if sess.Status != StatusActive && sess.Status != StatusInactive && sess.Status != StatusCompleted {
 		return nil, fmt.Errorf("cannot archive session in status %s", sess.Status)
 	}
 
@@ -776,37 +791,86 @@ func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Sessio
 	return sess, nil
 }
 
-func (s *SessionService) handlePRDiscovered(ctx context.Context, event eventbus.Event) error {
-	data, ok := event.Data.(git.PRDiscoveredEvent)
+func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(git.PRUpdatedEvent)
 	if !ok {
 		return nil
 	}
 
-	if data.PullRequest.HeadBranchID == nil {
+	pr := data.PullRequest
+	if pr.HeadBranchID == nil {
 		return nil
 	}
 
-	_, err := s.store.GetByBranchID(*data.PullRequest.HeadBranchID)
-	if err == nil {
-		return nil
+	isNew := data.Previous == nil
+	newlyAssigned := pr.IsAssignedToMe && (isNew || !data.Previous.IsAssignedToMe)
+	newlyMerged := pr.State == git.PRStateMerged && (isNew || data.Previous.State != git.PRStateMerged)
+
+	if newlyAssigned {
+		s.maybeCreatePendingSession(ctx, data)
 	}
 
-	if s.dismissedPRStore != nil && s.dismissedPRStore.IsDismissed(data.PullRequest.ID) {
-		return nil
+	if newlyMerged {
+		s.maybeCompleteSession(ctx, pr)
 	}
 
-	slog.Info("PR discovered, could create pending session", "pr", data.PullRequest.Number, "branch", data.PullRequest.HeadBranchID)
 	return nil
 }
 
-func (s *SessionService) handlePRStateChanged(ctx context.Context, event eventbus.Event) error {
-	data, ok := event.Data.(git.PRStateChangedEvent)
-	if !ok {
-		return nil
+func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git.PRUpdatedEvent) {
+	pr := data.PullRequest
+
+	_, err := s.store.GetByBranchID(*pr.HeadBranchID)
+	if err == nil {
+		return
 	}
 
-	if data.NewState == git.PRStateMerged && data.PullRequest.HeadBranchID != nil {
-		slog.Info("PR merged", "pr", data.PullRequest.Number, "branch_id", *data.PullRequest.HeadBranchID)
+	if s.dismissedPRStore != nil && s.dismissedPRStore.IsDismissed(pr.ID) {
+		return
 	}
-	return nil
+
+	ws, err := s.workspaceService.GetWorkspaceByRepoID(ctx, data.Repo.ID)
+	if err != nil {
+		slog.Debug("no workspace for repo, skipping pending session", "repo_id", data.Repo.ID)
+		return
+	}
+
+	branch, err := s.gitService.GetBranch(*pr.HeadBranchID)
+	if err != nil {
+		slog.Warn("failed to get branch for pending session", "error", err)
+		return
+	}
+
+	sess := &Session{
+		Name:        branch.Name,
+		WorkspaceID: ws.ID,
+		BranchID:    pr.HeadBranchID,
+		Status:      StatusPending,
+		LastUsedAt:  time.Now(),
+	}
+
+	if err := s.store.Add(sess); err != nil {
+		slog.Warn("failed to create pending session for PR", "pr", pr.Number, "error", err)
+		return
+	}
+
+	slog.Info("created pending session for assigned PR", "pr", pr.Number, "session", sess.ID, "branch", branch.Name)
+}
+
+func (s *SessionService) maybeCompleteSession(_ context.Context, pr *git.PullRequest) {
+	sess, err := s.store.GetByBranchID(*pr.HeadBranchID)
+	if err != nil {
+		return
+	}
+
+	if sess.Status == StatusDeleted || sess.Status == StatusArchived || sess.Status == StatusCompleted {
+		return
+	}
+
+	sess.Status = StatusCompleted
+	if err := s.store.Update(sess); err != nil {
+		slog.Warn("failed to mark session completed", "session", sess.ID, "error", err)
+	} else {
+		slog.Info("marked session completed after PR merge", "session", sess.ID, "pr", pr.Number)
+	}
 }

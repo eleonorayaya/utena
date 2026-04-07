@@ -6,34 +6,27 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/google/go-github/v72/github"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockGitHubClient struct {
-	repoPRs     []RawPR
-	assignedPRs []RawPR
-	prByNumber  map[int]*RawPR
+	repoPRs     []*github.PullRequest
+	prByNumber  map[int]*github.PullRequest
 	diffContent string
 	currentUser string
 	err         error
 }
 
-func (m *mockGitHubClient) ListRepoPRs(ctx context.Context, owner, repo string) ([]RawPR, error) {
+func (m *mockGitHubClient) ListRepoPRs(ctx context.Context, owner, repo string) ([]*github.PullRequest, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.repoPRs, nil
 }
 
-func (m *mockGitHubClient) ListAssignedPRs(ctx context.Context) ([]RawPR, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.assignedPRs, nil
-}
-
-func (m *mockGitHubClient) GetPR(ctx context.Context, owner, repo string, number int) (*RawPR, error) {
+func (m *mockGitHubClient) GetPR(ctx context.Context, owner, repo string, number int) (*github.PullRequest, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -81,26 +74,26 @@ func setupGitServiceTest(t *testing.T) (db.Database, *Repo) {
 	return database, repo
 }
 
-func makeRawPR(number int, title, headRef, state string, draft bool) RawPR {
-	raw := RawPR{
-		Number:  number,
-		Title:   title,
-		State:   state,
-		Draft:   draft,
-		HTMLURL: "https://github.com/owner/repo/pull/1",
+func makeGitHubPR(number int, title, headRef, state string, draft bool) *github.PullRequest {
+	return &github.PullRequest{
+		Number:  github.Ptr(number),
+		Title:   github.Ptr(title),
+		State:   github.Ptr(state),
+		Draft:   github.Ptr(draft),
+		HTMLURL: github.Ptr("https://github.com/owner/repo/pull/1"),
+		User:    &github.User{Login: github.Ptr("octocat")},
+		Head: &github.PullRequestBranch{
+			Ref:  github.Ptr(headRef),
+			Repo: &github.Repository{FullName: github.Ptr("owner/repo")},
+		},
+		Base: &github.PullRequestBranch{Ref: github.Ptr("main")},
 	}
-	raw.User.Login = "octocat"
-	raw.Head.Ref = headRef
-	raw.Head.Repo = &struct {
-		FullName string `json:"full_name"`
-	}{FullName: "owner/repo"}
-	return raw
 }
 
 func TestSyncRepoPRs_CreatesNewPRs(t *testing.T) {
 	database, repo := setupGitServiceTest(t)
 	ghClient := &mockGitHubClient{
-		repoPRs: []RawPR{makeRawPR(1, "First PR", "feature-a", "open", false)},
+		repoPRs: []*github.PullRequest{makeGitHubPR(1, "First PR", "feature-a", "open", false)},
 	}
 	svc := NewGitService(database, WithGitHubClient(ghClient))
 
@@ -132,7 +125,7 @@ func TestSyncRepoPRs_UpdatesExistingPRs(t *testing.T) {
 	require.NoError(t, prStore.Add(existing))
 
 	ghClient := &mockGitHubClient{
-		repoPRs: []RawPR{makeRawPR(1, "New Title", "feature-a", "open", false)},
+		repoPRs: []*github.PullRequest{makeGitHubPR(1, "New Title", "feature-a", "open", false)},
 	}
 	svc := NewGitService(database, WithGitHubClient(ghClient))
 
@@ -144,7 +137,7 @@ func TestSyncRepoPRs_UpdatesExistingPRs(t *testing.T) {
 	assert.Equal(t, "New Title", updated.Title)
 }
 
-func TestSyncRepoPRs_PublishesStateChangedEvent(t *testing.T) {
+func TestSyncRepoPRs_PublishesPRUpdatedOnStateChange(t *testing.T) {
 	database, repo := setupGitServiceTest(t)
 	branchStore := NewBranchStore(database)
 	branch := &Branch{Name: "feature-a", RepoID: repo.ID}
@@ -161,11 +154,11 @@ func TestSyncRepoPRs_PublishesStateChangedEvent(t *testing.T) {
 	}
 	require.NoError(t, prStore.Add(existing))
 
-	mergedAt := "2026-01-01T00:00:00Z"
-	raw := makeRawPR(1, "Some PR", "feature-a", "closed", false)
+	mergedAt := github.Timestamp{}
+	raw := makeGitHubPR(1, "Some PR", "feature-a", "closed", false)
 	raw.MergedAt = &mergedAt
 
-	ghClient := &mockGitHubClient{repoPRs: []RawPR{raw}}
+	ghClient := &mockGitHubClient{repoPRs: []*github.PullRequest{raw}}
 	bus := &mockEventBus{}
 	svc := NewGitService(database, WithGitHubClient(ghClient), WithEventBus(bus))
 
@@ -173,16 +166,17 @@ func TestSyncRepoPRs_PublishesStateChangedEvent(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, bus.events, 1)
-	assert.Equal(t, EventPRStateChanged, bus.events[0].Type)
-	data := bus.events[0].Data.(PRStateChangedEvent)
-	assert.Equal(t, PRStateOpen, data.OldState)
-	assert.Equal(t, PRStateMerged, data.NewState)
+	assert.Equal(t, EventPRUpdated, bus.events[0].Type)
+	data := bus.events[0].Data.(PRUpdatedEvent)
+	require.NotNil(t, data.Previous)
+	assert.Equal(t, PRStateOpen, data.Previous.State)
+	assert.Equal(t, PRStateMerged, data.PullRequest.State)
 }
 
-func TestSyncRepoPRs_PublishesPRDiscoveredEvent(t *testing.T) {
+func TestSyncRepoPRs_PublishesPRUpdatedForNewPR(t *testing.T) {
 	database, repo := setupGitServiceTest(t)
 	ghClient := &mockGitHubClient{
-		repoPRs: []RawPR{makeRawPR(1, "New PR", "feature-a", "open", false)},
+		repoPRs: []*github.PullRequest{makeGitHubPR(1, "New PR", "feature-a", "open", false)},
 	}
 	bus := &mockEventBus{}
 	svc := NewGitService(database, WithGitHubClient(ghClient), WithEventBus(bus))
@@ -191,8 +185,9 @@ func TestSyncRepoPRs_PublishesPRDiscoveredEvent(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, bus.events, 1)
-	assert.Equal(t, EventPRDiscovered, bus.events[0].Type)
-	data := bus.events[0].Data.(PRDiscoveredEvent)
+	assert.Equal(t, EventPRUpdated, bus.events[0].Type)
+	data := bus.events[0].Data.(PRUpdatedEvent)
+	assert.Nil(t, data.Previous)
 	assert.Equal(t, "New PR", data.PullRequest.Title)
 	assert.Equal(t, repo.ID, data.Repo.ID)
 }
@@ -200,7 +195,7 @@ func TestSyncRepoPRs_PublishesPRDiscoveredEvent(t *testing.T) {
 func TestSyncRepoPRs_CreatesBranchForUnknownHead(t *testing.T) {
 	database, repo := setupGitServiceTest(t)
 	ghClient := &mockGitHubClient{
-		repoPRs: []RawPR{makeRawPR(1, "PR", "new-branch", "open", false)},
+		repoPRs: []*github.PullRequest{makeGitHubPR(1, "PR", "new-branch", "open", false)},
 	}
 	svc := NewGitService(database, WithGitHubClient(ghClient))
 
@@ -210,46 +205,6 @@ func TestSyncRepoPRs_CreatesBranchForUnknownHead(t *testing.T) {
 	branch, err := svc.branchStore.GetByNameAndRepo("new-branch", repo.ID)
 	require.NoError(t, err)
 	assert.True(t, branch.ExistsRemote)
-}
-
-func TestSyncAssignedPRs_ReturnsNewlyDiscoveredPRs(t *testing.T) {
-	database, _ := setupGitServiceTest(t)
-	ghClient := &mockGitHubClient{
-		assignedPRs: []RawPR{makeRawPR(10, "Assigned PR", "feature-x", "open", false)},
-	}
-	svc := NewGitService(database, WithGitHubClient(ghClient))
-
-	discovered, err := svc.SyncAssignedPRs(context.Background())
-	require.NoError(t, err)
-	require.Len(t, discovered, 1)
-	assert.Equal(t, 10, discovered[0].Number)
-	assert.Equal(t, "Assigned PR", discovered[0].Title)
-}
-
-func TestSyncAssignedPRs_SkipsAlreadyKnownPRs(t *testing.T) {
-	database, repo := setupGitServiceTest(t)
-	branchStore := NewBranchStore(database)
-	branch := &Branch{Name: "feature-x", RepoID: repo.ID}
-	require.NoError(t, branchStore.Upsert(branch))
-
-	prStore := NewPRStore(database)
-	require.NoError(t, prStore.Add(&PullRequest{
-		RepoID:       repo.ID,
-		Number:       10,
-		HeadBranchID: &branch.ID,
-		Title:        "Already Known",
-		State:        PRStateOpen,
-		AuthorLogin:  "octocat",
-	}))
-
-	ghClient := &mockGitHubClient{
-		assignedPRs: []RawPR{makeRawPR(10, "Already Known", "feature-x", "open", false)},
-	}
-	svc := NewGitService(database, WithGitHubClient(ghClient))
-
-	discovered, err := svc.SyncAssignedPRs(context.Background())
-	require.NoError(t, err)
-	assert.Empty(t, discovered)
 }
 
 func TestSearchPRs_FiltersByRepoAndState(t *testing.T) {
@@ -326,19 +281,42 @@ func TestGetPRDiff_ReturnsStructuredDiff(t *testing.T) {
 	assert.Equal(t, "file.go", diff.Files[0].NewPath)
 }
 
-func TestSyncRepoPRs_NilGitHubClient_ReturnsNoError(t *testing.T) {
+func TestSyncRepoPRs_NilGitHubClient_ReturnsError(t *testing.T) {
 	database, repo := setupGitServiceTest(t)
 	svc := NewGitService(database)
 
 	err := svc.SyncRepoPRs(context.Background(), repo)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, ErrNoGitHubClient)
 }
 
-func TestSyncAssignedPRs_NilGitHubClient_ReturnsEmptyResult(t *testing.T) {
-	database, _ := setupGitServiceTest(t)
-	svc := NewGitService(database)
+func TestSyncRepoPRs_SetsIsAssignedToMe(t *testing.T) {
+	database, repo := setupGitServiceTest(t)
+	raw := makeGitHubPR(1, "Assigned PR", "feature-a", "open", false)
+	raw.Assignees = []*github.User{{Login: github.Ptr("myself")}}
+	ghClient := &mockGitHubClient{repoPRs: []*github.PullRequest{raw}}
+	svc := NewGitService(database, WithGitHubClient(ghClient))
+	svc.currentUser = "myself"
 
-	discovered, err := svc.SyncAssignedPRs(context.Background())
-	assert.NoError(t, err)
-	assert.Nil(t, discovered)
+	err := svc.SyncRepoPRs(context.Background(), repo)
+	require.NoError(t, err)
+
+	prs := svc.prStore.ListByRepo(repo.ID)
+	require.Len(t, prs, 1)
+	assert.True(t, prs[0].IsAssignedToMe)
+}
+
+func TestSyncRepoPRs_NotAssigned(t *testing.T) {
+	database, repo := setupGitServiceTest(t)
+	raw := makeGitHubPR(1, "Someone elses PR", "feature-b", "open", false)
+	raw.Assignees = []*github.User{{Login: github.Ptr("someone-else")}}
+	ghClient := &mockGitHubClient{repoPRs: []*github.PullRequest{raw}}
+	svc := NewGitService(database, WithGitHubClient(ghClient))
+	svc.currentUser = "myself"
+
+	err := svc.SyncRepoPRs(context.Background(), repo)
+	require.NoError(t, err)
+
+	prs := svc.prStore.ListByRepo(repo.ID)
+	require.Len(t, prs, 1)
+	assert.False(t, prs[0].IsAssignedToMe)
 }

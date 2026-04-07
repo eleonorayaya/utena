@@ -12,6 +12,7 @@ import (
 
 	"github.com/GianlucaP106/gotmux/gotmux"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/todo"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -114,6 +115,34 @@ func (c *client) fetchBranches(workspaceID uint) tea.Cmd {
 		}
 
 		return branchesLoadedMsg{branches: resp.Branches}
+	}
+}
+
+func (c *client) fetchPRs(workspaceID uint, state string) tea.Cmd {
+	return func() tea.Msg {
+		url := fmt.Sprintf("%s/workspaces/%d/prs", c.baseURL, workspaceID)
+		if state != "" {
+			url += "?state=" + state
+		}
+		res, err := c.httpClient.Get(url)
+		if err != nil {
+			log.Printf("[ERROR] fetch PRs: %v", err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			return parseAPIError(res, "fetch PRs")
+		}
+
+		var resp struct {
+			PullRequests []git.PullRequest `json:"pull_requests"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			return ErrMsg{err}
+		}
+
+		return prsLoadedMsg{prs: resp.PullRequests, workspaceID: workspaceID}
 	}
 }
 

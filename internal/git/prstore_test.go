@@ -34,7 +34,6 @@ func TestPRStore_AddAndGetByID(t *testing.T) {
 		Number:      42,
 		Title:       "Add feature",
 		State:       PRStateOpen,
-		IsDraft:     false,
 		HTMLURL:     "https://github.com/owner/repo/pull/42",
 		AuthorLogin: "octocat",
 	}

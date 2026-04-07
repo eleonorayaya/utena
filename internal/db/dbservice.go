@@ -54,6 +54,8 @@ func (d *DB) OnAppEnd(ctx context.Context) error {
 }
 
 func (d *DB) Migrate(models ...any) error {
+	d.Exec("PRAGMA foreign_keys=OFF")
+	defer d.Exec("PRAGMA foreign_keys=ON")
 	return d.AutoMigrate(models...)
 }
 

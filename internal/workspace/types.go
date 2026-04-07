@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/go-chi/render"
 )
 
@@ -57,4 +58,8 @@ func (a *AddWorkspaceRequest) Bind(r *http.Request) error {
 type BranchListResponse struct {
 	Branches      []string `json:"branches"`
 	CurrentBranch string   `json:"current_branch"`
+}
+
+type PRListResponse struct {
+	PullRequests []git.PullRequest `json:"pull_requests"`
 }

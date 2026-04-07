@@ -10,4 +10,7 @@ const (
 	TodoFormView
 	DebugView
 	StatusView
+	WorkspaceListView
+	WorkspaceDetailView
+	PRListView
 )

@@ -8,22 +8,17 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/google/go-github/v72/github"
 )
 
-const (
-	EventPRDiscovered   = "git.pr_discovered"
-	EventPRStateChanged = "git.pr_state_changed"
-)
+var ErrNoGitHubClient = errors.New("github client not configured")
 
-type PRDiscoveredEvent struct {
+const EventPRUpdated = "git.pr_updated"
+
+type PRUpdatedEvent struct {
 	PullRequest *PullRequest
+	Previous    *PullRequest
 	Repo        *Repo
-}
-
-type PRStateChangedEvent struct {
-	PullRequest *PullRequest
-	OldState    PRState
-	NewState    PRState
 }
 
 type GitService struct {
@@ -34,6 +29,7 @@ type GitService struct {
 	prStore       *PRStore
 	githubClient  GitHubClient
 	eventBus      eventbus.EventBus
+	currentUser   string
 }
 
 type GitServiceOption func(*GitService)
@@ -367,9 +363,53 @@ func (s *GitService) GetPRDiff(ctx context.Context, prID uint) (*Diff, error) {
 	return ParseUnifiedDiff(raw)
 }
 
+func (s *GitService) syncGitHubPR(ctx context.Context, ghPR *github.PullRequest, repo *Repo) error {
+	headRef := ghPR.GetHead().GetRef()
+	branch, _ := s.branchStore.GetByNameAndRepo(headRef, repo.ID)
+	if branch == nil {
+		branch = &Branch{Name: headRef, RepoID: repo.ID, ExistsRemote: true}
+		if err := s.branchStore.Upsert(branch); err != nil {
+			return fmt.Errorf("failed to upsert branch %s: %w", headRef, err)
+		}
+	}
+
+	existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, ghPR.GetNumber())
+	pr := ghPRToPullRequest(ghPR, repo.ID, branch.ID, s.currentUser)
+
+	var previous *PullRequest
+	if existing != nil {
+		previous = &PullRequest{}
+		*previous = *existing
+		pr.Model = existing.Model
+		if err := s.prStore.Update(pr); err != nil {
+			return fmt.Errorf("failed to update PR #%d: %w", ghPR.GetNumber(), err)
+		}
+	} else {
+		if err := s.prStore.Upsert(pr); err != nil {
+			return fmt.Errorf("failed to upsert PR #%d: %w", ghPR.GetNumber(), err)
+		}
+	}
+	if s.eventBus != nil && prChanged(previous, pr) {
+		s.eventBus.Publish(ctx, eventbus.Event{
+			Type: EventPRUpdated,
+			Data: PRUpdatedEvent{PullRequest: pr, Previous: previous, Repo: repo},
+		})
+	}
+	return nil
+}
+
+func prChanged(previous *PullRequest, current *PullRequest) bool {
+	if previous == nil {
+		return true
+	}
+	return previous.State != current.State ||
+		previous.Title != current.Title ||
+		previous.IsAssignedToMe != current.IsAssignedToMe
+}
+
 func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 	if s.githubClient == nil {
-		return nil
+		return ErrNoGitHubClient
 	}
 	owner, name, err := repo.OwnerAndName()
 	if err != nil {
@@ -380,46 +420,10 @@ func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 		return err
 	}
 	var errs []error
-	for _, raw := range rawPRs {
-		branch, _ := s.branchStore.GetByNameAndRepo(raw.Head.Ref, repo.ID)
-		if branch == nil {
-			branch = &Branch{Name: raw.Head.Ref, RepoID: repo.ID, ExistsRemote: true}
-			if err := s.branchStore.Upsert(branch); err != nil {
-				slog.Warn("failed to upsert branch for PR", "branch", raw.Head.Ref, "error", err)
-				errs = append(errs, err)
-				continue
-			}
-		}
-
-		existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, raw.Number)
-		pr := rawPRToPullRequest(raw, repo.ID, branch.ID)
-
-		if existing != nil {
-			oldState := existing.State
-			pr.Model = existing.Model
-			if err := s.prStore.Update(pr); err != nil {
-				slog.Warn("failed to update PR", "number", raw.Number, "error", err)
-				errs = append(errs, err)
-				continue
-			}
-			if oldState != pr.State && s.eventBus != nil {
-				s.eventBus.Publish(ctx, eventbus.Event{
-					Type: EventPRStateChanged,
-					Data: PRStateChangedEvent{PullRequest: pr, OldState: oldState, NewState: pr.State},
-				})
-			}
-		} else {
-			if err := s.prStore.Upsert(pr); err != nil {
-				slog.Warn("failed to upsert PR", "number", raw.Number, "error", err)
-				errs = append(errs, err)
-				continue
-			}
-			if s.eventBus != nil {
-				s.eventBus.Publish(ctx, eventbus.Event{
-					Type: EventPRDiscovered,
-					Data: PRDiscoveredEvent{PullRequest: pr, Repo: repo},
-				})
-			}
+	for _, ghPR := range rawPRs {
+		if err := s.syncGitHubPR(ctx, ghPR, repo); err != nil {
+			slog.Warn("failed to sync PR", "number", ghPR.GetNumber(), "error", err)
+			errs = append(errs, err)
 		}
 	}
 	if len(errs) > 0 {
@@ -428,62 +432,31 @@ func (s *GitService) SyncRepoPRs(ctx context.Context, repo *Repo) error {
 	return nil
 }
 
-func (s *GitService) SyncAssignedPRs(ctx context.Context) ([]PullRequest, error) {
-	if s.githubClient == nil {
-		return nil, nil
-	}
-	rawPRs, err := s.githubClient.ListAssignedPRs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var discovered []PullRequest
-	for _, raw := range rawPRs {
-		if raw.Head.Repo == nil {
-			continue
-		}
-		repo, err := s.repoStore.GetByFullName(raw.Head.Repo.FullName)
-		if err != nil {
-			slog.Debug("skipping assigned PR for untracked repo", "repo", raw.Head.Repo.FullName)
-			continue
-		}
-		existing, _ := s.prStore.GetByRepoAndNumber(repo.ID, raw.Number)
-		if existing != nil {
-			continue
-		}
-		branch, _ := s.branchStore.GetByNameAndRepo(raw.Head.Ref, repo.ID)
-		if branch == nil {
-			branch = &Branch{Name: raw.Head.Ref, RepoID: repo.ID, ExistsRemote: true}
-			if err := s.branchStore.Upsert(branch); err != nil {
-				slog.Warn("failed to upsert branch for assigned PR", "branch", raw.Head.Ref, "error", err)
-				continue
-			}
-		}
-		pr := rawPRToPullRequest(raw, repo.ID, branch.ID)
-		if err := s.prStore.Upsert(pr); err != nil {
-			slog.Warn("failed to upsert assigned PR", "number", raw.Number, "error", err)
-			continue
-		}
-		discovered = append(discovered, *pr)
-		if s.eventBus != nil {
-			s.eventBus.Publish(ctx, eventbus.Event{
-				Type: EventPRDiscovered,
-				Data: PRDiscoveredEvent{PullRequest: pr, Repo: repo},
-			})
+func ghPRToPullRequest(ghPR *github.PullRequest, repoID uint, branchID uint, currentUser string) *PullRequest {
+	assigned := false
+	for _, a := range ghPR.Assignees {
+		if a.GetLogin() == currentUser {
+			assigned = true
+			break
 		}
 	}
-	return discovered, nil
-}
-
-func rawPRToPullRequest(raw RawPR, repoID uint, branchID uint) *PullRequest {
+	state := PRStateOpen
+	if ghPR.MergedAt != nil {
+		state = PRStateMerged
+	} else if ghPR.GetState() == "closed" {
+		state = PRStateClosed
+	} else if ghPR.GetDraft() {
+		state = PRStateDraft
+	}
 	return &PullRequest{
-		RepoID:       repoID,
-		Number:       raw.Number,
-		HeadBranchID: &branchID,
-		Title:        raw.Title,
-		State:        raw.ToPRState(),
-		IsDraft:      raw.Draft,
-		HTMLURL:      raw.HTMLURL,
-		AuthorLogin:  raw.User.Login,
+		RepoID:         repoID,
+		Number:         ghPR.GetNumber(),
+		HeadBranchID:   &branchID,
+		Title:          ghPR.GetTitle(),
+		State:          state,
+		IsAssignedToMe: assigned,
+		HTMLURL:        ghPR.GetHTMLURL(),
+		AuthorLogin:    ghPR.GetUser().GetLogin(),
 	}
 }
 

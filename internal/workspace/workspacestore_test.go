@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +22,7 @@ func setupTestDB(t *testing.T) db.Database {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database.Migrate(&Workspace{})
+	database.Migrate(&git.Repo{}, &Workspace{})
 	t.Cleanup(func() { database.Close() })
 	return database
 }
@@ -594,6 +595,26 @@ func TestWorkspaceStore_Persistence(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, now.Unix(), retrieved.LastUsedAt.Unix())
 	require.Equal(t, "test", retrieved.Name)
+}
+
+func TestWorkspaceStore_GetByRepoID(t *testing.T) {
+	store := setupWorkspaceStore(t)
+	repo := &git.Repo{Path: "/test/my-ws", FullName: "owner/my-ws"}
+	require.NoError(t, store.db.Create(repo).Error)
+
+	ws := &Workspace{Name: "my-ws", Path: "/test/my-ws", IsGitRepo: true, RepoID: &repo.ID}
+	require.NoError(t, store.Add(ws))
+
+	found, err := store.GetByRepoID(repo.ID)
+	require.NoError(t, err)
+	require.Equal(t, ws.ID, found.ID)
+	require.Equal(t, repo.ID, *found.RepoID)
+}
+
+func TestWorkspaceStore_GetByRepoID_NotFound(t *testing.T) {
+	store := setupWorkspaceStore(t)
+	_, err := store.GetByRepoID(999)
+	require.Error(t, err)
 }
 
 func TestWorkspaceStore_OnAppStart_MergesDiscoveredWithPersisted(t *testing.T) {

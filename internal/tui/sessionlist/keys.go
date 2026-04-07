@@ -10,15 +10,16 @@ type keyMap struct {
 	Close        key.Binding
 	New          key.Binding
 	Todos        key.Binding
+	Workspaces   key.Binding
 	ToggleBroken key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Select, k.Close, k.New, k.Todos, k.ToggleBroken}
+	return []key.Binding{k.Select, k.Close, k.New, k.Todos, k.Workspaces, k.ToggleBroken}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Select, k.Close, k.New, k.Todos, k.ToggleBroken}}
+	return [][]key.Binding{{k.Select, k.Close, k.New, k.Todos, k.Workspaces, k.ToggleBroken}}
 }
 
 var keys = keyMap{
@@ -26,6 +27,7 @@ var keys = keyMap{
 	Close:        key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "close")),
 	New:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
 	Todos:        key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "todos")),
+	Workspaces:   key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "workspaces")),
 	ToggleBroken: key.NewBinding(key.WithKeys("."), key.WithHelp(".", "toggle broken")),
 }
 
