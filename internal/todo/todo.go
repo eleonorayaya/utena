@@ -13,5 +13,5 @@ type Todo struct {
 	Name        string               `json:"name"`
 	Description string               `json:"description"`
 	WorkspaceID *uint                `json:"workspace_id,omitempty" gorm:"index"`
-	Workspace   *workspace.Workspace `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID"`
+	Workspace   *workspace.Workspace `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID;constraint:OnDelete:CASCADE"`
 }

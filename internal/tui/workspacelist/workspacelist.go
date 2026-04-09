@@ -1,6 +1,8 @@
 package workspacelist
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -13,8 +15,9 @@ import (
 )
 
 type Model struct {
-	list       list.Model
-	workspaces []workspace.Workspace
+	list            list.Model
+	workspaces      []workspace.Workspace
+	pendingDeleteID uint
 }
 
 func New() Model {
@@ -70,6 +73,9 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if m.list.FilterState() == list.Filtering {
 		return m, nil, false
 	}
+	if !key.Matches(msg, keys.Delete) {
+		m.pendingDeleteID = 0
+	}
 	switch {
 	case key.Matches(msg, keys.Select):
 		item, ok := m.list.SelectedItem().(workspaceItem)
@@ -80,6 +86,17 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			router.NavigateTo(router.WorkspaceDetailView),
 			workspacedetail.Select(item.workspace),
 		), true
+	case key.Matches(msg, keys.Delete):
+		item, ok := m.list.SelectedItem().(workspaceItem)
+		if !ok {
+			return m, nil, false
+		}
+		if m.pendingDeleteID == item.workspace.ID {
+			m.pendingDeleteID = 0
+			return m, provider.DeleteWorkspace(item.workspace.ID), true
+		}
+		m.pendingDeleteID = item.workspace.ID
+		return m, m.list.NewStatusMessage(fmt.Sprintf("press d again to delete %s", item.workspace.Name)), true
 	case key.Matches(msg, keys.Back):
 		return m, router.Back(), true
 	}

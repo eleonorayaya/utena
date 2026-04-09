@@ -138,7 +138,7 @@ func initTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	cmds := [][]string{
-		{"git", "init"},
+		{"git", "init", "-b", "main"},
 		{"git", "config", "user.email", "test@test.com"},
 		{"git", "config", "user.name", "Test"},
 		{"git", "commit", "--allow-empty", "-m", "init"},
@@ -183,6 +183,34 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	require.Contains(t, response.Branches, "main")
 	require.Contains(t, response.Branches, "develop")
 	require.Equal(t, "main", response.Branches[0])
+}
+
+func TestWorkspaceRouter_DeleteWorkspace(t *testing.T) {
+	router, store := setupWorkspaceRouter(t)
+
+	ws, err := store.GetByPath("/path/to/utena")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("DELETE", fmt.Sprintf("/%d", ws.ID), nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+
+	_, err = store.GetByID(ws.ID)
+	require.Error(t, err)
+}
+
+func TestWorkspaceRouter_DeleteWorkspace_NotFound(t *testing.T) {
+	router, _ := setupWorkspaceRouter(t)
+
+	req := httptest.NewRequest("DELETE", "/99999", nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestWorkspaceRouter_ListBranches_NotGitRepo(t *testing.T) {

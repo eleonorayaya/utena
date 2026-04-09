@@ -617,6 +617,55 @@ func TestWorkspaceStore_GetByRepoID_NotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestWorkspaceStore_Delete(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	ws := &Workspace{Name: "test", Path: "/path/to/test"}
+	store.Add(ws)
+
+	err := store.Delete(ws.ID)
+	require.NoError(t, err)
+
+	_, err = store.GetByID(ws.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestWorkspaceStore_Delete_NotFound(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	err := store.Delete(99999)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestWorkspaceStore_Delete_ZeroID(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	err := store.Delete(0)
+	require.Error(t, err)
+}
+
+func TestWorkspaceStore_RemoveWorkspaceFromConfig(t *testing.T) {
+	store, _ := setupWorkspaceStoreWithFullConfig(t, nil, []string{"/some/path", "/other/path"})
+
+	store.RemoveWorkspaceFromConfig("/some/path")
+
+	cfg, err := store.loadConfig()
+	require.NoError(t, err)
+	require.Equal(t, []string{"/other/path"}, cfg.Workspaces)
+}
+
+func TestWorkspaceStore_RemoveWorkspaceFromConfig_NotInConfig(t *testing.T) {
+	store, _ := setupWorkspaceStoreWithFullConfig(t, nil, []string{"/some/path"})
+
+	store.RemoveWorkspaceFromConfig("/nonexistent/path")
+
+	cfg, err := store.loadConfig()
+	require.NoError(t, err)
+	require.Equal(t, []string{"/some/path"}, cfg.Workspaces)
+}
+
 func TestWorkspaceStore_OnAppStart_MergesDiscoveredWithPersisted(t *testing.T) {
 	rootDir := t.TempDir()
 	os.MkdirAll(filepath.Join(rootDir, "project-alpha"), 0755)

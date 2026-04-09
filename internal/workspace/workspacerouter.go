@@ -22,6 +22,7 @@ func (wr *WorkspaceRouter) Routes() chi.Router {
 	r.Get("/{id}/branches", wr.controller.ListBranches)
 	r.Get("/{id}/prs", wr.controller.ListPRs)
 	r.Get("/{id}", wr.controller.GetWorkspaceByID)
+	r.Delete("/{id}", wr.controller.DeleteWorkspace)
 
 	return r
 }

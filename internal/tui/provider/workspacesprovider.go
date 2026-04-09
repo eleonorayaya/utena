@@ -36,6 +36,10 @@ func FetchPRs(workspaceID uint, state string) tea.Cmd {
 	return func() tea.Msg { return fetchPRsIntentMsg{workspaceID: workspaceID, state: state} }
 }
 
+func DeleteWorkspace(id uint) tea.Cmd {
+	return func() tea.Msg { return deleteWorkspaceIntentMsg{id: id} }
+}
+
 func AddWorkspace(path string, asRoot bool) tea.Cmd {
 	return func() tea.Msg { return addWorkspaceIntentMsg{path: path, asRoot: asRoot} }
 }
@@ -45,6 +49,10 @@ type requestWorkspacesStateMsg struct{}
 
 type requestBranchesMsg struct {
 	workspaceID uint
+}
+
+type deleteWorkspaceIntentMsg struct {
+	id uint
 }
 
 type addWorkspaceIntentMsg struct {
@@ -70,6 +78,7 @@ type branchesLoadedMsg struct {
 	branches []string
 }
 
+type workspaceDeletedMsg struct{}
 type workspaceAddedMsg struct{}
 
 type workspacesProvider struct {
@@ -125,6 +134,12 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 	case setActiveWorkspaceMsg:
 		p.activeWorkspaceID = msg.workspaceID
 		return p, p.emitState()
+
+	case deleteWorkspaceIntentMsg:
+		return p, p.client.deleteWorkspace(msg.id)
+
+	case workspaceDeletedMsg:
+		return p, p.client.fetchWorkspaces()
 
 	case addWorkspaceIntentMsg:
 		return p, p.client.addWorkspace(msg.path, msg.asRoot)

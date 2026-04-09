@@ -79,6 +79,23 @@ func (c *WorkspaceController) AddWorkspace(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+func (c *WorkspaceController) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	raw := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	if err := c.service.DeleteWorkspace(ctx, uint(id)); err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	render.NoContent(w, r)
+}
+
 func (c *WorkspaceController) ListBranches(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	raw := chi.URLParam(r, "id")

@@ -307,7 +307,7 @@ func initTestRepo(t *testing.T) string {
 	dir := t.TempDir()
 
 	bareCmds := [][]string{
-		{"git", "init", "--bare"},
+		{"git", "init", "--bare", "-b", "main"},
 	}
 	for _, args := range bareCmds {
 		cmd := exec.Command(args[0], args[1:]...)
@@ -317,7 +317,7 @@ func initTestRepo(t *testing.T) string {
 	}
 
 	cmds := [][]string{
-		{"git", "init"},
+		{"git", "init", "-b", "main"},
 		{"git", "config", "user.email", "test@test.com"},
 		{"git", "config", "user.name", "Test"},
 		{"git", "remote", "add", "origin", bareDir},

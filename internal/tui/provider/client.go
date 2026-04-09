@@ -267,6 +267,28 @@ func (c *client) deleteSession(id uint) tea.Cmd {
 	}
 }
 
+func (c *client) deleteWorkspace(id uint) tea.Cmd {
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/workspaces/%d", c.baseURL, id), nil)
+		if err != nil {
+			return ErrMsg{err}
+		}
+
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] delete workspace %d: %v", id, err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusNoContent {
+			return parseAPIError(res, "delete workspace")
+		}
+
+		return workspaceDeletedMsg{}
+	}
+}
+
 func (c *client) addWorkspace(path string, asRoot bool) tea.Cmd {
 	return func() tea.Msg {
 		body := map[string]interface{}{
