@@ -289,6 +289,30 @@ func (c *client) deleteWorkspace(id uint) tea.Cmd {
 	}
 }
 
+func (c *client) setWorkspaceHidden(id uint, hidden bool) tea.Cmd {
+	return func() tea.Msg {
+		body, _ := json.Marshal(map[string]bool{"hidden": hidden})
+		req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/workspaces/%d/hidden", c.baseURL, id), bytes.NewReader(body))
+		if err != nil {
+			return ErrMsg{err}
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] set workspace hidden %d: %v", id, err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusNoContent {
+			return parseAPIError(res, "set workspace hidden")
+		}
+
+		return workspaceHiddenToggledMsg{}
+	}
+}
+
 func (c *client) addWorkspace(path string, asRoot bool) tea.Cmd {
 	return func() tea.Msg {
 		body := map[string]interface{}{

@@ -14,6 +14,9 @@ func (i workspaceItem) Title() string {
 	if i.workspace.IsGitRepo {
 		title += " (git)"
 	}
+	if i.workspace.IsHidden {
+		title += " [hidden]"
+	}
 	return title
 }
 

@@ -185,6 +185,40 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	require.Equal(t, "main", response.Branches[0])
 }
 
+func TestWorkspaceRouter_SetWorkspaceHidden(t *testing.T) {
+	router, store := setupWorkspaceRouter(t)
+
+	ws, err := store.GetByPath("/path/to/utena")
+	require.NoError(t, err)
+	require.False(t, ws.IsHidden)
+
+	body := `{"hidden": true}`
+	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/hidden", ws.ID), strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+
+	updated, err := store.GetByID(ws.ID)
+	require.NoError(t, err)
+	require.True(t, updated.IsHidden)
+}
+
+func TestWorkspaceRouter_SetWorkspaceHidden_NotFound(t *testing.T) {
+	router, _ := setupWorkspaceRouter(t)
+
+	body := `{"hidden": true}`
+	req := httptest.NewRequest("PUT", "/99999/hidden", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
 func TestWorkspaceRouter_DeleteWorkspace(t *testing.T) {
 	router, store := setupWorkspaceRouter(t)
 

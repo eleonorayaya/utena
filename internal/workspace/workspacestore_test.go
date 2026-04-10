@@ -646,6 +646,36 @@ func TestWorkspaceStore_Delete_ZeroID(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestWorkspaceStore_SetHidden(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	ws := &Workspace{Name: "test", Path: "/path/to/test"}
+	store.Add(ws)
+	require.False(t, ws.IsHidden)
+
+	err := store.SetHidden(ws.ID, true)
+	require.NoError(t, err)
+
+	retrieved, err := store.GetByID(ws.ID)
+	require.NoError(t, err)
+	require.True(t, retrieved.IsHidden)
+
+	err = store.SetHidden(ws.ID, false)
+	require.NoError(t, err)
+
+	retrieved, err = store.GetByID(ws.ID)
+	require.NoError(t, err)
+	require.False(t, retrieved.IsHidden)
+}
+
+func TestWorkspaceStore_SetHidden_NotFound(t *testing.T) {
+	store := setupWorkspaceStore(t)
+
+	err := store.SetHidden(99999, true)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
 func TestWorkspaceStore_RemoveWorkspaceFromConfig(t *testing.T) {
 	store, _ := setupWorkspaceStoreWithFullConfig(t, nil, []string{"/some/path", "/other/path"})
 

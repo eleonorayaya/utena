@@ -51,6 +51,10 @@ func (s *WorkspaceService) Touch(ctx context.Context, id uint) error {
 	return s.store.Update(ws)
 }
 
+func (s *WorkspaceService) SetWorkspaceHidden(ctx context.Context, id uint, hidden bool) error {
+	return s.store.SetHidden(id, hidden)
+}
+
 func (s *WorkspaceService) DeleteWorkspace(ctx context.Context, id uint) error {
 	ws, err := s.store.GetByID(id)
 	if err != nil {

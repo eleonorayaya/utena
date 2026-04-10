@@ -126,6 +126,18 @@ func (s *WorkspaceStore) Update(ws *Workspace) error {
 	return s.db.Omit("Repo").Save(ws).Error
 }
 
+func (s *WorkspaceStore) SetHidden(id uint, hidden bool) error {
+	var ws Workspace
+	if err := s.db.First(&ws, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return common.NewNotFound(fmt.Sprintf("workspace not found: %d", id))
+		}
+		return err
+	}
+
+	return s.db.Model(&ws).Update("is_hidden", hidden).Error
+}
+
 func (s *WorkspaceStore) Delete(id uint) error {
 	if id == 0 {
 		return errors.New("workspace ID cannot be zero")

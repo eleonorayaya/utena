@@ -55,6 +55,14 @@ func (a *AddWorkspaceRequest) Bind(r *http.Request) error {
 	return nil
 }
 
+type SetHiddenRequest struct {
+	Hidden bool `json:"hidden"`
+}
+
+func (s *SetHiddenRequest) Bind(r *http.Request) error {
+	return nil
+}
+
 type BranchListResponse struct {
 	Branches      []string `json:"branches"`
 	CurrentBranch string   `json:"current_branch"`

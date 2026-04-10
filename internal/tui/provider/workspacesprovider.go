@@ -40,6 +40,10 @@ func DeleteWorkspace(id uint) tea.Cmd {
 	return func() tea.Msg { return deleteWorkspaceIntentMsg{id: id} }
 }
 
+func SetWorkspaceHidden(id uint, hidden bool) tea.Cmd {
+	return func() tea.Msg { return setWorkspaceHiddenIntentMsg{id: id, hidden: hidden} }
+}
+
 func AddWorkspace(path string, asRoot bool) tea.Cmd {
 	return func() tea.Msg { return addWorkspaceIntentMsg{path: path, asRoot: asRoot} }
 }
@@ -53,6 +57,11 @@ type requestBranchesMsg struct {
 
 type deleteWorkspaceIntentMsg struct {
 	id uint
+}
+
+type setWorkspaceHiddenIntentMsg struct {
+	id     uint
+	hidden bool
 }
 
 type addWorkspaceIntentMsg struct {
@@ -79,6 +88,7 @@ type branchesLoadedMsg struct {
 }
 
 type workspaceDeletedMsg struct{}
+type workspaceHiddenToggledMsg struct{}
 type workspaceAddedMsg struct{}
 
 type workspacesProvider struct {
@@ -139,6 +149,12 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 		return p, p.client.deleteWorkspace(msg.id)
 
 	case workspaceDeletedMsg:
+		return p, p.client.fetchWorkspaces()
+
+	case setWorkspaceHiddenIntentMsg:
+		return p, p.client.setWorkspaceHidden(msg.id, msg.hidden)
+
+	case workspaceHiddenToggledMsg:
 		return p, p.client.fetchWorkspaces()
 
 	case addWorkspaceIntentMsg:
