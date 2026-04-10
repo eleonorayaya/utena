@@ -156,6 +156,54 @@ func TestWorkspaceService_AddWorkspaceAsRoot(t *testing.T) {
 	require.Len(t, workspaces, 1)
 }
 
+func TestWorkspaceService_SetWorkspaceHidden(t *testing.T) {
+	service, store := setupWorkspaceService(t)
+
+	ws := &Workspace{Name: "test", Path: "/path"}
+	store.Add(ws)
+
+	ctx := context.Background()
+	err := service.SetWorkspaceHidden(ctx, ws.ID, true)
+	require.NoError(t, err)
+
+	retrieved, err := store.GetByID(ws.ID)
+	require.NoError(t, err)
+	require.True(t, retrieved.IsHidden)
+}
+
+func TestWorkspaceService_SetWorkspaceHidden_NotFound(t *testing.T) {
+	service, _ := setupWorkspaceService(t)
+
+	ctx := context.Background()
+	err := service.SetWorkspaceHidden(ctx, 99999, true)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestWorkspaceService_DeleteWorkspace(t *testing.T) {
+	service, store := setupWorkspaceService(t)
+
+	ws := &Workspace{Name: "test", Path: "/path"}
+	store.Add(ws)
+
+	ctx := context.Background()
+	err := service.DeleteWorkspace(ctx, ws.ID)
+	require.NoError(t, err)
+
+	_, err = store.GetByID(ws.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestWorkspaceService_DeleteWorkspace_NotFound(t *testing.T) {
+	service, _ := setupWorkspaceService(t)
+
+	ctx := context.Background()
+	err := service.DeleteWorkspace(ctx, 99999)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
 func TestWorkspaceService_Touch(t *testing.T) {
 	service, store := setupWorkspaceService(t)
 

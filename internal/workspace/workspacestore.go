@@ -126,6 +126,53 @@ func (s *WorkspaceStore) Update(ws *Workspace) error {
 	return s.db.Omit("Repo").Save(ws).Error
 }
 
+func (s *WorkspaceStore) SetHidden(id uint, hidden bool) error {
+	var ws Workspace
+	if err := s.db.First(&ws, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return common.NewNotFound(fmt.Sprintf("workspace not found: %d", id))
+		}
+		return err
+	}
+
+	return s.db.Model(&ws).Update("is_hidden", hidden).Error
+}
+
+func (s *WorkspaceStore) Delete(id uint) error {
+	if id == 0 {
+		return errors.New("workspace ID cannot be zero")
+	}
+
+	var existing Workspace
+	if err := s.db.First(&existing, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return common.NewNotFound(fmt.Sprintf("workspace not found: %d", id))
+		}
+		return err
+	}
+
+	return s.db.Where("id = ?", id).Unscoped().Delete(&Workspace{}).Error
+}
+
+func (s *WorkspaceStore) RemoveWorkspaceFromConfig(path string) {
+	cfg, err := s.loadConfig()
+	if err != nil {
+		return
+	}
+
+	filtered := make([]string, 0, len(cfg.Workspaces))
+	for _, ws := range cfg.Workspaces {
+		if expandHome(ws) != expandHome(path) {
+			filtered = append(filtered, ws)
+		}
+	}
+
+	if len(filtered) != len(cfg.Workspaces) {
+		cfg.Workspaces = filtered
+		s.saveConfig(cfg)
+	}
+}
+
 func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
 	info, err := s.fs.Stat(path)
 	if err != nil {

@@ -11,7 +11,13 @@ type workspaceItem struct {
 	workspace workspace.Workspace
 }
 
-func (i workspaceItem) Title() string       { return i.workspace.Name }
+func (i workspaceItem) Title() string {
+	title := i.workspace.Name
+	if i.workspace.IsHidden {
+		title += " [hidden]"
+	}
+	return title
+}
 func (i workspaceItem) Description() string { return AbbreviatePath(i.workspace.Path) }
 func (i workspaceItem) FilterValue() string { return i.workspace.Name }
 

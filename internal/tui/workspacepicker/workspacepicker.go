@@ -12,7 +12,9 @@ import (
 
 type Model struct {
 	list              list.Model
+	workspaces        []workspace.Workspace
 	sortActiveFirst   bool
+	showHidden        bool
 	activeWorkspaceID uint
 }
 
@@ -42,30 +44,38 @@ func (m Model) Keys() help.KeyMap {
 	return Keys
 }
 
+func (m *Model) rebuildItems() tea.Cmd {
+	workspaces := m.workspaces
+
+	if m.sortActiveFirst && m.activeWorkspaceID != 0 {
+		sorted := make([]workspace.Workspace, 0, len(workspaces))
+		var rest []workspace.Workspace
+		for _, ws := range workspaces {
+			if ws.ID == m.activeWorkspaceID {
+				sorted = append(sorted, ws)
+			} else {
+				rest = append(rest, ws)
+			}
+		}
+		workspaces = append(sorted, rest...)
+	}
+
+	var items []list.Item
+	for _, ws := range workspaces {
+		if !m.showHidden && ws.IsHidden {
+			continue
+		}
+		items = append(items, workspaceItem{workspace: ws})
+	}
+	return m.list.SetItems(items)
+}
+
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case provider.WorkspacesStateUpdatedMsg:
 		m.activeWorkspaceID = msg.ActiveWorkspaceID
-		workspaces := msg.Workspaces
-
-		if m.sortActiveFirst && m.activeWorkspaceID != 0 {
-			sorted := make([]workspace.Workspace, 0, len(workspaces))
-			var rest []workspace.Workspace
-			for _, ws := range workspaces {
-				if ws.ID == m.activeWorkspaceID {
-					sorted = append(sorted, ws)
-				} else {
-					rest = append(rest, ws)
-				}
-			}
-			workspaces = append(sorted, rest...)
-		}
-
-		items := make([]list.Item, len(workspaces))
-		for i, ws := range workspaces {
-			items[i] = workspaceItem{workspace: ws}
-		}
-		return m, m.list.SetItems(items)
+		m.workspaces = msg.Workspaces
+		return m, m.rebuildItems()
 
 	case tea.KeyMsg:
 		var cmd tea.Cmd
@@ -93,6 +103,13 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 				return SelectedMsg{Workspace: ws}
 			}, true
 		}
+	case key.Matches(msg, Keys.ToggleHidden):
+		m.showHidden = !m.showHidden
+		statusMsg := "showing all workspaces"
+		if !m.showHidden {
+			statusMsg = "hiding hidden workspaces"
+		}
+		return m, tea.Batch(m.rebuildItems(), m.list.NewStatusMessage(statusMsg)), true
 	case key.Matches(msg, Keys.AddDir):
 		return m, func() tea.Msg { return AddDirectoryMsg{} }, true
 	}

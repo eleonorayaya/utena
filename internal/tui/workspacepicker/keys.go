@@ -6,9 +6,10 @@ import (
 )
 
 type keyMap struct {
-	Select key.Binding
-	AddDir key.Binding
-	Back   key.Binding
+	Select       key.Binding
+	ToggleHidden key.Binding
+	AddDir       key.Binding
+	Back         key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -16,13 +17,14 @@ func (k keyMap) ShortHelp() []key.Binding {
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Select, k.AddDir, k.Back}}
+	return [][]key.Binding{{k.Select, k.ToggleHidden, k.AddDir, k.Back}}
 }
 
 var Keys = keyMap{
-	Select: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
-	AddDir: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add dir")),
-	Back:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+	Select:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+	ToggleHidden: key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "show hidden")),
+	AddDir:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add dir")),
+	Back:         key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 }
 
 var _ help.KeyMap = Keys
