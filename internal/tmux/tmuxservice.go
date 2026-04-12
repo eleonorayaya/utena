@@ -139,6 +139,21 @@ func (t *TmuxService) GetSessionByName(name string) (*TmuxSession, error) {
 	return ts, nil
 }
 
+func (t *TmuxService) GetOrTrackSession(name, startDir string, env map[string]string) (*TmuxSession, error) {
+	ts, err := t.store.GetByName(name)
+	if err == nil {
+		return ts, nil
+	}
+	if !errors.Is(err, ErrTmuxSessionNotFound) {
+		return nil, err
+	}
+	ts = &TmuxSession{Name: name, StartDir: startDir, Env: env, IsAlive: true}
+	if err := t.store.Add(ts); err != nil {
+		return nil, err
+	}
+	return ts, nil
+}
+
 func (t *TmuxService) ListSessionNames() ([]string, error) {
 	if t.runner == nil {
 		return nil, ErrTmuxNotAvailable

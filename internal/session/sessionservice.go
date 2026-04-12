@@ -332,6 +332,14 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName 
 		startDir = s.resolveStartDir(ctx, sess)
 	}
 	env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", sess.ID)}
+	if s.tmuxService.HasSession(tmuxName) {
+		ts, err := s.tmuxService.GetOrTrackSession(tmuxName, startDir, env)
+		if err != nil {
+			return fmt.Errorf("failed to attach to existing tmux session: %v", err)
+		}
+		sess.TmuxSessionID = &ts.ID
+		return nil
+	}
 	ts, err := s.tmuxService.CreateSession(tmuxName, startDir, env)
 	if err != nil {
 		return fmt.Errorf("failed to create tmux session: %v", err)

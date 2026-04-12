@@ -139,6 +139,20 @@ func TestGitCLI_CreateWorktree_InvalidBaseBranch(t *testing.T) {
 	require.Contains(t, err.Error(), "git worktree add failed")
 }
 
+func TestGitCLI_ValidateWorktree_DetachedHead(t *testing.T) {
+	repo := initTestRepo(t)
+
+	svc := newGitCLI()
+	worktreePath, err := svc.createWorktree(context.Background(), repo, "eqt/my-feature", "main")
+	require.NoError(t, err)
+
+	run(t, worktreePath, "git", "checkout", "--detach")
+
+	exists, err := svc.validateWorktree(context.Background(), worktreePath, "eqt/my-feature")
+	require.NoError(t, err)
+	require.True(t, exists)
+}
+
 func TestGitCLI_Pull_NoRemote(t *testing.T) {
 	repo := initTestRepo(t)
 
