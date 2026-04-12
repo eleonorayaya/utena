@@ -125,6 +125,9 @@ func (s *gitCLI) validateWorktree(ctx context.Context, worktreePath string, expe
 	if err != nil {
 		return false, fmt.Errorf("worktree exists at %s but failed to read branch: %w", worktreePath, err)
 	}
+	if currentBranch == "" {
+		return true, nil
+	}
 	if currentBranch != expectedBranch {
 		return false, fmt.Errorf("worktree at %s has branch %q, expected %q", worktreePath, currentBranch, expectedBranch)
 	}

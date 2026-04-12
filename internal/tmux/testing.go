@@ -1,6 +1,9 @@
 package tmux
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 type MockRunner struct {
 	mu        sync.Mutex
@@ -18,6 +21,9 @@ func (m *MockRunner) newSession(name, startDir string, env map[string]string) er
 	defer m.mu.Unlock()
 	if m.CreateErr != nil {
 		return m.CreateErr
+	}
+	if m.Sessions[name] {
+		return fmt.Errorf("duplicate session: %s", name)
 	}
 	m.Sessions[name] = true
 	return nil
