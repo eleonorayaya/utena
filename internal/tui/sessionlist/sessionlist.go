@@ -23,7 +23,7 @@ type Model struct {
 }
 
 func New() Model {
-	l := ulist.New("Sessions")
+	l := ulist.NewWithDelegate("Sessions", sessionItemDelegate{})
 	l.KeyMap.Quit.SetEnabled(true)
 	return Model{list: l}
 }
@@ -52,7 +52,11 @@ func (m *Model) rebuildItems() tea.Cmd {
 		status := aggregateClaudeStatus(s.ClaudeSessions)
 		items = append(items, sessionItem{session: s, claudeStatus: status})
 	}
-	return m.list.SetItems(items)
+	cmd := m.list.SetItems(items)
+	if len(items) > 1 {
+		m.list.Select(1)
+	}
+	return cmd
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {

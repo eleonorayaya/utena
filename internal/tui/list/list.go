@@ -22,3 +22,11 @@ func New(title string) bubblelist.Model {
 	l.SetShowHelp(false)
 	return l
 }
+
+func NewWithDelegate(title string, d bubblelist.ItemDelegate) bubblelist.Model {
+	l := bubblelist.New(nil, d, 0, 0)
+	l.Title = title
+	l.KeyMap.Quit.SetEnabled(false)
+	l.SetShowHelp(false)
+	return l
+}

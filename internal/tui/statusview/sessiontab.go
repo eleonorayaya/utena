@@ -13,11 +13,32 @@ import (
 )
 
 type SessionTab struct {
-	session  session.Session
-	windows  []tmux.Window
-	badge    StatusBadge
-	selected bool
-	width    int
+	session     session.Session
+	windows     []tmux.Window
+	badge       StatusBadge
+	selected    bool
+	width       int
+	hideWindows bool
+}
+
+func (t SessionTab) WithWidth(w int) SessionTab {
+	t.width = w
+	return t
+}
+
+func (t SessionTab) WithoutWindows() SessionTab {
+	t.hideWindows = true
+	return t
+}
+
+func (t SessionTab) WithSelected(selected bool) SessionTab {
+	t.selected = selected
+	t.badge, _ = t.badge.Update(statusBadgeMsg{
+		ClaudeSessions: t.session.ClaudeSessions,
+		Selected:       selected,
+		IsAttached:     t.session.IsAttached,
+	})
+	return t
 }
 
 func NewSessionTab(s session.Session) SessionTab {
@@ -145,13 +166,15 @@ func (t SessionTab) renderHeader(bg lipgloss.TerminalColor) []string {
 		wsLine := accent + wsStyle.Render(wsName) + timeStr
 		wsLine = t.padLine(wsLine, bg)
 		result = append(result, wsLine)
+	} else if t.hideWindows {
+		result = append(result, t.padLine(accent, bg))
 	}
 
 	return result
 }
 
 func (t SessionTab) renderWindows(bg lipgloss.TerminalColor) []string {
-	if len(t.windows) == 0 {
+	if t.hideWindows || len(t.windows) == 0 {
 		return nil
 	}
 
