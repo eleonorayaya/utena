@@ -50,6 +50,9 @@ func (r *gotmuxRunner) killSession(name string) error {
 	if err != nil {
 		return err
 	}
+	if sess == nil {
+		return nil
+	}
 	return sess.Kill()
 }
 
