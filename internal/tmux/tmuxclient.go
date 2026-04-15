@@ -46,6 +46,9 @@ func (r *gotmuxRunner) newSession(name, startDir string, env map[string]string) 
 }
 
 func (r *gotmuxRunner) killSession(name string) error {
+	if !r.tmux.HasSession(name) {
+		return nil
+	}
 	sess, err := r.tmux.GetSessionByName(name)
 	if err != nil {
 		return err
