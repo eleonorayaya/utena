@@ -98,13 +98,8 @@ type branchListResponse struct {
 }
 
 type branchRefListResponse struct {
-	Branches      []branchRefEntry `json:"branches"`
-	CurrentBranch string           `json:"current_branch"`
-}
-
-type branchRefEntry struct {
-	Name   string `json:"name"`
-	Remote bool   `json:"remote"`
+	Branches      []git.BranchRef `json:"branches"`
+	CurrentBranch string          `json:"current_branch"`
 }
 
 type branchExistsResponse struct {
@@ -158,11 +153,7 @@ func (c *client) fetchOriginBranches(workspaceID uint) tea.Cmd {
 			return branchesFetchedLoadedMsg{err: err}
 		}
 
-		branches := make([]BranchRef, len(resp.Branches))
-		for i, b := range resp.Branches {
-			branches[i] = BranchRef{Name: b.Name, Remote: b.Remote}
-		}
-		return branchesFetchedLoadedMsg{branches: branches}
+		return branchesFetchedLoadedMsg{branches: resp.Branches}
 	}
 }
 

@@ -276,18 +276,16 @@ func (m Model) updateBranchManualInput(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) onBranchExistsChecked(msg provider.BranchExistsCheckedMsg) Model {
-	if m.pendingBranchCheck == "" || msg.Name != m.pendingBranchCheck {
+	if m.activeStep != branchManualInputStep || m.pendingBranchCheck == "" || msg.Name != m.pendingBranchCheck {
 		return m
 	}
 	m.pendingBranchCheck = ""
 	if msg.Err != nil {
 		m.manualBranchErr = msg.Err.Error()
-		m.activeStep = branchManualInputStep
 		return m
 	}
 	if !msg.ExistsLocal && !msg.ExistsRemote {
 		m.manualBranchErr = "branch not found: " + msg.Name
-		m.activeStep = branchManualInputStep
 		return m
 	}
 	m.manualBranchErr = ""

@@ -15,10 +15,7 @@ type BranchesLoadedMsg struct {
 	Branches []string
 }
 
-type BranchRef struct {
-	Name   string
-	Remote bool
-}
+type BranchRef = git.BranchRef
 
 type BranchesFetchedMsg struct {
 	Branches []BranchRef
