@@ -271,3 +271,166 @@ func TestWorkspaceRouter_ListBranches_NotFound(t *testing.T) {
 
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
+
+func initTestRepoWithOrigin(t *testing.T) string {
+	t.Helper()
+	origin := t.TempDir()
+	runCmd(t, origin, "git", "init", "--bare", "-b", "main")
+
+	upstream := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init", "-b", "main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+		{"git", "remote", "add", "origin", origin},
+		{"git", "push", "origin", "main"},
+		{"git", "branch", "remote-branch"},
+		{"git", "push", "origin", "remote-branch"},
+	} {
+		runCmd(t, upstream, args[0], args[1:]...)
+	}
+
+	clone := t.TempDir()
+	runCmd(t, clone, "git", "clone", origin, ".")
+	runCmd(t, clone, "git", "config", "user.email", "test@test.com")
+	runCmd(t, clone, "git", "config", "user.name", "Test")
+	runCmd(t, clone, "git", "branch", "local-only")
+	return clone
+}
+
+func runCmd(t *testing.T, dir string, name string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "command %s %v failed: %s", name, args, string(out))
+}
+
+func setupBranchRouter(t *testing.T, repoPath string) (*WorkspaceRouter, *Workspace) {
+	t.Helper()
+
+	database, err := db.OpenInMemory()
+	require.NoError(t, err)
+	database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
+	t.Cleanup(func() { database.Close() })
+
+	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
+	ws := &Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
+	store.Add(ws)
+	notGit := &Workspace{Name: "plain", Path: "/plain", IsGitRepo: false}
+	store.Add(notGit)
+
+	service := NewWorkspaceService(store)
+	gitService := git.NewGitService(database)
+	controller := NewWorkspaceController(service, gitService)
+	router := NewWorkspaceRouter(controller)
+
+	return router, ws
+}
+
+func TestWorkspaceRouter_FetchAndListBranches(t *testing.T) {
+	repoPath := initTestRepoWithOrigin(t)
+	router, ws := setupBranchRouter(t, repoPath)
+
+	req := httptest.NewRequest("POST", fmt.Sprintf("/%d/branches/fetch", ws.ID), nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response BranchRefListResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	byName := map[string]git.BranchRef{}
+	for _, r := range response.Branches {
+		byName[r.Name] = r
+	}
+	require.Contains(t, byName, "main")
+	require.False(t, byName["main"].Remote)
+	require.Contains(t, byName, "local-only")
+	require.False(t, byName["local-only"].Remote)
+	require.Contains(t, byName, "remote-branch")
+	require.True(t, byName["remote-branch"].Remote)
+	require.Equal(t, "main", response.Branches[0].Name)
+}
+
+func TestWorkspaceRouter_FetchAndListBranches_NotGitRepo(t *testing.T) {
+	repoPath := initTestRepoWithOrigin(t)
+	router, _ := setupBranchRouter(t, repoPath)
+
+	req := httptest.NewRequest("POST", "/2/branches/fetch", nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestWorkspaceRouter_CheckBranchExists_Remote(t *testing.T) {
+	repoPath := initTestRepoWithOrigin(t)
+	router, ws := setupBranchRouter(t, repoPath)
+
+	req := httptest.NewRequest("GET", fmt.Sprintf("/%d/branches/exists?name=remote-branch", ws.ID), nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response BranchExistsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.False(t, response.ExistsLocal)
+	require.True(t, response.ExistsRemote)
+}
+
+func TestWorkspaceRouter_CheckBranchExists_Local(t *testing.T) {
+	repoPath := initTestRepoWithOrigin(t)
+	router, ws := setupBranchRouter(t, repoPath)
+
+	req := httptest.NewRequest("GET", fmt.Sprintf("/%d/branches/exists?name=local-only", ws.ID), nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response BranchExistsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.True(t, response.ExistsLocal)
+	require.False(t, response.ExistsRemote)
+}
+
+func TestWorkspaceRouter_CheckBranchExists_NotFound(t *testing.T) {
+	repoPath := initTestRepoWithOrigin(t)
+	router, ws := setupBranchRouter(t, repoPath)
+
+	req := httptest.NewRequest("GET", fmt.Sprintf("/%d/branches/exists?name=does-not-exist", ws.ID), nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response BranchExistsResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.False(t, response.ExistsLocal)
+	require.False(t, response.ExistsRemote)
+}
+
+func TestWorkspaceRouter_CheckBranchExists_MissingName(t *testing.T) {
+	repoPath := initTestRepoWithOrigin(t)
+	router, ws := setupBranchRouter(t, repoPath)
+
+	req := httptest.NewRequest("GET", fmt.Sprintf("/%d/branches/exists", ws.ID), nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}

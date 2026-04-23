@@ -15,6 +15,20 @@ type BranchesLoadedMsg struct {
 	Branches []string
 }
 
+type BranchRef = git.BranchRef
+
+type BranchesFetchedMsg struct {
+	Branches []BranchRef
+	Err      error
+}
+
+type BranchExistsCheckedMsg struct {
+	Name         string
+	ExistsLocal  bool
+	ExistsRemote bool
+	Err          error
+}
+
 func FetchWorkspaces() tea.Cmd {
 	return func() tea.Msg { return fetchWorkspacesIntentMsg{} }
 }
@@ -25,6 +39,14 @@ func RequestWorkspacesState() tea.Cmd {
 
 func RequestBranches(workspaceID uint) tea.Cmd {
 	return func() tea.Msg { return requestBranchesMsg{workspaceID: workspaceID} }
+}
+
+func FetchOriginBranches(workspaceID uint) tea.Cmd {
+	return func() tea.Msg { return fetchOriginBranchesIntentMsg{workspaceID: workspaceID} }
+}
+
+func CheckBranchExists(workspaceID uint, name string) tea.Cmd {
+	return func() tea.Msg { return checkBranchExistsIntentMsg{workspaceID: workspaceID, name: name} }
 }
 
 type PRsStateUpdatedMsg struct {
@@ -53,6 +75,27 @@ type requestWorkspacesStateMsg struct{}
 
 type requestBranchesMsg struct {
 	workspaceID uint
+}
+
+type fetchOriginBranchesIntentMsg struct {
+	workspaceID uint
+}
+
+type checkBranchExistsIntentMsg struct {
+	workspaceID uint
+	name        string
+}
+
+type branchesFetchedLoadedMsg struct {
+	branches []BranchRef
+	err      error
+}
+
+type branchExistsCheckedLoadedMsg struct {
+	name         string
+	existsLocal  bool
+	existsRemote bool
+	err          error
 }
 
 type deleteWorkspaceIntentMsg struct {
@@ -132,6 +175,26 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 
 	case requestBranchesMsg:
 		return p, p.client.fetchBranches(msg.workspaceID)
+
+	case fetchOriginBranchesIntentMsg:
+		return p, p.client.fetchOriginBranches(msg.workspaceID)
+
+	case branchesFetchedLoadedMsg:
+		branches := msg.branches
+		err := msg.err
+		return p, func() tea.Msg { return BranchesFetchedMsg{Branches: branches, Err: err} }
+
+	case checkBranchExistsIntentMsg:
+		return p, p.client.checkBranchExists(msg.workspaceID, msg.name)
+
+	case branchExistsCheckedLoadedMsg:
+		name := msg.name
+		existsLocal := msg.existsLocal
+		existsRemote := msg.existsRemote
+		err := msg.err
+		return p, func() tea.Msg {
+			return BranchExistsCheckedMsg{Name: name, ExistsLocal: existsLocal, ExistsRemote: existsRemote, Err: err}
+		}
 
 	case fetchPRsIntentMsg:
 		return p, p.client.fetchPRs(msg.workspaceID, msg.state)

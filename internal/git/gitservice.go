@@ -60,6 +60,14 @@ func (s *GitService) ListBranches(ctx context.Context, repoPath string) ([]strin
 	return s.cli.listBranches(ctx, repoPath)
 }
 
+func (s *GitService) ListAllBranches(ctx context.Context, repoPath string) ([]BranchRef, error) {
+	return s.cli.listAllBranches(ctx, repoPath)
+}
+
+func (s *GitService) FetchOrigin(ctx context.Context, repoPath string) error {
+	return s.cli.fetchOrigin(ctx, repoPath)
+}
+
 func (s *GitService) Pull(ctx context.Context, repoPath string, branch string) error {
 	return s.cli.pull(ctx, repoPath, branch)
 }

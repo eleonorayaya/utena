@@ -17,6 +17,11 @@ func newGitCLI() *gitCLI {
 	return &gitCLI{}
 }
 
+type BranchRef struct {
+	Name   string `json:"name"`
+	Remote bool   `json:"remote"`
+}
+
 func (s *gitCLI) listBranches(ctx context.Context, repoPath string) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "branch", "--format=%(refname:short)")
 	output, err := cmd.Output()
@@ -42,6 +47,56 @@ func (s *gitCLI) listBranches(ctx context.Context, repoPath string) ([]string, e
 	}
 
 	return branches, nil
+}
+
+func (s *gitCLI) listAllBranches(ctx context.Context, repoPath string) ([]BranchRef, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list branches: %w", err)
+	}
+
+	refs := []BranchRef{}
+	seen := map[string]bool{}
+
+	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
+		ref := strings.TrimSpace(line)
+		if ref == "" {
+			continue
+		}
+		name := ref
+		remote := false
+		if stripped, ok := strings.CutPrefix(ref, "origin/"); ok {
+			if stripped == "HEAD" {
+				continue
+			}
+			name = stripped
+			remote = true
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		refs = append(refs, BranchRef{Name: name, Remote: remote})
+	}
+
+	for i, r := range refs {
+		if r.Name == "main" {
+			refs = append(refs[:i], refs[i+1:]...)
+			refs = append([]BranchRef{r}, refs...)
+			break
+		}
+	}
+
+	return refs, nil
+}
+
+func (s *gitCLI) fetchOrigin(ctx context.Context, repoPath string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "fetch", "--prune", "origin")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git fetch failed: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
 }
 
 func (s *gitCLI) pull(ctx context.Context, repoPath string, branch string) error {
