@@ -508,6 +508,52 @@ func TestSessionService_CreateSession_NoBranch_SkipsWorktree(t *testing.T) {
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 }
 
+func TestSessionService_CreateSession_ExistingBranch_AutoCreatesWorktree(t *testing.T) {
+	repoPath := initTestRepo(t)
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+
+	ctx := context.Background()
+	branchName := "eqt/auto-worktree"
+	worktreePath := filepath.Join(repoPath, ".worktrees", "eqt-auto-worktree")
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, "main")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "pre-create worktree failed: %s", string(out))
+
+	pushCmd := exec.Command("git", "-C", worktreePath, "push", "-u", "origin", branchName)
+	out, err = pushCmd.CombinedOutput()
+	require.NoError(t, err, "push branch failed: %s", string(out))
+
+	session := &Session{WorkspaceID: wsGitID}
+
+	err = service.CreateSession(ctx, session, branchName, "", false)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
+
+	_, err = os.Stat(worktreePath)
+	require.NoError(t, err, "worktree should exist")
+
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+	require.Equal(t, "auto-worktree", retrieved.Name, "branch prefix should be stripped from session name")
+}
+
+func TestSessionService_CreateSession_ExistingMainBranch_SkipsWorktree(t *testing.T) {
+	repoPath := initTestRepo(t)
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+
+	session := &Session{WorkspaceID: wsGitID}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session, "main", "", false)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
+
+	_, err = os.Stat(filepath.Join(repoPath, ".worktrees", "main"))
+	require.True(t, os.IsNotExist(err), "no worktree should be created for main")
+}
+
 func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T) {
 	database := setupTestDB(t)
 	bus := eventbus.NewEventBus()

@@ -120,6 +120,10 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, br
 		createWorktree = true
 	}
 
+	if ws != nil && ws.IsGitRepo && branchName != "" && baseBranchName == "" && branchName != "main" {
+		createWorktree = true
+	}
+
 	var tmuxName string
 	switch {
 	case session.Name != "":
@@ -130,7 +134,7 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, br
 		}
 	case branchName != "":
 		if session.Name == "" {
-			session.Name = branchName
+			session.Name = s.nameFromBranch(branchName)
 		}
 		if ws != nil {
 			tmuxName = BuildTmuxSessionName(ws.Name, session.Name)
@@ -584,6 +588,17 @@ func (s *SessionService) computeTmuxName(sess *Session, ws *workspace.Workspace)
 	return SanitizeTmuxName(sess.Name)
 }
 
+func (s *SessionService) nameFromBranch(branchName string) string {
+	if s.branchPrefix == "" {
+		return branchName
+	}
+	stripped := strings.TrimPrefix(branchName, s.branchPrefix)
+	if stripped == "" {
+		return branchName
+	}
+	return stripped
+}
+
 func (s *SessionService) resolveStartDir(ctx context.Context, session *Session) string {
 	if session.BranchID != nil && session.GitBranch != nil {
 		ws, _ := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
@@ -850,7 +865,7 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 	}
 
 	sess := &Session{
-		Name:        branch.Name,
+		Name:        s.nameFromBranch(branch.Name),
 		WorkspaceID: ws.ID,
 		BranchID:    pr.HeadBranchID,
 		Status:      StatusPending,
