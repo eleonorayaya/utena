@@ -68,6 +68,16 @@ type BranchListResponse struct {
 	CurrentBranch string   `json:"current_branch"`
 }
 
+type BranchRefListResponse struct {
+	Branches      []git.BranchRef `json:"branches"`
+	CurrentBranch string          `json:"current_branch"`
+}
+
+type BranchExistsResponse struct {
+	ExistsLocal  bool `json:"exists_local"`
+	ExistsRemote bool `json:"exists_remote"`
+}
+
 type PRListResponse struct {
 	PullRequests []git.PullRequest `json:"pull_requests"`
 }

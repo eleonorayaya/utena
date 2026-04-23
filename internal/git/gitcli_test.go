@@ -162,6 +162,96 @@ func TestGitCLI_Pull_NoRemote(t *testing.T) {
 	require.Contains(t, err.Error(), "git pull failed")
 }
 
+func TestGitCLI_FetchOrigin_NoRemote(t *testing.T) {
+	repo := initTestRepo(t)
+
+	svc := newGitCLI()
+	err := svc.fetchOrigin(context.Background(), repo)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "git fetch failed")
+}
+
+func initTestRepoWithOrigin(t *testing.T) (string, string) {
+	t.Helper()
+	origin := t.TempDir()
+	run(t, origin, "git", "init", "--bare", "-b", "main")
+
+	upstream := t.TempDir()
+	run(t, upstream, "git", "init", "-b", "main")
+	run(t, upstream, "git", "config", "user.email", "test@test.com")
+	run(t, upstream, "git", "config", "user.name", "Test")
+	run(t, upstream, "git", "commit", "--allow-empty", "-m", "init")
+	run(t, upstream, "git", "remote", "add", "origin", origin)
+	run(t, upstream, "git", "push", "origin", "main")
+
+	clone := t.TempDir()
+	run(t, clone, "git", "clone", origin, ".")
+	run(t, clone, "git", "config", "user.email", "test@test.com")
+	run(t, clone, "git", "config", "user.name", "Test")
+	return clone, upstream
+}
+
+func TestGitCLI_ListAllBranches_DedupesLocalAndRemote(t *testing.T) {
+	clone, upstream := initTestRepoWithOrigin(t)
+
+	run(t, upstream, "git", "checkout", "-b", "feature-remote")
+	run(t, upstream, "git", "commit", "--allow-empty", "-m", "feature commit")
+	run(t, upstream, "git", "push", "origin", "feature-remote")
+
+	run(t, clone, "git", "fetch", "origin")
+	run(t, clone, "git", "branch", "local-only")
+
+	svc := newGitCLI()
+	refs, err := svc.listAllBranches(context.Background(), clone)
+	require.NoError(t, err)
+
+	byName := map[string]BranchRef{}
+	for _, r := range refs {
+		byName[r.Name] = r
+	}
+	require.Contains(t, byName, "main")
+	require.False(t, byName["main"].Remote, "main exists locally")
+	require.Contains(t, byName, "local-only")
+	require.False(t, byName["local-only"].Remote)
+	require.Contains(t, byName, "feature-remote")
+	require.True(t, byName["feature-remote"].Remote, "feature-remote should be remote-only")
+	require.Equal(t, "main", refs[0].Name, "main should be first")
+}
+
+func TestGitCLI_ListAllBranches_SkipsOriginHEAD(t *testing.T) {
+	clone, _ := initTestRepoWithOrigin(t)
+
+	svc := newGitCLI()
+	refs, err := svc.listAllBranches(context.Background(), clone)
+	require.NoError(t, err)
+	for _, r := range refs {
+		require.NotEqual(t, "HEAD", r.Name)
+	}
+}
+
+func TestGitCLI_FetchOrigin_Succeeds(t *testing.T) {
+	clone, upstream := initTestRepoWithOrigin(t)
+
+	run(t, upstream, "git", "checkout", "-b", "new-from-upstream")
+	run(t, upstream, "git", "commit", "--allow-empty", "-m", "upstream commit")
+	run(t, upstream, "git", "push", "origin", "new-from-upstream")
+
+	svc := newGitCLI()
+	err := svc.fetchOrigin(context.Background(), clone)
+	require.NoError(t, err)
+
+	refs, err := svc.listAllBranches(context.Background(), clone)
+	require.NoError(t, err)
+	found := false
+	for _, r := range refs {
+		if r.Name == "new-from-upstream" {
+			found = true
+			require.True(t, r.Remote)
+		}
+	}
+	require.True(t, found, "expected new-from-upstream after fetch")
+}
+
 func TestGitCLI_WorktreePath(t *testing.T) {
 	svc := newGitCLI()
 	require.Equal(t, "/repo/.worktrees/eqt-my-feature", svc.worktreePath("/repo", "eqt/my-feature"))

@@ -10,7 +10,8 @@ import (
 )
 
 type Model struct {
-	list list.Model
+	list       list.Model
+	isFetching bool
 }
 
 func New() Model {
@@ -45,6 +46,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, m.list.SetItems(items)
 
+	case provider.BranchesFetchedMsg:
+		m.isFetching = false
+		if msg.Err != nil {
+			return m, m.list.NewStatusMessage("fetch failed: " + msg.Err.Error())
+		}
+		items := make([]list.Item, len(msg.Branches))
+		for i, b := range msg.Branches {
+			items[i] = branchItem{name: b.Name, remote: b.Remote}
+		}
+		return m, tea.Batch(m.list.SetItems(items), m.list.NewStatusMessage("fetched"))
+
 	case tea.KeyMsg:
 		var cmd tea.Cmd
 		var handled bool
@@ -70,6 +82,19 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 				return SelectedMsg{Branch: branch}
 			}, true
 		}
+	}
+	if key.Matches(msg, Keys.Fetch) {
+		if m.isFetching {
+			return m, nil, true
+		}
+		m.isFetching = true
+		return m, tea.Batch(
+			m.list.NewStatusMessage("fetching origin…"),
+			func() tea.Msg { return FetchRequestedMsg{} },
+		), true
+	}
+	if key.Matches(msg, Keys.Manual) {
+		return m, func() tea.Msg { return ManualEntryRequestedMsg{} }, true
 	}
 	return m, nil, false
 }

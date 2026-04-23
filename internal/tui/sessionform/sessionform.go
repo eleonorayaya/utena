@@ -31,29 +31,34 @@ const (
 	filePickerStep
 	dirTypeChoiceStep
 	branchPickerStep
+	branchManualInputStep
 	branchModeStep
 	nameInputStep
 )
 
 type Model struct {
-	activeStep        step
-	workspacePicker   workspacepicker.Model
-	filePicker        filepicker.Model
-	branchPicker      branchpicker.Model
-	nameInput         textinput.Model
-	selectedWorkspace workspace.Workspace
-	selectedBranch    string
-	selectedDirPath   string
-	nameErr           string
-	width, height     int
+	activeStep         step
+	workspacePicker    workspacepicker.Model
+	filePicker         filepicker.Model
+	branchPicker       branchpicker.Model
+	nameInput          textinput.Model
+	manualBranchInput  textinput.Model
+	selectedWorkspace  workspace.Workspace
+	selectedBranch     string
+	selectedDirPath    string
+	nameErr            string
+	manualBranchErr    string
+	pendingBranchCheck string
+	width, height      int
 }
 
 func New() Model {
 	return Model{
-		activeStep:      workspacePickerStep,
-		workspacePicker: workspacepicker.New("Select workspace", false),
-		branchPicker:    branchpicker.New(),
-		nameInput:       textinput.New(),
+		activeStep:        workspacePickerStep,
+		workspacePicker:   workspacepicker.New("Select workspace", false),
+		branchPicker:      branchpicker.New(),
+		nameInput:         textinput.New(),
+		manualBranchInput: textinput.New(),
 	}
 }
 
@@ -64,6 +69,9 @@ func (m Model) Init() (Model, tea.Cmd) {
 	m.selectedDirPath = ""
 	m.nameErr = ""
 	m.nameInput.SetValue("")
+	m.manualBranchErr = ""
+	m.manualBranchInput.SetValue("")
+	m.pendingBranchCheck = ""
 	return m, provider.FetchWorkspaces()
 }
 
@@ -83,7 +91,7 @@ func (m Model) Keys() help.KeyMap {
 		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, filepicker.Keys}}
 	case branchPickerStep:
 		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, branchpicker.Keys}}
-	case dirTypeChoiceStep, branchModeStep:
+	case dirTypeChoiceStep, branchModeStep, branchManualInputStep:
 		return formKeys
 	default:
 		return formKeys
@@ -106,6 +114,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			router.NavigateTo(router.SessionProgressView),
 			sessionprogress.Start(msg.ID),
 		)
+	case provider.BranchExistsCheckedMsg:
+		return m.onBranchExistsChecked(msg), nil
 	}
 
 	switch m.activeStep {
@@ -117,6 +127,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.updateDirTypeChoice(msg)
 	case branchPickerStep:
 		return m.updateBranchPicker(msg)
+	case branchManualInputStep:
+		return m.updateBranchManualInput(msg)
 	case branchModeStep:
 		return m.updateBranchMode(msg)
 	case nameInputStep:
@@ -210,6 +222,21 @@ func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 		m.activeStep = branchModeStep
 		return m, nil
 
+	case branchpicker.FetchRequestedMsg:
+		var cmd tea.Cmd
+		m.branchPicker, cmd = m.branchPicker.Update(msg)
+		return m, tea.Batch(cmd, provider.FetchOriginBranches(m.selectedWorkspace.ID))
+
+	case branchpicker.ManualEntryRequestedMsg:
+		m.initManualBranchInput()
+		m.activeStep = branchManualInputStep
+		return m, m.manualBranchInput.Focus()
+
+	case provider.BranchesFetchedMsg:
+		var cmd tea.Cmd
+		m.branchPicker, cmd = m.branchPicker.Update(msg)
+		return m, cmd
+
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
 			m.activeStep = workspacePickerStep
@@ -220,6 +247,53 @@ func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.branchPicker, cmd = m.branchPicker.Update(msg)
 	return m, cmd
+}
+
+func (m Model) updateBranchManualInput(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, formKeys.Submit):
+			name := strings.TrimSpace(m.manualBranchInput.Value())
+			if name == "" {
+				m.manualBranchErr = "branch name required"
+				return m, nil
+			}
+			m.manualBranchErr = ""
+			m.pendingBranchCheck = name
+			return m, provider.CheckBranchExists(m.selectedWorkspace.ID, name)
+		case key.Matches(msg, formKeys.Back):
+			m.activeStep = branchPickerStep
+			m.manualBranchErr = ""
+			m.pendingBranchCheck = ""
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.manualBranchInput, cmd = m.manualBranchInput.Update(msg)
+	return m, cmd
+}
+
+func (m Model) onBranchExistsChecked(msg provider.BranchExistsCheckedMsg) Model {
+	if m.pendingBranchCheck == "" || msg.Name != m.pendingBranchCheck {
+		return m
+	}
+	m.pendingBranchCheck = ""
+	if msg.Err != nil {
+		m.manualBranchErr = msg.Err.Error()
+		m.activeStep = branchManualInputStep
+		return m
+	}
+	if !msg.ExistsLocal && !msg.ExistsRemote {
+		m.manualBranchErr = "branch not found: " + msg.Name
+		m.activeStep = branchManualInputStep
+		return m
+	}
+	m.manualBranchErr = ""
+	m.selectedBranch = msg.Name
+	m.activeStep = branchModeStep
+	return m
 }
 
 func (m Model) updateBranchMode(msg tea.Msg) (Model, tea.Cmd) {
@@ -278,6 +352,14 @@ func (m *Model) initNameInput() {
 	m.nameErr = ""
 }
 
+func (m *Model) initManualBranchInput() {
+	ti := textinput.New()
+	ti.Prompt = "Branch name: "
+	m.manualBranchInput = ti
+	m.manualBranchErr = ""
+	m.pendingBranchCheck = ""
+}
+
 func (m Model) View() string {
 	switch m.activeStep {
 	case filePickerStep:
@@ -290,6 +372,17 @@ func (m Model) View() string {
 			"  esc: back"
 	case branchPickerStep:
 		return m.branchPicker.View()
+	case branchManualInputStep:
+		var b strings.Builder
+		b.WriteString("Enter a branch name (local or remote)\n\n")
+		b.WriteString(m.manualBranchInput.View())
+		if m.pendingBranchCheck != "" {
+			b.WriteString("\n\nchecking…")
+		}
+		if m.manualBranchErr != "" {
+			b.WriteString("\n" + errStyle().Render(m.manualBranchErr))
+		}
+		return b.String()
 	case branchModeStep:
 		return promptStyle().Render("Branch: ") + pathStyle().Render(m.selectedBranch) +
 			"\n\n" +

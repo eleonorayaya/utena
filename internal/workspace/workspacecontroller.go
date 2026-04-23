@@ -153,6 +153,86 @@ func (c *WorkspaceController) ListBranches(w http.ResponseWriter, r *http.Reques
 	render.JSON(w, r, BranchListResponse{Branches: branches, CurrentBranch: currentBranch})
 }
 
+func (c *WorkspaceController) FetchAndListBranches(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	raw := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	ws, err := c.service.GetWorkspace(ctx, uint(id))
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	if !ws.IsGitRepo {
+		common.RenderError(w, r, common.NewInvalidRequest(fmt.Sprintf("workspace %q is not a git repository", ws.Name)))
+		return
+	}
+
+	if err := c.gitService.FetchOrigin(ctx, ws.Path); err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	branches, err := c.gitService.ListAllBranches(ctx, ws.Path)
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	currentBranch, err := c.gitService.CurrentBranch(ctx, ws.Path)
+	if err != nil {
+		currentBranch = ""
+	}
+
+	render.JSON(w, r, BranchRefListResponse{Branches: branches, CurrentBranch: currentBranch})
+}
+
+func (c *WorkspaceController) CheckBranchExists(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	raw := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		common.RenderError(w, r, common.NewInvalidRequest("name query parameter is required"))
+		return
+	}
+
+	ws, err := c.service.GetWorkspace(ctx, uint(id))
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	if !ws.IsGitRepo {
+		common.RenderError(w, r, common.NewInvalidRequest(fmt.Sprintf("workspace %q is not a git repository", ws.Name)))
+		return
+	}
+
+	existsLocal, err := c.gitService.HasBranch(ctx, ws.Path, name)
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	existsRemote, err := c.gitService.HasRemoteBranch(ctx, ws.Path, name)
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	render.JSON(w, r, BranchExistsResponse{ExistsLocal: existsLocal, ExistsRemote: existsRemote})
+}
+
 func (c *WorkspaceController) ListPRs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	raw := chi.URLParam(r, "id")

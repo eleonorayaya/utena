@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/GianlucaP106/gotmux/gotmux"
@@ -96,6 +97,21 @@ type branchListResponse struct {
 	CurrentBranch string   `json:"current_branch"`
 }
 
+type branchRefListResponse struct {
+	Branches      []branchRefEntry `json:"branches"`
+	CurrentBranch string           `json:"current_branch"`
+}
+
+type branchRefEntry struct {
+	Name   string `json:"name"`
+	Remote bool   `json:"remote"`
+}
+
+type branchExistsResponse struct {
+	ExistsLocal  bool `json:"exists_local"`
+	ExistsRemote bool `json:"exists_remote"`
+}
+
 func (c *client) fetchBranches(workspaceID uint) tea.Cmd {
 	return func() tea.Msg {
 		res, err := c.httpClient.Get(fmt.Sprintf("%s/workspaces/%d/branches", c.baseURL, workspaceID))
@@ -115,6 +131,66 @@ func (c *client) fetchBranches(workspaceID uint) tea.Cmd {
 		}
 
 		return branchesLoadedMsg{branches: resp.Branches}
+	}
+}
+
+func (c *client) fetchOriginBranches(workspaceID uint) tea.Cmd {
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/workspaces/%d/branches/fetch", c.baseURL, workspaceID), nil)
+		if err != nil {
+			return branchesFetchedLoadedMsg{err: err}
+		}
+
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] fetch origin branches: %v", err)
+			return branchesFetchedLoadedMsg{err: err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			apiErr := parseAPIError(res, "fetch origin branches")
+			return branchesFetchedLoadedMsg{err: apiErr.Err}
+		}
+
+		var resp branchRefListResponse
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			return branchesFetchedLoadedMsg{err: err}
+		}
+
+		branches := make([]BranchRef, len(resp.Branches))
+		for i, b := range resp.Branches {
+			branches[i] = BranchRef{Name: b.Name, Remote: b.Remote}
+		}
+		return branchesFetchedLoadedMsg{branches: branches}
+	}
+}
+
+func (c *client) checkBranchExists(workspaceID uint, name string) tea.Cmd {
+	return func() tea.Msg {
+		u := fmt.Sprintf("%s/workspaces/%d/branches/exists?name=%s", c.baseURL, workspaceID, url.QueryEscape(name))
+		res, err := c.httpClient.Get(u)
+		if err != nil {
+			log.Printf("[ERROR] check branch exists %q: %v", name, err)
+			return branchExistsCheckedLoadedMsg{name: name, err: err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			apiErr := parseAPIError(res, "check branch exists")
+			return branchExistsCheckedLoadedMsg{name: name, err: apiErr.Err}
+		}
+
+		var resp branchExistsResponse
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			return branchExistsCheckedLoadedMsg{name: name, err: err}
+		}
+
+		return branchExistsCheckedLoadedMsg{
+			name:         name,
+			existsLocal:  resp.ExistsLocal,
+			existsRemote: resp.ExistsRemote,
+		}
 	}
 }
 
