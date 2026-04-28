@@ -826,7 +826,7 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 	}
 
 	isNew := data.Previous == nil
-	newlyAssigned := pr.IsAssignedToMe && (isNew || !data.Previous.IsAssignedToMe)
+	newlyAssigned := pr.IsAssignedToMe && pr.State == git.PRStateOpen && (isNew || !data.Previous.IsAssignedToMe)
 	newlyMerged := pr.State == git.PRStateMerged && (isNew || data.Previous.State != git.PRStateMerged)
 
 	if newlyAssigned {

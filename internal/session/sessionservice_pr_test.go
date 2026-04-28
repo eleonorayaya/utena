@@ -132,6 +132,44 @@ func TestHandlePRUpdated_SkipsUnassigned(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestHandlePRUpdated_SkipsNonOpenStates(t *testing.T) {
+	cases := []struct {
+		name  string
+		state git.PRState
+	}{
+		{"draft", git.PRStateDraft},
+		{"closed", git.PRStateClosed},
+		{"merged", git.PRStateMerged},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := setupPRTestEnv(t)
+			ctx := context.Background()
+			branchID := env.branch.ID
+			event := eventbus.Event{
+				Type: git.EventPRUpdated,
+				Data: git.PRUpdatedEvent{
+					PullRequest: &git.PullRequest{
+						RepoID:         env.repo.ID,
+						Number:         42,
+						HeadBranchID:   &branchID,
+						State:          tc.state,
+						IsAssignedToMe: true,
+					},
+					Previous: nil,
+					Repo:     env.repo,
+				},
+			}
+
+			err := env.service.handlePRUpdated(ctx, event)
+			require.NoError(t, err)
+
+			_, err = env.sessionStore.GetByBranchID(branchID)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestHandlePRUpdated_SkipsExistingSession(t *testing.T) {
 	env := setupPRTestEnv(t)
 	ctx := context.Background()
