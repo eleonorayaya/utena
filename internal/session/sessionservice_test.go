@@ -79,6 +79,26 @@ func TestSessionService_OnAppStart(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSessionService_OnAppStart_RecoversStuckCreatingSessions(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+	ctx := context.Background()
+
+	stuck := &Session{
+		Name:        "stuck-session",
+		WorkspaceID: ws1ID,
+		Status:      StatusCreating,
+		LastUsedAt:  time.Now().Add(-1 * time.Hour),
+	}
+	require.NoError(t, sessionStore.Add(stuck))
+
+	require.NoError(t, service.OnAppStart(ctx))
+
+	recovered, err := sessionStore.GetByID(stuck.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusBroken, recovered.Status)
+	require.NotEmpty(t, recovered.StatusError)
+}
+
 func TestSessionService_OnAppEnd(t *testing.T) {
 	service, _, _, _, _, _ := setupSessionService(t)
 	ctx := context.Background()

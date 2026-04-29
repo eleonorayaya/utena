@@ -48,8 +48,30 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.eventBus.Subscribe(eventbus.TmuxClientAttached, s.handleTmuxClientAttached)
 	s.eventBus.Subscribe(eventbus.TmuxClientDetached, s.handleTmuxClientDetached)
 	s.eventBus.Subscribe(git.EventPRUpdated, s.handlePRUpdated)
+	s.recoverStuckCreatingSessions()
 	s.reconcileTmuxState(ctx)
 	return nil
+}
+
+func (s *SessionService) recoverStuckCreatingSessions() {
+	sessions, err := s.store.List()
+	if err != nil {
+		slog.Warn("failed to list sessions for stuck-creating recovery", "error", err)
+		return
+	}
+	for i := range sessions {
+		sess := &sessions[i]
+		if sess.Status != StatusCreating {
+			continue
+		}
+		sess.Status = StatusBroken
+		sess.StatusError = "creation interrupted by daemon restart"
+		if err := s.store.Update(sess); err != nil {
+			slog.Warn("failed to recover stuck creating session", "session", sess.ID, "error", err)
+			continue
+		}
+		slog.Info("recovered stuck creating session", "session", sess.ID, "name", sess.Name)
+	}
 }
 
 func (s *SessionService) OnAppEnd(ctx context.Context) error {
