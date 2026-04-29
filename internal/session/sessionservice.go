@@ -48,8 +48,30 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.eventBus.Subscribe(eventbus.TmuxClientAttached, s.handleTmuxClientAttached)
 	s.eventBus.Subscribe(eventbus.TmuxClientDetached, s.handleTmuxClientDetached)
 	s.eventBus.Subscribe(git.EventPRUpdated, s.handlePRUpdated)
+	s.recoverStuckCreatingSessions()
 	s.reconcileTmuxState(ctx)
 	return nil
+}
+
+func (s *SessionService) recoverStuckCreatingSessions() {
+	sessions, err := s.store.List()
+	if err != nil {
+		slog.Warn("failed to list sessions for stuck-creating recovery", "error", err)
+		return
+	}
+	for i := range sessions {
+		sess := &sessions[i]
+		if sess.Status != StatusCreating {
+			continue
+		}
+		sess.Status = StatusBroken
+		sess.StatusError = "creation interrupted by daemon restart"
+		if err := s.store.Update(sess); err != nil {
+			slog.Warn("failed to recover stuck creating session", "session", sess.ID, "error", err)
+			continue
+		}
+		slog.Info("recovered stuck creating session", "session", sess.ID, "name", sess.Name)
+	}
 }
 
 func (s *SessionService) OnAppEnd(ctx context.Context) error {
@@ -484,6 +506,14 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		return nil, ErrCannotActivate
 	}
 
+	if session.BranchID != nil && session.GitBranch != nil && session.WorkspaceID != 0 {
+		if ws, wsErr := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID); wsErr == nil && ws != nil {
+			if _, wtErr := s.gitService.EnsureWorktree(ctx, session.GitBranch, ws.Path); wtErr != nil {
+				slog.Warn("failed to ensure worktree on activation", "session", id, "branch", session.GitBranch.Name, "error", wtErr)
+			}
+		}
+	}
+
 	tmuxName := ""
 	if session.TmuxSessionID != nil {
 		ts, tsErr := s.tmuxService.GetSession(*session.TmuxSessionID)
@@ -826,7 +856,7 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 	}
 
 	isNew := data.Previous == nil
-	newlyAssigned := pr.IsAssignedToMe && (isNew || !data.Previous.IsAssignedToMe)
+	newlyAssigned := pr.IsAssignedToMe && pr.State == git.PRStateOpen && (isNew || !data.Previous.IsAssignedToMe)
 	newlyMerged := pr.State == git.PRStateMerged && (isNew || data.Previous.State != git.PRStateMerged)
 
 	if newlyAssigned {

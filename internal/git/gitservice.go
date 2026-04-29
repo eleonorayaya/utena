@@ -448,6 +448,14 @@ func ghPRToPullRequest(ghPR *github.PullRequest, repoID uint, branchID uint, cur
 			break
 		}
 	}
+	if !assigned {
+		for _, r := range ghPR.RequestedReviewers {
+			if r.GetLogin() == currentUser {
+				assigned = true
+				break
+			}
+		}
+	}
 	state := PRStateOpen
 	if ghPR.MergedAt != nil {
 		state = PRStateMerged

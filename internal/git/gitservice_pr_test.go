@@ -320,3 +320,35 @@ func TestSyncRepoPRs_NotAssigned(t *testing.T) {
 	require.Len(t, prs, 1)
 	assert.False(t, prs[0].IsAssignedToMe)
 }
+
+func TestSyncRepoPRs_SetsIsAssignedToMe_WhenRequestedReviewer(t *testing.T) {
+	database, repo := setupGitServiceTest(t)
+	raw := makeGitHubPR(1, "Review request PR", "feature-a", "open", false)
+	raw.RequestedReviewers = []*github.User{{Login: github.Ptr("myself")}}
+	ghClient := &mockGitHubClient{repoPRs: []*github.PullRequest{raw}}
+	svc := NewGitService(database, WithGitHubClient(ghClient))
+	svc.currentUser = "myself"
+
+	err := svc.SyncRepoPRs(context.Background(), repo)
+	require.NoError(t, err)
+
+	prs := svc.prStore.ListByRepo(repo.ID)
+	require.Len(t, prs, 1)
+	assert.True(t, prs[0].IsAssignedToMe)
+}
+
+func TestSyncRepoPRs_TeamReviewRequest_DoesNotMarkAssigned(t *testing.T) {
+	database, repo := setupGitServiceTest(t)
+	raw := makeGitHubPR(1, "Team review PR", "feature-a", "open", false)
+	raw.RequestedTeams = []*github.Team{{Slug: github.Ptr("my-team")}}
+	ghClient := &mockGitHubClient{repoPRs: []*github.PullRequest{raw}}
+	svc := NewGitService(database, WithGitHubClient(ghClient))
+	svc.currentUser = "myself"
+
+	err := svc.SyncRepoPRs(context.Background(), repo)
+	require.NoError(t, err)
+
+	prs := svc.prStore.ListByRepo(repo.ID)
+	require.Len(t, prs, 1)
+	assert.False(t, prs[0].IsAssignedToMe)
+}

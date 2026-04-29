@@ -79,6 +79,26 @@ func TestSessionService_OnAppStart(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSessionService_OnAppStart_RecoversStuckCreatingSessions(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+	ctx := context.Background()
+
+	stuck := &Session{
+		Name:        "stuck-session",
+		WorkspaceID: ws1ID,
+		Status:      StatusCreating,
+		LastUsedAt:  time.Now().Add(-1 * time.Hour),
+	}
+	require.NoError(t, sessionStore.Add(stuck))
+
+	require.NoError(t, service.OnAppStart(ctx))
+
+	recovered, err := sessionStore.GetByID(stuck.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusBroken, recovered.Status)
+	require.NotEmpty(t, recovered.StatusError)
+}
+
 func TestSessionService_OnAppEnd(t *testing.T) {
 	service, _, _, _, _, _ := setupSessionService(t)
 	ctx := context.Background()
@@ -335,6 +355,12 @@ func initTestRepo(t *testing.T) string {
 
 func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *utmux.MockRunner, uint) {
 	t.Helper()
+	service, sessionStore, mock, wsID, _, _ := setupWorktreeSessionServiceFull(t, repoPath, configDir)
+	return service, sessionStore, mock, wsID
+}
+
+func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *utmux.MockRunner, uint, db.Database, *git.GitService) {
+	t.Helper()
 
 	database := setupTestDB(t)
 	bus := eventbus.NewEventBus()
@@ -346,14 +372,10 @@ func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string
 	mock := utmux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitDB, err := db.OpenInMemory()
-	require.NoError(t, err)
-	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
-	t.Cleanup(func() { gitDB.Close() })
-	gitService := git.NewGitService(gitDB)
+	gitService := git.NewGitService(database)
 	dismissedPRStore := NewDismissedPRStore(database)
 	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir)
-	return service, sessionStore, mock, wsGit.ID
+	return service, sessionStore, mock, wsGit.ID, database, gitService
 }
 
 func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
@@ -638,6 +660,48 @@ func TestSessionService_ActivateSession_RejectsBrokenSession(t *testing.T) {
 	_, err := service.ActivateSession(ctx, session.ID)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrCannotActivate)
+}
+
+func TestSessionService_ActivateSession_PendingPR_CreatesWorktree(t *testing.T) {
+	repoPath := initTestRepo(t)
+	branchName := "harleyk--catalog-docs"
+
+	pushCmd := exec.Command("git", "-C", repoPath, "push", "origin", "main:"+branchName)
+	out, err := pushCmd.CombinedOutput()
+	require.NoError(t, err, "push remote branch failed: %s", string(out))
+
+	service, sessionStore, mock, wsGitID, gitDB, _ := setupWorktreeSessionServiceFull(t, repoPath, t.TempDir())
+
+	repo := &git.Repo{Path: repoPath, FullName: "owner/repo"}
+	require.NoError(t, gitDB.Create(repo).Error)
+	branch := &git.Branch{Name: branchName, RepoID: repo.ID, ExistsLocal: false, ExistsRemote: true}
+	require.NoError(t, gitDB.Create(branch).Error)
+
+	branchID := branch.ID
+	pending := &Session{
+		Name:        branchName,
+		WorkspaceID: wsGitID,
+		BranchID:    &branchID,
+		Status:      StatusPending,
+		LastUsedAt:  time.Now(),
+	}
+	require.NoError(t, sessionStore.Add(pending))
+
+	ctx := context.Background()
+	result, err := service.ActivateSession(ctx, pending.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusActive, result.Status)
+
+	worktreePath := filepath.Join(repoPath, ".worktrees", "harleyk--catalog-docs")
+	info, err := os.Stat(worktreePath)
+	require.NoError(t, err, "expected worktree at %s", worktreePath)
+	require.True(t, info.IsDir())
+
+	tmuxName := fmt.Sprintf("git-repo-%s", branchName)
+	require.True(t, mock.HasSessionByName(tmuxName), "tmux session %q not created", tmuxName)
+	ts, err := service.tmuxService.GetSessionByName(tmuxName)
+	require.NoError(t, err)
+	require.Equal(t, worktreePath, ts.StartDir, "tmux session start dir should be the worktree, not the repo root")
 }
 
 func TestSessionService_ActivateSession_RecreatesMissingTmux(t *testing.T) {
