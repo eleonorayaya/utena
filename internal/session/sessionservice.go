@@ -484,6 +484,14 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		return nil, ErrCannotActivate
 	}
 
+	if session.BranchID != nil && session.GitBranch != nil && session.WorkspaceID != 0 {
+		if ws, wsErr := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID); wsErr == nil && ws != nil {
+			if _, wtErr := s.gitService.EnsureWorktree(ctx, session.GitBranch, ws.Path); wtErr != nil {
+				slog.Warn("failed to ensure worktree on activation", "session", id, "branch", session.GitBranch.Name, "error", wtErr)
+			}
+		}
+	}
+
 	tmuxName := ""
 	if session.TmuxSessionID != nil {
 		ts, tsErr := s.tmuxService.GetSession(*session.TmuxSessionID)
