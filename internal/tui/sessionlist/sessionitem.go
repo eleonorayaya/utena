@@ -33,6 +33,9 @@ func (i sessionItem) Title() string {
 			title += " (attached)"
 		}
 	}
+	if i.session.Status != session.StatusBroken && i.session.StatusError != "" {
+		title += " [!]"
+	}
 	switch i.claudeStatus {
 	case claude.StatusNeedsAttention:
 		title += " [needs attention]"
