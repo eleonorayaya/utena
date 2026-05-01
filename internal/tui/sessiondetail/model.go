@@ -95,6 +95,9 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, router.Back()
 
 	case key.Matches(msg, keys.Activate):
+		if m.sess.IsAttached {
+			return m, nil
+		}
 		return m, provider.ActivateSession(m.sess.ID)
 
 	case key.Matches(msg, keys.Archive):

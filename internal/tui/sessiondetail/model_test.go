@@ -42,6 +42,14 @@ func TestSessionDetail_Back_NavigatesBack(t *testing.T) {
 	assert.IsType(t, router.BackMsg{}, msg)
 }
 
+func TestSessionDetail_Activate_SkipsWhenAttached(t *testing.T) {
+	attached := makeActiveSession()
+	attached.IsAttached = true
+	m, _ := New().Update(SelectMsg{Session: attached})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.Nil(t, cmd)
+}
+
 func TestSessionDetail_Archive_ArchivesAndGoesBack(t *testing.T) {
 	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
