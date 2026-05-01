@@ -11,6 +11,7 @@ import (
 	ulist "github.com/eleonorayaya/utena/internal/tui/list"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/sessiondetail"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
 )
 
@@ -101,6 +102,15 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.pendingRepairID = 0
 	}
 	switch {
+	case key.Matches(msg, keys.Info):
+		item, ok := m.list.SelectedItem().(sessionItem)
+		if !ok {
+			return m, nil, false
+		}
+		return m, tea.Sequence(
+			router.NavigateTo(router.SessionDetailView),
+			sessiondetail.Select(item.session),
+		), true
 	case key.Matches(msg, keys.ToggleBroken):
 		m.showBroken = !m.showBroken
 		return m, m.rebuildItems(), true
