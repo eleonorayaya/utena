@@ -47,7 +47,8 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	t.Cleanup(func() { gitDB.Close() })
 	gitService := git.NewGitService(gitDB)
 	dismissedPRStore := NewDismissedPRStore(database)
-	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
+	startupActionStore := NewStartupActionStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, startupActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 	return service, sessionStore, workspaceStore, mock, ws1.ID, ws2.ID
 }
 
@@ -374,7 +375,8 @@ func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir st
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService(database)
 	dismissedPRStore := NewDismissedPRStore(database)
-	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir)
+	startupActionStore := NewStartupActionStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, startupActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir)
 	return service, sessionStore, mock, wsGit.ID, database, gitService
 }
 
@@ -593,7 +595,8 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	t.Cleanup(func() { gitDB.Close() })
 	gitService := git.NewGitService(gitDB)
 	dismissedPRStore := NewDismissedPRStore(database)
-	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
+	startupActionStore := NewStartupActionStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, startupActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
 
 	session := &Session{
 		Name:        "my-session",

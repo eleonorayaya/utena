@@ -9,6 +9,7 @@ import (
 
 type tmuxRunner interface {
 	newSession(name, startDir string, env map[string]string) error
+	newWindow(sessionName, startDir, command string) error
 	killSession(name string) error
 	hasSession(name string) bool
 	switchClient(targetSession string) error
@@ -43,6 +44,11 @@ func (r *gotmuxRunner) newSession(name, startDir string, env map[string]string) 
 		}
 	}
 	return nil
+}
+
+func (r *gotmuxRunner) newWindow(sessionName, startDir, command string) error {
+	_, err := r.tmux.Command("new-window", "-t", sessionName, "-c", startDir, command)
+	return err
 }
 
 func (r *gotmuxRunner) killSession(name string) error {

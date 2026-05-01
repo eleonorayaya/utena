@@ -207,6 +207,13 @@ func (t *TmuxService) HandleClientDetached(ctx context.Context, tmuxName string)
 	})
 }
 
+func (t *TmuxService) SpawnWindow(sessionName, startDir, command string) error {
+	if t.runner == nil {
+		return ErrTmuxNotAvailable
+	}
+	return t.runner.newWindow(sessionName, startDir, command)
+}
+
 func (t *TmuxService) SyncWindows(ctx context.Context, tmuxName string, windows []Window) {
 	t.windowsBySession[tmuxName] = windows
 }

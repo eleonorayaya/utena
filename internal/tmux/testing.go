@@ -5,15 +5,33 @@ import (
 	"sync"
 )
 
+type SpawnedWindow struct {
+	SessionName string
+	StartDir    string
+	Command     string
+}
+
 type MockRunner struct {
-	mu        sync.Mutex
-	Sessions  map[string]bool
-	CreateErr error
-	KillErr   error
+	mu             sync.Mutex
+	Sessions       map[string]bool
+	SpawnedWindows []SpawnedWindow
+	CreateErr      error
+	KillErr        error
 }
 
 func NewMockRunner() *MockRunner {
 	return &MockRunner{Sessions: make(map[string]bool)}
+}
+
+func (m *MockRunner) newWindow(sessionName, startDir, command string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.SpawnedWindows = append(m.SpawnedWindows, SpawnedWindow{
+		SessionName: sessionName,
+		StartDir:    startDir,
+		Command:     command,
+	})
+	return nil
 }
 
 func (m *MockRunner) newSession(name, startDir string, env map[string]string) error {

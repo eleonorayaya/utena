@@ -41,6 +41,7 @@ type Session struct {
 	LastUsedAt     time.Time              `json:"last_used_at"`
 	Workspace      *workspace.Workspace   `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID;constraint:OnDelete:CASCADE"`
 	ClaudeSessions []claude.ClaudeSession `json:"claude_sessions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	StartupActions []StartupAction        `json:"startup_actions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	BranchID       *uint                  `json:"branch_id,omitempty" gorm:"index"`
 	TmuxSessionID  *uint                  `json:"tmux_session_id,omitempty" gorm:"uniqueIndex"`
 	StatusError    string                 `json:"status_error,omitempty"`

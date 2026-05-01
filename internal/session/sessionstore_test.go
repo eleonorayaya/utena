@@ -22,7 +22,7 @@ func setupTestDB(t *testing.T) db.Database {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database.Migrate(&workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{})
+	database.Migrate(&workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{}, &StartupAction{})
 	t.Cleanup(func() { database.Close() })
 	return database
 }
@@ -321,7 +321,7 @@ func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *u
 	if err != nil {
 		t.Fatal(err)
 	}
-	database.Migrate(&workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{})
+	database.Migrate(&workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{}, &StartupAction{})
 	t.Cleanup(func() { database.Close() })
 
 	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -40,6 +41,7 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 		&Session{},
 		&DismissedPR{},
 		&claude.ClaudeSession{},
+		&StartupAction{},
 	)
 	t.Cleanup(func() { database.Close() })
 
@@ -60,7 +62,8 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 	branch := &git.Branch{Name: "feature-pr", RepoID: repo.ID, ExistsLocal: false, ExistsRemote: true}
 	require.NoError(t, database.Create(branch).Error)
 
-	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, nil, bus, "eqt/", t.TempDir())
+	startupActionStore := NewStartupActionStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, startupActionStore, workspaceService, gitService, nil, bus, "eqt/", t.TempDir())
 
 	return &prTestEnv{
 		service:          service,
@@ -410,4 +413,42 @@ func TestHandlePRDiscovered_SkipsDismissed(t *testing.T) {
 
 	_, err = env.sessionStore.GetByBranchID(env.branch.ID)
 	require.Error(t, err)
+}
+
+func TestHandlePRUpdated_NewAssignedPR_CreatesStartupAction(t *testing.T) {
+	env := setupPRTestEnv(t)
+	ctx := context.Background()
+
+	branchID := env.branch.ID
+	event := eventbus.Event{
+		Type: git.EventPRUpdated,
+		Data: git.PRUpdatedEvent{
+			PullRequest: &git.PullRequest{
+				RepoID:         env.repo.ID,
+				Number:         42,
+				HeadBranchID:   &branchID,
+				Title:          "Test PR",
+				State:          git.PRStateOpen,
+				IsAssignedToMe: true,
+			},
+			Previous: nil,
+			Repo:     env.repo,
+		},
+	}
+
+	err := env.service.handlePRUpdated(ctx, event)
+	require.NoError(t, err)
+
+	sess, err := env.sessionStore.GetByBranchID(branchID)
+	require.NoError(t, err)
+
+	actionStore := NewStartupActionStore(env.database)
+	actions, err := actionStore.ListBySessionID(sess.ID)
+	require.NoError(t, err)
+	require.Len(t, actions, 1)
+	require.Equal(t, StartupActionTypeClaude, actions[0].Type)
+
+	var opts ClaudeActionOptions
+	require.NoError(t, json.Unmarshal([]byte(actions[0].Options), &opts))
+	require.Equal(t, "/review", opts.Prompt)
 }
