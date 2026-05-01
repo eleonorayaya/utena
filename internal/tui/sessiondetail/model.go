@@ -139,7 +139,7 @@ func filterPRsByBranch(prs []git.PullRequest, branch *git.Branch) []git.PullRequ
 	}
 	var out []git.PullRequest
 	for _, pr := range prs {
-		if pr.HeadBranch != nil && pr.HeadBranch.Name == branch.Name {
+		if pr.HeadBranchID != nil && *pr.HeadBranchID == branch.ID {
 			out = append(out, pr)
 		}
 	}
