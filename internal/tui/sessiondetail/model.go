@@ -1,6 +1,7 @@
 package sessiondetail
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -64,7 +65,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case SelectMsg:
 		s := msg.Session
 		m.sess = &s
+		m.prs = nil
 		m.pendingDeleteID = 0
+		if s.WorkspaceID != 0 {
+			return m, provider.FetchPRs(s.WorkspaceID, "")
+		}
+		return m, nil
+	case provider.PRsStateUpdatedMsg:
+		if m.sess != nil && msg.WorkspaceID == m.sess.WorkspaceID {
+			m.prs = filterPRsByBranch(msg.PullRequests, m.sess.GitBranch)
+		}
 		return m, nil
 	case tea.KeyMsg:
 		return m.onKeyMsg(msg)
@@ -123,6 +133,19 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+func filterPRsByBranch(prs []git.PullRequest, branch *git.Branch) []git.PullRequest {
+	if branch == nil {
+		return nil
+	}
+	var out []git.PullRequest
+	for _, pr := range prs {
+		if pr.HeadBranch != nil && pr.HeadBranch.Name == branch.Name {
+			out = append(out, pr)
+		}
+	}
+	return out
+}
+
 func (m Model) View() string {
 	if m.sess == nil {
 		return "No session selected"
@@ -151,6 +174,9 @@ func (m Model) View() string {
 	if s.GitBranch != nil {
 		b.WriteString("\n" + sectionStyle().Render("Git") + "\n")
 		b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(s.GitBranch.Name) + "\n")
+		for _, pr := range m.prs {
+			b.WriteString(labelStyle().Render("PR") + valueStyle().Render(fmt.Sprintf("#%d %s (%s)", pr.Number, pr.Title, pr.State)) + "\n")
+		}
 	}
 
 	if len(s.ClaudeSessions) > 0 {
