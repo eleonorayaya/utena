@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +17,10 @@ import (
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
+
+type SetupWarning struct{ Message string }
+
+func (w SetupWarning) Error() string { return w.Message }
 
 type SessionService struct {
 	store            *SessionStore
@@ -197,14 +202,22 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 
 	var worktreeCreated bool
 	var worktreePath string
+	var setupWarning string
 
 	hasBranch := ws != nil && ws.IsGitRepo && (branchName != "" || baseBranchName != "")
 	if hasBranch {
 		if err := s.setupBranch(ctx, ws, branchName, baseBranchName); err != nil {
-			sess.Status = StatusBroken
-			sess.StatusError = fmt.Sprintf("branch setup failed: %v", err)
-			s.store.Update(sess)
-			return
+			var w SetupWarning
+			if errors.As(err, &w) {
+				setupWarning = w.Message
+				sess.StatusError = w.Message
+				s.store.Update(sess)
+			} else {
+				sess.Status = StatusBroken
+				sess.StatusError = fmt.Sprintf("branch setup failed: %v", err)
+				s.store.Update(sess)
+				return
+			}
 		}
 
 		finalBranchName := branchName
@@ -246,7 +259,9 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 	}
 
 	sess.Status = StatusActive
-	sess.StatusError = ""
+	if setupWarning == "" {
+		sess.StatusError = ""
+	}
 	s.store.Update(sess)
 }
 
@@ -283,11 +298,11 @@ func (s *SessionService) setupBranch(ctx context.Context, ws *workspace.Workspac
 	}
 
 	if dirty {
-		return nil
+		return SetupWarning{fmt.Sprintf("branch not pulled: %q has uncommitted changes", pullBranch)}
 	}
 
 	if err := s.gitService.Pull(ctx, ws.Path, pullBranch); err != nil {
-		slog.Warn("failed to pull branch, continuing with local state", "branch", pullBranch, "error", err)
+		return SetupWarning{fmt.Sprintf("branch not pulled: %v", err)}
 	}
 
 	return nil
@@ -450,7 +465,8 @@ func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, 
 	if err != nil {
 		return nil, err
 	}
-	if sess.Status != StatusBroken {
+	isWarned := sess.Status == StatusActive && sess.StatusError != ""
+	if sess.Status != StatusBroken && !isWarned {
 		return nil, ErrSessionNotBroken
 	}
 

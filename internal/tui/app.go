@@ -9,6 +9,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/prlist"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/sessiondetail"
 	"github.com/eleonorayaya/utena/internal/tui/sessionform"
 	"github.com/eleonorayaya/utena/internal/tui/sessionlist"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
@@ -49,6 +50,7 @@ func NewApp(logPath, port string, initialView router.View, opts ...AppOption) Ap
 	baseURL := fmt.Sprintf("http://localhost:%s", port)
 	views := map[router.View]router.ViewEntry{
 		router.SessionListView:     &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
+		router.SessionDetailView:   &router.ViewAdapter[sessiondetail.Model]{Model: sessiondetail.New()},
 		router.SessionFormView:     &router.ViewAdapter[sessionform.Model]{Model: sessionform.New()},
 		router.SessionProgressView: &router.ViewAdapter[sessionprogress.Model]{Model: sessionprogress.New()},
 		router.TodoListView:        &router.ViewAdapter[todolist.Model]{Model: todolist.New()},

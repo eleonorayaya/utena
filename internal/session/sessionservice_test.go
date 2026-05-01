@@ -1076,3 +1076,65 @@ func TestSessionService_WorktreeInit_WorkingDirIsWorktree(t *testing.T) {
 	expectedPath := filepath.Join(repoPath, ".worktrees", "eqt-wd-test")
 	require.Contains(t, string(data), expectedPath)
 }
+
+func TestSessionService_CreateSession_DirtyMainRepo_SetsWarning(t *testing.T) {
+	repoPath := initTestRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(repoPath, "dirty.txt"), []byte("uncommitted"), 0644))
+
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+
+	sess := &Session{Name: "warn-feature", WorkspaceID: wsGitID}
+	ctx := context.Background()
+	require.NoError(t, service.CreateSession(ctx, sess, "", "main", true))
+
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+
+	retrieved, err := sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusActive, retrieved.Status)
+	require.Contains(t, retrieved.StatusError, "branch not pulled")
+}
+
+func TestSessionService_CreateSession_CleanRepo_NoWarning(t *testing.T) {
+	repoPath := initTestRepo(t)
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+
+	sess := &Session{Name: "clean-feature", WorkspaceID: wsGitID}
+	ctx := context.Background()
+	require.NoError(t, service.CreateSession(ctx, sess, "", "main", true))
+
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+
+	retrieved, err := sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusActive, retrieved.Status)
+	require.Empty(t, retrieved.StatusError)
+}
+
+func TestSessionService_RepairSession_ClearsWarning(t *testing.T) {
+	repoPath := initTestRepo(t)
+	dirtyFile := filepath.Join(repoPath, "dirty.txt")
+	require.NoError(t, os.WriteFile(dirtyFile, []byte("uncommitted"), 0644))
+
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+
+	sess := &Session{Name: "warn-repair", WorkspaceID: wsGitID}
+	ctx := context.Background()
+	require.NoError(t, service.CreateSession(ctx, sess, "", "main", true))
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+
+	warned, err := sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, warned.StatusError)
+
+	require.NoError(t, os.Remove(dirtyFile))
+
+	_, err = service.RepairSession(ctx, sess.ID)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+
+	retrieved, err := sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.Empty(t, retrieved.StatusError)
+}

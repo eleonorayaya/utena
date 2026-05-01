@@ -55,6 +55,10 @@ func DeleteSession(id uint) tea.Cmd {
 	return func() tea.Msg { return deleteSessionIntentMsg{id: id} }
 }
 
+func ArchiveSession(id uint) tea.Cmd {
+	return func() tea.Msg { return archiveSessionIntentMsg{id: id} }
+}
+
 type fetchSessionsIntentMsg struct{}
 type requestSessionsStateMsg struct{}
 
@@ -76,6 +80,10 @@ type repairSessionIntentMsg struct {
 }
 
 type deleteSessionIntentMsg struct {
+	id uint
+}
+
+type archiveSessionIntentMsg struct {
 	id uint
 }
 
@@ -103,6 +111,8 @@ type sessionRepairedMsg struct {
 type sessionDeletedMsg struct {
 	id uint
 }
+
+type sessionArchivedMsg struct{ id uint }
 
 type sessionPolledMsg struct {
 	session session.Session
@@ -188,6 +198,12 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, p.client.deleteSession(msg.id)
 
 	case sessionDeletedMsg:
+		return p, p.client.fetchSessions()
+
+	case archiveSessionIntentMsg:
+		return p, p.client.archiveSession(msg.id)
+
+	case sessionArchivedMsg:
 		return p, p.client.fetchSessions()
 
 	case pollSessionIntentMsg:

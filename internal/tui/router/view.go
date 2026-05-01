@@ -13,4 +13,5 @@ const (
 	WorkspaceListView
 	WorkspaceDetailView
 	PRListView
+	SessionDetailView
 )

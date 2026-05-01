@@ -15,11 +15,10 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
-func titleStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
-func pendingStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(theme.Current.StatusPending)
-}
-func failedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
+func titleStyle() lipgloss.Style   { return lipgloss.NewStyle().Bold(true) }
+func pendingStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(theme.Current.StatusPending) }
+func failedStyle() lipgloss.Style   { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
+func warningStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(theme.Current.AccentLavender) }
 
 type tickMsg time.Time
 
@@ -36,6 +35,7 @@ type Model struct {
 	session   *session.Session
 	done      bool
 	err       error
+	warning   string
 	width     int
 	height    int
 }
@@ -48,6 +48,7 @@ func (m Model) Init() (Model, tea.Cmd) {
 	m.session = nil
 	m.done = false
 	m.err = nil
+	m.warning = ""
 	return m, nil
 }
 
@@ -77,6 +78,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.session = nil
 		m.done = false
 		m.err = nil
+		m.warning = ""
 		return m, tea.Batch(provider.PollSession(m.sessionID), tick())
 
 	case tickMsg:
@@ -96,6 +98,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.session = &s
 		switch s.Status {
 		case session.StatusActive:
+			if s.StatusError != "" {
+				m.done = true
+				m.warning = s.StatusError
+				return m, nil
+			}
 			m.done = true
 			return m, provider.ActivateSession(s.ID)
 		case session.StatusBroken:
@@ -112,11 +119,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.done {
 			if key.Matches(msg, keys.Back) {
+				if m.warning != "" {
+					return m, tea.Batch(router.Back(), provider.ActivateSession(m.sessionID))
+				}
 				return m, router.Back()
 			}
-			if m.err != nil && key.Matches(msg, keys.Repair) {
+			if (m.err != nil || m.warning != "") && key.Matches(msg, keys.Repair) {
 				m.done = false
 				m.err = nil
+				m.warning = ""
 				return m, tea.Batch(
 					provider.RepairSession(m.sessionID),
 					provider.PollSession(m.sessionID),
@@ -153,6 +164,14 @@ func (m Model) View() string {
 		b.WriteString("\n")
 	} else if m.session.Status == session.StatusCreating {
 		b.WriteString(pendingStyle().Render("  Setting up..."))
+		b.WriteString("\n")
+	}
+
+	if m.warning != "" {
+		b.WriteString("\n")
+		b.WriteString(warningStyle().Render("[!] " + m.warning))
+		b.WriteString("\n")
+		b.WriteString(pendingStyle().Render("  Session is active. Press esc to open it or r to retry setup."))
 		b.WriteString("\n")
 	}
 
