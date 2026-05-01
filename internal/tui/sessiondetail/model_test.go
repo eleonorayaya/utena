@@ -64,6 +64,15 @@ func TestSessionDetail_Delete_RequiresDoublePress(t *testing.T) {
 	assert.NotNil(t, cmd2)
 }
 
+func TestSessionDetail_Delete_ResetsByInterveningKey(t *testing.T) {
+	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	assert.Equal(t, uint(1), m2.pendingDeleteID)
+
+	m3, _ := m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.Equal(t, uint(0), m3.pendingDeleteID)
+}
+
 func TestSessionDetail_Repair_SkipsWhenHealthy(t *testing.T) {
 	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})

@@ -48,9 +48,6 @@ func New() Model {
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
-	m.sess = nil
-	m.prs = nil
-	m.pendingDeleteID = 0
 	return m, nil
 }
 
@@ -80,6 +77,9 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	pendingID := m.pendingDeleteID
+	m.pendingDeleteID = 0
+
 	switch {
 	case key.Matches(msg, keys.Back):
 		return m, router.Back()
@@ -88,7 +88,10 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, provider.ActivateSession(m.sess.ID)
 
 	case key.Matches(msg, keys.Archive):
-		if m.sess.Status == session.StatusBroken {
+		archivable := m.sess.Status == session.StatusActive ||
+			m.sess.Status == session.StatusInactive ||
+			m.sess.Status == session.StatusCompleted
+		if !archivable {
 			return m, nil
 		}
 		return m, tea.Batch(
@@ -97,8 +100,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		)
 
 	case key.Matches(msg, keys.Delete):
-		if m.pendingDeleteID == m.sess.ID {
-			m.pendingDeleteID = 0
+		if pendingID == m.sess.ID {
 			return m, tea.Batch(
 				provider.DeleteSession(m.sess.ID),
 				router.Back(),
@@ -158,9 +160,7 @@ func (m Model) View() string {
 		}
 	}
 
-	if s.StatusError != "" && s.Status == session.StatusBroken {
-		b.WriteString("\n" + warningStyle().Render("[!] "+s.StatusError) + "\n")
-	} else if s.StatusError != "" {
+	if s.StatusError != "" {
 		b.WriteString("\n" + warningStyle().Render("[!] "+s.StatusError) + "\n")
 	}
 
