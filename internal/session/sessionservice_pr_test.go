@@ -420,6 +420,7 @@ func TestHandlePRUpdated_NewAssignedPR_CreatesSessionAction(t *testing.T) {
 	ctx := context.Background()
 
 	branchID := env.branch.ID
+	prURL := "https://github.com/eleonorayaya/utena/pull/42"
 	event := eventbus.Event{
 		Type: git.EventPRUpdated,
 		Data: git.PRUpdatedEvent{
@@ -430,6 +431,7 @@ func TestHandlePRUpdated_NewAssignedPR_CreatesSessionAction(t *testing.T) {
 				Title:          "Test PR",
 				State:          git.PRStateOpen,
 				IsAssignedToMe: true,
+				HTMLURL:        prURL,
 			},
 			Previous: nil,
 			Repo:     env.repo,
@@ -451,5 +453,5 @@ func TestHandlePRUpdated_NewAssignedPR_CreatesSessionAction(t *testing.T) {
 
 	var opts ClaudeActionOptions
 	require.NoError(t, json.Unmarshal([]byte(actions[0].Options), &opts))
-	require.Equal(t, "/review", opts.Prompt)
+	require.Contains(t, opts.Prompt, prURL)
 }

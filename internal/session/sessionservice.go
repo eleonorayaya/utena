@@ -934,11 +934,19 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 		return
 	}
 
+	prompt := fmt.Sprintf(
+		"/review the latest changes for the PR %s are checked out in the current working directory. "+
+			"Review the changes and prepare an initial feedback report (in memory, don't write to a file). "+
+			"Then for each piece of feedback spawn a subagent to play devil's advocate and verify the validity of the feedback. "+
+			"Once that is done prepare a final feedback report for me incorporating the subagent feedback (in memory again). "+
+			"The final report should just reflect the final state of feedback and should not reference any initial feedback that was dismissed by the subagents or make any reference at all to the process.",
+		pr.HTMLURL,
+	)
 	action := &SessionAction{
 		SessionID: sess.ID,
 		Trigger:   TriggerOnCreate,
 		Type:      SessionActionTypeClaude,
-		Options:   marshalOptions(ClaudeActionOptions{Prompt: "/review"}),
+		Options:   marshalOptions(ClaudeActionOptions{Prompt: prompt}),
 	}
 	if err := s.sessionActionStore.Add(action); err != nil {
 		slog.Warn("failed to create session action for PR", "pr", pr.Number, "error", err)
