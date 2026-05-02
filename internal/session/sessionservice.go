@@ -560,6 +560,9 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		session.TmuxSessionID = &ts.ID
 		session.Status = StatusActive
 		session.StatusError = ""
+		if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(session.ID, TriggerOnCreate); err == nil && len(actions) > 0 {
+			go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
+		}
 	}
 
 	if session.IsAttached {
@@ -905,26 +908,29 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 
 	ws, err := s.workspaceService.GetWorkspaceByRepoID(ctx, data.Repo.ID)
 	if err != nil {
-		slog.Debug("no workspace for repo, skipping pending session", "repo_id", data.Repo.ID)
+		slog.Debug("no workspace for repo, skipping PR session", "repo_id", data.Repo.ID)
 		return
 	}
 
 	branch, err := s.gitService.GetBranch(*pr.HeadBranchID)
 	if err != nil {
-		slog.Warn("failed to get branch for pending session", "error", err)
+		slog.Warn("failed to get branch for PR session", "error", err)
 		return
 	}
 
+	sessName := s.nameFromBranch(branch.Name)
+	tmuxName := BuildTmuxSessionName(ws.Name, sessName)
+
 	sess := &Session{
-		Name:        s.nameFromBranch(branch.Name),
+		Name:        sessName,
 		WorkspaceID: ws.ID,
 		BranchID:    pr.HeadBranchID,
-		Status:      StatusPending,
+		Status:      StatusCreating,
 		LastUsedAt:  time.Now(),
 	}
 
 	if err := s.store.Add(sess); err != nil {
-		slog.Warn("failed to create pending session for PR", "pr", pr.Number, "error", err)
+		slog.Warn("failed to create session for PR", "pr", pr.Number, "error", err)
 		return
 	}
 
@@ -935,10 +941,11 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 		Options:   marshalOptions(ClaudeActionOptions{Prompt: "/review"}),
 	}
 	if err := s.sessionActionStore.Add(action); err != nil {
-		slog.Warn("failed to create session action for PR session", "pr", pr.Number, "error", err)
+		slog.Warn("failed to create session action for PR", "pr", pr.Number, "error", err)
 	}
 
-	slog.Info("created pending session for assigned PR", "pr", pr.Number, "session", sess.ID, "branch", branch.Name)
+	slog.Info("activating session for assigned PR", "pr", pr.Number, "session", sess.ID, "branch", branch.Name)
+	go s.runSetup(sess.ID, ws, tmuxName, branch.Name, "", false)
 }
 
 func (s *SessionService) maybeCompleteSession(_ context.Context, pr *git.PullRequest) {

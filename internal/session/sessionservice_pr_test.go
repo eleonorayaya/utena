@@ -102,7 +102,7 @@ func TestHandlePRUpdated_NewAssignedPR_CreatesSession(t *testing.T) {
 
 	sess, err := env.sessionStore.GetByBranchID(branchID)
 	require.NoError(t, err)
-	require.Equal(t, StatusPending, sess.Status)
+	require.Equal(t, StatusCreating, sess.Status)
 	require.Equal(t, env.workspace.ID, sess.WorkspaceID)
 	require.Equal(t, "feature-pr", sess.Name)
 }
@@ -307,7 +307,7 @@ func TestHandlePRUpdated_NewlyAssignedExistingPR_CreatesSession(t *testing.T) {
 
 	sess, err := env.sessionStore.GetByBranchID(branchID)
 	require.NoError(t, err)
-	require.Equal(t, StatusPending, sess.Status)
+	require.Equal(t, StatusCreating, sess.Status)
 }
 
 func TestCompletedCleanupTask_ArchivesStale(t *testing.T) {
