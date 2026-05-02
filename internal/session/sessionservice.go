@@ -560,8 +560,8 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		session.TmuxSessionID = &ts.ID
 		session.Status = StatusActive
 		session.StatusError = ""
-		if actions, err := s.startupActionStore.ListBySessionID(session.ID); err == nil {
-			executeStartupActions(actions, s.tmuxService, tmuxName, startDir)
+		if actions, err := s.startupActionStore.ListBySessionID(session.ID); err == nil && len(actions) > 0 {
+			go executeStartupActions(actions, s.tmuxService, tmuxName, startDir)
 		}
 	}
 

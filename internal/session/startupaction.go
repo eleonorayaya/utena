@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"encoding/json"
 
 	"github.com/eleonorayaya/utena/internal/db"
@@ -35,9 +34,6 @@ type StartupActionStore struct {
 func NewStartupActionStore(database db.Database) *StartupActionStore {
 	return &StartupActionStore{db: database}
 }
-
-func (s *StartupActionStore) OnAppStart(_ context.Context) error { return nil }
-func (s *StartupActionStore) OnAppEnd(_ context.Context) error   { return nil }
 
 func (s *StartupActionStore) Add(action *StartupAction) error {
 	return s.db.Create(action).Error
