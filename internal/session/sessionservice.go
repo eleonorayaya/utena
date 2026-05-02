@@ -388,7 +388,9 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName 
 		return fmt.Errorf("failed to create tmux session: %v", err)
 	}
 	sess.TmuxSessionID = &ts.ID
-	if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate); err == nil && len(actions) > 0 {
+	if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate); err != nil {
+		slog.Warn("failed to load session actions", "session", sess.ID, "error", err)
+	} else if len(actions) > 0 {
 		go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
 	}
 	return nil
@@ -560,7 +562,9 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		session.TmuxSessionID = &ts.ID
 		session.Status = StatusActive
 		session.StatusError = ""
-		if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(session.ID, TriggerOnCreate); err == nil && len(actions) > 0 {
+		if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(session.ID, TriggerOnCreate); err != nil {
+			slog.Warn("failed to load session actions", "session", session.ID, "error", err)
+		} else if len(actions) > 0 {
 			go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
 		}
 	}
