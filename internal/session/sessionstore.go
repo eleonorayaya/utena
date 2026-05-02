@@ -21,7 +21,7 @@ func NewSessionStore(database db.Database) *SessionStore {
 
 func (s *SessionStore) GetByID(id uint) (*Session, error) {
 	var session Session
-	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").First(&session, "sessions.id = ?", id).Error; err != nil {
+	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Preload("SessionActions").First(&session, "sessions.id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound
 		}
@@ -32,7 +32,7 @@ func (s *SessionStore) GetByID(id uint) (*Session, error) {
 
 func (s *SessionStore) List() ([]Session, error) {
 	var sessions []Session
-	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Order("sessions.last_used_at DESC").Find(&sessions).Error; err != nil {
+	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Preload("SessionActions").Order("sessions.last_used_at DESC").Find(&sessions).Error; err != nil {
 		return nil, err
 	}
 	return sessions, nil
@@ -40,7 +40,7 @@ func (s *SessionStore) List() ([]Session, error) {
 
 func (s *SessionStore) ListByWorkspace(workspaceID uint) ([]Session, error) {
 	var sessions []Session
-	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Where("sessions.workspace_id = ?", workspaceID).Order("sessions.last_used_at DESC").Find(&sessions).Error; err != nil {
+	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Preload("ClaudeSessions").Preload("SessionActions").Where("sessions.workspace_id = ?", workspaceID).Order("sessions.last_used_at DESC").Find(&sessions).Error; err != nil {
 		return nil, err
 	}
 	return sessions, nil

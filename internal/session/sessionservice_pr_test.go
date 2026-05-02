@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -40,6 +41,7 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 		&Session{},
 		&DismissedPR{},
 		&claude.ClaudeSession{},
+		&SessionAction{},
 	)
 	t.Cleanup(func() { database.Close() })
 
@@ -60,7 +62,8 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 	branch := &git.Branch{Name: "feature-pr", RepoID: repo.ID, ExistsLocal: false, ExistsRemote: true}
 	require.NoError(t, database.Create(branch).Error)
 
-	service := NewSessionService(sessionStore, dismissedPRStore, workspaceService, gitService, nil, bus, "eqt/", t.TempDir())
+	sessionActionStore := NewSessionActionStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, nil, bus, "eqt/", t.TempDir())
 
 	return &prTestEnv{
 		service:          service,
@@ -99,7 +102,7 @@ func TestHandlePRUpdated_NewAssignedPR_CreatesSession(t *testing.T) {
 
 	sess, err := env.sessionStore.GetByBranchID(branchID)
 	require.NoError(t, err)
-	require.Equal(t, StatusPending, sess.Status)
+	require.Equal(t, StatusCreating, sess.Status)
 	require.Equal(t, env.workspace.ID, sess.WorkspaceID)
 	require.Equal(t, "feature-pr", sess.Name)
 }
@@ -304,7 +307,7 @@ func TestHandlePRUpdated_NewlyAssignedExistingPR_CreatesSession(t *testing.T) {
 
 	sess, err := env.sessionStore.GetByBranchID(branchID)
 	require.NoError(t, err)
-	require.Equal(t, StatusPending, sess.Status)
+	require.Equal(t, StatusCreating, sess.Status)
 }
 
 func TestCompletedCleanupTask_ArchivesStale(t *testing.T) {
@@ -410,4 +413,45 @@ func TestHandlePRDiscovered_SkipsDismissed(t *testing.T) {
 
 	_, err = env.sessionStore.GetByBranchID(env.branch.ID)
 	require.Error(t, err)
+}
+
+func TestHandlePRUpdated_NewAssignedPR_CreatesSessionAction(t *testing.T) {
+	env := setupPRTestEnv(t)
+	ctx := context.Background()
+
+	branchID := env.branch.ID
+	prURL := "https://github.com/eleonorayaya/utena/pull/42"
+	event := eventbus.Event{
+		Type: git.EventPRUpdated,
+		Data: git.PRUpdatedEvent{
+			PullRequest: &git.PullRequest{
+				RepoID:         env.repo.ID,
+				Number:         42,
+				HeadBranchID:   &branchID,
+				Title:          "Test PR",
+				State:          git.PRStateOpen,
+				IsAssignedToMe: true,
+				HTMLURL:        prURL,
+			},
+			Previous: nil,
+			Repo:     env.repo,
+		},
+	}
+
+	err := env.service.handlePRUpdated(ctx, event)
+	require.NoError(t, err)
+
+	sess, err := env.sessionStore.GetByBranchID(branchID)
+	require.NoError(t, err)
+
+	actionStore := NewSessionActionStore(env.database)
+	actions, err := actionStore.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate)
+	require.NoError(t, err)
+	require.Len(t, actions, 1)
+	require.Equal(t, SessionActionTypeClaude, actions[0].Type)
+	require.Equal(t, TriggerOnCreate, actions[0].Trigger)
+
+	var opts ClaudeActionOptions
+	require.NoError(t, json.Unmarshal([]byte(actions[0].Options), &opts))
+	require.Contains(t, opts.Prompt, prURL)
 }

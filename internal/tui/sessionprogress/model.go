@@ -15,10 +15,14 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
-func titleStyle() lipgloss.Style   { return lipgloss.NewStyle().Bold(true) }
-func pendingStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(theme.Current.StatusPending) }
-func failedStyle() lipgloss.Style   { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
-func warningStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(theme.Current.AccentLavender) }
+func titleStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
+func pendingStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.StatusPending)
+}
+func failedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
+func warningStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.AccentLavender)
+}
 
 type tickMsg time.Time
 

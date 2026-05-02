@@ -23,26 +23,28 @@ type SetupWarning struct{ Message string }
 func (w SetupWarning) Error() string { return w.Message }
 
 type SessionService struct {
-	store            *SessionStore
-	dismissedPRStore *DismissedPRStore
-	workspaceService *workspace.WorkspaceService
-	gitService       *git.GitService
-	tmuxService      *utmux.TmuxService
-	eventBus         eventbus.EventBus
-	branchPrefix     string
-	configDir        string
+	store              *SessionStore
+	dismissedPRStore   *DismissedPRStore
+	sessionActionStore *SessionActionStore
+	workspaceService   *workspace.WorkspaceService
+	gitService         *git.GitService
+	tmuxService        *utmux.TmuxService
+	eventBus           eventbus.EventBus
+	branchPrefix       string
+	configDir          string
 }
 
-func NewSessionService(store *SessionStore, dismissedPRStore *DismissedPRStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string) *SessionService {
+func NewSessionService(store *SessionStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string) *SessionService {
 	return &SessionService{
-		store:            store,
-		dismissedPRStore: dismissedPRStore,
-		workspaceService: workspaceService,
-		gitService:       gitService,
-		tmuxService:      tmuxService,
-		eventBus:         bus,
-		branchPrefix:     branchPrefix,
-		configDir:        configDir,
+		store:              store,
+		dismissedPRStore:   dismissedPRStore,
+		sessionActionStore: sessionActionStore,
+		workspaceService:   workspaceService,
+		gitService:         gitService,
+		tmuxService:        tmuxService,
+		eventBus:           bus,
+		branchPrefix:       branchPrefix,
+		configDir:          configDir,
 	}
 }
 
@@ -386,6 +388,11 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName 
 		return fmt.Errorf("failed to create tmux session: %v", err)
 	}
 	sess.TmuxSessionID = &ts.ID
+	if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate); err != nil {
+		slog.Warn("failed to load session actions", "session", sess.ID, "error", err)
+	} else if len(actions) > 0 {
+		go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
+	}
 	return nil
 }
 
@@ -555,6 +562,11 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		session.TmuxSessionID = &ts.ID
 		session.Status = StatusActive
 		session.StatusError = ""
+		if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(session.ID, TriggerOnCreate); err != nil {
+			slog.Warn("failed to load session actions", "session", session.ID, "error", err)
+		} else if len(actions) > 0 {
+			go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
+		}
 	}
 
 	if session.IsAttached {
@@ -900,30 +912,52 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 
 	ws, err := s.workspaceService.GetWorkspaceByRepoID(ctx, data.Repo.ID)
 	if err != nil {
-		slog.Debug("no workspace for repo, skipping pending session", "repo_id", data.Repo.ID)
+		slog.Debug("no workspace for repo, skipping PR session", "repo_id", data.Repo.ID)
 		return
 	}
 
 	branch, err := s.gitService.GetBranch(*pr.HeadBranchID)
 	if err != nil {
-		slog.Warn("failed to get branch for pending session", "error", err)
+		slog.Warn("failed to get branch for PR session", "error", err)
 		return
 	}
 
+	sessName := s.nameFromBranch(branch.Name)
+	tmuxName := BuildTmuxSessionName(ws.Name, sessName)
+
 	sess := &Session{
-		Name:        s.nameFromBranch(branch.Name),
+		Name:        sessName,
 		WorkspaceID: ws.ID,
 		BranchID:    pr.HeadBranchID,
-		Status:      StatusPending,
+		Status:      StatusCreating,
 		LastUsedAt:  time.Now(),
 	}
 
 	if err := s.store.Add(sess); err != nil {
-		slog.Warn("failed to create pending session for PR", "pr", pr.Number, "error", err)
+		slog.Warn("failed to create session for PR", "pr", pr.Number, "error", err)
 		return
 	}
 
-	slog.Info("created pending session for assigned PR", "pr", pr.Number, "session", sess.ID, "branch", branch.Name)
+	prompt := fmt.Sprintf(
+		"/review the latest changes for the PR %s are checked out in the current working directory. "+
+			"Review the changes and prepare an initial feedback report (in memory, don't write to a file). "+
+			"Then for each piece of feedback spawn a subagent to play devil's advocate and verify the validity of the feedback. "+
+			"Once that is done prepare a final feedback report for me incorporating the subagent feedback (in memory again). "+
+			"The final report should just reflect the final state of feedback and should not reference any initial feedback that was dismissed by the subagents or make any reference at all to the process.",
+		pr.HTMLURL,
+	)
+	action := &SessionAction{
+		SessionID: sess.ID,
+		Trigger:   TriggerOnCreate,
+		Type:      SessionActionTypeClaude,
+		Options:   marshalOptions(ClaudeActionOptions{Prompt: prompt}),
+	}
+	if err := s.sessionActionStore.Add(action); err != nil {
+		slog.Warn("failed to create session action for PR", "pr", pr.Number, "error", err)
+	}
+
+	slog.Info("activating session for assigned PR", "pr", pr.Number, "session", sess.ID, "branch", branch.Name)
+	go s.runSetup(sess.ID, ws, tmuxName, branch.Name, "", false)
 }
 
 func (s *SessionService) maybeCompleteSession(_ context.Context, pr *git.PullRequest) {
