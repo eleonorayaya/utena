@@ -193,5 +193,18 @@ func (m Model) View() string {
 		b.WriteString("\n" + warningStyle().Render("[!] "+s.StatusError) + "\n")
 	}
 
+	var actionErrors []string
+	for _, a := range s.SessionActions {
+		if a.Error != "" {
+			actionErrors = append(actionErrors, fmt.Sprintf("[!] action %s failed: %s", a.Type, a.Error))
+		}
+	}
+	if len(actionErrors) > 0 {
+		b.WriteString("\n" + sectionStyle().Render("Actions") + "\n")
+		for _, e := range actionErrors {
+			b.WriteString(warningStyle().Render(e) + "\n")
+		}
+	}
+
 	return b.String()
 }

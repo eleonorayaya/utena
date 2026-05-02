@@ -41,7 +41,7 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 		&Session{},
 		&DismissedPR{},
 		&claude.ClaudeSession{},
-		&StartupAction{},
+		&SessionAction{},
 	)
 	t.Cleanup(func() { database.Close() })
 
@@ -62,8 +62,8 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 	branch := &git.Branch{Name: "feature-pr", RepoID: repo.ID, ExistsLocal: false, ExistsRemote: true}
 	require.NoError(t, database.Create(branch).Error)
 
-	startupActionStore := NewStartupActionStore(database)
-	service := NewSessionService(sessionStore, dismissedPRStore, startupActionStore, workspaceService, gitService, nil, bus, "eqt/", t.TempDir())
+	sessionActionStore := NewSessionActionStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, nil, bus, "eqt/", t.TempDir())
 
 	return &prTestEnv{
 		service:          service,
@@ -415,7 +415,7 @@ func TestHandlePRDiscovered_SkipsDismissed(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestHandlePRUpdated_NewAssignedPR_CreatesStartupAction(t *testing.T) {
+func TestHandlePRUpdated_NewAssignedPR_CreatesSessionAction(t *testing.T) {
 	env := setupPRTestEnv(t)
 	ctx := context.Background()
 
@@ -442,11 +442,12 @@ func TestHandlePRUpdated_NewAssignedPR_CreatesStartupAction(t *testing.T) {
 	sess, err := env.sessionStore.GetByBranchID(branchID)
 	require.NoError(t, err)
 
-	actionStore := NewStartupActionStore(env.database)
-	actions, err := actionStore.ListBySessionID(sess.ID)
+	actionStore := NewSessionActionStore(env.database)
+	actions, err := actionStore.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate)
 	require.NoError(t, err)
 	require.Len(t, actions, 1)
-	require.Equal(t, StartupActionTypeClaude, actions[0].Type)
+	require.Equal(t, SessionActionTypeClaude, actions[0].Type)
+	require.Equal(t, TriggerOnCreate, actions[0].Trigger)
 
 	var opts ClaudeActionOptions
 	require.NoError(t, json.Unmarshal([]byte(actions[0].Options), &opts))
