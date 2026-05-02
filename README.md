@@ -119,3 +119,5 @@ The theme is loaded once at TUI startup. Changes require restarting the TUI.
 - [Examples](https://github.com/charmbracelet/bubbletea/tree/main/examples)
 
 See [CLAUDE.md](CLAUDE.md) for build commands and development workflow.
+
+<!-- test -->
