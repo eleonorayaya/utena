@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -20,6 +21,26 @@ func newGitCLI() *gitCLI {
 type BranchRef struct {
 	Name   string `json:"name"`
 	Remote bool   `json:"remote"`
+}
+
+func (s *gitCLI) defaultBranch(ctx context.Context, repoPath string) string {
+	ref := "refs/remotes/origin/HEAD"
+	if isBareWorkspace(repoPath) {
+		ref = "HEAD"
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "symbolic-ref", ref)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	resolved := strings.TrimSpace(string(output))
+	if name, ok := strings.CutPrefix(resolved, "refs/heads/"); ok {
+		return name
+	}
+	if name, ok := strings.CutPrefix(resolved, "refs/remotes/origin/"); ok {
+		return name
+	}
+	return ""
 }
 
 func (s *gitCLI) listBranches(ctx context.Context, repoPath string) ([]string, error) {
@@ -38,11 +59,20 @@ func (s *gitCLI) listBranches(ctx context.Context, repoPath string) ([]string, e
 		}
 	}
 
+	def := s.defaultBranch(ctx, repoPath)
+
+	if def != "" && !slices.Contains(branches, def) {
+		return append([]string{def}, branches...), nil
+	}
+
+	priority := def
+	if priority == "" {
+		priority = "main"
+	}
 	for i, b := range branches {
-		if b == "main" {
+		if b == priority {
 			branches = append(branches[:i], branches[i+1:]...)
-			branches = append([]string{"main"}, branches...)
-			break
+			return append([]string{priority}, branches...), nil
 		}
 	}
 
@@ -80,11 +110,13 @@ func (s *gitCLI) listAllBranches(ctx context.Context, repoPath string) ([]Branch
 		refs = append(refs, BranchRef{Name: name, Remote: remote})
 	}
 
-	for i, r := range refs {
-		if r.Name == "main" {
-			refs = append(refs[:i], refs[i+1:]...)
-			refs = append([]BranchRef{r}, refs...)
-			break
+	if def := s.defaultBranch(ctx, repoPath); def != "" {
+		for i, r := range refs {
+			if r.Name == def {
+				refs = append(refs[:i], refs[i+1:]...)
+				refs = append([]BranchRef{r}, refs...)
+				break
+			}
 		}
 	}
 
@@ -106,6 +138,14 @@ func (s *gitCLI) pull(ctx context.Context, repoPath string, branch string) error
 		if output, err := fallback.CombinedOutput(); err != nil {
 			return fmt.Errorf("git pull failed: %s: %w", string(output), err)
 		}
+	}
+	return nil
+}
+
+func (s *gitCLI) fetch(ctx context.Context, repoPath string, branch string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "fetch", "origin", branch+":"+branch)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git fetch failed: %s: %w", strings.TrimSpace(string(output)), err)
 	}
 	return nil
 }
@@ -189,8 +229,20 @@ func (s *gitCLI) validateWorktree(ctx context.Context, worktreePath string, expe
 	return true, nil
 }
 
+func isBareWorkspace(path string) bool {
+	gitInfo, err := os.Stat(filepath.Join(path, ".git"))
+	if err != nil || gitInfo.IsDir() {
+		return false
+	}
+	bareInfo, err := os.Stat(filepath.Join(path, ".bare"))
+	return err == nil && bareInfo.IsDir()
+}
+
 func (s *gitCLI) worktreePath(repoPath string, branch string) string {
 	dirName := strings.ReplaceAll(branch, "/", "-")
+	if isBareWorkspace(repoPath) {
+		return filepath.Join(repoPath, dirName)
+	}
 	return filepath.Join(repoPath, ".worktrees", dirName)
 }
 
@@ -217,6 +269,50 @@ func (s *gitCLI) remoteURL(ctx context.Context, repoPath string) (string, error)
 		return "", fmt.Errorf("failed to get remote URL: %w", err)
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+func (s *gitCLI) migrateToBare(ctx context.Context, workspacePath string) error {
+	backupPath := workspacePath + "-backup"
+
+	if _, err := os.Stat(backupPath); err == nil {
+		return fmt.Errorf("backup directory already exists: %s", backupPath)
+	}
+
+	gitDir := filepath.Join(workspacePath, ".git")
+	info, err := os.Stat(gitDir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("workspace does not have a .git directory: %s", workspacePath)
+	}
+
+	remoteURL, err := s.remoteURL(ctx, workspacePath)
+	if err != nil {
+		return fmt.Errorf("failed to get remote URL (workspace must have a remote named 'origin'): %w", err)
+	}
+
+	if err := os.Rename(workspacePath, backupPath); err != nil {
+		return fmt.Errorf("failed to move workspace to backup: %w", err)
+	}
+
+	if err := os.Mkdir(workspacePath, 0755); err != nil {
+		return fmt.Errorf("failed to create workspace directory (backup at %s): %w", backupPath, err)
+	}
+
+	barePath := filepath.Join(workspacePath, ".bare")
+	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", remoteURL, barePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git clone --bare failed (backup at %s): %s: %w", backupPath, strings.TrimSpace(string(output)), err)
+	}
+
+	if err := os.WriteFile(gitDir, []byte("gitdir: ./.bare\n"), 0644); err != nil {
+		return fmt.Errorf("failed to write .git file (backup at %s): %w", backupPath, err)
+	}
+
+	cmd = exec.CommandContext(ctx, "git", "-C", workspacePath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to set fetch refspec (backup at %s): %s: %w", backupPath, strings.TrimSpace(string(output)), err)
+	}
+
+	return nil
 }
 
 func (s *gitCLI) parseRepoFullName(remoteURL string) (owner string, repo string, err error) {

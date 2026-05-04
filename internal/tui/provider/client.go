@@ -378,6 +378,28 @@ func (c *client) deleteWorkspace(id uint) tea.Cmd {
 	}
 }
 
+func (c *client) migrateWorkspaceToBare(id uint) tea.Cmd {
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/workspaces/%d/migrate-bare", c.baseURL, id), nil)
+		if err != nil {
+			return ErrMsg{err}
+		}
+
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] migrate workspace %d to bare: %v", id, err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusNoContent {
+			return parseAPIError(res, "migrate workspace to bare")
+		}
+
+		return workspaceMigratedToBareMsg{}
+	}
+}
+
 func (c *client) setWorkspaceHidden(id uint, hidden bool) tea.Cmd {
 	return func() tea.Msg {
 		body, _ := json.Marshal(map[string]bool{"hidden": hidden})

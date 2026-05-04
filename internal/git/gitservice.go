@@ -72,12 +72,58 @@ func (s *GitService) Pull(ctx context.Context, repoPath string, branch string) e
 	return s.cli.pull(ctx, repoPath, branch)
 }
 
-func (s *GitService) CreateWorktree(ctx context.Context, repoPath string, branchName string, baseBranch string) (string, error) {
-	return s.cli.createWorktree(ctx, repoPath, branchName, baseBranch)
+func (s *GitService) Fetch(ctx context.Context, repoPath string, branch string) error {
+	return s.cli.fetch(ctx, repoPath, branch)
 }
 
-func (s *GitService) CheckoutWorktree(ctx context.Context, repoPath string, branch string) (string, error) {
-	return s.cli.checkoutWorktree(ctx, repoPath, branch)
+func (s *GitService) SetupWorktree(ctx context.Context, repoPath string, branchName string, baseBranch string, branchID uint, repoID uint) (bool, string, error) {
+	creatingNew := baseBranch != ""
+
+	exists, err := s.cli.hasBranch(ctx, repoPath, branchName)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to check branch %q: %v", branchName, err)
+	}
+	if creatingNew && exists {
+		return false, "", fmt.Errorf("branch %q already exists; use it as an existing branch instead", branchName)
+	}
+	if !creatingNew && !exists {
+		return false, "", fmt.Errorf("branch %q does not exist; provide a base branch to create it", branchName)
+	}
+
+	wtPath := s.cli.worktreePath(repoPath, branchName)
+
+	alreadyExists, err := s.cli.validateWorktree(ctx, wtPath, branchName)
+	if err != nil {
+		return false, "", err
+	}
+	if alreadyExists {
+		s.ensureWorktreeRecord(branchID, repoID, wtPath)
+		return false, wtPath, nil
+	}
+
+	var path string
+	if creatingNew {
+		path, err = s.cli.createWorktree(ctx, repoPath, branchName, baseBranch)
+		if err != nil {
+			return false, "", fmt.Errorf("failed to create worktree: %v", err)
+		}
+	} else {
+		path, err = s.cli.checkoutWorktree(ctx, repoPath, branchName)
+		if err != nil {
+			return false, "", fmt.Errorf("failed to checkout worktree: %v", err)
+		}
+	}
+
+	s.ensureWorktreeRecord(branchID, repoID, path)
+	return true, path, nil
+}
+
+func (s *GitService) ensureWorktreeRecord(branchID uint, repoID uint, path string) {
+	if branchID == 0 || repoID == 0 {
+		return
+	}
+	_ = s.worktreeStore.DeleteByBranchID(branchID)
+	_ = s.worktreeStore.Add(&Worktree{Path: path, BranchID: branchID, RepoID: repoID})
 }
 
 func (s *GitService) CurrentBranch(ctx context.Context, repoPath string) (string, error) {
@@ -106,6 +152,10 @@ func (s *GitService) WorktreePath(repoPath string, branch string) string {
 
 func (s *GitService) RemoveWorktree(ctx context.Context, repoPath string, worktreePath string) error {
 	return s.cli.removeWorktree(ctx, repoPath, worktreePath)
+}
+
+func (s *GitService) MigrateToBare(ctx context.Context, workspacePath string) error {
+	return s.cli.migrateToBare(ctx, workspacePath)
 }
 
 func (s *GitService) DeleteBranch(ctx context.Context, repoPath string, branchName string) error {
@@ -244,6 +294,11 @@ func (s *GitService) HasWorktree(branchID uint) bool {
 	_, err := s.worktreeStore.GetByBranchID(branchID)
 	return err == nil
 }
+
+func (s *GitService) DeleteWorktreesByRepoID(repoID uint) error {
+	return s.worktreeStore.DeleteByRepoID(repoID)
+}
+
 
 func (s *GitService) IsHealthy(ctx context.Context, branch *Branch, repoPath string) bool {
 	wt, err := s.worktreeStore.GetByBranchID(branch.ID)

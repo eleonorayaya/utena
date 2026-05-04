@@ -69,6 +69,15 @@ func (s *WorkspaceService) DeleteWorkspace(ctx context.Context, id uint) error {
 	return nil
 }
 
+func (s *WorkspaceService) MarkAsBare(ctx context.Context, id uint) error {
+	ws, err := s.store.GetByID(id)
+	if err != nil {
+		return err
+	}
+	ws.IsBare = true
+	return s.store.Update(ws)
+}
+
 func (s *WorkspaceService) AddWorkspace(ctx context.Context, path string, asRoot bool) (*Workspace, error) {
 	if asRoot {
 		_, err := s.store.AddWorkspaceRoot(path)

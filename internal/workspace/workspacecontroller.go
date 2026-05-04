@@ -233,6 +233,51 @@ func (c *WorkspaceController) CheckBranchExists(w http.ResponseWriter, r *http.R
 	render.JSON(w, r, BranchExistsResponse{ExistsLocal: existsLocal, ExistsRemote: existsRemote})
 }
 
+func (c *WorkspaceController) MigrateWorkspaceToBare(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	raw := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	ws, err := c.service.GetWorkspace(ctx, uint(id))
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	if !ws.IsGitRepo {
+		common.RenderError(w, r, common.NewInvalidRequest(fmt.Sprintf("workspace %q is not a git repository", ws.Name)))
+		return
+	}
+
+	if ws.IsBare {
+		common.RenderError(w, r, common.NewInvalidRequest(fmt.Sprintf("workspace %q is already using the bare pattern", ws.Name)))
+		return
+	}
+
+	if err := c.gitService.MigrateToBare(ctx, ws.Path); err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	if ws.RepoID != nil {
+		if err := c.gitService.DeleteWorktreesByRepoID(*ws.RepoID); err != nil {
+			common.RenderError(w, r, fmt.Errorf("migration succeeded but failed to clear worktree records: %w", err))
+			return
+		}
+	}
+
+	if err := c.service.MarkAsBare(ctx, uint(id)); err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	render.NoContent(w, r)
+}
+
 func (c *WorkspaceController) ListPRs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	raw := chi.URLParam(r, "id")

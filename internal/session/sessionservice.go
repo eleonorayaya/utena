@@ -291,6 +291,12 @@ func (s *SessionService) setupBranch(ctx context.Context, ws *workspace.Workspac
 
 	checkPath := s.gitService.WorktreePath(ws.Path, pullBranch)
 	if _, err := os.Stat(checkPath); os.IsNotExist(err) {
+		if ws.IsBare {
+			if err := s.gitService.Fetch(ctx, ws.Path, pullBranch); err != nil {
+				return SetupWarning{fmt.Sprintf("branch not fetched: %v", err)}
+			}
+			return nil
+		}
 		checkPath = ws.Path
 	}
 
@@ -298,12 +304,11 @@ func (s *SessionService) setupBranch(ctx context.Context, ws *workspace.Workspac
 	if err != nil {
 		return fmt.Errorf("failed to check dirty state for %q: %v", pullBranch, err)
 	}
-
 	if dirty {
 		return SetupWarning{fmt.Sprintf("branch not pulled: %q has uncommitted changes", pullBranch)}
 	}
 
-	if err := s.gitService.Pull(ctx, ws.Path, pullBranch); err != nil {
+	if err := s.gitService.Pull(ctx, checkPath, pullBranch); err != nil {
 		return SetupWarning{fmt.Sprintf("branch not pulled: %v", err)}
 	}
 
@@ -311,46 +316,20 @@ func (s *SessionService) setupBranch(ctx context.Context, ws *workspace.Workspac
 }
 
 func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *workspace.Workspace, branchName string, baseBranchName string) (bool, string, error) {
-	creatingNewBranch := baseBranchName != ""
-
 	finalBranchName := branchName
-	if creatingNewBranch {
+	if baseBranchName != "" {
 		finalBranchName = s.branchPrefix + sess.Name
 	}
 
-	branchExists, err := s.gitService.HasBranch(ctx, ws.Path, finalBranchName)
-	if err != nil {
-		return false, "", fmt.Errorf("failed to check branch %q: %v", finalBranchName, err)
+	var branchID, repoID uint
+	if sess.BranchID != nil {
+		branchID = *sess.BranchID
 	}
-	if creatingNewBranch && branchExists {
-		return false, "", fmt.Errorf("branch %q already exists; use it as an existing branch instead", finalBranchName)
-	}
-	if !creatingNewBranch && !branchExists {
-		return false, "", fmt.Errorf("branch %q does not exist; provide a base branch to create it", finalBranchName)
+	if ws.RepoID != nil {
+		repoID = *ws.RepoID
 	}
 
-	worktreePath := s.gitService.WorktreePath(ws.Path, finalBranchName)
-
-	exists, err := s.gitService.ValidateWorktree(ctx, worktreePath, finalBranchName)
-	if err != nil {
-		return false, "", err
-	}
-	if exists {
-		return false, worktreePath, nil
-	}
-
-	if creatingNewBranch {
-		path, err := s.gitService.CreateWorktree(ctx, ws.Path, finalBranchName, baseBranchName)
-		if err != nil {
-			return false, "", fmt.Errorf("failed to create worktree: %v", err)
-		}
-		return true, path, nil
-	}
-	path, err := s.gitService.CheckoutWorktree(ctx, ws.Path, finalBranchName)
-	if err != nil {
-		return false, "", fmt.Errorf("failed to checkout worktree: %v", err)
-	}
-	return true, path, nil
+	return s.gitService.SetupWorktree(ctx, ws.Path, finalBranchName, baseBranchName, branchID, repoID)
 }
 
 func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string, worktreePath string) error {

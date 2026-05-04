@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/tui/prlist"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -28,6 +29,7 @@ func valueStyle() lipgloss.Style {
 
 type Model struct {
 	workspace *workspace.Workspace
+	actionErr string
 	width     int
 	height    int
 }
@@ -53,6 +55,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case SelectMsg:
 		ws := msg.Workspace
 		m.workspace = &ws
+		m.actionErr = ""
+		return m, nil
+	case provider.WorkspacesStateUpdatedMsg:
+		if m.workspace != nil {
+			for _, ws := range msg.Workspaces {
+				if ws.ID == m.workspace.ID {
+					wsCopy := ws
+					m.workspace = &wsCopy
+					break
+				}
+			}
+		}
+		return m, nil
+	case provider.ErrMsg:
+		m.actionErr = msg.Err.Error()
 		return m, nil
 	case tea.KeyMsg:
 		return m.onKeyMsg(msg)
@@ -70,6 +87,12 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			router.NavigateTo(router.PRListView),
 			prlist.Select(m.workspace.ID),
 		)
+	case key.Matches(msg, keys.Migrate):
+		if m.workspace == nil || !m.workspace.IsGitRepo || m.workspace.IsBare {
+			return m, nil
+		}
+		m.actionErr = ""
+		return m, provider.MigrateWorkspaceToBare(m.workspace.ID)
 	case key.Matches(msg, keys.Back):
 		return m, router.Back()
 	}
@@ -95,12 +118,23 @@ func (m Model) View() string {
 			repoName = ws.Repo.FullName
 		}
 		b.WriteString(labelStyle().Render("Repository") + valueStyle().Render(repoName) + "\n")
+
+		bareStatus := "no  (press m to migrate)"
+		if ws.IsBare {
+			bareStatus = "yes"
+		}
+		b.WriteString(labelStyle().Render("Bare") + valueStyle().Render(bareStatus) + "\n")
 	} else {
 		b.WriteString(labelStyle().Render("Repository") + valueStyle().Render("not a git repo") + "\n")
 	}
 
 	if !ws.LastUsedAt.IsZero() {
 		b.WriteString(labelStyle().Render("Last used") + valueStyle().Render(common.TimeAgo(ws.LastUsedAt)) + "\n")
+	}
+
+	if m.actionErr != "" {
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(theme.Current.Error).Render("Error: "+m.actionErr) + "\n")
 	}
 
 	return b.String()
