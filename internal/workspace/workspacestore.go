@@ -187,11 +187,12 @@ func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
 		return nil, fmt.Errorf("workspace already exists: %s", path)
 	}
 
+	isGit, isBare := s.detectRepoKind(path)
 	ws := &Workspace{
 		Name:      filepath.Base(path),
 		Path:      path,
-		IsGitRepo: s.isGitRepository(path),
-		IsBare:    s.isBareRepository(path),
+		IsGitRepo: isGit,
+		IsBare:    isBare,
 	}
 
 	if err := s.Add(ws); err != nil {
@@ -236,11 +237,12 @@ func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
 			continue
 		}
 
+		isGit, isBare := s.detectRepoKind(fullPath)
 		ws := &Workspace{
 			Name:      entry.Name(),
 			Path:      fullPath,
-			IsGitRepo: s.isGitRepository(fullPath),
-			IsBare:    s.isBareRepository(fullPath),
+			IsGitRepo: isGit,
+			IsBare:    isBare,
 		}
 		if err := s.Add(ws); err != nil {
 			continue
@@ -312,8 +314,7 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 			}
 
 			fullPath := filepath.Join(expanded, entry.Name())
-			isGitRepo := s.isGitRepository(fullPath)
-			isBare := s.isBareRepository(fullPath)
+			isGitRepo, isBare := s.detectRepoKind(fullPath)
 
 			workspaces = append(workspaces, &Workspace{
 				Name:      entry.Name(),
@@ -330,8 +331,7 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		isGitRepo := s.isGitRepository(expanded)
-		isBare := s.isBareRepository(expanded)
+		isGitRepo, isBare := s.detectRepoKind(expanded)
 		workspaces = append(workspaces, &Workspace{
 			Name:      filepath.Base(expanded),
 			Path:      expanded,
@@ -383,19 +383,23 @@ func expandHome(path string) string {
 	return path
 }
 
-func (s *WorkspaceStore) isGitRepository(path string) bool {
+func (s *WorkspaceStore) detectRepoKind(path string) (isGit, isBare bool) {
 	info, err := s.fs.Stat(filepath.Join(path, ".git"))
-	if err == nil && info.IsDir() {
-		return true
+	if err != nil {
+		return false, false
 	}
-	return s.isBareRepository(path)
-}
-
-func (s *WorkspaceStore) isBareRepository(path string) bool {
-	gitInfo, err := s.fs.Stat(filepath.Join(path, ".git"))
-	if err != nil || gitInfo.IsDir() {
-		return false
+	if info.IsDir() {
+		return true, false
 	}
 	bareInfo, err := s.fs.Stat(filepath.Join(path, ".bare"))
-	return err == nil && bareInfo.IsDir()
+	if err == nil && bareInfo.IsDir() {
+		return true, true
+	}
+	return false, false
 }
+
+func (s *WorkspaceStore) isGitRepository(path string) bool {
+	isGit, _ := s.detectRepoKind(path)
+	return isGit
+}
+

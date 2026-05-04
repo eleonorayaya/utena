@@ -62,7 +62,7 @@ func (s *gitCLI) listBranches(ctx context.Context, repoPath string) ([]string, e
 	def := s.defaultBranch(ctx, repoPath)
 
 	if def != "" && !slices.Contains(branches, def) {
-		branches = append([]string{def}, branches...)
+		return append([]string{def}, branches...), nil
 	}
 
 	priority := def
@@ -303,8 +303,7 @@ func (s *gitCLI) migrateToBare(ctx context.Context, workspacePath string) error 
 		return fmt.Errorf("git clone --bare failed (backup at %s): %s: %w", backupPath, strings.TrimSpace(string(output)), err)
 	}
 
-	gitFile := filepath.Join(workspacePath, ".git")
-	if err := os.WriteFile(gitFile, []byte("gitdir: ./.bare\n"), 0644); err != nil {
+	if err := os.WriteFile(gitDir, []byte("gitdir: ./.bare\n"), 0644); err != nil {
 		return fmt.Errorf("failed to write .git file (backup at %s): %w", backupPath, err)
 	}
 
