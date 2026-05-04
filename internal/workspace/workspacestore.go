@@ -191,6 +191,7 @@ func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
 		Name:      filepath.Base(path),
 		Path:      path,
 		IsGitRepo: s.isGitRepository(path),
+		IsBare:    s.isBareRepository(path),
 	}
 
 	if err := s.Add(ws); err != nil {
@@ -239,6 +240,7 @@ func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {
 			Name:      entry.Name(),
 			Path:      fullPath,
 			IsGitRepo: s.isGitRepository(fullPath),
+			IsBare:    s.isBareRepository(fullPath),
 		}
 		if err := s.Add(ws); err != nil {
 			continue
@@ -269,6 +271,7 @@ func (s *WorkspaceStore) OnAppStart(ctx context.Context) error {
 		if err := s.db.First(&existing, "path = ?", ws.Path).Error; err == nil {
 			existing.Name = ws.Name
 			existing.IsGitRepo = ws.IsGitRepo
+			existing.IsBare = ws.IsBare
 			s.db.Save(&existing)
 		} else {
 			s.db.Create(ws)
@@ -310,11 +313,13 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 
 			fullPath := filepath.Join(expanded, entry.Name())
 			isGitRepo := s.isGitRepository(fullPath)
+			isBare := s.isBareRepository(fullPath)
 
 			workspaces = append(workspaces, &Workspace{
 				Name:      entry.Name(),
 				Path:      fullPath,
 				IsGitRepo: isGitRepo,
+				IsBare:    isBare,
 			})
 		}
 	}
@@ -326,10 +331,12 @@ func (s *WorkspaceStore) discoverWorkspaces() ([]*Workspace, error) {
 			continue
 		}
 		isGitRepo := s.isGitRepository(expanded)
+		isBare := s.isBareRepository(expanded)
 		workspaces = append(workspaces, &Workspace{
 			Name:      filepath.Base(expanded),
 			Path:      expanded,
 			IsGitRepo: isGitRepo,
+			IsBare:    isBare,
 		})
 	}
 
@@ -378,8 +385,17 @@ func expandHome(path string) string {
 
 func (s *WorkspaceStore) isGitRepository(path string) bool {
 	info, err := s.fs.Stat(filepath.Join(path, ".git"))
-	if err != nil {
+	if err == nil && info.IsDir() {
+		return true
+	}
+	return s.isBareRepository(path)
+}
+
+func (s *WorkspaceStore) isBareRepository(path string) bool {
+	gitInfo, err := s.fs.Stat(filepath.Join(path, ".git"))
+	if err != nil || gitInfo.IsDir() {
 		return false
 	}
-	return info.IsDir()
+	bareInfo, err := s.fs.Stat(filepath.Join(path, ".bare"))
+	return err == nil && bareInfo.IsDir()
 }

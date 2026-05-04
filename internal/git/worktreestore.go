@@ -66,20 +66,22 @@ func (s *WorktreeStore) GetByPath(path string) (*Worktree, error) {
 }
 
 func (s *WorktreeStore) Delete(id uint) error {
-	var worktree Worktree
-	if err := s.db.First(&worktree, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrWorktreeNotFound
-		}
-		return err
+	result := s.db.Where("id = ?", id).Unscoped().Delete(&Worktree{})
+	if result.Error != nil {
+		return result.Error
 	}
-
-	return s.db.Delete(&Worktree{}, id).Error
+	if result.RowsAffected == 0 {
+		return ErrWorktreeNotFound
+	}
+	return nil
 }
 
 func (s *WorktreeStore) DeleteByBranchID(branchID uint) error {
-	result := s.db.Where("branch_id = ?", branchID).Delete(&Worktree{})
-	return result.Error
+	return s.db.Where("branch_id = ?", branchID).Unscoped().Delete(&Worktree{}).Error
+}
+
+func (s *WorktreeStore) DeleteByRepoID(repoID uint) error {
+	return s.db.Where("repo_id = ?", repoID).Unscoped().Delete(&Worktree{}).Error
 }
 
 func (s *WorktreeStore) ListByRepo(repoID uint) []Worktree {
