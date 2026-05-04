@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -20,6 +21,26 @@ func newGitCLI() *gitCLI {
 type BranchRef struct {
 	Name   string `json:"name"`
 	Remote bool   `json:"remote"`
+}
+
+func (s *gitCLI) defaultBranch(ctx context.Context, repoPath string) string {
+	ref := "refs/remotes/origin/HEAD"
+	if isBareWorkspace(repoPath) {
+		ref = "HEAD"
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "symbolic-ref", ref)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	resolved := strings.TrimSpace(string(output))
+	if name, ok := strings.CutPrefix(resolved, "refs/heads/"); ok {
+		return name
+	}
+	if name, ok := strings.CutPrefix(resolved, "refs/remotes/origin/"); ok {
+		return name
+	}
+	return ""
 }
 
 func (s *gitCLI) listBranches(ctx context.Context, repoPath string) ([]string, error) {
@@ -38,11 +59,20 @@ func (s *gitCLI) listBranches(ctx context.Context, repoPath string) ([]string, e
 		}
 	}
 
+	def := s.defaultBranch(ctx, repoPath)
+
+	if def != "" && !slices.Contains(branches, def) {
+		branches = append([]string{def}, branches...)
+	}
+
+	priority := def
+	if priority == "" {
+		priority = "main"
+	}
 	for i, b := range branches {
-		if b == "main" {
+		if b == priority {
 			branches = append(branches[:i], branches[i+1:]...)
-			branches = append([]string{"main"}, branches...)
-			break
+			return append([]string{priority}, branches...), nil
 		}
 	}
 
@@ -80,11 +110,13 @@ func (s *gitCLI) listAllBranches(ctx context.Context, repoPath string) ([]Branch
 		refs = append(refs, BranchRef{Name: name, Remote: remote})
 	}
 
-	for i, r := range refs {
-		if r.Name == "main" {
-			refs = append(refs[:i], refs[i+1:]...)
-			refs = append([]BranchRef{r}, refs...)
-			break
+	if def := s.defaultBranch(ctx, repoPath); def != "" {
+		for i, r := range refs {
+			if r.Name == def {
+				refs = append(refs[:i], refs[i+1:]...)
+				refs = append([]BranchRef{r}, refs...)
+				break
+			}
 		}
 	}
 
