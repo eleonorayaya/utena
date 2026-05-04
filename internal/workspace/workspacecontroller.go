@@ -1,9 +1,11 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
@@ -234,7 +236,8 @@ func (c *WorkspaceController) CheckBranchExists(w http.ResponseWriter, r *http.R
 }
 
 func (c *WorkspaceController) MigrateWorkspaceToBare(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Minute)
+	defer cancel()
 	raw := chi.URLParam(r, "id")
 	id, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil {
