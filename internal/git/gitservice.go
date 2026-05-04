@@ -299,7 +299,6 @@ func (s *GitService) DeleteWorktreesByRepoID(repoID uint) error {
 	return s.worktreeStore.DeleteByRepoID(repoID)
 }
 
-
 func (s *GitService) IsHealthy(ctx context.Context, branch *Branch, repoPath string) bool {
 	wt, err := s.worktreeStore.GetByBranchID(branch.ID)
 	if errors.Is(err, ErrWorktreeNotFound) {
@@ -370,7 +369,7 @@ func (s *GitService) CleanupBranch(ctx context.Context, branch *Branch, repoPath
 	if err != nil && !errors.Is(err, ErrWorktreeNotFound) {
 		return fmt.Errorf("failed to look up worktree: %w", err)
 	}
-	if wt != nil {
+	if wt != nil && branch.Name != s.cli.defaultBranch(ctx, repoPath) {
 		if err := s.cli.removeWorktree(ctx, repoPath, wt.Path); err != nil {
 			return err
 		}

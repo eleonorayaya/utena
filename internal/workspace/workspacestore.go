@@ -402,4 +402,3 @@ func (s *WorkspaceStore) isGitRepository(path string) bool {
 	isGit, _ := s.detectRepoKind(path)
 	return isGit
 }
-

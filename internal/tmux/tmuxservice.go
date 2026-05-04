@@ -47,7 +47,20 @@ func (t *TmuxService) CreateSession(name, startDir string, env map[string]string
 		IsAlive:  true,
 	}
 	if err := t.store.Add(ts); err != nil {
-		return nil, err
+		if !errors.Is(err, ErrTmuxSessionAlreadyExists) {
+			return nil, err
+		}
+		existing, getErr := t.store.GetByName(name)
+		if getErr != nil {
+			return nil, getErr
+		}
+		existing.StartDir = startDir
+		existing.Env = env
+		existing.IsAlive = true
+		if updateErr := t.store.Update(existing); updateErr != nil {
+			return nil, updateErr
+		}
+		return existing, nil
 	}
 	return ts, nil
 }

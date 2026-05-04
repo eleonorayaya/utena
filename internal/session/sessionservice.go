@@ -149,7 +149,7 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, br
 		createWorktree = true
 	}
 
-	if ws != nil && ws.IsGitRepo && branchName != "" && baseBranchName == "" && branchName != "main" {
+	if ws != nil && ws.IsGitRepo && branchName != "" && baseBranchName == "" && (ws.IsBare || branchName != "main") {
 		createWorktree = true
 	}
 
@@ -364,14 +364,21 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName 
 	}
 	ts, err := s.tmuxService.CreateSession(tmuxName, startDir, env)
 	if err != nil {
-		return fmt.Errorf("failed to create tmux session: %v", err)
+		if !s.tmuxService.HasSession(tmuxName) {
+			return fmt.Errorf("failed to create tmux session: %v", err)
+		}
+		ts, err = s.tmuxService.GetOrTrackSession(tmuxName, startDir, env)
+		if err != nil {
+			return fmt.Errorf("failed to create tmux session: %v", err)
+		}
+	} else {
+		if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate); err != nil {
+			slog.Warn("failed to load session actions", "session", sess.ID, "error", err)
+		} else if len(actions) > 0 {
+			go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
+		}
 	}
 	sess.TmuxSessionID = &ts.ID
-	if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate); err != nil {
-		slog.Warn("failed to load session actions", "session", sess.ID, "error", err)
-	} else if len(actions) > 0 {
-		go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
-	}
 	return nil
 }
 
@@ -536,16 +543,23 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", session.ID)}
 		ts, createErr := s.tmuxService.CreateSession(tmuxName, startDir, env)
 		if createErr != nil {
-			return nil, fmt.Errorf("failed to revive tmux session: %w", createErr)
+			if !s.tmuxService.HasSession(tmuxName) {
+				return nil, fmt.Errorf("failed to revive tmux session: %w", createErr)
+			}
+			ts, createErr = s.tmuxService.GetOrTrackSession(tmuxName, startDir, env)
+			if createErr != nil {
+				return nil, fmt.Errorf("failed to revive tmux session: %w", createErr)
+			}
+		} else {
+			if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(session.ID, TriggerOnCreate); err != nil {
+				slog.Warn("failed to load session actions", "session", session.ID, "error", err)
+			} else if len(actions) > 0 {
+				go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
+			}
 		}
 		session.TmuxSessionID = &ts.ID
 		session.Status = StatusActive
 		session.StatusError = ""
-		if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(session.ID, TriggerOnCreate); err != nil {
-			slog.Warn("failed to load session actions", "session", session.ID, "error", err)
-		} else if len(actions) > 0 {
-			go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
-		}
 	}
 
 	if session.IsAttached {
@@ -609,7 +623,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 
 	if session.TmuxSessionID != nil {
 		if err := s.tmuxService.KillSession(*session.TmuxSessionID); err != nil {
-			slog.Info("failed to kill tmux session", "error", err)
+			slog.Warn("failed to kill tmux session", "error", err)
 		}
 	}
 
