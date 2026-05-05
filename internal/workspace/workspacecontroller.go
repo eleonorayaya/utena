@@ -2,9 +2,11 @@ package workspace
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 
+	"github.com/eleonorayaya/utena/internal/claudesettings"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/go-chi/chi/v5"
@@ -273,6 +275,11 @@ func (c *WorkspaceController) MigrateWorkspaceToBare(w http.ResponseWriter, r *h
 	if err := c.service.MarkAsBare(ctx, uint(id)); err != nil {
 		common.RenderError(w, r, err)
 		return
+	}
+
+	if err := claudesettings.EnsureWorkspaceRoot(ws.Path); err != nil {
+		slog.Warn("failed to bootstrap claude settings after bare migration",
+			"workspace", ws.Name, "error", err)
 	}
 
 	render.NoContent(w, r)
