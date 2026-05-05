@@ -66,3 +66,80 @@ func TestEnsureWorkspaceRoot_CreatesClaudeDir(t *testing.T) {
 		t.Fatalf(".claude is not a directory")
 	}
 }
+
+func TestLinkWorktree_CreatesRelativeSymlink(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureWorkspaceRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(root, "feature-x")
+	if err := os.Mkdir(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LinkWorktree(root, worktree); err != nil {
+		t.Fatalf("LinkWorktree: %v", err)
+	}
+
+	linkPath := filepath.Join(worktree, ".claude", "settings.local.json")
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if filepath.IsAbs(target) {
+		t.Fatalf("target should be relative, got %q", target)
+	}
+	resolved := filepath.Join(filepath.Dir(linkPath), target)
+	rootSettings := filepath.Join(root, ".claude", "settings.local.json")
+	gotAbs, _ := filepath.EvalSymlinks(resolved)
+	wantAbs, _ := filepath.EvalSymlinks(rootSettings)
+	if gotAbs != wantAbs {
+		t.Fatalf("symlink resolves to %q, want %q", gotAbs, wantAbs)
+	}
+}
+
+func TestLinkWorktree_PreservesExistingFile(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureWorkspaceRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(root, "feature-y")
+	wtClaude := filepath.Join(worktree, ".claude")
+	if err := os.MkdirAll(wtClaude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	custom := []byte(`{"per-worktree": true}`)
+	settingsPath := filepath.Join(wtClaude, "settings.local.json")
+	if err := os.WriteFile(settingsPath, custom, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LinkWorktree(root, worktree); err != nil {
+		t.Fatalf("LinkWorktree: %v", err)
+	}
+
+	got, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(custom) {
+		t.Fatalf("regular file was clobbered")
+	}
+}
+
+func TestLinkWorktree_IdempotentOnExistingCorrectSymlink(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureWorkspaceRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(root, "feature-z")
+	if err := os.Mkdir(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := LinkWorktree(root, worktree); err != nil {
+		t.Fatal(err)
+	}
+	if err := LinkWorktree(root, worktree); err != nil {
+		t.Fatalf("second call should be no-op: %v", err)
+	}
+}

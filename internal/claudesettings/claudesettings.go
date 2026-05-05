@@ -48,5 +48,25 @@ func EnsureWorkspaceRoot(workspacePath string) error {
 }
 
 func LinkWorktree(workspacePath, worktreePath string) error {
-	return errors.New("not implemented")
+	dstDir := filepath.Join(worktreePath, ".claude")
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return fmt.Errorf("create worktree .claude dir: %w", err)
+	}
+	dst := filepath.Join(dstDir, "settings.local.json")
+
+	if _, err := os.Lstat(dst); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat worktree settings.local.json: %w", err)
+	}
+
+	src := filepath.Join(workspacePath, ".claude", "settings.local.json")
+	rel, err := filepath.Rel(dstDir, src)
+	if err != nil {
+		return fmt.Errorf("compute relative path: %w", err)
+	}
+	if err := os.Symlink(rel, dst); err != nil {
+		return fmt.Errorf("create symlink: %w", err)
+	}
+	return nil
 }
