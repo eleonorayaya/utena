@@ -424,8 +424,7 @@ func (s *SessionService) setupWorktreeInit(ctx context.Context, sess *Session, w
 		if err := claudesettings.EnsureWorkspaceRoot(ws.Path); err != nil {
 			slog.Warn("ensure workspace claude settings failed", "workspace", ws.Name, "error", err)
 			warnings = append(warnings, err.Error())
-		}
-		if err := claudesettings.LinkWorktree(ws.Path, worktreePath); err != nil {
+		} else if err := claudesettings.LinkWorktree(ws.Path, worktreePath); err != nil {
 			slog.Warn("link worktree claude settings failed", "worktree", worktreePath, "error", err)
 			warnings = append(warnings, err.Error())
 		}
