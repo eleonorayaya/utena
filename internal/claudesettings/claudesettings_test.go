@@ -1,6 +1,7 @@
 package claudesettings
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,14 +30,13 @@ func TestEnsureWorkspaceRoot_CreatesFileWhenMissing(t *testing.T) {
 	}
 }
 
-func TestEnsureWorkspaceRoot_DoesNotOverwriteExisting(t *testing.T) {
+func TestEnsureWorkspaceRoot_MergesIntoExistingSettings(t *testing.T) {
 	root := t.TempDir()
 	claudeDir := filepath.Join(root, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	custom := []byte(`{"custom": true}`)
-	if err := os.WriteFile(filepath.Join(claudeDir, "settings.local.json"), custom, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.local.json"), []byte(`{"custom": true}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -44,12 +44,61 @@ func TestEnsureWorkspaceRoot_DoesNotOverwriteExisting(t *testing.T) {
 		t.Fatalf("EnsureWorkspaceRoot: %v", err)
 	}
 
-	got, err := os.ReadFile(filepath.Join(claudeDir, "settings.local.json"))
+	raw, err := os.ReadFile(filepath.Join(claudeDir, "settings.local.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != string(custom) {
-		t.Fatalf("user file was overwritten: %s", got)
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse result: %v", err)
+	}
+	if out["custom"] != true {
+		t.Fatalf("existing key 'custom' was removed")
+	}
+	sandbox, _ := out["sandbox"].(map[string]any)
+	fs, _ := sandbox["filesystem"].(map[string]any)
+	allowWrite, _ := fs["allowWrite"].([]any)
+	gitPath := filepath.Join(root, ".git")
+	found := false
+	for _, v := range allowWrite {
+		if v == gitPath {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("allowWrite missing %q; got %v", gitPath, allowWrite)
+	}
+}
+
+func TestEnsureWorkspaceRoot_DoesNotDuplicateAllowWrite(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureWorkspaceRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureWorkspaceRoot(root); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse result: %v", err)
+	}
+	sandbox, _ := out["sandbox"].(map[string]any)
+	fs, _ := sandbox["filesystem"].(map[string]any)
+	allowWrite, _ := fs["allowWrite"].([]any)
+	gitPath := filepath.Join(root, ".git")
+	count := 0
+	for _, v := range allowWrite {
+		if v == gitPath {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected git path once in allowWrite, got %d times", count)
 	}
 }
 
