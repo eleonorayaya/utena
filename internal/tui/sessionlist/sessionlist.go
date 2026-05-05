@@ -161,9 +161,12 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 		if m.pendingDeleteID == item.session.ID {
 			m.pendingDeleteID = 0
-			return m, provider.DeleteSession(item.session.ID), true
+			return m, provider.DeleteSession(item.session.ID, item.session.IsCreating()), true
 		}
 		m.pendingDeleteID = item.session.ID
+		if item.session.IsCreating() {
+			return m, m.list.NewStatusMessage(forceDeleteMessage(item.displayName())), true
+		}
 		return m, m.list.NewStatusMessage(fmt.Sprintf("press d again to close %s", item.displayName())), true
 	}
 	return m, nil, false
@@ -171,4 +174,8 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 
 func (m Model) View() string {
 	return m.list.View()
+}
+
+func forceDeleteMessage(name string) string {
+	return fmt.Sprintf("session is still creating — press d again to force delete %s", name)
 }

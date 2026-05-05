@@ -132,8 +132,9 @@ func (c *SessionController) DeleteSession(w http.ResponseWriter, r *http.Request
 	}
 
 	deleteBranch := r.URL.Query().Get("delete_branch") != "false"
+	force := r.URL.Query().Get("force") == "true"
 
-	if err := c.service.DeleteSession(ctx, id, deleteBranch); err != nil {
+	if err := c.service.DeleteSession(ctx, id, deleteBranch, force); err != nil {
 		common.RenderError(w, r, err)
 		return
 	}
