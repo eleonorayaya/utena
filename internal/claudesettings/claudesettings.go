@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 )
 
@@ -26,7 +27,24 @@ func defaultSettingsJSON(workspacePath string) ([]byte, error) {
 }
 
 func EnsureWorkspaceRoot(workspacePath string) error {
-	return errors.New("not implemented")
+	claudeDir := filepath.Join(workspacePath, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		return fmt.Errorf("create .claude dir: %w", err)
+	}
+	settingsPath := filepath.Join(claudeDir, "settings.local.json")
+	if _, err := os.Lstat(settingsPath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat settings.local.json: %w", err)
+	}
+	data, err := defaultSettingsJSON(workspacePath)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
+		return fmt.Errorf("write settings.local.json: %w", err)
+	}
+	return nil
 }
 
 func LinkWorktree(workspacePath, worktreePath string) error {
