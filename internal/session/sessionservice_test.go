@@ -328,16 +328,12 @@ func TestSessionService_DeleteSession_Creating_Blocked(t *testing.T) {
 	sess := &Session{
 		Name:        "stuck-session",
 		WorkspaceID: ws1ID,
-		Status:      StatusActive,
+		Status:      StatusCreating,
 		LastUsedAt:  time.Now(),
 	}
 
 	ctx := context.Background()
 	err := sessionStore.Add(sess)
-	require.NoError(t, err)
-
-	sess.Status = StatusCreating
-	err = sessionStore.Update(sess)
 	require.NoError(t, err)
 
 	err = service.DeleteSession(ctx, sess.ID, true, false)
@@ -351,16 +347,12 @@ func TestSessionService_DeleteSession_Creating_Force(t *testing.T) {
 	sess := &Session{
 		Name:        "stuck-session",
 		WorkspaceID: ws1ID,
-		Status:      StatusActive,
+		Status:      StatusCreating,
 		LastUsedAt:  time.Now(),
 	}
 
 	ctx := context.Background()
 	err := sessionStore.Add(sess)
-	require.NoError(t, err)
-
-	sess.Status = StatusCreating
-	err = sessionStore.Update(sess)
 	require.NoError(t, err)
 
 	err = service.DeleteSession(ctx, sess.ID, true, true)
