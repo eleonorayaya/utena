@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/claudesettings"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
@@ -415,6 +416,17 @@ func (s *SessionService) setupWorktreeInit(ctx context.Context, sess *Session, w
 	for _, script := range scripts {
 		if err := s.runScript(ctx, script, worktreePath, env); err != nil {
 			slog.Warn("worktree setup script failed", "script", script, "error", err)
+			warnings = append(warnings, err.Error())
+		}
+	}
+
+	if ws != nil && ws.IsBare {
+		if err := claudesettings.EnsureWorkspaceRoot(ws.Path); err != nil {
+			slog.Warn("ensure workspace claude settings failed", "workspace", ws.Name, "error", err)
+			warnings = append(warnings, err.Error())
+		}
+		if err := claudesettings.LinkWorktree(ws.Path, worktreePath); err != nil {
+			slog.Warn("link worktree claude settings failed", "worktree", worktreePath, "error", err)
 			warnings = append(warnings, err.Error())
 		}
 	}
