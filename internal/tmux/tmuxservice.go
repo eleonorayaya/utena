@@ -3,6 +3,7 @@ package tmux
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
 )
@@ -14,6 +15,14 @@ type TmuxService struct {
 	store            *TmuxStore
 	eventBus         eventbus.EventBus
 	windowsBySession map[string][]Window
+	nameLocks        sync.Map
+}
+
+func (t *TmuxService) lockName(name string) func() {
+	actual, _ := t.nameLocks.LoadOrStore(name, &sync.Mutex{})
+	mu := actual.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 func NewTmuxService(runner tmuxRunner, store *TmuxStore, bus eventbus.EventBus) *TmuxService {
@@ -37,6 +46,7 @@ func (t *TmuxService) CreateSession(name, startDir string, env map[string]string
 	if t.runner == nil {
 		return nil, ErrTmuxNotAvailable
 	}
+	defer t.lockName(name)()
 	if err := t.runner.newSession(name, startDir, env); err != nil {
 		return nil, err
 	}
@@ -73,6 +83,7 @@ func (t *TmuxService) KillSession(id uint) error {
 	if err != nil {
 		return err
 	}
+	defer t.lockName(ts.Name)()
 	if err := t.runner.killSession(ts.Name); err != nil {
 		return err
 	}
@@ -84,6 +95,7 @@ func (t *TmuxService) KillSessionByName(name string) error {
 	if t.runner == nil {
 		return ErrTmuxNotAvailable
 	}
+	defer t.lockName(name)()
 	if err := t.runner.killSession(name); err != nil {
 		return err
 	}
@@ -106,6 +118,7 @@ func (t *TmuxService) RecreateSession(id uint) error {
 	if err != nil {
 		return err
 	}
+	defer t.lockName(ts.Name)()
 	if err := t.runner.newSession(ts.Name, ts.StartDir, ts.Env); err != nil {
 		return err
 	}

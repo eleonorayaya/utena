@@ -17,6 +17,8 @@ type MockRunner struct {
 	SpawnedWindows []SpawnedWindow
 	CreateErr      error
 	KillErr        error
+	OnNewSession   func()
+	OnKillSession  func()
 }
 
 func NewMockRunner() *MockRunner {
@@ -35,6 +37,9 @@ func (m *MockRunner) newWindow(sessionName, startDir, command string) error {
 }
 
 func (m *MockRunner) newSession(name, startDir string, env map[string]string) error {
+	if m.OnNewSession != nil {
+		m.OnNewSession()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.CreateErr != nil {
@@ -48,6 +53,9 @@ func (m *MockRunner) newSession(name, startDir string, env map[string]string) er
 }
 
 func (m *MockRunner) killSession(name string) error {
+	if m.OnKillSession != nil {
+		m.OnKillSession()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.KillErr != nil {
