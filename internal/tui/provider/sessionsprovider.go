@@ -51,8 +51,8 @@ func PollSession(id uint) tea.Cmd {
 	return func() tea.Msg { return pollSessionIntentMsg{id: id} }
 }
 
-func DeleteSession(id uint) tea.Cmd {
-	return func() tea.Msg { return deleteSessionIntentMsg{id: id} }
+func DeleteSession(id uint, force bool) tea.Cmd {
+	return func() tea.Msg { return deleteSessionIntentMsg{id: id, force: force} }
 }
 
 func ArchiveSession(id uint) tea.Cmd {
@@ -80,7 +80,8 @@ type repairSessionIntentMsg struct {
 }
 
 type deleteSessionIntentMsg struct {
-	id uint
+	id    uint
+	force bool
 }
 
 type archiveSessionIntentMsg struct {
@@ -195,7 +196,7 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, p.client.switchTmuxSession(msg.tmuxSessionName)
 
 	case deleteSessionIntentMsg:
-		return p, p.client.deleteSession(msg.id)
+		return p, p.client.deleteSession(msg.id, msg.force)
 
 	case sessionDeletedMsg:
 		return p, p.client.fetchSessions()

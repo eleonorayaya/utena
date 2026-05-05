@@ -312,9 +312,13 @@ func (c *client) createSession(name string, workspaceID uint, branch string, bas
 	}
 }
 
-func (c *client) deleteSession(id uint) tea.Cmd {
+func (c *client) deleteSession(id uint, force bool) tea.Cmd {
 	return func() tea.Msg {
-		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/sessions/%d", c.baseURL, id), nil)
+		url := fmt.Sprintf("%s/sessions/%d", c.baseURL, id)
+		if force {
+			url += "?force=true"
+		}
+		req, err := http.NewRequest(http.MethodDelete, url, nil)
 		if err != nil {
 			return ErrMsg{err}
 		}
