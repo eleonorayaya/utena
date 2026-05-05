@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -433,4 +434,21 @@ func TestWorkspaceRouter_CheckBranchExists_MissingName(t *testing.T) {
 	router.Routes().ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestWorkspaceRouter_MigrateToBare_BootstrapsClaudeSettings(t *testing.T) {
+	repoPath := initTestRepoWithOrigin(t)
+	router, ws := setupBranchRouter(t, repoPath)
+
+	req := httptest.NewRequest("POST", fmt.Sprintf("/%d/migrate-bare", ws.ID), nil)
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+
+	settingsPath := filepath.Join(repoPath, ".claude", "settings.local.json")
+	data, err := os.ReadFile(settingsPath)
+	require.NoError(t, err, "settings.local.json should exist after bare migration")
+	require.NotEmpty(t, data)
 }

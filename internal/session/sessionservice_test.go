@@ -1204,3 +1204,62 @@ func TestSessionService_RepairSession_ClearsWarning(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, retrieved.StatusError)
 }
+
+func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionService, *SessionStore, *utmux.MockRunner, uint, string) {
+	t.Helper()
+
+	repoPath := initTestRepo(t)
+
+	database := setupTestDB(t)
+	gitService := git.NewGitService(database)
+	ctx := context.Background()
+	require.NoError(t, gitService.MigrateToBare(ctx, repoPath))
+
+	bus := eventbus.NewEventBus()
+	sessionStore := NewSessionStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
+	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true, IsBare: true}
+	workspaceStore.Add(wsGit)
+
+	mock := utmux.NewMockRunner()
+	tmuxService := createTmuxService(t, database, mock, bus)
+	workspaceService := workspace.NewWorkspaceService(workspaceStore)
+	dismissedPRStore := NewDismissedPRStore(database)
+	sessionActionStore := NewSessionActionStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir)
+	return service, sessionStore, mock, wsGit.ID, repoPath
+}
+
+func TestRunSetup_BareWorkspace_LinksClaudeSettings(t *testing.T) {
+	service, sessionStore, _, wsID, repoPath := setupBareWorktreeSessionService(t, t.TempDir())
+
+	session := &Session{
+		Name:        "my-feature",
+		WorkspaceID: wsID,
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session, "", "main", true)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
+
+	worktreePath := filepath.Join(repoPath, "eqt-my-feature")
+
+	rootSettings := filepath.Join(repoPath, ".claude", "settings.local.json")
+	data, err := os.ReadFile(rootSettings)
+	require.NoError(t, err, "workspace root settings.local.json should exist")
+	require.NotEmpty(t, data)
+
+	linkPath := filepath.Join(worktreePath, ".claude", "settings.local.json")
+	target, err := os.Readlink(linkPath)
+	require.NoError(t, err, "worktree settings.local.json should be a symlink")
+	require.False(t, filepath.IsAbs(target), "symlink target should be relative, got %q", target)
+
+	resolved := filepath.Join(filepath.Dir(linkPath), target)
+	gotAbs, err := filepath.EvalSymlinks(resolved)
+	require.NoError(t, err)
+	wantAbs, err := filepath.EvalSymlinks(rootSettings)
+	require.NoError(t, err)
+	require.Equal(t, wantAbs, gotAbs, "symlink should resolve to workspace root settings")
+}

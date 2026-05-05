@@ -2,3 +2,4 @@ out/
 .task/
 *.log
 .worktrees/
+.claude/settings.local.json
