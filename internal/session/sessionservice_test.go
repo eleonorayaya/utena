@@ -493,6 +493,28 @@ func TestSessionService_CreateSession_WithWorktree_ReusesLocalOnlyBranch(t *test
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 }
 
+func TestSessionService_CreateSession_TimesOut(t *testing.T) {
+	repoPath := initTestRepo(t)
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+	service.setupTimeout = 1 * time.Nanosecond
+
+	session := &Session{
+		Name:        "slow-feature",
+		WorkspaceID: wsGitID,
+	}
+
+	ctx := context.Background()
+	err := service.CreateSession(ctx, session, "", "main", true)
+	require.NoError(t, err)
+
+	waitForStatus(t, sessionStore, session.ID, StatusBroken, 5*time.Second)
+
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusBroken, retrieved.Status)
+	require.Contains(t, retrieved.StatusError, "timed out")
+}
+
 func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	repoPath := initTestRepo(t)
 	service, sessionStore, mock, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/api"
+	slogctx "github.com/veqryn/slog-context"
 )
 
 func main() {
@@ -18,7 +19,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	logger := slog.New(slogctx.NewHandler(slog.NewTextHandler(os.Stdout, nil), nil))
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
