@@ -30,7 +30,7 @@ func TestSessionList_Delete_Creating_FirstPress_ShowsForceMessage(t *testing.T) 
 	assert.True(t, handled)
 	assert.NotNil(t, cmd)
 	assert.Equal(t, uint(1), result.pendingDeleteID)
-	assert.Contains(t, forceDeleteMessage("stuck"), "force delete")
+	assert.Equal(t, "session is still creating — press d again to force delete stuck", forceDeleteMessage("stuck"))
 }
 
 func TestSessionList_Delete_Creating_SecondPress_ForceDeletes(t *testing.T) {
