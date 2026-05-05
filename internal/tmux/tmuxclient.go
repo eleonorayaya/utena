@@ -51,7 +51,13 @@ func (r *gotmuxRunner) newWindow(sessionName, startDir, command string) error {
 	return err
 }
 
-func (r *gotmuxRunner) killSession(name string) error {
+func (r *gotmuxRunner) killSession(name string) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Warn("tmux killSession recovered from panic", "name", name, "panic", rec)
+			err = fmt.Errorf("tmux killSession panicked: %v", rec)
+		}
+	}()
 	if !r.tmux.HasSession(name) {
 		return nil
 	}
