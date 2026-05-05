@@ -161,11 +161,10 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 		if m.pendingDeleteID == item.session.ID {
 			m.pendingDeleteID = 0
-			force := item.session.Status == session.StatusCreating
-			return m, provider.DeleteSession(item.session.ID, force), true
+			return m, provider.DeleteSession(item.session.ID, item.session.IsCreating()), true
 		}
 		m.pendingDeleteID = item.session.ID
-		if item.session.Status == session.StatusCreating {
+		if item.session.IsCreating() {
 			return m, m.list.NewStatusMessage(forceDeleteMessage(item.displayName())), true
 		}
 		return m, m.list.NewStatusMessage(fmt.Sprintf("press d again to close %s", item.displayName())), true

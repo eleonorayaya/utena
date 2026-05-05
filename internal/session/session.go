@@ -49,6 +49,10 @@ type Session struct {
 	TmuxSession    *utmux.TmuxSession     `json:"tmux_session,omitempty" gorm:"foreignKey:TmuxSessionID"`
 }
 
+func (s Session) IsCreating() bool {
+	return s.Status == StatusCreating
+}
+
 func SanitizeTmuxName(name string) string {
 	r := strings.NewReplacer(
 		" ", "-",

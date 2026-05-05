@@ -114,9 +114,8 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Delete):
 		if pendingID == m.sess.ID {
-			force := m.sess.Status == session.StatusCreating
 			return m, tea.Batch(
-				provider.DeleteSession(m.sess.ID, force),
+				provider.DeleteSession(m.sess.ID, m.sess.IsCreating()),
 				router.Back(),
 			)
 		}
