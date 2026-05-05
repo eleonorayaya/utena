@@ -596,7 +596,7 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 	return session, nil
 }
 
-func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranch bool) error {
+func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranch bool, force bool) error {
 	session, err := s.store.GetByID(id)
 	if err != nil {
 		return err
@@ -606,7 +606,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 		return ErrSessionAttached
 	}
 
-	if session.Status == StatusCreating {
+	if session.Status == StatusCreating && !force {
 		return common.NewInvalidRequest("cannot delete session while it is being created")
 	}
 

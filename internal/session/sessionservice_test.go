@@ -305,7 +305,7 @@ func TestSessionService_DeleteSession(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, retrieved.TmuxSessionID)
 
-	err = service.DeleteSession(ctx, retrieved.ID, true)
+	err = service.DeleteSession(ctx, retrieved.ID, true, false)
 	require.NoError(t, err)
 
 	retrieved, err = sessionStore.GetByID(session.ID)
@@ -317,9 +317,58 @@ func TestSessionService_DeleteSession_NotFound(t *testing.T) {
 	service, _, _, _, _, _ := setupSessionService(t)
 
 	ctx := context.Background()
-	err := service.DeleteSession(ctx, 99999, true)
+	err := service.DeleteSession(ctx, 99999, true, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
+}
+
+func TestSessionService_DeleteSession_Creating_Blocked(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+
+	sess := &Session{
+		Name:        "stuck-session",
+		WorkspaceID: ws1ID,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
+	}
+
+	ctx := context.Background()
+	err := sessionStore.Add(sess)
+	require.NoError(t, err)
+
+	sess.Status = StatusCreating
+	err = sessionStore.Update(sess)
+	require.NoError(t, err)
+
+	err = service.DeleteSession(ctx, sess.ID, true, false)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot delete session while it is being created")
+}
+
+func TestSessionService_DeleteSession_Creating_Force(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+
+	sess := &Session{
+		Name:        "stuck-session",
+		WorkspaceID: ws1ID,
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
+	}
+
+	ctx := context.Background()
+	err := sessionStore.Add(sess)
+	require.NoError(t, err)
+
+	sess.Status = StatusCreating
+	err = sessionStore.Update(sess)
+	require.NoError(t, err)
+
+	err = service.DeleteSession(ctx, sess.ID, true, true)
+	require.NoError(t, err)
+
+	retrieved, err := sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusDeleted, retrieved.Status)
 }
 
 func initTestRepo(t *testing.T) string {
