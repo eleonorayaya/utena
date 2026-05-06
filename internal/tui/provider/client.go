@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -384,12 +385,16 @@ func (c *client) deleteWorkspace(id uint) tea.Cmd {
 
 func (c *client) migrateWorkspaceToBare(id uint) tea.Cmd {
 	return func() tea.Msg {
-		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/workspaces/%d/migrate-bare", c.baseURL, id), nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/workspaces/%d/migrate-bare", c.baseURL, id), nil)
 		if err != nil {
 			return ErrMsg{err}
 		}
 
-		res, err := c.httpClient.Do(req)
+		httpClient := &http.Client{}
+		res, err := httpClient.Do(req)
 		if err != nil {
 			log.Printf("[ERROR] migrate workspace %d to bare: %v", id, err)
 			return ErrMsg{err}
