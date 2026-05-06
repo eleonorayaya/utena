@@ -32,9 +32,13 @@ func executeSessionActions(actions []SessionAction, spawner WindowSpawner, store
 		}
 		if err != nil {
 			slog.Warn("session action failed", "type", action.Type, "session", tmuxName, "error", err)
-			store.UpdateError(action, err.Error())
+			if updateErr := store.UpdateError(action, err.Error()); updateErr != nil {
+				slog.Warn("failed to persist session action error", "action", action.ID, "error", updateErr)
+			}
 		} else if action.Error != "" {
-			store.UpdateError(action, "")
+			if updateErr := store.UpdateError(action, ""); updateErr != nil {
+				slog.Warn("failed to clear session action error", "action", action.ID, "error", updateErr)
+			}
 		}
 	}
 }

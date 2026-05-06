@@ -209,6 +209,41 @@ func TestSessionService_CreateSession(t *testing.T) {
 	require.True(t, tmux.HasSessionByName("utena-session-1"))
 }
 
+func TestSessionService_CreateSession_DuplicateNameInWorkspace_Errors(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, ws2ID := setupSessionService(t)
+
+	ctx := context.Background()
+	first := &Session{Name: "dup", WorkspaceID: ws1ID}
+	require.NoError(t, service.CreateSession(ctx, first, "", "", false))
+	waitForStatus(t, sessionStore, first.ID, StatusActive, 2*time.Second)
+
+	second := &Session{Name: "dup", WorkspaceID: ws1ID}
+	err := service.CreateSession(ctx, second, "", "", false)
+	require.ErrorIs(t, err, ErrSessionAlreadyExists)
+	require.Zero(t, second.ID, "duplicate session should not be persisted")
+
+	otherWorkspace := &Session{Name: "dup", WorkspaceID: ws2ID}
+	require.NoError(t, service.CreateSession(ctx, otherWorkspace, "", "", false), "same name in a different workspace must be allowed")
+}
+
+func TestSessionService_CreateSession_DuplicateNameAfterDelete_Allowed(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+
+	ctx := context.Background()
+	first := &Session{Name: "reusable", WorkspaceID: ws1ID}
+	require.NoError(t, service.CreateSession(ctx, first, "", "", false))
+	waitForStatus(t, sessionStore, first.ID, StatusActive, 2*time.Second)
+	require.NoError(t, service.DeleteSession(ctx, first.ID, false, false))
+
+	deleted, err := sessionStore.GetByID(first.ID)
+	require.NoError(t, err)
+	require.Nil(t, deleted.TmuxSessionID, "deleted session should not retain tmux_session_id")
+
+	second := &Session{Name: "reusable", WorkspaceID: ws1ID}
+	require.NoError(t, service.CreateSession(ctx, second, "", "", false))
+	waitForStatus(t, sessionStore, second.ID, StatusActive, 2*time.Second)
+}
+
 func TestSessionService_CreateSession_TmuxFails(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 	tmux.SetCreateErr(fmt.Errorf("connection refused"))
