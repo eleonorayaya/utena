@@ -22,8 +22,12 @@ func setupTestDB(t *testing.T) db.Database {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database.Migrate(&git.Repo{}, &Workspace{})
-	t.Cleanup(func() { database.Close() })
+	require.NoError(t, database.Migrate(&git.Repo{}, &Workspace{}))
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 	return database
 }
 
@@ -109,7 +113,7 @@ func TestWorkspaceStore_GetByID(t *testing.T) {
 		IsGitRepo: false,
 	}
 
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 
 	retrieved, err := store.GetByID(ws.ID)
 	require.NoError(t, err)
@@ -135,7 +139,7 @@ func TestWorkspaceStore_GetByPath(t *testing.T) {
 		Path: "/unique/path",
 	}
 
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 
 	retrieved, err := store.GetByPath("/unique/path")
 	require.NoError(t, err)
@@ -156,8 +160,8 @@ func TestWorkspaceStore_List(t *testing.T) {
 	ws1 := &Workspace{Name: "test1", Path: "/path1"}
 	ws2 := &Workspace{Name: "test2", Path: "/path2"}
 
-	store.Add(ws1)
-	store.Add(ws2)
+	require.NoError(t, store.Add(ws1))
+	require.NoError(t, store.Add(ws2))
 
 	list := store.List()
 	require.Len(t, list, 2)
@@ -175,9 +179,9 @@ func TestWorkspaceStore_List(t *testing.T) {
 func TestWorkspaceStore_List_SortedAlphabetically(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
-	store.Add(&Workspace{Name: "charlie", Path: "/path3"})
-	store.Add(&Workspace{Name: "alpha", Path: "/path1"})
-	store.Add(&Workspace{Name: "bravo", Path: "/path2"})
+	require.NoError(t, store.Add(&Workspace{Name: "charlie", Path: "/path3"}))
+	require.NoError(t, store.Add(&Workspace{Name: "alpha", Path: "/path1"}))
+	require.NoError(t, store.Add(&Workspace{Name: "bravo", Path: "/path2"}))
 
 	list := store.List()
 	require.Len(t, list, 3)
@@ -190,9 +194,9 @@ func TestWorkspaceStore_List_SortedByLastUsedAt(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
 	now := time.Now()
-	store.Add(&Workspace{Name: "alpha", Path: "/path1", LastUsedAt: now.Add(-2 * time.Hour)})
-	store.Add(&Workspace{Name: "bravo", Path: "/path2", LastUsedAt: now})
-	store.Add(&Workspace{Name: "charlie", Path: "/path3"})
+	require.NoError(t, store.Add(&Workspace{Name: "alpha", Path: "/path1", LastUsedAt: now.Add(-2 * time.Hour)}))
+	require.NoError(t, store.Add(&Workspace{Name: "bravo", Path: "/path2", LastUsedAt: now}))
+	require.NoError(t, store.Add(&Workspace{Name: "charlie", Path: "/path3"}))
 
 	list := store.List()
 	require.Len(t, list, 3)
@@ -221,7 +225,7 @@ func TestWorkspaceStore_ConcurrentAccess(t *testing.T) {
 				Name: fmt.Sprintf("concurrent-%d", id),
 				Path: fmt.Sprintf("/path/%d", id),
 			}
-			store.Add(ws)
+			require.NoError(t, store.Add(ws))
 		}(i)
 	}
 
@@ -244,8 +248,8 @@ func TestWorkspaceStore_ConcurrentAccess(t *testing.T) {
 func TestWorkspaceStore_OnAppStart_WithConfig(t *testing.T) {
 	rootDir := t.TempDir()
 
-	os.MkdirAll(filepath.Join(rootDir, "project-alpha", ".git"), 0755)
-	os.MkdirAll(filepath.Join(rootDir, "project-beta"), 0755)
+	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, "project-alpha", ".git"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, "project-beta"), 0755))
 
 	store, _ := setupWorkspaceStoreWithConfig(t, []string{rootDir})
 
@@ -292,8 +296,8 @@ func TestWorkspaceStore_OnAppStart_MultipleRoots(t *testing.T) {
 	root1 := t.TempDir()
 	root2 := t.TempDir()
 
-	os.MkdirAll(filepath.Join(root1, "project-a", ".git"), 0755)
-	os.MkdirAll(filepath.Join(root2, "project-b"), 0755)
+	require.NoError(t, os.MkdirAll(filepath.Join(root1, "project-a", ".git"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root2, "project-b"), 0755))
 
 	store, _ := setupWorkspaceStoreWithConfig(t, []string{root1, root2})
 
@@ -314,8 +318,8 @@ func TestWorkspaceStore_OnAppStart_MultipleRoots(t *testing.T) {
 func TestWorkspaceStore_OnAppStart_SkipsFiles(t *testing.T) {
 	rootDir := t.TempDir()
 
-	os.MkdirAll(filepath.Join(rootDir, "real-project"), 0755)
-	os.WriteFile(filepath.Join(rootDir, "not-a-dir.txt"), []byte("hello"), 0644)
+	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, "real-project"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(rootDir, "not-a-dir.txt"), []byte("hello"), 0644))
 
 	store, _ := setupWorkspaceStoreWithConfig(t, []string{rootDir})
 
@@ -331,7 +335,7 @@ func TestWorkspaceStore_OnAppStart_SkipsFiles(t *testing.T) {
 func TestWorkspaceStore_OnAppStart_InvalidRootSkipped(t *testing.T) {
 	rootDir := t.TempDir()
 
-	os.MkdirAll(filepath.Join(rootDir, "good-project"), 0755)
+	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, "good-project"), 0755))
 
 	store, _ := setupWorkspaceStoreWithConfig(t, []string{"/nonexistent/root", rootDir})
 
@@ -346,7 +350,7 @@ func TestWorkspaceStore_OnAppStart_InvalidRootSkipped(t *testing.T) {
 
 func TestWorkspaceStore_OnAppStart_StableIDs(t *testing.T) {
 	rootDir := t.TempDir()
-	os.MkdirAll(filepath.Join(rootDir, "my-project"), 0755)
+	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, "my-project"), 0755))
 
 	store1, _ := setupWorkspaceStoreWithConfig(t, []string{rootDir})
 	ctx := context.Background()
@@ -392,10 +396,10 @@ func TestIsGitRepository(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	gitDir := filepath.Join(tmpDir, "git-project")
-	os.MkdirAll(filepath.Join(gitDir, ".git"), 0755)
+	require.NoError(t, os.MkdirAll(filepath.Join(gitDir, ".git"), 0755))
 
 	nonGitDir := filepath.Join(tmpDir, "non-git-project")
-	os.MkdirAll(nonGitDir, 0755)
+	require.NoError(t, os.MkdirAll(nonGitDir, 0755))
 
 	database := setupTestDB(t)
 	store := NewWorkspaceStore(database, afero.NewOsFs(), tmpDir)
@@ -428,8 +432,8 @@ func setupWorkspaceStoreWithFullConfig(t *testing.T, roots []string, workspaces 
 func TestWorkspaceStore_OnAppStart_WithAdHocWorkspaces(t *testing.T) {
 	rootDir := t.TempDir()
 	adHocDir := t.TempDir()
-	os.MkdirAll(filepath.Join(rootDir, "from-root"), 0755)
-	os.MkdirAll(filepath.Join(adHocDir, ".git"), 0755)
+	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, "from-root"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(adHocDir, ".git"), 0755))
 
 	store, _ := setupWorkspaceStoreWithFullConfig(t, []string{rootDir}, []string{adHocDir})
 
@@ -465,7 +469,7 @@ func TestWorkspaceStore_SaveConfig(t *testing.T) {
 
 func TestWorkspaceStore_AddWorkspace(t *testing.T) {
 	wsDir := t.TempDir()
-	os.MkdirAll(filepath.Join(wsDir, ".git"), 0755)
+	require.NoError(t, os.MkdirAll(filepath.Join(wsDir, ".git"), 0755))
 
 	store, _ := setupWorkspaceStoreWithFullConfig(t, nil, nil)
 
@@ -504,8 +508,8 @@ func TestWorkspaceStore_AddWorkspace_AlreadyExists(t *testing.T) {
 
 func TestWorkspaceStore_AddWorkspaceRoot(t *testing.T) {
 	rootDir := t.TempDir()
-	os.MkdirAll(filepath.Join(rootDir, "proj-a", ".git"), 0755)
-	os.MkdirAll(filepath.Join(rootDir, "proj-b"), 0755)
+	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, "proj-a", ".git"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, "proj-b"), 0755))
 
 	store, _ := setupWorkspaceStoreWithFullConfig(t, nil, nil)
 
@@ -532,7 +536,7 @@ func TestWorkspaceStore_Update(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
 	ws := &Workspace{Name: "test", Path: "/path"}
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 
 	now := time.Now()
 	ws.LastUsedAt = now
@@ -587,7 +591,7 @@ func TestWorkspaceStore_Persistence(t *testing.T) {
 
 	now := time.Now()
 	ws := &Workspace{Name: "test", Path: "/path", LastUsedAt: now}
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 
 	store2 := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
@@ -621,7 +625,7 @@ func TestWorkspaceStore_Delete(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
 	ws := &Workspace{Name: "test", Path: "/path/to/test"}
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 
 	err := store.Delete(ws.ID)
 	require.NoError(t, err)
@@ -650,7 +654,7 @@ func TestWorkspaceStore_SetHidden(t *testing.T) {
 	store := setupWorkspaceStore(t)
 
 	ws := &Workspace{Name: "test", Path: "/path/to/test"}
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 	require.False(t, ws.IsHidden)
 
 	err := store.SetHidden(ws.ID, true)
@@ -698,7 +702,7 @@ func TestWorkspaceStore_RemoveWorkspaceFromConfig_NotInConfig(t *testing.T) {
 
 func TestWorkspaceStore_OnAppStart_MergesDiscoveredWithPersisted(t *testing.T) {
 	rootDir := t.TempDir()
-	os.MkdirAll(filepath.Join(rootDir, "project-alpha"), 0755)
+	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, "project-alpha"), 0755))
 
 	store, _ := setupWorkspaceStoreWithConfig(t, []string{rootDir})
 
@@ -712,7 +716,7 @@ func TestWorkspaceStore_OnAppStart_MergesDiscoveredWithPersisted(t *testing.T) {
 
 	now := time.Now()
 	workspaces[0].LastUsedAt = now
-	store.Update(&workspaces[0])
+	require.NoError(t, store.Update(&workspaces[0]))
 
 	err = store.OnAppStart(ctx)
 	require.NoError(t, err)

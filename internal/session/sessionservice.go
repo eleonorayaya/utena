@@ -232,7 +232,9 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, br
 	}
 
 	if session.WorkspaceID != 0 {
-		s.workspaceService.Touch(ctx, session.WorkspaceID)
+		if err := s.workspaceService.Touch(ctx, session.WorkspaceID); err != nil {
+			slog.Warn("failed to touch workspace last-used timestamp", "workspace", session.WorkspaceID, "error", err)
+		}
 	}
 
 	go s.runSetup(session.ID, ws, tmuxName, branchName, baseBranchName, createWorktree)
@@ -702,13 +704,17 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 	}
 
 	if session.WorkspaceID != 0 {
-		s.workspaceService.Touch(ctx, session.WorkspaceID)
+		if err := s.workspaceService.Touch(ctx, session.WorkspaceID); err != nil {
+			slog.Warn("failed to touch workspace last-used timestamp", "workspace", session.WorkspaceID, "error", err)
+		}
 	}
 
-	s.eventBus.Publish(ctx, eventbus.Event{
+	if err := s.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionActivated,
 		Data: eventbus.SessionActivatedEvent{SessionName: tmuxName},
-	})
+	}); err != nil {
+		slog.Warn("failed to publish session activated event", "session", session.ID, "error", err)
+	}
 
 	return session, nil
 }
@@ -796,7 +802,9 @@ func (s *SessionService) handleTmuxSessionCreated(ctx context.Context, event eve
 		return nil
 	}
 
-	s.RefreshSession(ctx, sess.ID)
+	if _, err := s.RefreshSession(ctx, sess.ID); err != nil {
+		slog.Warn("failed to refresh session after tmux create", "session", sess.ID, "error", err)
+	}
 	return nil
 }
 
@@ -885,7 +893,9 @@ func (s *SessionService) reconcileTmuxState(ctx context.Context) {
 	}
 	for _, sess := range sessions {
 		if sess.Status != StatusDeleted {
-			s.RefreshSession(ctx, sess.ID)
+			if _, err := s.RefreshSession(ctx, sess.ID); err != nil {
+				slog.Warn("failed to refresh session during reconcile", "session", sess.ID, "error", err)
+			}
 		}
 	}
 }
@@ -902,12 +912,17 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 	if sess.BranchID != nil && sess.GitBranch != nil {
 		ws, _ := s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID)
 		if ws != nil {
-			s.gitService.CleanupBranch(ctx, sess.GitBranch, ws.Path, false)
+			if err := s.gitService.CleanupBranch(ctx, sess.GitBranch, ws.Path, false); err != nil {
+				slog.Warn("failed to cleanup branch during archive", "session", sess.ID, "error", err)
+			}
 		}
 	}
 
 	if sess.TmuxSessionID != nil {
-		s.tmuxService.KillSession(*sess.TmuxSessionID)
+		if err := s.tmuxService.KillSession(*sess.TmuxSessionID); err != nil {
+			slog.Warn("failed to kill tmux session during archive", "session", sess.ID, "error", err)
+		}
+		sess.TmuxSessionID = nil
 	}
 
 	sess.Status = StatusArchived
@@ -930,10 +945,12 @@ func (s *SessionService) DismissSession(ctx context.Context, id uint) error {
 	if sess.BranchID != nil && s.dismissedPRStore != nil {
 		prs := s.gitService.GetPRsForBranch(*sess.BranchID)
 		for _, pr := range prs {
-			s.dismissedPRStore.Add(&DismissedPR{
+			if err := s.dismissedPRStore.Add(&DismissedPR{
 				PullRequestID: pr.ID,
 				DismissedAt:   time.Now(),
-			})
+			}); err != nil {
+				slog.Warn("failed to record dismissed PR", "pr", pr.ID, "error", err)
+			}
 		}
 	}
 

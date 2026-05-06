@@ -37,7 +37,7 @@ func (c *SessionController) ListSessions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	render.Render(w, r, NewSessionListResponse(sessions))
+	common.RenderResponse(w, r, NewSessionListResponse(sessions))
 }
 
 func (c *SessionController) GetSessionByID(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +54,7 @@ func (c *SessionController) GetSessionByID(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	render.Render(w, r, NewSessionResponse(session))
+	common.RenderResponse(w, r, NewSessionResponse(session))
 }
 
 func (c *SessionController) ListSessionsByWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +72,7 @@ func (c *SessionController) ListSessionsByWorkspace(w http.ResponseWriter, r *ht
 		return
 	}
 
-	render.Render(w, r, NewSessionListResponse(sessions))
+	common.RenderResponse(w, r, NewSessionListResponse(sessions))
 }
 
 func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +96,7 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 	}
 
 	render.Status(r, http.StatusAccepted)
-	render.Render(w, r, NewSessionResponse(session))
+	common.RenderResponse(w, r, NewSessionResponse(session))
 }
 
 func (c *SessionController) UpdateSession(w http.ResponseWriter, r *http.Request) {
@@ -113,14 +113,14 @@ func (c *SessionController) UpdateSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	data.Session.ID = id
+	data.ID = id
 
 	if err := c.service.UpdateSession(ctx, data.Session); err != nil {
 		common.RenderError(w, r, err)
 		return
 	}
 
-	render.Render(w, r, NewSessionResponse(data.Session))
+	common.RenderResponse(w, r, NewSessionResponse(data.Session))
 }
 
 func (c *SessionController) DeleteSession(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +156,7 @@ func (c *SessionController) ActivateSession(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	render.Render(w, r, NewSessionResponse(session))
+	common.RenderResponse(w, r, NewSessionResponse(session))
 }
 
 func (c *SessionController) RepairSession(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +173,7 @@ func (c *SessionController) RepairSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	render.Render(w, r, NewSessionResponse(session))
+	common.RenderResponse(w, r, NewSessionResponse(session))
 }
 
 func (c *SessionController) ArchiveSession(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +190,7 @@ func (c *SessionController) ArchiveSession(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	render.Render(w, r, NewSessionResponse(session))
+	common.RenderResponse(w, r, NewSessionResponse(session))
 }
 
 func (c *SessionController) DismissSession(w http.ResponseWriter, r *http.Request) {

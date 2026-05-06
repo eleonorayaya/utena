@@ -45,8 +45,8 @@ func TestWorkspaceService_ListWorkspaces(t *testing.T) {
 
 	ws1 := &Workspace{Name: "test1", Path: "/path1"}
 	ws2 := &Workspace{Name: "test2", Path: "/path2"}
-	store.Add(ws1)
-	store.Add(ws2)
+	require.NoError(t, store.Add(ws1))
+	require.NoError(t, store.Add(ws2))
 
 	ctx := context.Background()
 	workspaces, err := service.ListWorkspaces(ctx)
@@ -69,7 +69,7 @@ func TestWorkspaceService_GetWorkspace(t *testing.T) {
 		Path:      "/path/to/test",
 		IsGitRepo: true,
 	}
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 
 	ctx := context.Background()
 	retrieved, err := service.GetWorkspace(ctx, ws.ID)
@@ -95,7 +95,7 @@ func TestWorkspaceService_GetWorkspaceByPath(t *testing.T) {
 		Name: "test",
 		Path: "/unique/path",
 	}
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 
 	ctx := context.Background()
 	retrieved, err := service.GetWorkspaceByPath(ctx, "/unique/path")
@@ -118,13 +118,17 @@ func setupWorkspaceServiceWithConfig(t *testing.T) (*WorkspaceService, *Workspac
 	configDir := filepath.Join(tmpDir, "config")
 
 	fs := afero.NewOsFs()
-	fs.MkdirAll(configDir, 0755)
-	afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644)
+	require.NoError(t, fs.MkdirAll(configDir, 0755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644))
 
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	database.Migrate(&Workspace{})
-	t.Cleanup(func() { database.Close() })
+	require.NoError(t, database.Migrate(&Workspace{}))
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 
 	store := NewWorkspaceStore(database, fs, configDir)
 	service := NewWorkspaceService(store)
@@ -145,7 +149,7 @@ func TestWorkspaceService_AddWorkspace(t *testing.T) {
 func TestWorkspaceService_AddWorkspaceAsRoot(t *testing.T) {
 	service, _ := setupWorkspaceServiceWithConfig(t)
 	rootDir := t.TempDir()
-	os.MkdirAll(filepath.Join(rootDir, "project-a"), 0755)
+	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, "project-a"), 0755))
 
 	ctx := context.Background()
 	ws, err := service.AddWorkspace(ctx, rootDir, true)
@@ -160,7 +164,7 @@ func TestWorkspaceService_SetWorkspaceHidden(t *testing.T) {
 	service, store := setupWorkspaceService(t)
 
 	ws := &Workspace{Name: "test", Path: "/path"}
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 
 	ctx := context.Background()
 	err := service.SetWorkspaceHidden(ctx, ws.ID, true)
@@ -184,7 +188,7 @@ func TestWorkspaceService_DeleteWorkspace(t *testing.T) {
 	service, store := setupWorkspaceService(t)
 
 	ws := &Workspace{Name: "test", Path: "/path"}
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 
 	ctx := context.Background()
 	err := service.DeleteWorkspace(ctx, ws.ID)
@@ -208,7 +212,7 @@ func TestWorkspaceService_Touch(t *testing.T) {
 	service, store := setupWorkspaceService(t)
 
 	ws := &Workspace{Name: "test", Path: "/path"}
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 
 	before := time.Now()
 	ctx := context.Background()

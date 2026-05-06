@@ -12,7 +12,11 @@ func setupTestDB(t *testing.T) db.Database {
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
 	require.NoError(t, database.Migrate(&Repo{}))
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 	return database
 }
 

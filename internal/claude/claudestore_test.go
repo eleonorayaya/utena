@@ -20,8 +20,12 @@ func setupTestDB(t *testing.T) db.Database {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database.Migrate(&testSession{}, &ClaudeSession{})
-	t.Cleanup(func() { database.Close() })
+	require.NoError(t, database.Migrate(&testSession{}, &ClaudeSession{}))
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 	return database
 }
 
@@ -42,11 +46,11 @@ func TestUpdateStatus(t *testing.T) {
 	store, database := setupStore(t)
 	sessionID := createTestSession(t, database)
 
-	store.Create(&ClaudeSession{
+	require.NoError(t, store.Create(&ClaudeSession{
 		ClaudeSessionID: "cs-1",
 		SessionID:       sessionID,
 		Status:          StatusNeedsAttention,
-	})
+	}))
 
 	err := store.UpdateStatus("cs-1", StatusWorking)
 	require.NoError(t, err)

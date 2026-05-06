@@ -26,7 +26,9 @@ func TestListRepoPRs(t *testing.T) {
 			{Number: github.Ptr(1), Title: github.Ptr("Fix bug"), State: github.Ptr("open"), Draft: github.Ptr(false), HTMLURL: github.Ptr("https://github.com/octocat/hello/pull/1")},
 			{Number: github.Ptr(2), Title: github.Ptr("Add feature"), State: github.Ptr("open"), Draft: github.Ptr(true), HTMLURL: github.Ptr("https://github.com/octocat/hello/pull/2")},
 		}
-		json.NewEncoder(w).Encode(prs)
+		if err := json.NewEncoder(w).Encode(prs); err != nil {
+			t.Errorf("encode PRs response: %v", err)
+		}
 	})
 
 	client := setupMockSDKClient(t, mux)
@@ -57,7 +59,9 @@ func TestGetPR(t *testing.T) {
 			Head:    &github.PullRequestBranch{Ref: github.Ptr("feature-branch")},
 			Base:    &github.PullRequestBranch{Ref: github.Ptr("main")},
 		}
-		json.NewEncoder(w).Encode(pr)
+		if err := json.NewEncoder(w).Encode(pr); err != nil {
+			t.Errorf("encode PR response: %v", err)
+		}
 	})
 
 	client := setupMockSDKClient(t, mux)
@@ -87,10 +91,14 @@ func TestGetPRDiff(t *testing.T) {
 	mux.HandleFunc("/repos/octocat/hello/pulls/1", func(w http.ResponseWriter, r *http.Request) {
 		accept := r.Header.Get("Accept")
 		if strings.Contains(accept, "diff") {
-			w.Write([]byte("diff --git a/file.go b/file.go\n--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n"))
+			if _, err := w.Write([]byte("diff --git a/file.go b/file.go\n--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n")); err != nil {
+				t.Errorf("write diff response: %v", err)
+			}
 			return
 		}
-		json.NewEncoder(w).Encode(github.PullRequest{Number: github.Ptr(1)})
+		if err := json.NewEncoder(w).Encode(github.PullRequest{Number: github.Ptr(1)}); err != nil {
+			t.Errorf("encode PR response: %v", err)
+		}
 	})
 
 	client := setupMockSDKClient(t, mux)
@@ -107,7 +115,9 @@ func TestGetPRDiff(t *testing.T) {
 func TestGetCurrentUser(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(github.User{Login: github.Ptr("testuser")})
+		if err := json.NewEncoder(w).Encode(github.User{Login: github.Ptr("testuser")}); err != nil {
+			t.Errorf("encode user response: %v", err)
+		}
 	})
 
 	client := setupMockSDKClient(t, mux)

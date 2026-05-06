@@ -34,7 +34,7 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	database.Migrate(
+	require.NoError(t, database.Migrate(
 		&workspace.Workspace{},
 		&git.Repo{},
 		&git.Branch{},
@@ -45,8 +45,12 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 		&DismissedPR{},
 		&claude.ClaudeSession{},
 		&SessionAction{},
-	)
-	t.Cleanup(func() { database.Close() })
+	))
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 
 	bus := eventbus.NewEventBus()
 	sessionStore := NewSessionStore(database)

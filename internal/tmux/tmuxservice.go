@@ -3,6 +3,7 @@ package tmux
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
@@ -191,7 +192,9 @@ func (t *TmuxService) HandleSessionCreated(ctx context.Context, tmuxName string)
 	ts, err := t.store.GetByName(tmuxName)
 	if err == nil {
 		ts.IsAlive = true
-		t.store.Update(ts)
+		if updateErr := t.store.Update(ts); updateErr != nil {
+			slog.Warn("failed to mark tmux session alive", "tmux", tmuxName, "error", updateErr)
+		}
 	}
 	return t.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.TmuxSessionCreated,
@@ -203,7 +206,9 @@ func (t *TmuxService) HandleSessionClosed(ctx context.Context, tmuxName string) 
 	ts, err := t.store.GetByName(tmuxName)
 	if err == nil {
 		ts.IsAlive = false
-		t.store.Update(ts)
+		if updateErr := t.store.Update(ts); updateErr != nil {
+			slog.Warn("failed to mark tmux session dead", "tmux", tmuxName, "error", updateErr)
+		}
 	}
 	delete(t.windowsBySession, tmuxName)
 	return t.eventBus.Publish(ctx, eventbus.Event{

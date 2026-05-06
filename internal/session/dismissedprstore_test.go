@@ -12,8 +12,12 @@ func setupDismissedPRStore(t *testing.T) *DismissedPRStore {
 	t.Helper()
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	database.Migrate(&DismissedPR{})
-	t.Cleanup(func() { database.Close() })
+	require.NoError(t, database.Migrate(&DismissedPR{}))
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 	return NewDismissedPRStore(database)
 }
 

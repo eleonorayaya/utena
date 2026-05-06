@@ -14,7 +14,11 @@ import (
 func TestGitModule_Models(t *testing.T) {
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 
 	bus := eventbus.NewEventBus()
 	service := NewGitService(database, WithEventBus(bus))
@@ -27,7 +31,11 @@ func TestGitModule_Models(t *testing.T) {
 func TestGitModule_RegisterJobs(t *testing.T) {
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 
 	bus := eventbus.NewEventBus()
 	service := NewGitService(database, WithEventBus(bus))
@@ -44,7 +52,11 @@ func TestGitModule_RegisterJobs(t *testing.T) {
 func TestGitModule_OnAppStart_SetsCurrentUser(t *testing.T) {
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 
 	bus := &mockEventBus{}
 	module := NewGitModule(database, bus)
@@ -58,7 +70,11 @@ func TestGitModule_OnAppStart_SetsCurrentUser(t *testing.T) {
 func TestGitModule_InitializesWithoutError(t *testing.T) {
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 
 	bus := eventbus.NewEventBus()
 	service := NewGitService(database, WithEventBus(bus))

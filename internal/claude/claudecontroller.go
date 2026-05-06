@@ -44,5 +44,5 @@ func (c *ClaudeController) ListClaudeSessions(w http.ResponseWriter, r *http.Req
 	}
 
 	response := NewClaudeSessionListResponse(sessions)
-	render.Render(w, r, response)
+	common.RenderResponse(w, r, response)
 }

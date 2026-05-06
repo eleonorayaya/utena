@@ -11,7 +11,11 @@ import (
 func TestTmuxModule_Models(t *testing.T) {
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 
 	bus := eventbus.NewEventBus()
 	mock := NewMockRunner()
@@ -25,7 +29,11 @@ func TestTmuxModule_Models(t *testing.T) {
 func TestTmuxModule_InitializesWithoutError(t *testing.T) {
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 
 	bus := eventbus.NewEventBus()
 	mock := NewMockRunner()

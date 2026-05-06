@@ -20,11 +20,11 @@ func TestPreToolUse_ClearsNeedsAttention(t *testing.T) {
 	service, store, database := setupService(t)
 	sessionID := createTestSession(t, database)
 
-	store.Create(&ClaudeSession{
+	require.NoError(t, store.Create(&ClaudeSession{
 		ClaudeSessionID: "cs-1",
 		SessionID:       sessionID,
 		Status:          StatusNeedsAttention,
-	})
+	}))
 
 	err := service.HandleHookEvent(context.Background(), &HookEventRequest{
 		Event:           "PreToolUse",
@@ -42,11 +42,11 @@ func TestPreToolUse_NoOpWhenWorking(t *testing.T) {
 	service, store, database := setupService(t)
 	sessionID := createTestSession(t, database)
 
-	store.Create(&ClaudeSession{
+	require.NoError(t, store.Create(&ClaudeSession{
 		ClaudeSessionID: "cs-1",
 		SessionID:       sessionID,
 		Status:          StatusWorking,
-	})
+	}))
 
 	err := service.HandleHookEvent(context.Background(), &HookEventRequest{
 		Event:           "PreToolUse",
@@ -64,11 +64,11 @@ func TestPreToolUse_ClearsReadyForReview(t *testing.T) {
 	service, store, database := setupService(t)
 	sessionID := createTestSession(t, database)
 
-	store.Create(&ClaudeSession{
+	require.NoError(t, store.Create(&ClaudeSession{
 		ClaudeSessionID: "cs-1",
 		SessionID:       sessionID,
 		Status:          StatusReadyForReview,
-	})
+	}))
 
 	err := service.HandleHookEvent(context.Background(), &HookEventRequest{
 		Event:           "PreToolUse",
@@ -86,11 +86,11 @@ func TestPreToolUse_ClearsDone(t *testing.T) {
 	service, store, database := setupService(t)
 	sessionID := createTestSession(t, database)
 
-	store.Create(&ClaudeSession{
+	require.NoError(t, store.Create(&ClaudeSession{
 		ClaudeSessionID: "cs-1",
 		SessionID:       sessionID,
 		Status:          StatusDone,
-	})
+	}))
 
 	err := service.HandleHookEvent(context.Background(), &HookEventRequest{
 		Event:           "PreToolUse",
@@ -109,37 +109,37 @@ func TestFullFlow_NeedsAttentionToWorkingViaPreToolUse(t *testing.T) {
 	sessionID := createTestSession(t, database)
 	ctx := context.Background()
 
-	service.HandleHookEvent(ctx, &HookEventRequest{
+	require.NoError(t, service.HandleHookEvent(ctx, &HookEventRequest{
 		Event:           "SessionStart",
 		ClaudeSessionID: "cs-1",
 		SessionID:       sessionID,
 		CWD:             "/tmp",
-	})
+	}))
 	sessions := store.List()
 	require.Equal(t, StatusIdle, sessions[0].Status)
 
-	service.HandleHookEvent(ctx, &HookEventRequest{
+	require.NoError(t, service.HandleHookEvent(ctx, &HookEventRequest{
 		Event:            "Notification",
 		ClaudeSessionID:  "cs-1",
 		SessionID:        sessionID,
 		NotificationType: "permission_prompt",
-	})
+	}))
 	sessions = store.List()
 	require.Equal(t, StatusNeedsAttention, sessions[0].Status)
 
-	service.HandleHookEvent(ctx, &HookEventRequest{
+	require.NoError(t, service.HandleHookEvent(ctx, &HookEventRequest{
 		Event:           "PreToolUse",
 		ClaudeSessionID: "cs-1",
 		SessionID:       sessionID,
-	})
+	}))
 	sessions = store.List()
 	require.Equal(t, StatusWorking, sessions[0].Status)
 
-	service.HandleHookEvent(ctx, &HookEventRequest{
+	require.NoError(t, service.HandleHookEvent(ctx, &HookEventRequest{
 		Event:           "Stop",
 		ClaudeSessionID: "cs-1",
 		SessionID:       sessionID,
-	})
+	}))
 	sessions = store.List()
 	require.Equal(t, StatusReadyForReview, sessions[0].Status)
 }

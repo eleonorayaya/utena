@@ -43,7 +43,9 @@ func main() {
 func setupLogging() string {
 	logfilePath := os.Getenv("BUBBLETEA_LOG")
 	if logfilePath == "" {
-		os.MkdirAll(defaultLogDir, 0755)
+		if err := os.MkdirAll(defaultLogDir, 0755); err != nil {
+			log.Fatalf("failed to create log directory: %v", err)
+		}
 		logfilePath = filepath.Join(defaultLogDir, "tui.log")
 	}
 	if _, err := tea.LogToFile(logfilePath, "utena"); err != nil {

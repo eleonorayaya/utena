@@ -29,7 +29,7 @@ func (c *TodoController) ListTodos(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := NewTodoListResponse(todos)
-	render.Render(w, r, response)
+	common.RenderResponse(w, r, response)
 }
 
 func (c *TodoController) CreateTodo(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +48,7 @@ func (c *TodoController) CreateTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render.Status(r, http.StatusCreated)
-	render.Render(w, r, NewTodoResponse(t))
+	common.RenderResponse(w, r, NewTodoResponse(t))
 }
 
 func (c *TodoController) DeleteTodo(w http.ResponseWriter, r *http.Request) {

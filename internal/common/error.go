@@ -2,6 +2,7 @@ package common
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/render"
@@ -90,7 +91,7 @@ func RenderError(w http.ResponseWriter, r *http.Request, err error) {
 			statusText = "Internal server error."
 		}
 
-		render.Render(w, r, &errResponse{
+		RenderResponse(w, r, &errResponse{
 			Err:            appErr,
 			HTTPStatusCode: statusCode,
 			StatusText:     statusText,
@@ -99,10 +100,16 @@ func RenderError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 
-	render.Render(w, r, &errResponse{
+	RenderResponse(w, r, &errResponse{
 		Err:            err,
 		HTTPStatusCode: http.StatusInternalServerError,
 		StatusText:     "Internal server error.",
 		ErrorText:      err.Error(),
 	})
+}
+
+func RenderResponse(w http.ResponseWriter, r *http.Request, v render.Renderer) {
+	if err := render.Render(w, r, v); err != nil {
+		slog.Error("failed to render response", "path", r.URL.Path, "error", err)
+	}
 }

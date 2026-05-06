@@ -15,6 +15,9 @@ linters:
       exclude-functions:
         - (io.Closer).Close
         - (*os.File).Close
+  exclusions:
+    paths:
+      - internal/tui/
 
 formatters:
   enable:

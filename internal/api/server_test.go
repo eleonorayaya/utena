@@ -41,8 +41,8 @@ func setupTestRouter(t *testing.T) (*App, chi.Router, *tmux.MockRunner, uint, ui
 
 	ws1 := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
 	ws2 := &workspace.Workspace{Name: "other", Path: "/tmp/other"}
-	app.Workspace.Store.Add(ws1)
-	app.Workspace.Store.Add(ws2)
+	require.NoError(t, app.Workspace.Store.Add(ws1))
+	require.NoError(t, app.Workspace.Store.Add(ws2))
 
 	server := BuildServer(app, cfg)
 

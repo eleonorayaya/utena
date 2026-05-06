@@ -169,7 +169,9 @@ func (s *WorkspaceStore) RemoveWorkspaceFromConfig(path string) {
 
 	if len(filtered) != len(cfg.Workspaces) {
 		cfg.Workspaces = filtered
-		s.saveConfig(cfg)
+		if err := s.saveConfig(cfg); err != nil {
+			slog.Warn("failed to persist workspace config after removal", "path", path, "error", err)
+		}
 	}
 }
 

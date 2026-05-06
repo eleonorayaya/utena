@@ -66,7 +66,11 @@ func setupGitServiceTest(t *testing.T) (db.Database, *Repo) {
 	database, err := db.OpenInMemory()
 	require.NoError(t, err)
 	require.NoError(t, database.Migrate(&Repo{}, &Branch{}, &Worktree{}, &PullRequest{}))
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+	})
 
 	repoStore := NewRepoStore(database)
 	repo := &Repo{Path: "/test/repo", FullName: "owner/repo"}
