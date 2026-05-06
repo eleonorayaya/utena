@@ -20,10 +20,14 @@ func setupTestDB(t *testing.T) db.Database {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database.Migrate(&workspace.Workspace{}, &Todo{})
+	require.NoError(t, database.Migrate(&workspace.Workspace{}, &Todo{}))
 	t.Cleanup(func() {
-		database.Close()
-		os.Remove(dbPath)
+		if err := database.Close(); err != nil {
+			t.Logf("close database: %v", err)
+		}
+		if err := os.Remove(dbPath); err != nil {
+			t.Logf("remove db file: %v", err)
+		}
 	})
 	return database
 }
@@ -85,7 +89,7 @@ func TestTodoStore_GetByID(t *testing.T) {
 		Name:        "fix bug",
 		WorkspaceID: &ws1ID,
 	}
-	store.Add(td)
+	require.NoError(t, store.Add(td))
 
 	retrieved, err := store.GetByID(td.ID)
 	require.NoError(t, err)
@@ -105,7 +109,7 @@ func TestTodoStore_GetByID_ReturnsCopy(t *testing.T) {
 	store, _, _ := setupTodoStore(t)
 
 	td := &Todo{Name: "original"}
-	store.Add(td)
+	require.NoError(t, store.Add(td))
 
 	retrieved, _ := store.GetByID(td.ID)
 	retrieved.Name = "modified"
@@ -121,9 +125,9 @@ func TestTodoStore_List(t *testing.T) {
 	td2 := &Todo{Name: "newest"}
 	td3 := &Todo{Name: "middle"}
 
-	store.Add(td1)
-	store.Add(td2)
-	store.Add(td3)
+	require.NoError(t, store.Add(td1))
+	require.NoError(t, store.Add(td2))
+	require.NoError(t, store.Add(td3))
 
 	list := store.List()
 	require.Len(t, list, 3)
@@ -146,9 +150,9 @@ func TestTodoStore_ListByWorkspaceID(t *testing.T) {
 	td2 := &Todo{Name: "ws2", WorkspaceID: &ws2ID}
 	td3 := &Todo{Name: "ws1-new", WorkspaceID: &ws1ID}
 
-	store.Add(td1)
-	store.Add(td2)
-	store.Add(td3)
+	require.NoError(t, store.Add(td1))
+	require.NoError(t, store.Add(td2))
+	require.NoError(t, store.Add(td3))
 
 	ws1Todos := store.ListByWorkspaceID(ws1ID)
 	require.Len(t, ws1Todos, 2)
@@ -176,7 +180,7 @@ func TestTodoStore_Delete(t *testing.T) {
 	store, _, _ := setupTodoStore(t)
 
 	td := &Todo{Name: "test"}
-	store.Add(td)
+	require.NoError(t, store.Add(td))
 
 	err := store.Delete(td.ID)
 	require.NoError(t, err)
@@ -208,7 +212,7 @@ func TestTodoStore_Persistence(t *testing.T) {
 
 	store1 := NewTodoStore(database)
 	td := &Todo{Name: "persist me", WorkspaceID: &ws1ID}
-	store1.Add(td)
+	require.NoError(t, store1.Add(td))
 
 	store2 := NewTodoStore(database)
 
@@ -231,7 +235,7 @@ func TestTodoStore_ConcurrentAccess(t *testing.T) {
 			td := &Todo{
 				Name: "concurrent",
 			}
-			store.Add(td)
+			require.NoError(t, store.Add(td))
 		}(i)
 	}
 

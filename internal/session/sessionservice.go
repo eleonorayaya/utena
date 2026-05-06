@@ -100,9 +100,7 @@ func (s *SessionService) recoverStuckCreatingSessions() {
 		if sess.Status != StatusCreating {
 			continue
 		}
-		sess.Status = StatusBroken
-		sess.StatusError = "creation interrupted by daemon restart"
-		if err := s.store.Update(sess); err != nil {
+		if err := s.markSessionBroken(sess, "creation interrupted by daemon restart"); err != nil {
 			slog.Warn("failed to recover stuck creating session", "session", sess.ID, "error", err)
 			continue
 		}
@@ -163,7 +161,7 @@ func (s *SessionService) findSessionByTmuxName(tmuxName string) (*Session, error
 	return s.store.GetByTmuxSessionID(ts.ID)
 }
 
-func (s *SessionService) CreateSession(ctx context.Context, session *Session, branchName string, baseBranchName string, createWorktree bool) error {
+func (s *SessionService) CreateSession(ctx context.Context, session *Session, branchName string, baseBranchName string, createWorktree bool, actions ...*SessionAction) error {
 	var ws *workspace.Workspace
 	if session.WorkspaceID != 0 {
 		var err error
@@ -178,7 +176,11 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, br
 		createWorktree = true
 	}
 
-	if ws != nil && ws.IsGitRepo && branchName != "" && baseBranchName == "" && (ws.IsBare || branchName != "main") {
+	if ws != nil && ws.IsBare {
+		createWorktree = true
+	}
+
+	if ws != nil && ws.IsGitRepo && branchName != "" && baseBranchName == "" && branchName != "main" {
 		createWorktree = true
 	}
 
@@ -209,12 +211,31 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, br
 		session.LastUsedAt = time.Now()
 	}
 
+	if session.WorkspaceID != 0 && session.Name != "" {
+		_, err := s.store.GetByWorkspaceAndName(session.WorkspaceID, session.Name, StatusDeleted, StatusArchived)
+		switch {
+		case err == nil:
+			return fmt.Errorf("session %q already exists in workspace: %w", session.Name, ErrSessionAlreadyExists)
+		case !errors.Is(err, ErrSessionNotFound):
+			return fmt.Errorf("failed to check for duplicate session: %w", err)
+		}
+	}
+
 	if err := s.store.Add(session); err != nil {
 		return err
 	}
 
+	for _, action := range actions {
+		action.SessionID = session.ID
+		if err := s.sessionActionStore.Add(action); err != nil {
+			slog.Error("failed to persist session action", "session", session.ID, "trigger", action.Trigger, "error", err)
+		}
+	}
+
 	if session.WorkspaceID != 0 {
-		s.workspaceService.Touch(ctx, session.WorkspaceID)
+		if err := s.workspaceService.Touch(ctx, session.WorkspaceID); err != nil {
+			slog.Warn("failed to touch workspace last-used timestamp", "workspace", session.WorkspaceID, "error", err)
+		}
 	}
 
 	go s.runSetup(session.ID, ws, tmuxName, branchName, baseBranchName, createWorktree)
@@ -249,13 +270,15 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 	}()
 
 	markBroken := func(stage string, err error) {
-		sess.Status = StatusBroken
+		var msg string
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			sess.StatusError = fmt.Sprintf("%s timed out after %s", stage, s.setupTimeout)
+			msg = fmt.Sprintf("%s timed out after %s", stage, s.setupTimeout)
 		} else {
-			sess.StatusError = fmt.Sprintf("%s failed: %v", stage, err)
+			msg = fmt.Sprintf("%s failed: %v", stage, err)
 		}
-		s.store.Update(sess)
+		if updateErr := s.markSessionBroken(sess, msg); updateErr != nil {
+			slog.ErrorContext(ctx, "failed to persist broken status", "stage", stage, "error", updateErr)
+		}
 	}
 
 	var worktreeCreated bool
@@ -269,7 +292,9 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 			if errors.As(err, &w) {
 				setupWarning = w.Message
 				sess.StatusError = w.Message
-				s.store.Update(sess)
+				if updateErr := s.store.Update(sess); updateErr != nil {
+					slog.WarnContext(ctx, "failed to persist setup warning", "error", updateErr)
+				}
 			} else {
 				markBroken("branch setup", err)
 				return
@@ -285,10 +310,13 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 				return s.gitService.FindOrCreateBranch(ctx, finalBranchName, *ws.RepoID)
 			}, "name", finalBranchName)
 			if err != nil {
-				slog.Warn("failed to create branch record", "branch", finalBranchName, "error", err)
-			} else {
-				sess.BranchID = &branch.ID
-				s.store.Update(sess)
+				markBroken("find-or-create-branch", err)
+				return
+			}
+			sess.BranchID = &branch.ID
+			if updateErr := s.store.Update(sess); updateErr != nil {
+				markBroken("persist branch id", updateErr)
+				return
 			}
 		}
 
@@ -316,7 +344,10 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 	if setupWarning == "" {
 		sess.StatusError = ""
 	}
-	s.store.Update(sess)
+	if err := s.store.Update(sess); err != nil {
+		markBroken("persist active status", err)
+		return
+	}
 }
 
 func (s *SessionService) setupBranch(ctx context.Context, ws *workspace.Workspace, branchName string, baseBranchName string) error {
@@ -548,7 +579,9 @@ func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, 
 
 	sess.Status = StatusCreating
 	sess.StatusError = ""
-	s.store.Update(sess)
+	if err := s.store.Update(sess); err != nil {
+		return nil, fmt.Errorf("failed to mark session for repair: %w", err)
+	}
 
 	var ws *workspace.Workspace
 	if sess.WorkspaceID != 0 {
@@ -655,9 +688,13 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 			if existing.IsAttached {
 				slog.Info("clearing attached flag", "session", existing.ID)
 				existing.IsAttached = false
-				s.store.Update(&existing)
+				if updateErr := s.store.Update(&existing); updateErr != nil {
+					slog.Warn("failed to clear attached flag", "session", existing.ID, "error", updateErr)
+				}
 			}
 		}
+	} else {
+		slog.Warn("failed to list sessions while clearing attached flags", "error", err)
 	}
 
 	session.LastUsedAt = time.Now()
@@ -668,13 +705,17 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 	}
 
 	if session.WorkspaceID != 0 {
-		s.workspaceService.Touch(ctx, session.WorkspaceID)
+		if err := s.workspaceService.Touch(ctx, session.WorkspaceID); err != nil {
+			slog.Warn("failed to touch workspace last-used timestamp", "workspace", session.WorkspaceID, "error", err)
+		}
 	}
 
-	s.eventBus.Publish(ctx, eventbus.Event{
+	if err := s.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionActivated,
 		Data: eventbus.SessionActivatedEvent{SessionName: tmuxName},
-	})
+	}); err != nil {
+		slog.Warn("failed to publish session activated event", "session", session.ID, "error", err)
+	}
 
 	return session, nil
 }
@@ -708,6 +749,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 		if err := s.tmuxService.KillSession(*session.TmuxSessionID); err != nil {
 			slog.Warn("failed to kill tmux session", "error", err)
 		}
+		session.TmuxSessionID = nil
 	}
 
 	session.Status = StatusDeleted
@@ -761,7 +803,9 @@ func (s *SessionService) handleTmuxSessionCreated(ctx context.Context, event eve
 		return nil
 	}
 
-	s.RefreshSession(ctx, sess.ID)
+	if _, err := s.RefreshSession(ctx, sess.ID); err != nil {
+		slog.Warn("failed to refresh session after tmux create", "session", sess.ID, "error", err)
+	}
 	return nil
 }
 
@@ -788,7 +832,10 @@ func (s *SessionService) handleTmuxClientSessionChanged(ctx context.Context, eve
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sessions, _ := s.store.List()
+	sessions, err := s.store.List()
+	if err != nil {
+		return fmt.Errorf("failed to list sessions while clearing attached flags: %w", err)
+	}
 	for _, sess := range sessions {
 		if sess.IsAttached {
 			sess.IsAttached = false
@@ -850,7 +897,9 @@ func (s *SessionService) reconcileTmuxState(ctx context.Context) {
 	}
 	for _, sess := range sessions {
 		if sess.Status != StatusDeleted {
-			s.RefreshSession(ctx, sess.ID)
+			if _, err := s.RefreshSession(ctx, sess.ID); err != nil {
+				slog.Warn("failed to refresh session during reconcile", "session", sess.ID, "error", err)
+			}
 		}
 	}
 }
@@ -867,12 +916,17 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 	if sess.BranchID != nil && sess.GitBranch != nil {
 		ws, _ := s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID)
 		if ws != nil {
-			s.gitService.CleanupBranch(ctx, sess.GitBranch, ws.Path, false)
+			if err := s.gitService.CleanupBranch(ctx, sess.GitBranch, ws.Path, false); err != nil {
+				slog.Warn("failed to cleanup branch during archive", "session", sess.ID, "error", err)
+			}
 		}
 	}
 
 	if sess.TmuxSessionID != nil {
-		s.tmuxService.KillSession(*sess.TmuxSessionID)
+		if err := s.tmuxService.KillSession(*sess.TmuxSessionID); err != nil {
+			slog.Warn("failed to kill tmux session during archive", "session", sess.ID, "error", err)
+		}
+		sess.TmuxSessionID = nil
 	}
 
 	sess.Status = StatusArchived
@@ -895,10 +949,12 @@ func (s *SessionService) DismissSession(ctx context.Context, id uint) error {
 	if sess.BranchID != nil && s.dismissedPRStore != nil {
 		prs := s.gitService.GetPRsForBranch(*sess.BranchID)
 		for _, pr := range prs {
-			s.dismissedPRStore.Add(&DismissedPR{
+			if err := s.dismissedPRStore.Add(&DismissedPR{
 				PullRequestID: pr.ID,
 				DismissedAt:   time.Now(),
-			})
+			}); err != nil {
+				slog.Warn("failed to record dismissed PR", "pr", pr.ID, "error", err)
+			}
 		}
 	}
 
@@ -944,8 +1000,16 @@ func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Sessio
 		}
 	}
 
-	s.store.Update(sess)
+	if err := s.store.Update(sess); err != nil {
+		return nil, fmt.Errorf("failed to persist reconciled session: %w", err)
+	}
 	return sess, nil
+}
+
+func (s *SessionService) markSessionBroken(sess *Session, statusError string) error {
+	sess.Status = StatusBroken
+	sess.StatusError = statusError
+	return s.store.Update(sess)
 }
 
 func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Event) error {
@@ -998,20 +1062,9 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 		return
 	}
 
-	sessName := s.nameFromBranch(branch.Name)
-	tmuxName := BuildTmuxSessionName(ws.Name, sessName)
-
 	sess := &Session{
-		Name:        sessName,
 		WorkspaceID: ws.ID,
 		BranchID:    pr.HeadBranchID,
-		Status:      StatusCreating,
-		LastUsedAt:  time.Now(),
-	}
-
-	if err := s.store.Add(sess); err != nil {
-		slog.Warn("failed to create session for PR", "pr", pr.Number, "error", err)
-		return
 	}
 
 	prompt := fmt.Sprintf(
@@ -1022,18 +1075,18 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 			"The final report should just reflect the final state of feedback and should not reference any initial feedback that was dismissed by the subagents or make any reference at all to the process.",
 		pr.HTMLURL,
 	)
-	action := &SessionAction{
-		SessionID: sess.ID,
-		Trigger:   TriggerOnCreate,
-		Type:      SessionActionTypeClaude,
-		Options:   marshalOptions(ClaudeActionOptions{Prompt: prompt}),
+	reviewAction := &SessionAction{
+		Trigger: TriggerOnCreate,
+		Type:    SessionActionTypeClaude,
+		Options: marshalOptions(ClaudeActionOptions{Prompt: prompt}),
 	}
-	if err := s.sessionActionStore.Add(action); err != nil {
-		slog.Warn("failed to create session action for PR", "pr", pr.Number, "error", err)
+
+	if err := s.CreateSession(ctx, sess, branch.Name, "", false, reviewAction); err != nil {
+		slog.Warn("failed to create session for PR", "pr", pr.Number, "error", err)
+		return
 	}
 
 	slog.Info("activating session for assigned PR", "pr", pr.Number, "session", sess.ID, "branch", branch.Name)
-	go s.runSetup(sess.ID, ws, tmuxName, branch.Name, "", false)
 }
 
 func (s *SessionService) maybeCompleteSession(_ context.Context, pr *git.PullRequest) {

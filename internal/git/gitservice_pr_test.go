@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/google/go-github/v72/github"
 	"github.com/stretchr/testify/assert"
@@ -63,10 +64,7 @@ func (m *mockEventBus) Subscribe(eventType string, handler eventbus.Handler) {}
 
 func setupGitServiceTest(t *testing.T) (db.Database, *Repo) {
 	t.Helper()
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, database.Migrate(&Repo{}, &Branch{}, &Worktree{}, &PullRequest{}))
-	t.Cleanup(func() { database.Close() })
+	database := testdb.New(t, &Repo{}, &Branch{}, &Worktree{}, &PullRequest{})
 
 	repoStore := NewRepoStore(database)
 	repo := &Repo{Path: "/test/repo", FullName: "owner/repo"}

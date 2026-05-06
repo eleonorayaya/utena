@@ -10,6 +10,7 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -17,14 +18,7 @@ import (
 )
 
 func setupTestDB(t *testing.T) db.Database {
-	t.Helper()
-	database, err := db.OpenInMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	database.Migrate(&workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{}, &SessionAction{})
-	t.Cleanup(func() { database.Close() })
-	return database
+	return testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{}, &SessionAction{})
 }
 
 func setupSessionStore(t *testing.T) (*SessionStore, uint, uint) {
@@ -106,7 +100,7 @@ func TestSessionStore_GetByID(t *testing.T) {
 		LastUsedAt:  time.Now(),
 	}
 
-	store.Add(session)
+	require.NoError(t, store.Add(session))
 
 	retrieved, err := store.GetByID(session.ID)
 	require.NoError(t, err)
@@ -132,9 +126,9 @@ func TestSessionStore_List(t *testing.T) {
 	session2 := &Session{Name: "session-2", WorkspaceID: ws2ID, LastUsedAt: now}
 	session3 := &Session{Name: "session-3", WorkspaceID: ws1ID, LastUsedAt: now.Add(-1 * time.Hour)}
 
-	store.Add(session1)
-	store.Add(session2)
-	store.Add(session3)
+	require.NoError(t, store.Add(session1))
+	require.NoError(t, store.Add(session2))
+	require.NoError(t, store.Add(session3))
 
 	list, _ := store.List()
 	require.Len(t, list, 3)
@@ -158,9 +152,9 @@ func TestSessionStore_ListByWorkspace(t *testing.T) {
 	session2 := &Session{Name: "session-2", WorkspaceID: ws2ID, LastUsedAt: now}
 	session3 := &Session{Name: "session-3", WorkspaceID: ws1ID, LastUsedAt: now.Add(-1 * time.Hour)}
 
-	store.Add(session1)
-	store.Add(session2)
-	store.Add(session3)
+	require.NoError(t, store.Add(session1))
+	require.NoError(t, store.Add(session2))
+	require.NoError(t, store.Add(session3))
 
 	ws1Sessions, err := store.ListByWorkspace(ws1ID)
 	require.NoError(t, err)
@@ -196,7 +190,7 @@ func TestSessionStore_Update(t *testing.T) {
 		LastUsedAt:  time.Now(),
 	}
 
-	store.Add(session)
+	require.NoError(t, store.Add(session))
 
 	session.IsAttached = true
 	session.LastUsedAt = time.Now().Add(1 * time.Hour)
@@ -238,7 +232,7 @@ func TestSessionStore_Delete(t *testing.T) {
 	store, ws1ID, _ := setupSessionStore(t)
 
 	session := &Session{Name: "session-1", WorkspaceID: ws1ID, LastUsedAt: time.Now()}
-	store.Add(session)
+	require.NoError(t, store.Add(session))
 
 	err := store.Delete(session.ID)
 	require.NoError(t, err)
@@ -279,7 +273,7 @@ func TestSessionStore_ConcurrentAccess(t *testing.T) {
 				WorkspaceID: ws1ID,
 				LastUsedAt:  time.Now(),
 			}
-			store.Add(session)
+			require.NoError(t, store.Add(session))
 		}(i)
 	}
 
@@ -317,12 +311,7 @@ func TestSessionStore_OnAppEnd(t *testing.T) {
 
 func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *utmux.TmuxSession) {
 	t.Helper()
-	database, err := db.OpenInMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	database.Migrate(&workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{}, &SessionAction{})
-	t.Cleanup(func() { database.Close() })
+	database := testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{}, &SessionAction{})
 
 	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
 	database.Create(ws)

@@ -82,7 +82,9 @@ func (t *reconcileSyncTask) Run(ctx context.Context) error {
 	}
 	for _, sess := range sessions {
 		if sess.Status != StatusDeleted && sess.Status != StatusArchived && sess.Status != StatusCreating {
-			t.service.ReconcileSession(ctx, sess.ID)
+			if _, err := t.service.ReconcileSession(ctx, sess.ID); err != nil {
+				slog.Warn("reconcile failed for session", "session", sess.ID, "error", err)
+			}
 		}
 	}
 	return nil

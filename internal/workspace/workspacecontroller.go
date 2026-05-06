@@ -37,7 +37,7 @@ func (c *WorkspaceController) ListWorkspaces(w http.ResponseWriter, r *http.Requ
 	}
 
 	response := NewWorkspaceListResponse(workspaces)
-	render.Render(w, r, response)
+	common.RenderResponse(w, r, response)
 }
 
 func (c *WorkspaceController) GetWorkspaceByID(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +56,7 @@ func (c *WorkspaceController) GetWorkspaceByID(w http.ResponseWriter, r *http.Re
 	}
 
 	response := NewWorkspaceResponse(workspace)
-	render.Render(w, r, response)
+	common.RenderResponse(w, r, response)
 }
 
 func (c *WorkspaceController) AddWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -76,10 +76,14 @@ func (c *WorkspaceController) AddWorkspace(w http.ResponseWriter, r *http.Reques
 
 	render.Status(r, http.StatusCreated)
 	if ws != nil {
-		render.Render(w, r, NewWorkspaceListResponse([]Workspace{*ws}))
+		common.RenderResponse(w, r, NewWorkspaceListResponse([]Workspace{*ws}))
 	} else {
-		workspaces, _ := c.service.ListWorkspaces(ctx)
-		render.Render(w, r, NewWorkspaceListResponse(workspaces))
+		workspaces, listErr := c.service.ListWorkspaces(ctx)
+		if listErr != nil {
+			common.RenderError(w, r, listErr)
+			return
+		}
+		common.RenderResponse(w, r, NewWorkspaceListResponse(workspaces))
 	}
 }
 

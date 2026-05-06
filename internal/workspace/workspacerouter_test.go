@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -20,17 +20,14 @@ import (
 func setupWorkspaceRouter(t *testing.T) (*WorkspaceRouter, *WorkspaceStore) {
 	t.Helper()
 
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
-	t.Cleanup(func() { database.Close() })
+	database := testdb.New(t, &Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
 	ws1 := &Workspace{Name: "utena", Path: "/path/to/utena", IsGitRepo: true}
 	ws2 := &Workspace{Name: "example-project", Path: "/path/to/example", IsGitRepo: false}
-	store.Add(ws1)
-	store.Add(ws2)
+	require.NoError(t, store.Add(ws1))
+	require.NoError(t, store.Add(ws2))
 
 	service := NewWorkspaceService(store)
 	gitService := git.NewGitService(database)
@@ -78,8 +75,7 @@ func TestWorkspaceRouter_GetWorkspaceByID(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var response WorkspaceResponse
-	err = json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Equal(t, ws.ID, response.ID)
 	require.Equal(t, "utena", response.Name)
 	require.Equal(t, "/path/to/utena", response.Path)
@@ -102,13 +98,10 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 	configDir := filepath.Join(tmpDir, "config")
 
 	fs := afero.NewOsFs()
-	fs.MkdirAll(configDir, 0755)
-	afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644)
+	require.NoError(t, fs.MkdirAll(configDir, 0755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644))
 
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
-	t.Cleanup(func() { database.Close() })
+	database := testdb.New(t, &Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 
 	store := NewWorkspaceStore(database, fs, configDir)
 
@@ -129,8 +122,7 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code)
 
 	var response WorkspaceListResponse
-	err = json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Len(t, response.Workspaces, 1)
 	require.Equal(t, wsDir, response.Workspaces[0].Path)
 }
@@ -157,14 +149,11 @@ func initTestRepo(t *testing.T) string {
 func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	repoPath := initTestRepo(t)
 
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
-	t.Cleanup(func() { database.Close() })
+	database := testdb.New(t, &Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	wsGit := &Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
-	store.Add(wsGit)
+	require.NoError(t, store.Add(wsGit))
 
 	service := NewWorkspaceService(store)
 	gitService := git.NewGitService(database)
@@ -179,8 +168,7 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var response BranchListResponse
-	err = json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Contains(t, response.Branches, "main")
 	require.Contains(t, response.Branches, "develop")
 	require.Equal(t, "main", response.Branches[0])
@@ -311,16 +299,13 @@ func runCmd(t *testing.T, dir string, name string, args ...string) {
 func setupBranchRouter(t *testing.T, repoPath string) (*WorkspaceRouter, *Workspace) {
 	t.Helper()
 
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
-	t.Cleanup(func() { database.Close() })
+	database := testdb.New(t, &Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	ws := &Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
-	store.Add(ws)
+	require.NoError(t, store.Add(ws))
 	notGit := &Workspace{Name: "plain", Path: "/plain", IsGitRepo: false}
-	store.Add(notGit)
+	require.NoError(t, store.Add(notGit))
 
 	service := NewWorkspaceService(store)
 	gitService := git.NewGitService(database)

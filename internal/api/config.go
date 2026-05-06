@@ -34,7 +34,9 @@ func LoadConfig(args []string) (Config, error) {
 	}
 
 	if v := os.Getenv("UTENA_PORT"); v != "" {
-		fmt.Sscanf(v, "%d", &cfg.Port)
+		if _, err := fmt.Sscanf(v, "%d", &cfg.Port); err != nil {
+			return Config{}, fmt.Errorf("invalid UTENA_PORT %q: %w", v, err)
+		}
 	}
 	if v := os.Getenv("UTENA_DATA_DIR"); v != "" {
 		cfg.ConfigDir = v

@@ -3,15 +3,13 @@ package tmux
 import (
 	"testing"
 
-	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTmuxModule_Models(t *testing.T) {
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { database.Close() })
+	database := testdb.New(t)
 
 	bus := eventbus.NewEventBus()
 	mock := NewMockRunner()
@@ -23,9 +21,7 @@ func TestTmuxModule_Models(t *testing.T) {
 }
 
 func TestTmuxModule_InitializesWithoutError(t *testing.T) {
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { database.Close() })
+	database := testdb.New(t)
 
 	bus := eventbus.NewEventBus()
 	mock := NewMockRunner()

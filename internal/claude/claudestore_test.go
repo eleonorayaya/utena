@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -15,14 +16,7 @@ type testSession struct {
 func (testSession) TableName() string { return "sessions" }
 
 func setupTestDB(t *testing.T) db.Database {
-	t.Helper()
-	database, err := db.OpenInMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	database.Migrate(&testSession{}, &ClaudeSession{})
-	t.Cleanup(func() { database.Close() })
-	return database
+	return testdb.New(t, &testSession{}, &ClaudeSession{})
 }
 
 func createTestSession(t *testing.T, database db.Database) uint {
@@ -42,11 +36,11 @@ func TestUpdateStatus(t *testing.T) {
 	store, database := setupStore(t)
 	sessionID := createTestSession(t, database)
 
-	store.Create(&ClaudeSession{
+	require.NoError(t, store.Create(&ClaudeSession{
 		ClaudeSessionID: "cs-1",
 		SessionID:       sessionID,
 		Status:          StatusNeedsAttention,
-	})
+	}))
 
 	err := store.UpdateStatus("cs-1", StatusWorking)
 	require.NoError(t, err)

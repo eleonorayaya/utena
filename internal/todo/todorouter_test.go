@@ -22,8 +22,8 @@ func setupTodoRouter(t *testing.T) (*TodoRouter, *TodoStore, *workspace.Workspac
 
 	ws1 := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
 	ws2 := &workspace.Workspace{Name: "other", Path: "/tmp/other"}
-	workspaceStore.Add(ws1)
-	workspaceStore.Add(ws2)
+	require.NoError(t, workspaceStore.Add(ws1))
+	require.NoError(t, workspaceStore.Add(ws2))
 
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	service := NewTodoService(todoStore, workspaceService)
@@ -162,7 +162,7 @@ func TestTodoRouter_DeleteTodo(t *testing.T) {
 	router.Routes().ServeHTTP(createW, createReq)
 
 	var created TodoResponse
-	json.Unmarshal(createW.Body.Bytes(), &created)
+	require.NoError(t, json.Unmarshal(createW.Body.Bytes(), &created))
 
 	req := httptest.NewRequest("DELETE", fmt.Sprintf("/%d", created.ID), nil)
 	w := httptest.NewRecorder()
@@ -175,7 +175,7 @@ func TestTodoRouter_DeleteTodo(t *testing.T) {
 	router.Routes().ServeHTTP(listW, listReq)
 
 	var listResp TodoListResponse
-	json.Unmarshal(listW.Body.Bytes(), &listResp)
+	require.NoError(t, json.Unmarshal(listW.Body.Bytes(), &listResp))
 	require.Empty(t, listResp.Todos)
 }
 

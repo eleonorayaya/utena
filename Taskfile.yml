@@ -23,6 +23,12 @@ tasks:
       - '**/*.go'
     cmds:
       - go test ./...
+  go:lint:
+    sources:
+      - '**/*.go'
+      - .golangci.yml
+    cmds:
+      - golangci-lint run ./...
 
   test:
     cmds:
@@ -30,6 +36,9 @@ tasks:
   fmt:
     cmds:
       - task: go:fmt
+  lint:
+    cmds:
+      - task: go:lint
   tmux:install:
     cmds:
       - mkdir -p ~/.config/tmux/plugins/utena-tmux

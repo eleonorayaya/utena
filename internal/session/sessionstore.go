@@ -95,6 +95,21 @@ func (s *SessionStore) Delete(id uint) error {
 	return s.db.Delete(&Session{}, "id = ?", id).Error
 }
 
+func (s *SessionStore) GetByWorkspaceAndName(workspaceID uint, name string, excludeStatuses ...SessionStatus) (*Session, error) {
+	var session Session
+	q := s.db.Where("workspace_id = ? AND name = ?", workspaceID, name)
+	if len(excludeStatuses) > 0 {
+		q = q.Where("status NOT IN ?", excludeStatuses)
+	}
+	if err := q.First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return &session, nil
+}
+
 func (s *SessionStore) GetByBranchID(branchID uint) (*Session, error) {
 	var session Session
 	if err := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").First(&session, "sessions.branch_id = ?", branchID).Error; err != nil {

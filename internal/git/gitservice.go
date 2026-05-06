@@ -452,10 +452,12 @@ func (s *GitService) syncGitHubPR(ctx context.Context, ghPR *github.PullRequest,
 		}
 	}
 	if s.eventBus != nil && prChanged(previous, pr) {
-		s.eventBus.Publish(ctx, eventbus.Event{
+		if err := s.eventBus.Publish(ctx, eventbus.Event{
 			Type: EventPRUpdated,
 			Data: PRUpdatedEvent{PullRequest: pr, Previous: previous, Repo: repo},
-		})
+		}); err != nil {
+			slog.Warn("failed to publish PR-updated event", "pr", pr.Number, "error", err)
+		}
 	}
 	return nil
 }

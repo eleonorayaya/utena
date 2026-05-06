@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
@@ -28,16 +28,13 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 
 	ws1 := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
 	ws2 := &workspace.Workspace{Name: "other", Path: "/tmp/other"}
-	workspaceStore.Add(ws1)
-	workspaceStore.Add(ws2)
+	require.NoError(t, workspaceStore.Add(ws1))
+	require.NoError(t, workspaceStore.Add(ws2))
 
 	mock := utmux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitDB, err := db.OpenInMemory()
-	require.NoError(t, err)
-	gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
-	t.Cleanup(func() { gitDB.Close() })
+	gitDB := testdb.New(t, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 	gitService := git.NewGitService(gitDB)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
@@ -54,8 +51,8 @@ func TestSessionRouter_ListSessions(t *testing.T) {
 	now := time.Now()
 	session1 := &Session{Name: "session-1", WorkspaceID: ws1ID, Status: StatusActive, LastUsedAt: now}
 	session2 := &Session{Name: "session-2", WorkspaceID: ws2ID, Status: StatusActive, LastUsedAt: now}
-	sessionStore.Add(session1)
-	sessionStore.Add(session2)
+	require.NoError(t, sessionStore.Add(session1))
+	require.NoError(t, sessionStore.Add(session2))
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -87,7 +84,7 @@ func TestSessionRouter_GetSessionByID(t *testing.T) {
 		Status:      StatusActive,
 		LastUsedAt:  time.Now(),
 	}
-	sessionStore.Add(session)
+	require.NoError(t, sessionStore.Add(session))
 
 	req := httptest.NewRequest("GET", fmt.Sprintf("/%d", session.ID), nil)
 	w := httptest.NewRecorder()
@@ -123,9 +120,9 @@ func TestSessionRouter_ListSessionsByWorkspace(t *testing.T) {
 	session1 := &Session{Name: "session-1", WorkspaceID: ws1ID, Status: StatusActive, LastUsedAt: now}
 	session2 := &Session{Name: "session-2", WorkspaceID: ws2ID, Status: StatusActive, LastUsedAt: now}
 	session3 := &Session{Name: "session-3", WorkspaceID: ws1ID, Status: StatusActive, LastUsedAt: now}
-	sessionStore.Add(session1)
-	sessionStore.Add(session2)
-	sessionStore.Add(session3)
+	require.NoError(t, sessionStore.Add(session1))
+	require.NoError(t, sessionStore.Add(session2))
+	require.NoError(t, sessionStore.Add(session3))
 
 	req := httptest.NewRequest("GET", fmt.Sprintf("/workspace/%d", ws1ID), nil)
 	w := httptest.NewRecorder()
@@ -246,7 +243,7 @@ func TestSessionRouter_UpdateSession(t *testing.T) {
 		Status:      StatusActive,
 		LastUsedAt:  time.Now(),
 	}
-	sessionStore.Add(session)
+	require.NoError(t, sessionStore.Add(session))
 
 	session.IsAttached = true
 	body, err := json.Marshal(session)
@@ -274,7 +271,7 @@ func TestSessionRouter_DeleteSession(t *testing.T) {
 		Status:      StatusActive,
 		LastUsedAt:  time.Now(),
 	}
-	sessionStore.Add(session)
+	require.NoError(t, sessionStore.Add(session))
 
 	req := httptest.NewRequest("DELETE", fmt.Sprintf("/%d", session.ID), nil)
 	w := httptest.NewRecorder()
@@ -297,7 +294,7 @@ func TestSessionRouter_RepairSession(t *testing.T) {
 		Status:      StatusBroken,
 		LastUsedAt:  time.Now(),
 	}
-	sessionStore.Add(session)
+	require.NoError(t, sessionStore.Add(session))
 
 	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/repair", session.ID), nil)
 	w := httptest.NewRecorder()
@@ -336,7 +333,7 @@ func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
 		Status:      StatusActive,
 		LastUsedAt:  time.Now(),
 	}
-	sessionStore.Add(session)
+	require.NoError(t, sessionStore.Add(session))
 
 	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/repair", session.ID), nil)
 	w := httptest.NewRecorder()
@@ -355,7 +352,7 @@ func TestSessionRouter_ActivateSession_RejectsBrokenSession(t *testing.T) {
 		Status:      StatusBroken,
 		LastUsedAt:  time.Now(),
 	}
-	sessionStore.Add(session)
+	require.NoError(t, sessionStore.Add(session))
 
 	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/activate", session.ID), nil)
 	w := httptest.NewRecorder()
@@ -374,7 +371,7 @@ func TestSessionRouter_GetSessionByID_ShowsCreatingStatus(t *testing.T) {
 		Status:      StatusCreating,
 		LastUsedAt:  time.Now(),
 	}
-	sessionStore.Add(session)
+	require.NoError(t, sessionStore.Add(session))
 
 	req := httptest.NewRequest("GET", fmt.Sprintf("/%d", session.ID), nil)
 	w := httptest.NewRecorder()
@@ -399,7 +396,7 @@ func TestSessionRouter_GetSessionByID_ShowsBrokenStatusError(t *testing.T) {
 		StatusError: "worktree setup failed: timeout",
 		LastUsedAt:  time.Now(),
 	}
-	sessionStore.Add(session)
+	require.NoError(t, sessionStore.Add(session))
 
 	req := httptest.NewRequest("GET", fmt.Sprintf("/%d", session.ID), nil)
 	w := httptest.NewRecorder()
