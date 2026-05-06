@@ -97,9 +97,9 @@ func (s *SessionStore) Delete(id uint) error {
 
 func (s *SessionStore) GetByWorkspaceAndName(workspaceID uint, name string, excludeStatuses ...SessionStatus) (*Session, error) {
 	var session Session
-	q := s.db.Joins("Workspace").Joins("GitBranch").Joins("TmuxSession").Where("sessions.workspace_id = ? AND sessions.name = ?", workspaceID, name)
+	q := s.db.Where("workspace_id = ? AND name = ?", workspaceID, name)
 	if len(excludeStatuses) > 0 {
-		q = q.Where("sessions.status NOT IN ?", excludeStatuses)
+		q = q.Where("status NOT IN ?", excludeStatuses)
 	}
 	if err := q.First(&session).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

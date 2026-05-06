@@ -4,21 +4,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/stretchr/testify/require"
 )
 
 func setupDismissedPRStore(t *testing.T) *DismissedPRStore {
-	t.Helper()
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, database.Migrate(&DismissedPR{}))
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
-	return NewDismissedPRStore(database)
+	return NewDismissedPRStore(testdb.New(t, &DismissedPR{}))
 }
 
 func TestAddAndIsDismissed(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/jobs"
 	"github.com/stretchr/testify/assert"
@@ -12,13 +12,7 @@ import (
 )
 
 func TestGitModule_Models(t *testing.T) {
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
+	database := testdb.New(t)
 
 	bus := eventbus.NewEventBus()
 	service := NewGitService(database, WithEventBus(bus))
@@ -29,13 +23,7 @@ func TestGitModule_Models(t *testing.T) {
 }
 
 func TestGitModule_RegisterJobs(t *testing.T) {
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
+	database := testdb.New(t)
 
 	bus := eventbus.NewEventBus()
 	service := NewGitService(database, WithEventBus(bus))
@@ -50,31 +38,18 @@ func TestGitModule_RegisterJobs(t *testing.T) {
 }
 
 func TestGitModule_OnAppStart_SetsCurrentUser(t *testing.T) {
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
+	database := testdb.New(t)
 
 	bus := &mockEventBus{}
 	module := NewGitModule(database, bus)
 	module.Service.githubClient = &mockGitHubClient{currentUser: "testuser"}
 
-	err = module.OnAppStart(context.Background())
-	require.NoError(t, err)
+	require.NoError(t, module.OnAppStart(context.Background()))
 	assert.Equal(t, "testuser", module.Service.currentUser)
 }
 
 func TestGitModule_InitializesWithoutError(t *testing.T) {
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
+	database := testdb.New(t)
 
 	bus := eventbus.NewEventBus()
 	service := NewGitService(database, WithEventBus(bus))

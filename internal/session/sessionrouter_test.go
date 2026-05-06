@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
@@ -34,14 +34,7 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 	mock := utmux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitDB, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}))
-	t.Cleanup(func() {
-		if err := gitDB.Close(); err != nil {
-			t.Logf("close gitDB: %v", err)
-		}
-	})
+	gitDB := testdb.New(t, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 	gitService := git.NewGitService(gitDB)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)

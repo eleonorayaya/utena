@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
@@ -41,14 +42,7 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	mock := utmux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitDB, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}))
-	t.Cleanup(func() {
-		if err := gitDB.Close(); err != nil {
-			t.Logf("close gitDB: %v", err)
-		}
-	})
+	gitDB := testdb.New(t, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 	gitService := git.NewGitService(gitDB)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
@@ -691,14 +685,7 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	mock := utmux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore)
-	gitDB, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, gitDB.Migrate(&git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}))
-	t.Cleanup(func() {
-		if err := gitDB.Close(); err != nil {
-			t.Logf("close gitDB: %v", err)
-		}
-	})
+	gitDB := testdb.New(t, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 	gitService := git.NewGitService(gitDB)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
@@ -710,8 +697,7 @@ func TestSessionService_CreateSession_NonGitWorkspace_SkipsWorktree(t *testing.T
 	}
 
 	ctx := context.Background()
-	err = service.CreateSession(ctx, session, "", "main", false)
-	require.NoError(t, err)
+	require.NoError(t, service.CreateSession(ctx, session, "", "main", false))
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 2*time.Second)
 }

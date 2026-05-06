@@ -5,21 +5,13 @@ import (
 	"testing"
 
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func setupTestDB(t *testing.T) db.Database {
-	t.Helper()
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, database.Migrate(&TmuxSession{}))
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
-	return database
+	return testdb.New(t, &TmuxSession{})
 }
 
 func TestAddAndGetByID(t *testing.T) {

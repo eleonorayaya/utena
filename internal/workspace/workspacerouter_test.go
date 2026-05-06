@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -20,14 +20,7 @@ import (
 func setupWorkspaceRouter(t *testing.T) (*WorkspaceRouter, *WorkspaceStore) {
 	t.Helper()
 
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}))
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
+	database := testdb.New(t, &Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 
@@ -82,8 +75,7 @@ func TestWorkspaceRouter_GetWorkspaceByID(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var response WorkspaceResponse
-	err = json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Equal(t, ws.ID, response.ID)
 	require.Equal(t, "utena", response.Name)
 	require.Equal(t, "/path/to/utena", response.Path)
@@ -109,14 +101,7 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 	require.NoError(t, fs.MkdirAll(configDir, 0755))
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644))
 
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}))
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
+	database := testdb.New(t, &Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 
 	store := NewWorkspaceStore(database, fs, configDir)
 
@@ -137,8 +122,7 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code)
 
 	var response WorkspaceListResponse
-	err = json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Len(t, response.Workspaces, 1)
 	require.Equal(t, wsDir, response.Workspaces[0].Path)
 }
@@ -165,14 +149,7 @@ func initTestRepo(t *testing.T) string {
 func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	repoPath := initTestRepo(t)
 
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}))
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
+	database := testdb.New(t, &Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	wsGit := &Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
@@ -191,8 +168,7 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var response BranchListResponse
-	err = json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.Contains(t, response.Branches, "main")
 	require.Contains(t, response.Branches, "develop")
 	require.Equal(t, "main", response.Branches[0])
@@ -323,14 +299,7 @@ func runCmd(t *testing.T, dir string, name string, args ...string) {
 func setupBranchRouter(t *testing.T, repoPath string) (*WorkspaceRouter, *Workspace) {
 	t.Helper()
 
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, database.Migrate(&Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}))
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
+	database := testdb.New(t, &Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
 
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	ws := &Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}

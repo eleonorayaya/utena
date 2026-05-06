@@ -4,20 +4,12 @@ import (
 	"testing"
 
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/stretchr/testify/require"
 )
 
 func setupWorktreeTestDB(t *testing.T) db.Database {
-	t.Helper()
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, database.Migrate(&Repo{}, &Branch{}, &Worktree{}))
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
-	return database
+	return testdb.New(t, &Repo{}, &Branch{}, &Worktree{})
 }
 
 func createWorktreeTestRepoAndBranch(t *testing.T, database db.Database, path, branchName string) (*Repo, *Branch) {

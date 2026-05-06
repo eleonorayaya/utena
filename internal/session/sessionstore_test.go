@@ -10,6 +10,7 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -17,18 +18,7 @@ import (
 )
 
 func setupTestDB(t *testing.T) db.Database {
-	t.Helper()
-	database, err := db.OpenInMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	require.NoError(t, database.Migrate(&workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{}, &SessionAction{}))
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
-	return database
+	return testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{}, &SessionAction{})
 }
 
 func setupSessionStore(t *testing.T) (*SessionStore, uint, uint) {
@@ -321,16 +311,7 @@ func TestSessionStore_OnAppEnd(t *testing.T) {
 
 func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *utmux.TmuxSession) {
 	t.Helper()
-	database, err := db.OpenInMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	require.NoError(t, database.Migrate(&workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{}, &SessionAction{}))
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
+	database := testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &claude.ClaudeSession{}, &SessionAction{})
 
 	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
 	database.Create(ws)

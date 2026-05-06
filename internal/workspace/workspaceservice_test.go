@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
@@ -121,14 +121,7 @@ func setupWorkspaceServiceWithConfig(t *testing.T) (*WorkspaceService, *Workspac
 	require.NoError(t, fs.MkdirAll(configDir, 0755))
 	require.NoError(t, afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644))
 
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	require.NoError(t, database.Migrate(&Workspace{}))
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
+	database := testdb.New(t, &Workspace{})
 
 	store := NewWorkspaceStore(database, fs, configDir)
 	service := NewWorkspaceService(store)

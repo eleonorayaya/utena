@@ -11,24 +11,14 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
 func setupTestDB(t *testing.T) db.Database {
-	t.Helper()
-	database, err := db.OpenInMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	require.NoError(t, database.Migrate(&git.Repo{}, &Workspace{}))
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
-	return database
+	return testdb.New(t, &git.Repo{}, &Workspace{})
 }
 
 func setupWorkspaceStore(t *testing.T) *WorkspaceStore {

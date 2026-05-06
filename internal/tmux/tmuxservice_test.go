@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/stretchr/testify/require"
 )
@@ -58,14 +58,7 @@ func TestTmuxService_LockNameDoesNotBlockDifferentNames(t *testing.T) {
 }
 
 func TestTmuxService_ConcurrentKillCreateNoOverlap(t *testing.T) {
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Logf("close database: %v", err)
-		}
-	})
-	require.NoError(t, database.Migrate(&TmuxSession{}))
+	database := testdb.New(t, &TmuxSession{})
 
 	bus := eventbus.NewEventBus()
 	mock := NewMockRunner()
