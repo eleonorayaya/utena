@@ -3,6 +3,9 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -413,6 +416,83 @@ func TestHandlePRDiscovered_SkipsDismissed(t *testing.T) {
 
 	_, err = env.sessionStore.GetByBranchID(env.branch.ID)
 	require.Error(t, err)
+}
+
+func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
+	repoPath := initTestRepo(t)
+	branchName := "feature/pr-branch"
+
+	worktreeStaging := filepath.Join(repoPath, ".worktrees", "feature-pr-branch")
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreeStaging, "main")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "pre-create branch failed: %s", string(out))
+
+	pushCmd := exec.Command("git", "-C", worktreeStaging, "push", "-u", "origin", branchName)
+	out, err = pushCmd.CombinedOutput()
+	require.NoError(t, err, "push branch failed: %s", string(out))
+
+	rmWtCmd := exec.Command("git", "-C", repoPath, "worktree", "remove", "--force", worktreeStaging)
+	out, err = rmWtCmd.CombinedOutput()
+	require.NoError(t, err, "remove staging worktree failed: %s", string(out))
+
+	database := setupTestDB(t)
+	ctx := context.Background()
+	gitService := git.NewGitService(database)
+	require.NoError(t, gitService.MigrateToBare(ctx, repoPath))
+
+	repo := &git.Repo{Path: repoPath, FullName: "test/repo"}
+	require.NoError(t, database.Create(repo).Error)
+
+	bus := eventbus.NewEventBus()
+	sessionStore := NewSessionStore(database)
+	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
+	repoID := repo.ID
+	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true, IsBare: true, RepoID: &repoID}
+	require.NoError(t, workspaceStore.Add(wsGit))
+
+	branch := &git.Branch{Name: branchName, RepoID: repo.ID, ExistsRemote: true}
+	require.NoError(t, database.Create(branch).Error)
+
+	mock := utmux.NewMockRunner()
+	tmuxService := createTmuxService(t, database, mock, bus)
+	workspaceService := workspace.NewWorkspaceService(workspaceStore)
+	dismissedPRStore := NewDismissedPRStore(database)
+	sessionActionStore := NewSessionActionStore(database)
+	service := NewSessionService(sessionStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir())
+
+	branchID := branch.ID
+	event := eventbus.Event{
+		Type: git.EventPRUpdated,
+		Data: git.PRUpdatedEvent{
+			PullRequest: &git.PullRequest{
+				RepoID:         repo.ID,
+				Number:         42,
+				HeadBranchID:   &branchID,
+				Title:          "Test PR",
+				State:          git.PRStateOpen,
+				IsAssignedToMe: true,
+			},
+			Previous: nil,
+			Repo:     repo,
+		},
+	}
+
+	require.NoError(t, service.handlePRUpdated(ctx, event))
+
+	sess, err := sessionStore.GetByBranchID(branchID)
+	require.NoError(t, err)
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 10*time.Second)
+
+	expectedWorktree := filepath.Join(repoPath, "feature-pr-branch")
+	info, err := os.Stat(expectedWorktree)
+	require.NoError(t, err, "worktree should be created at %s", expectedWorktree)
+	require.True(t, info.IsDir())
+
+	tmuxName := BuildTmuxSessionName(wsGit.Name, sess.Name)
+	require.True(t, mock.HasSessionByName(tmuxName), "tmux session %s should exist", tmuxName)
+	ts, err := tmuxService.GetSessionByName(tmuxName)
+	require.NoError(t, err)
+	require.Equal(t, expectedWorktree, ts.StartDir, "tmux session should start in the worktree, not the bare workspace root")
 }
 
 func TestHandlePRUpdated_NewAssignedPR_CreatesSessionAction(t *testing.T) {

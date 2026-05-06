@@ -163,7 +163,7 @@ func (s *SessionService) findSessionByTmuxName(tmuxName string) (*Session, error
 	return s.store.GetByTmuxSessionID(ts.ID)
 }
 
-func (s *SessionService) CreateSession(ctx context.Context, session *Session, branchName string, baseBranchName string, createWorktree bool) error {
+func (s *SessionService) CreateSession(ctx context.Context, session *Session, branchName string, baseBranchName string, createWorktree bool, onCreateActions ...*SessionAction) error {
 	var ws *workspace.Workspace
 	if session.WorkspaceID != 0 {
 		var err error
@@ -178,7 +178,11 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, br
 		createWorktree = true
 	}
 
-	if ws != nil && ws.IsGitRepo && branchName != "" && baseBranchName == "" && (ws.IsBare || branchName != "main") {
+	if ws != nil && ws.IsBare {
+		createWorktree = true
+	}
+
+	if ws != nil && ws.IsGitRepo && branchName != "" && baseBranchName == "" && branchName != "main" {
 		createWorktree = true
 	}
 
@@ -211,6 +215,14 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, br
 
 	if err := s.store.Add(session); err != nil {
 		return err
+	}
+
+	for _, action := range onCreateActions {
+		action.SessionID = session.ID
+		action.Trigger = TriggerOnCreate
+		if err := s.sessionActionStore.Add(action); err != nil {
+			slog.Warn("failed to add on-create session action", "session", session.ID, "error", err)
+		}
 	}
 
 	if session.WorkspaceID != 0 {
@@ -998,20 +1010,9 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 		return
 	}
 
-	sessName := s.nameFromBranch(branch.Name)
-	tmuxName := BuildTmuxSessionName(ws.Name, sessName)
-
 	sess := &Session{
-		Name:        sessName,
 		WorkspaceID: ws.ID,
 		BranchID:    pr.HeadBranchID,
-		Status:      StatusCreating,
-		LastUsedAt:  time.Now(),
-	}
-
-	if err := s.store.Add(sess); err != nil {
-		slog.Warn("failed to create session for PR", "pr", pr.Number, "error", err)
-		return
 	}
 
 	prompt := fmt.Sprintf(
@@ -1022,18 +1023,17 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 			"The final report should just reflect the final state of feedback and should not reference any initial feedback that was dismissed by the subagents or make any reference at all to the process.",
 		pr.HTMLURL,
 	)
-	action := &SessionAction{
-		SessionID: sess.ID,
-		Trigger:   TriggerOnCreate,
-		Type:      SessionActionTypeClaude,
-		Options:   marshalOptions(ClaudeActionOptions{Prompt: prompt}),
+	reviewAction := &SessionAction{
+		Type:    SessionActionTypeClaude,
+		Options: marshalOptions(ClaudeActionOptions{Prompt: prompt}),
 	}
-	if err := s.sessionActionStore.Add(action); err != nil {
-		slog.Warn("failed to create session action for PR", "pr", pr.Number, "error", err)
+
+	if err := s.CreateSession(ctx, sess, branch.Name, "", false, reviewAction); err != nil {
+		slog.Warn("failed to create session for PR", "pr", pr.Number, "error", err)
+		return
 	}
 
 	slog.Info("activating session for assigned PR", "pr", pr.Number, "session", sess.ID, "branch", branch.Name)
-	go s.runSetup(sess.ID, ws, tmuxName, branch.Name, "", false)
 }
 
 func (s *SessionService) maybeCompleteSession(_ context.Context, pr *git.PullRequest) {
