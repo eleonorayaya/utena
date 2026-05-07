@@ -41,7 +41,6 @@ type Session struct {
 	IsAttached     bool                   `json:"is_attached"`
 	LastUsedAt     time.Time              `json:"last_used_at"`
 	SessionRoot    string                 `json:"session_root,omitempty" gorm:"index"`
-	Workspace      *workspace.Workspace   `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID"`
 	ClaudeSessions []claude.ClaudeSession `json:"claude_sessions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	SessionActions []SessionAction        `json:"session_actions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	Workspaces     []SessionWorkspace     `json:"workspaces,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
@@ -73,9 +72,7 @@ func (s *Session) IsMulti() bool {
 
 // WorkspaceDisplay returns the human-readable label naming the workspace(s)
 // this session involves: a single workspace name, "N workspaces · a, b, ..."
-// for multi (truncating beyond three names), or "no workspace". Falls back to
-// the legacy Session.Workspace pointer for sessions not yet through
-// OnAppStart's backfill.
+// for multi (truncating beyond three names), or "no workspace".
 func (s *Session) WorkspaceDisplay() string {
 	var names []string
 	if len(s.Workspaces) > 0 {
@@ -85,8 +82,6 @@ func (s *Session) WorkspaceDisplay() string {
 				names = append(names, s.Workspaces[i].Workspace.Name)
 			}
 		}
-	} else if s.Workspace != nil && s.Workspace.Name != "" {
-		names = []string{s.Workspace.Name}
 	}
 	switch len(names) {
 	case 0:

@@ -21,7 +21,6 @@ func NewSessionStore(database db.Database) *SessionStore {
 
 func (s *SessionStore) loaded() *gorm.DB {
 	return s.db.
-		Joins("Workspace").
 		Joins("GitBranch").
 		Joins("TmuxSession").
 		Preload("ClaudeSessions").
@@ -68,7 +67,7 @@ func (s *SessionStore) Add(session *Session) error {
 		return errors.New("session cannot be nil")
 	}
 
-	if err := s.db.Omit("Workspace", "ClaudeSessions", "GitBranch", "TmuxSession", "Workspaces").Create(session).Error; err != nil {
+	if err := s.db.Omit("ClaudeSessions", "GitBranch", "TmuxSession", "Workspaces").Create(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return fmt.Errorf("session '%s' already exists: %w", session.Name, ErrSessionAlreadyExists)
 		}
@@ -93,7 +92,7 @@ func (s *SessionStore) Update(session *Session) error {
 		return err
 	}
 
-	return s.db.Omit("Workspace", "ClaudeSessions", "GitBranch", "TmuxSession", "Workspaces").Save(session).Error
+	return s.db.Omit("ClaudeSessions", "GitBranch", "TmuxSession", "Workspaces").Save(session).Error
 }
 
 func (s *SessionStore) Delete(id uint) error {

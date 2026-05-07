@@ -32,6 +32,17 @@ type multiSlot struct {
 	destPath   string
 }
 
+func (s *SessionService) resolveRepoID(ctx context.Context, ws *workspace.Workspace) (uint, error) {
+	if ws.RepoID != nil {
+		return *ws.RepoID, nil
+	}
+	repo, err := s.gitService.FindOrCreateRepo(ctx, ws.Path)
+	if err != nil {
+		return 0, fmt.Errorf("workspace %q has no git repo and lookup failed: %w", ws.Name, err)
+	}
+	return repo.ID, nil
+}
+
 func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMultiSessionInput) (*Session, error) {
 	if input.Name == "" {
 		return nil, common.NewInvalidRequest("name is required for multi-workspace session")
@@ -242,13 +253,14 @@ func (s *SessionService) runMultiSetup(sessionID uint, slots []multiSlot, sessio
 			}
 		}
 
-		if ws.RepoID == nil {
-			markBroken("repo lookup", ws, fmt.Errorf("workspace has no associated git repo"))
+		repoID, err := s.resolveRepoID(ctx, ws)
+		if err != nil {
+			markBroken("repo lookup", ws, err)
 			return
 		}
 
 		branch, err := tracedOp(ctx, "find-or-create-branch", func() (*git.Branch, error) {
-			return s.gitService.FindOrCreateBranch(ctx, finalBranchName, *ws.RepoID)
+			return s.gitService.FindOrCreateBranch(ctx, finalBranchName, repoID)
 		}, "name", finalBranchName, "ws", ws.Name)
 		if err != nil {
 			markBroken("find-or-create-branch", ws, err)
@@ -256,7 +268,7 @@ func (s *SessionService) runMultiSetup(sessionID uint, slots []multiSlot, sessio
 		}
 
 		var wtPath string
-		_, wtPath, err = s.gitService.SetupWorktreeAt(ctx, ws.Path, finalBranchName, baseBranchName, branch.ID, *ws.RepoID, slot.destPath)
+		_, wtPath, err = s.gitService.SetupWorktreeAt(ctx, ws.Path, finalBranchName, baseBranchName, branch.ID, repoID, slot.destPath)
 		if err != nil {
 			markBroken("worktree setup", ws, err)
 			return

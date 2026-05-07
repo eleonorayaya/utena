@@ -269,7 +269,7 @@ func (s *gitCLI) deleteBranch(ctx context.Context, repoPath string, branchName s
 }
 
 func (s *gitCLI) remoteURL(ctx context.Context, repoPath string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "remote", "get-url", "origin")
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "config", "--get", "remote.origin.url")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get remote URL: %w", err)
