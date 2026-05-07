@@ -63,29 +63,17 @@ func (i sessionItem) Description() string {
 }
 
 func workspaceLabel(s session.Session) string {
-	if len(s.Workspaces) > 1 {
-		var names []string
-		for _, sw := range s.Workspaces {
-			if sw.Workspace != nil && sw.Workspace.Name != "" {
-				names = append(names, sw.Workspace.Name)
-			}
-		}
-		switch len(names) {
-		case 0:
-			return fmt.Sprintf("%d workspaces", len(s.Workspaces))
-		case 1, 2, 3:
-			return fmt.Sprintf("%d workspaces · %s", len(names), strings.Join(names, ", "))
-		default:
-			return fmt.Sprintf("%d workspaces · %s, …", len(names), strings.Join(names[:3], ", "))
-		}
+	names := s.WorkspaceNames()
+	switch len(names) {
+	case 0:
+		return "no workspace"
+	case 1:
+		return names[0]
+	case 2, 3:
+		return fmt.Sprintf("%d workspaces · %s", len(names), strings.Join(names, ", "))
+	default:
+		return fmt.Sprintf("%d workspaces · %s, …", len(names), strings.Join(names[:3], ", "))
 	}
-	if s.Workspace != nil && s.Workspace.Name != "" {
-		return s.Workspace.Name
-	}
-	if len(s.Workspaces) > 0 && s.Workspaces[0].Workspace != nil {
-		return s.Workspaces[0].Workspace.Name
-	}
-	return "no workspace"
 }
 
 func (i sessionItem) FilterValue() string { return i.displayName() }

@@ -70,6 +70,25 @@ func (s *Session) IsMulti() bool {
 	return len(s.Workspaces) > 1
 }
 
+// WorkspaceNames returns the names of every workspace this session involves,
+// in stable display order. Falls back to the legacy Session.Workspace pointer
+// for sessions that haven't run through OnAppStart's backfill yet.
+func (s *Session) WorkspaceNames() []string {
+	if len(s.Workspaces) > 0 {
+		names := make([]string, 0, len(s.Workspaces))
+		for i := range s.Workspaces {
+			if s.Workspaces[i].Workspace != nil && s.Workspaces[i].Workspace.Name != "" {
+				names = append(names, s.Workspaces[i].Workspace.Name)
+			}
+		}
+		return names
+	}
+	if s.Workspace != nil && s.Workspace.Name != "" {
+		return []string{s.Workspace.Name}
+	}
+	return nil
+}
+
 func SanitizeTmuxName(name string) string {
 	r := strings.NewReplacer(
 		" ", "-",

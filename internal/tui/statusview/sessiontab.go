@@ -1,6 +1,7 @@
 package statusview
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -153,8 +154,10 @@ func (t SessionTab) renderHeader(bg lipgloss.TerminalColor) []string {
 	result = append(result, nameLine)
 
 	wsName := ""
-	if s.Workspace != nil {
-		wsName = s.Workspace.Name
+	if names := s.WorkspaceNames(); len(names) == 1 {
+		wsName = names[0]
+	} else if len(names) > 1 {
+		wsName = fmt.Sprintf("%d workspaces", len(names))
 	}
 	if wsName != "" {
 		wsStyle := lipgloss.NewStyle().Foreground(theme.Current.Tertiary).Background(bg)

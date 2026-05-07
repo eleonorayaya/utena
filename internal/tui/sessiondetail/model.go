@@ -162,19 +162,13 @@ func (m Model) View() string {
 
 	b.WriteString(labelStyle().Render("Status") + valueStyle().Render(string(s.Status)) + "\n")
 
-	if len(s.Workspaces) > 1 {
-		var names []string
-		for _, sw := range s.Workspaces {
-			if sw.Workspace != nil {
-				names = append(names, sw.Workspace.Name)
-			}
-		}
+	if names := s.WorkspaceNames(); len(names) == 1 {
+		b.WriteString(labelStyle().Render("Workspace") + valueStyle().Render(names[0]) + "\n")
+	} else if len(names) > 1 {
 		b.WriteString(labelStyle().Render("Workspaces") + valueStyle().Render(strings.Join(names, ", ")) + "\n")
 		if s.SessionRoot != "" {
 			b.WriteString(labelStyle().Render("Root") + valueStyle().Render(s.SessionRoot) + "\n")
 		}
-	} else if s.Workspace != nil {
-		b.WriteString(labelStyle().Render("Workspace") + valueStyle().Render(s.Workspace.Name) + "\n")
 	}
 
 	if s.TmuxSession != nil {
