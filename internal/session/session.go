@@ -70,13 +70,6 @@ func (s *Session) IsMulti() bool {
 	return len(s.Workspaces) > 1
 }
 
-func (s *Session) PrimaryWorkspace() *SessionWorkspace {
-	if len(s.Workspaces) == 0 {
-		return nil
-	}
-	return &s.Workspaces[0]
-}
-
 func SanitizeTmuxName(name string) string {
 	r := strings.NewReplacer(
 		" ", "-",

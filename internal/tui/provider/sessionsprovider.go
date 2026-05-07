@@ -171,9 +171,6 @@ func (p sessionsProvider) deriveActiveWorkspace() tea.Cmd {
 			continue
 		}
 		wid := s.WorkspaceID
-		if primary := s.PrimaryWorkspace(); primary != nil && primary.WorkspaceID != 0 {
-			wid = primary.WorkspaceID
-		}
 		return func() tea.Msg {
 			return setActiveWorkspaceMsg{workspaceID: wid}
 		}

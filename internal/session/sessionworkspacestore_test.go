@@ -59,6 +59,5 @@ func TestSessionStore_Loaded_PreloadsWorkspaces(t *testing.T) {
 	require.Len(t, loaded.Workspaces, 2)
 	require.Equal(t, "/tmp/loaded", loaded.SessionRoot)
 	require.True(t, loaded.IsMulti())
-	require.NotNil(t, loaded.PrimaryWorkspace())
-	require.Equal(t, ws1ID, loaded.PrimaryWorkspace().WorkspaceID)
+	require.Equal(t, ws1ID, loaded.Workspaces[0].WorkspaceID)
 }

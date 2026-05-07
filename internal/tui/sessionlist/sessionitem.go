@@ -82,8 +82,8 @@ func workspaceLabel(s session.Session) string {
 	if s.Workspace != nil && s.Workspace.Name != "" {
 		return s.Workspace.Name
 	}
-	if primary := s.PrimaryWorkspace(); primary != nil && primary.Workspace != nil {
-		return primary.Workspace.Name
+	if len(s.Workspaces) > 0 && s.Workspaces[0].Workspace != nil {
+		return s.Workspaces[0].Workspace.Name
 	}
 	return "no workspace"
 }
