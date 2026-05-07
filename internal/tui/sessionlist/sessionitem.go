@@ -1,6 +1,9 @@
 package sessionlist
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/session"
@@ -52,17 +55,37 @@ func (i sessionItem) Title() string {
 }
 
 func (i sessionItem) Description() string {
-	var name string
-	if i.session.Workspace != nil {
-		name = i.session.Workspace.Name
-	}
-	if name == "" {
-		name = "no workspace"
-	}
+	name := workspaceLabel(i.session)
 	if !i.session.LastUsedAt.IsZero() {
 		return name + " · " + common.TimeAgo(i.session.LastUsedAt)
 	}
 	return name
+}
+
+func workspaceLabel(s session.Session) string {
+	if len(s.Workspaces) > 1 {
+		var names []string
+		for _, sw := range s.Workspaces {
+			if sw.Workspace != nil && sw.Workspace.Name != "" {
+				names = append(names, sw.Workspace.Name)
+			}
+		}
+		switch len(names) {
+		case 0:
+			return fmt.Sprintf("%d workspaces", len(s.Workspaces))
+		case 1, 2, 3:
+			return fmt.Sprintf("%d workspaces · %s", len(names), strings.Join(names, ", "))
+		default:
+			return fmt.Sprintf("%d workspaces · %s, …", len(names), strings.Join(names[:3], ", "))
+		}
+	}
+	if s.Workspace != nil && s.Workspace.Name != "" {
+		return s.Workspace.Name
+	}
+	if primary := s.PrimaryWorkspace(); primary != nil && primary.Workspace != nil {
+		return primary.Workspace.Name
+	}
+	return "no workspace"
 }
 
 func (i sessionItem) FilterValue() string { return i.displayName() }

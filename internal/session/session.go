@@ -39,9 +39,11 @@ type Session struct {
 	Status         SessionStatus          `json:"status"`
 	IsAttached     bool                   `json:"is_attached"`
 	LastUsedAt     time.Time              `json:"last_used_at"`
-	Workspace      *workspace.Workspace   `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID;constraint:OnDelete:CASCADE"`
+	SessionRoot    string                 `json:"session_root,omitempty" gorm:"index"`
+	Workspace      *workspace.Workspace   `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID"`
 	ClaudeSessions []claude.ClaudeSession `json:"claude_sessions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	SessionActions []SessionAction        `json:"session_actions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Workspaces     []SessionWorkspace     `json:"workspaces,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	BranchID       *uint                  `json:"branch_id,omitempty" gorm:"index"`
 	TmuxSessionID  *uint                  `json:"tmux_session_id,omitempty" gorm:"uniqueIndex"`
 	StatusError    string                 `json:"status_error,omitempty"`
@@ -49,8 +51,30 @@ type Session struct {
 	TmuxSession    *utmux.TmuxSession     `json:"tmux_session,omitempty" gorm:"foreignKey:TmuxSessionID"`
 }
 
-func (s Session) IsCreating() bool {
+type SessionWorkspace struct {
+	gorm.Model
+	SessionID    uint                 `json:"session_id" gorm:"uniqueIndex:idx_session_workspace;index;not null"`
+	WorkspaceID  uint                 `json:"workspace_id" gorm:"uniqueIndex:idx_session_workspace;index;not null"`
+	BranchID     *uint                `json:"branch_id,omitempty" gorm:"index"`
+	WorktreePath string               `json:"worktree_path,omitempty"`
+	Position     int                  `json:"position"`
+	Workspace    *workspace.Workspace `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID;constraint:OnDelete:RESTRICT"`
+	GitBranch    *git.Branch          `json:"git_branch,omitempty" gorm:"foreignKey:BranchID"`
+}
+
+func (s *Session) IsCreating() bool {
 	return s.Status == StatusCreating
+}
+
+func (s *Session) IsMulti() bool {
+	return len(s.Workspaces) > 1
+}
+
+func (s *Session) PrimaryWorkspace() *SessionWorkspace {
+	if len(s.Workspaces) == 0 {
+		return nil
+	}
+	return &s.Workspaces[0]
 }
 
 func SanitizeTmuxName(name string) string {

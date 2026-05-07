@@ -150,8 +150,11 @@ func (s *gitCLI) fetch(ctx context.Context, repoPath string, branch string) erro
 	return nil
 }
 
-func (s *gitCLI) createWorktree(ctx context.Context, repoPath string, branchName string, baseBranch string) (string, error) {
-	worktreePath := s.worktreePath(repoPath, branchName)
+func (s *gitCLI) createWorktree(ctx context.Context, repoPath string, branchName string, baseBranch string, destPath string) (string, error) {
+	worktreePath := destPath
+	if worktreePath == "" {
+		worktreePath = s.worktreePath(repoPath, branchName)
+	}
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, baseBranch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
@@ -159,8 +162,11 @@ func (s *gitCLI) createWorktree(ctx context.Context, repoPath string, branchName
 	return worktreePath, nil
 }
 
-func (s *gitCLI) checkoutWorktree(ctx context.Context, repoPath string, branch string) (string, error) {
-	worktreePath := s.worktreePath(repoPath, branch)
+func (s *gitCLI) checkoutWorktree(ctx context.Context, repoPath string, branch string, destPath string) (string, error) {
+	worktreePath := destPath
+	if worktreePath == "" {
+		worktreePath = s.worktreePath(repoPath, branch)
+	}
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", worktreePath, branch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)

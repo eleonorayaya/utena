@@ -9,10 +9,15 @@ import (
 
 type workspaceItem struct {
 	workspace workspace.Workspace
+	selected  bool
 }
 
 func (i workspaceItem) Title() string {
-	title := i.workspace.Name
+	prefix := ""
+	if i.selected {
+		prefix = "[x] "
+	}
+	title := prefix + i.workspace.Name
 	if i.workspace.IsHidden {
 		title += " [hidden]"
 	}

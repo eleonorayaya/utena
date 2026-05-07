@@ -44,6 +44,7 @@ type Model struct {
 	nameInput          textinput.Model
 	manualBranchInput  textinput.Model
 	selectedWorkspace  workspace.Workspace
+	selectedWorkspaces []workspace.Workspace
 	selectedBranch     string
 	selectedDirPath    string
 	nameErr            string
@@ -65,6 +66,7 @@ func New() Model {
 func (m Model) Init() (Model, tea.Cmd) {
 	m.activeStep = workspacePickerStep
 	m.selectedWorkspace = workspace.Workspace{}
+	m.selectedWorkspaces = nil
 	m.selectedBranch = ""
 	m.selectedDirPath = ""
 	m.nameErr = ""
@@ -149,7 +151,26 @@ func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
 func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspacepicker.SelectedMsg:
-		m.selectedWorkspace = msg.Workspace
+		picked := msg.Workspaces
+		if len(picked) == 0 {
+			picked = []workspace.Workspace{msg.Workspace}
+		}
+		m.selectedWorkspaces = picked
+		m.selectedWorkspace = picked[0]
+		if len(picked) > 1 {
+			for _, ws := range picked {
+				if !ws.IsGitRepo {
+					m.nameErr = "multi-workspace sessions require all selected workspaces to be git repositories"
+					return m, nil
+				}
+			}
+			m.nameErr = ""
+			m.activeStep = branchPickerStep
+			m.branchPicker = branchpicker.New()
+			m.branchPicker.SetSize(m.width, m.height)
+			return m, provider.RequestBranches(picked[0].ID)
+		}
+		m.nameErr = ""
 		if msg.Workspace.IsGitRepo {
 			m.activeStep = branchPickerStep
 			m.branchPicker = branchpicker.New()
@@ -302,6 +323,10 @@ func (m Model) updateBranchMode(msg tea.Msg) (Model, tea.Cmd) {
 			m.initNameInput()
 			return m, m.nameInput.Focus()
 		case "e":
+			if len(m.selectedWorkspaces) > 1 {
+				ids := workspaceIDs(m.selectedWorkspaces)
+				return m, provider.CreateMultiSession("", ids, m.selectedBranch, "")
+			}
 			return m, provider.CreateSession("", m.selectedWorkspace.ID, m.selectedBranch, "", m.selectedWorkspace.Path)
 		case "esc":
 			m.activeStep = branchPickerStep
@@ -323,6 +348,10 @@ func (m Model) updateNameInput(msg tea.Msg) (Model, tea.Cmd) {
 			if err := session.ValidateSessionName(name); err != nil {
 				m.nameErr = err.Error()
 				return m, nil
+			}
+			if len(m.selectedWorkspaces) > 1 {
+				ids := workspaceIDs(m.selectedWorkspaces)
+				return m, provider.CreateMultiSession(name, ids, "", m.selectedBranch)
 			}
 			return m, provider.CreateSession(name, m.selectedWorkspace.ID, "", m.selectedBranch, m.selectedWorkspace.Path)
 		case key.Matches(msg, formKeys.Back):
@@ -402,4 +431,12 @@ func (m Model) View() string {
 
 func defaultSessionName(workspaceName string) string {
 	return strings.ToLower(strings.ReplaceAll(workspaceName, " ", "-"))
+}
+
+func workspaceIDs(wss []workspace.Workspace) []uint {
+	ids := make([]uint, len(wss))
+	for i, ws := range wss {
+		ids[i] = ws.ID
+	}
+	return ids
 }

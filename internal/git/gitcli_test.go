@@ -105,7 +105,7 @@ func TestGitCLI_CreateWorktree(t *testing.T) {
 	repo := initTestRepo(t)
 
 	svc := newGitCLI()
-	worktreePath, err := svc.createWorktree(context.Background(), repo, "eqt/my-feature", "main")
+	worktreePath, err := svc.createWorktree(context.Background(), repo, "eqt/my-feature", "main", "")
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(repo, ".worktrees", "eqt-my-feature"), worktreePath)
 
@@ -122,10 +122,10 @@ func TestGitCLI_CreateWorktree_DuplicateName(t *testing.T) {
 	repo := initTestRepo(t)
 
 	svc := newGitCLI()
-	_, err := svc.createWorktree(context.Background(), repo, "eqt/my-feature", "main")
+	_, err := svc.createWorktree(context.Background(), repo, "eqt/my-feature", "main", "")
 	require.NoError(t, err)
 
-	_, err = svc.createWorktree(context.Background(), repo, "eqt/my-feature", "main")
+	_, err = svc.createWorktree(context.Background(), repo, "eqt/my-feature", "main", "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "git worktree add failed")
 }
@@ -134,7 +134,7 @@ func TestGitCLI_CreateWorktree_InvalidBaseBranch(t *testing.T) {
 	repo := initTestRepo(t)
 
 	svc := newGitCLI()
-	_, err := svc.createWorktree(context.Background(), repo, "eqt/my-feature", "nonexistent")
+	_, err := svc.createWorktree(context.Background(), repo, "eqt/my-feature", "nonexistent", "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "git worktree add failed")
 }
@@ -143,7 +143,7 @@ func TestGitCLI_ValidateWorktree_DetachedHead(t *testing.T) {
 	repo := initTestRepo(t)
 
 	svc := newGitCLI()
-	worktreePath, err := svc.createWorktree(context.Background(), repo, "eqt/my-feature", "main")
+	worktreePath, err := svc.createWorktree(context.Background(), repo, "eqt/my-feature", "main", "")
 	require.NoError(t, err)
 
 	run(t, worktreePath, "git", "checkout", "--detach")

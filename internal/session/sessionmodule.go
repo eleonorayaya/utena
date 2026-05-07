@@ -21,11 +21,12 @@ type SessionModule struct {
 	Router     *SessionRouter
 }
 
-func NewSessionModule(tmuxService *utmux.TmuxService, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string, configDir string) *SessionModule {
+func NewSessionModule(tmuxService *utmux.TmuxService, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string, configDir string, sessionsRoot string) *SessionModule {
 	store := NewSessionStore(database)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
-	service := NewSessionService(store, dismissedPRStore, sessionActionStore, workspaceModule.Service, workspaceModule.GitService, tmuxService, bus, branchPrefix, configDir)
+	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
+	service := NewSessionService(store, sessionWorkspaceStore, dismissedPRStore, sessionActionStore, workspaceModule.Service, workspaceModule.GitService, tmuxService, bus, branchPrefix, configDir, sessionsRoot)
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
@@ -62,7 +63,7 @@ func (m *SessionModule) OnAppEnd(ctx context.Context) error {
 }
 
 func (m *SessionModule) Models() []any {
-	return []any{&Session{}, &DismissedPR{}, &SessionAction{}}
+	return []any{&Session{}, &SessionWorkspace{}, &DismissedPR{}, &SessionAction{}}
 }
 
 func (m *SessionModule) Routes() chi.Router {

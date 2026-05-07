@@ -84,9 +84,31 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if data.IsMulti() {
+		session, err := c.service.CreateMultiSession(ctx, CreateMultiSessionInput{
+			Name:         data.Name,
+			WorkspaceIDs: data.WorkspaceIDs,
+			Branch:       data.Branch,
+			BaseBranch:   data.BaseBranch,
+			TodoID:       data.TodoID,
+		})
+		if err != nil {
+			common.RenderError(w, r, err)
+			return
+		}
+		render.Status(r, http.StatusAccepted)
+		common.RenderResponse(w, r, NewSessionResponse(session))
+		return
+	}
+
+	workspaceID := data.WorkspaceID
+	if workspaceID == 0 && len(data.WorkspaceIDs) == 1 {
+		workspaceID = data.WorkspaceIDs[0]
+	}
+
 	session := &Session{
 		Name:        data.Name,
-		WorkspaceID: data.WorkspaceID,
+		WorkspaceID: workspaceID,
 		TodoID:      data.TodoID,
 	}
 

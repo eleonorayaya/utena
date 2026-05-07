@@ -313,6 +313,47 @@ func (c *client) createSession(name string, workspaceID uint, branch string, bas
 	}
 }
 
+func (c *client) createMultiSession(name string, workspaceIDs []uint, branch, baseBranch string) tea.Cmd {
+	return func() tea.Msg {
+		body := map[string]interface{}{
+			"workspace_ids": workspaceIDs,
+		}
+		if name != "" {
+			body["name"] = name
+		}
+		if branch != "" {
+			body["branch"] = branch
+		}
+		if baseBranch != "" {
+			body["base_branch"] = baseBranch
+			body["create_worktree"] = true
+		}
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return ErrMsg{err}
+		}
+
+		res, err := c.httpClient.Post(c.baseURL+"/sessions", "application/json", bytes.NewReader(jsonBody))
+		if err != nil {
+			log.Printf("[ERROR] create multi session %q: %v", name, err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusAccepted {
+			return parseAPIError(res, "create multi session")
+		}
+
+		var resp struct {
+			ID     uint   `json:"id"`
+			Status string `json:"status"`
+		}
+		json.NewDecoder(res.Body).Decode(&resp)
+
+		return SessionCreatedMsg{ID: resp.ID, Status: session.SessionStatus(resp.Status)}
+	}
+}
+
 func (c *client) deleteSession(id uint, force bool) tea.Cmd {
 	return func() tea.Msg {
 		url := fmt.Sprintf("%s/sessions/%d", c.baseURL, id)

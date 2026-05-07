@@ -176,6 +176,71 @@ func TestLinkWorktree_PreservesExistingFile(t *testing.T) {
 	}
 }
 
+func TestEnsureSessionRoot_CreatesFileWithAllGitDirs(t *testing.T) {
+	root := t.TempDir()
+	gitDirs := []string{
+		filepath.Join(root, "repo-a", ".git"),
+		filepath.Join(root, "repo-b", ".git"),
+	}
+
+	if err := EnsureSessionRoot(root, gitDirs); err != nil {
+		t.Fatalf("EnsureSessionRoot: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	sandbox, _ := out["sandbox"].(map[string]any)
+	fs, _ := sandbox["filesystem"].(map[string]any)
+	allowWrite, _ := fs["allowWrite"].([]any)
+	if len(allowWrite) != 2 {
+		t.Fatalf("expected 2 allowWrite entries, got %d: %v", len(allowWrite), allowWrite)
+	}
+	for _, want := range gitDirs {
+		found := false
+		for _, v := range allowWrite {
+			if v == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("allowWrite missing %q; got %v", want, allowWrite)
+		}
+	}
+}
+
+func TestEnsureSessionRoot_IsIdempotent(t *testing.T) {
+	root := t.TempDir()
+	gitDirs := []string{filepath.Join(root, "a", ".git")}
+	if err := EnsureSessionRoot(root, gitDirs); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureSessionRoot(root, gitDirs); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	raw, _ := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
+	var out map[string]any
+	_ = json.Unmarshal(raw, &out)
+	sandbox, _ := out["sandbox"].(map[string]any)
+	fs, _ := sandbox["filesystem"].(map[string]any)
+	allowWrite, _ := fs["allowWrite"].([]any)
+	count := 0
+	for _, v := range allowWrite {
+		if v == gitDirs[0] {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected git dir once after re-run, got %d times", count)
+	}
+}
+
 func TestLinkWorktree_IdempotentOnExistingCorrectSymlink(t *testing.T) {
 	root := t.TempDir()
 	if err := EnsureWorkspaceRoot(root); err != nil {

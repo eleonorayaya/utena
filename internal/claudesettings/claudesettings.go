@@ -69,7 +69,15 @@ func mergeAllowWrite(data []byte, gitPath string) ([]byte, bool, error) {
 }
 
 func EnsureWorkspaceRoot(workspacePath string) error {
-	claudeDir := filepath.Join(workspacePath, ".claude")
+	return ensureSettingsFile(workspacePath, []string{filepath.Join(workspacePath, ".git")})
+}
+
+func EnsureSessionRoot(sessionRoot string, gitDirs []string) error {
+	return ensureSettingsFile(sessionRoot, gitDirs)
+}
+
+func ensureSettingsFile(rootPath string, allowWrite []string) error {
+	claudeDir := filepath.Join(rootPath, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		return fmt.Errorf("create .claude dir: %w", err)
 	}
@@ -78,24 +86,36 @@ func EnsureWorkspaceRoot(workspacePath string) error {
 	if err != nil {
 		return err
 	}
-	gitPath := filepath.Join(workspacePath, ".git")
-	if exists {
-		data, err := os.ReadFile(settingsPath)
+	if !exists {
+		var s settingsLocal
+		s.Sandbox.Filesystem.AllowWrite = append([]string{}, allowWrite...)
+		data, err := json.MarshalIndent(s, "", "  ")
 		if err != nil {
-			return fmt.Errorf("read %s: %w", settingsFileName, err)
+			return fmt.Errorf("marshal settings: %w", err)
 		}
-		merged, changed, err := mergeAllowWrite(data, gitPath)
-		if err != nil || !changed {
-			return err
-		}
-		if err := os.WriteFile(settingsPath, merged, 0o644); err != nil {
+		data = append(data, '\n')
+		if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", settingsFileName, err)
 		}
 		return nil
 	}
-	data, err := defaultSettingsJSON(workspacePath)
+	data, err := os.ReadFile(settingsPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("read %s: %w", settingsFileName, err)
+	}
+	dirty := false
+	for _, gitPath := range allowWrite {
+		merged, changed, err := mergeAllowWrite(data, gitPath)
+		if err != nil {
+			return err
+		}
+		if changed {
+			data = merged
+			dirty = true
+		}
+	}
+	if !dirty {
+		return nil
 	}
 	if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", settingsFileName, err)

@@ -77,6 +77,10 @@ func (s *GitService) Fetch(ctx context.Context, repoPath string, branch string) 
 }
 
 func (s *GitService) SetupWorktree(ctx context.Context, repoPath string, branchName string, baseBranch string, branchID uint, repoID uint) (bool, string, error) {
+	return s.SetupWorktreeAt(ctx, repoPath, branchName, baseBranch, branchID, repoID, "")
+}
+
+func (s *GitService) SetupWorktreeAt(ctx context.Context, repoPath string, branchName string, baseBranch string, branchID uint, repoID uint, destPath string) (bool, string, error) {
 	creatingNew := baseBranch != ""
 
 	exists, err := s.cli.hasBranch(ctx, repoPath, branchName)
@@ -90,7 +94,10 @@ func (s *GitService) SetupWorktree(ctx context.Context, repoPath string, branchN
 		return false, "", fmt.Errorf("branch %q does not exist; provide a base branch to create it", branchName)
 	}
 
-	wtPath := s.cli.worktreePath(repoPath, branchName)
+	wtPath := destPath
+	if wtPath == "" {
+		wtPath = s.cli.worktreePath(repoPath, branchName)
+	}
 
 	alreadyExists, err := s.cli.validateWorktree(ctx, wtPath, branchName)
 	if err != nil {
@@ -103,12 +110,12 @@ func (s *GitService) SetupWorktree(ctx context.Context, repoPath string, branchN
 
 	var path string
 	if creatingNew {
-		path, err = s.cli.createWorktree(ctx, repoPath, branchName, baseBranch)
+		path, err = s.cli.createWorktree(ctx, repoPath, branchName, baseBranch, destPath)
 		if err != nil {
 			return false, "", fmt.Errorf("failed to create worktree: %v", err)
 		}
 	} else {
-		path, err = s.cli.checkoutWorktree(ctx, repoPath, branchName)
+		path, err = s.cli.checkoutWorktree(ctx, repoPath, branchName, destPath)
 		if err != nil {
 			return false, "", fmt.Errorf("failed to checkout worktree: %v", err)
 		}
@@ -211,7 +218,7 @@ func (s *GitService) CreateBranch(ctx context.Context, repoPath string, branchNa
 		return nil, nil, fmt.Errorf("failed to look up base branch %s: %w", baseBranch, err)
 	}
 
-	wtPath, err := s.cli.createWorktree(ctx, repoPath, branchName, baseBranch)
+	wtPath, err := s.cli.createWorktree(ctx, repoPath, branchName, baseBranch, "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -265,7 +272,7 @@ func (s *GitService) EnsureWorktree(ctx context.Context, branch *Branch, repoPat
 		}
 	}
 
-	wtPath, err := s.cli.checkoutWorktree(ctx, repoPath, branch.Name)
+	wtPath, err := s.cli.checkoutWorktree(ctx, repoPath, branch.Name, "")
 	if err != nil {
 		return "", err
 	}

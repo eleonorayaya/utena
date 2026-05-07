@@ -33,6 +33,17 @@ func CreateSession(name string, workspaceID uint, branch, baseBranch, workspaceP
 	}
 }
 
+func CreateMultiSession(name string, workspaceIDs []uint, branch, baseBranch string) tea.Cmd {
+	return func() tea.Msg {
+		return createMultiSessionIntentMsg{
+			name:         name,
+			workspaceIDs: workspaceIDs,
+			branch:       branch,
+			baseBranch:   baseBranch,
+		}
+	}
+}
+
 func CreateSessionFromTodo(name string, workspaceID uint, todoID uint) tea.Cmd {
 	return func() tea.Msg {
 		return createSessionIntentMsg{
@@ -73,6 +84,13 @@ type createSessionIntentMsg struct {
 	baseBranch    string
 	workspacePath string
 	todoID        *uint
+}
+
+type createMultiSessionIntentMsg struct {
+	name         string
+	workspaceIDs []uint
+	branch       string
+	baseBranch   string
 }
 
 type repairSessionIntentMsg struct {
@@ -149,11 +167,15 @@ func (p sessionsProvider) emitState() tea.Cmd {
 
 func (p sessionsProvider) deriveActiveWorkspace() tea.Cmd {
 	for _, s := range p.sessions {
-		if s.IsAttached {
-			wid := s.WorkspaceID
-			return func() tea.Msg {
-				return setActiveWorkspaceMsg{workspaceID: wid}
-			}
+		if !s.IsAttached {
+			continue
+		}
+		wid := s.WorkspaceID
+		if primary := s.PrimaryWorkspace(); primary != nil && primary.WorkspaceID != 0 {
+			wid = primary.WorkspaceID
+		}
+		return func() tea.Msg {
+			return setActiveWorkspaceMsg{workspaceID: wid}
 		}
 	}
 	return func() tea.Msg {
@@ -188,6 +210,9 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 
 	case createSessionIntentMsg:
 		return p, p.client.createSession(msg.name, msg.workspaceID, msg.branch, msg.baseBranch, msg.todoID)
+
+	case createMultiSessionIntentMsg:
+		return p, p.client.createMultiSession(msg.name, msg.workspaceIDs, msg.branch, msg.baseBranch)
 
 	case SessionCreatedMsg:
 		return p, p.client.fetchSessions()

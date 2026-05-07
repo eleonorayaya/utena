@@ -24,6 +24,17 @@ type SetupWarning struct{ Message string }
 
 func (w SetupWarning) Error() string { return w.Message }
 
+const (
+	envSessionID      = "UTENA_SESSION_ID"
+	envSessionName    = "UTENA_SESSION_NAME"
+	envSessionRoot    = "UTENA_SESSION_ROOT"
+	envBranch         = "UTENA_BRANCH"
+	envWorktreePath   = "UTENA_WORKTREE_PATH"
+	envWorkspaceName  = "UTENA_WORKSPACE_NAME"
+	envWorkspacePath  = "UTENA_WORKSPACE_PATH"
+	worktreeSetupName = "worktree-setup"
+)
+
 const defaultSetupTimeout = 5 * time.Minute
 
 func traceOp(ctx context.Context, op string, fn func() error, attrs ...any) error {
@@ -50,30 +61,34 @@ func tracedOp[T any](ctx context.Context, op string, fn func() (T, error), attrs
 }
 
 type SessionService struct {
-	store              *SessionStore
-	dismissedPRStore   *DismissedPRStore
-	sessionActionStore *SessionActionStore
-	workspaceService   *workspace.WorkspaceService
-	gitService         *git.GitService
-	tmuxService        *utmux.TmuxService
-	eventBus           eventbus.EventBus
-	branchPrefix       string
-	configDir          string
-	setupTimeout       time.Duration
+	store                 *SessionStore
+	sessionWorkspaceStore *SessionWorkspaceStore
+	dismissedPRStore      *DismissedPRStore
+	sessionActionStore    *SessionActionStore
+	workspaceService      *workspace.WorkspaceService
+	gitService            *git.GitService
+	tmuxService           *utmux.TmuxService
+	eventBus              eventbus.EventBus
+	branchPrefix          string
+	configDir             string
+	sessionsRoot          string
+	setupTimeout          time.Duration
 }
 
-func NewSessionService(store *SessionStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string) *SessionService {
+func NewSessionService(store *SessionStore, sessionWorkspaceStore *SessionWorkspaceStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
 	return &SessionService{
-		store:              store,
-		dismissedPRStore:   dismissedPRStore,
-		sessionActionStore: sessionActionStore,
-		workspaceService:   workspaceService,
-		gitService:         gitService,
-		tmuxService:        tmuxService,
-		eventBus:           bus,
-		branchPrefix:       branchPrefix,
-		configDir:          configDir,
-		setupTimeout:       defaultSetupTimeout,
+		store:                 store,
+		sessionWorkspaceStore: sessionWorkspaceStore,
+		dismissedPRStore:      dismissedPRStore,
+		sessionActionStore:    sessionActionStore,
+		workspaceService:      workspaceService,
+		gitService:            gitService,
+		tmuxService:           tmuxService,
+		eventBus:              bus,
+		branchPrefix:          branchPrefix,
+		configDir:             configDir,
+		sessionsRoot:          sessionsRoot,
+		setupTimeout:          defaultSetupTimeout,
 	}
 }
 
@@ -84,9 +99,53 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.eventBus.Subscribe(eventbus.TmuxClientAttached, s.handleTmuxClientAttached)
 	s.eventBus.Subscribe(eventbus.TmuxClientDetached, s.handleTmuxClientDetached)
 	s.eventBus.Subscribe(git.EventPRUpdated, s.handlePRUpdated)
+	s.backfillSessionWorkspaces(ctx)
 	s.recoverStuckCreatingSessions()
 	s.reconcileTmuxState(ctx)
 	return nil
+}
+
+func (s *SessionService) backfillSessionWorkspaces(ctx context.Context) {
+	if !s.store.hasPendingBackfill() {
+		return
+	}
+	sessions, err := s.store.List()
+	if err != nil {
+		slog.Warn("backfill: failed to list sessions", "error", err)
+		return
+	}
+	for i := range sessions {
+		sess := &sessions[i]
+		if len(sess.Workspaces) > 0 || sess.WorkspaceID == 0 {
+			continue
+		}
+		ws, err := s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID)
+		if err != nil {
+			slog.Warn("backfill: workspace not found", "session", sess.ID, "workspace", sess.WorkspaceID, "error", err)
+			continue
+		}
+		wtPath := ws.Path
+		if sess.BranchID != nil && sess.GitBranch != nil {
+			wtPath = s.gitService.GetStartDir(sess.GitBranch, ws.Path)
+		}
+		sw := &SessionWorkspace{
+			SessionID:    sess.ID,
+			WorkspaceID:  ws.ID,
+			BranchID:     sess.BranchID,
+			WorktreePath: wtPath,
+			Position:     0,
+		}
+		if err := s.sessionWorkspaceStore.Add(sw); err != nil {
+			slog.Warn("backfill: failed to add session workspace junction", "session", sess.ID, "error", err)
+			continue
+		}
+		if sess.SessionRoot == "" {
+			sess.SessionRoot = wtPath
+			if err := s.store.Update(sess); err != nil {
+				slog.Warn("backfill: failed to persist session root", "session", sess.ID, "error", err)
+			}
+		}
+	}
 }
 
 func (s *SessionService) recoverStuckCreatingSessions() {
@@ -335,7 +394,34 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 		}
 	}
 
-	if err := s.setupTmux(ctx, sess, tmuxName, worktreePath); err != nil {
+	sessionRoot := worktreePath
+	if sessionRoot == "" && ws != nil {
+		sessionRoot = ws.Path
+	}
+	if sessionRoot != "" {
+		sess.SessionRoot = sessionRoot
+		if updateErr := s.store.Update(sess); updateErr != nil {
+			slog.WarnContext(ctx, "failed to persist session root", "error", updateErr)
+		}
+	}
+
+	if ws != nil {
+		existing, _ := s.sessionWorkspaceStore.ListBySessionID(sess.ID)
+		if len(existing) == 0 {
+			sw := &SessionWorkspace{
+				SessionID:    sess.ID,
+				WorkspaceID:  ws.ID,
+				BranchID:     sess.BranchID,
+				WorktreePath: worktreePath,
+				Position:     0,
+			}
+			if err := s.sessionWorkspaceStore.Add(sw); err != nil {
+				slog.WarnContext(ctx, "failed to add session workspace junction", "error", err)
+			}
+		}
+	}
+
+	if err := s.setupTmux(ctx, sess, tmuxName, sessionRoot); err != nil {
 		markBroken("tmux setup", err)
 		return
 	}
@@ -434,7 +520,7 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 	return created, path, err
 }
 
-func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string, worktreePath string) error {
+func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string, sessionRoot string) error {
 	if s.tmuxService.HasSession(tmuxName) {
 		if sess.TmuxSessionID == nil {
 			if ts, err := s.tmuxService.GetSessionByName(tmuxName); err == nil {
@@ -454,11 +540,11 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName 
 		return nil
 	}
 
-	startDir := worktreePath
+	startDir := sessionRoot
 	if startDir == "" {
 		startDir = s.resolveStartDir(ctx, sess)
 	}
-	env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", sess.ID)}
+	env := map[string]string{envSessionID: fmt.Sprintf("%d", sess.ID)}
 
 	ts, err := tracedOp(ctx, "tmux new-session", func() (*utmux.TmuxSession, error) {
 		return s.tmuxService.CreateSession(tmuxName, startDir, env)
@@ -494,22 +580,22 @@ func (s *SessionService) setupWorktreeInit(ctx context.Context, sess *Session, w
 	}
 
 	env := []string{
-		"UTENA_WORKTREE_PATH=" + worktreePath,
-		"UTENA_BRANCH=" + finalBranchName,
-		"UTENA_SESSION_NAME=" + sess.Name,
+		envWorktreePath + "=" + worktreePath,
+		envBranch + "=" + finalBranchName,
+		envSessionName + "=" + sess.Name,
 	}
 	if ws != nil {
 		env = append(env,
-			"UTENA_WORKSPACE_NAME="+ws.Name,
-			"UTENA_WORKSPACE_PATH="+ws.Path,
+			envWorkspaceName+"="+ws.Name,
+			envWorkspacePath+"="+ws.Path,
 		)
 	}
 
 	scripts := []string{
-		filepath.Join(s.configDir, "worktree-setup"),
+		filepath.Join(s.configDir, worktreeSetupName),
 	}
 	if ws != nil {
-		scripts = append(scripts, filepath.Join(ws.Path, ".utena", "worktree-setup"))
+		scripts = append(scripts, filepath.Join(ws.Path, ".utena", worktreeSetupName))
 	}
 
 	var warnings []string
@@ -734,14 +820,11 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 		return common.NewInvalidRequest("cannot delete session while it is being created")
 	}
 
-	if session.BranchID != nil && session.GitBranch != nil && session.WorkspaceID != 0 {
-		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
-		if err == nil {
-			if err := s.gitService.CleanupBranch(ctx, session.GitBranch, ws.Path, deleteBranch); err != nil {
-				slog.Warn("failed to cleanup branch", "error", err)
-			}
-		} else {
-			slog.Warn("workspace not found during cleanup, skipping worktree/branch removal", "workspace_id", session.WorkspaceID)
+	s.cleanupSessionBranches(ctx, session, deleteBranch)
+
+	if session.IsMulti() && session.SessionRoot != "" && s.isUnderSessionsRoot(session.SessionRoot) {
+		if err := os.RemoveAll(session.SessionRoot); err != nil {
+			slog.Warn("failed to remove session root", "path", session.SessionRoot, "error", err)
 		}
 	}
 
@@ -755,6 +838,42 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 	session.Status = StatusDeleted
 
 	return s.store.Update(session)
+}
+
+func (s *SessionService) isUnderSessionsRoot(path string) bool {
+	if s.sessionsRoot == "" {
+		return false
+	}
+	rel, err := filepath.Rel(s.sessionsRoot, path)
+	if err != nil {
+		return false
+	}
+	return rel != "" && rel != "." && !strings.HasPrefix(rel, "..")
+}
+
+func (s *SessionService) cleanupSessionBranches(ctx context.Context, session *Session, deleteBranch bool) {
+	if len(session.Workspaces) > 0 {
+		for i := range session.Workspaces {
+			sw := &session.Workspaces[i]
+			if sw.GitBranch == nil || sw.Workspace == nil {
+				continue
+			}
+			if err := s.gitService.CleanupBranch(ctx, sw.GitBranch, sw.Workspace.Path, deleteBranch); err != nil {
+				slog.Warn("failed to cleanup branch", "workspace_id", sw.WorkspaceID, "error", err)
+			}
+		}
+		return
+	}
+	if session.BranchID != nil && session.GitBranch != nil && session.WorkspaceID != 0 {
+		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
+		if err == nil {
+			if err := s.gitService.CleanupBranch(ctx, session.GitBranch, ws.Path, deleteBranch); err != nil {
+				slog.Warn("failed to cleanup branch", "error", err)
+			}
+			return
+		}
+		slog.Warn("workspace not found during cleanup, skipping worktree/branch removal", "workspace_id", session.WorkspaceID)
+	}
 }
 
 func (s *SessionService) computeTmuxName(sess *Session, ws *workspace.Workspace) string {
@@ -913,14 +1032,7 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 		return nil, fmt.Errorf("cannot archive session in status %s", sess.Status)
 	}
 
-	if sess.BranchID != nil && sess.GitBranch != nil {
-		ws, _ := s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID)
-		if ws != nil {
-			if err := s.gitService.CleanupBranch(ctx, sess.GitBranch, ws.Path, false); err != nil {
-				slog.Warn("failed to cleanup branch during archive", "session", sess.ID, "error", err)
-			}
-		}
-	}
+	s.cleanupSessionBranches(ctx, sess, false)
 
 	if sess.TmuxSessionID != nil {
 		if err := s.tmuxService.KillSession(*sess.TmuxSessionID); err != nil {
