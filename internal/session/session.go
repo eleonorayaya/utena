@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -70,23 +71,33 @@ func (s *Session) IsMulti() bool {
 	return len(s.Workspaces) > 1
 }
 
-// WorkspaceNames returns the names of every workspace this session involves,
-// in stable display order. Falls back to the legacy Session.Workspace pointer
-// for sessions that haven't run through OnAppStart's backfill yet.
-func (s *Session) WorkspaceNames() []string {
+// WorkspaceDisplay returns the human-readable label naming the workspace(s)
+// this session involves: a single workspace name, "N workspaces · a, b, ..."
+// for multi (truncating beyond three names), or "no workspace". Falls back to
+// the legacy Session.Workspace pointer for sessions not yet through
+// OnAppStart's backfill.
+func (s *Session) WorkspaceDisplay() string {
+	var names []string
 	if len(s.Workspaces) > 0 {
-		names := make([]string, 0, len(s.Workspaces))
+		names = make([]string, 0, len(s.Workspaces))
 		for i := range s.Workspaces {
 			if s.Workspaces[i].Workspace != nil && s.Workspaces[i].Workspace.Name != "" {
 				names = append(names, s.Workspaces[i].Workspace.Name)
 			}
 		}
-		return names
+	} else if s.Workspace != nil && s.Workspace.Name != "" {
+		names = []string{s.Workspace.Name}
 	}
-	if s.Workspace != nil && s.Workspace.Name != "" {
-		return []string{s.Workspace.Name}
+	switch len(names) {
+	case 0:
+		return "no workspace"
+	case 1:
+		return names[0]
+	case 2, 3:
+		return fmt.Sprintf("%d workspaces · %s", len(names), strings.Join(names, ", "))
+	default:
+		return fmt.Sprintf("%d workspaces · %s, …", len(names), strings.Join(names[:3], ", "))
 	}
-	return nil
 }
 
 func SanitizeTmuxName(name string) string {

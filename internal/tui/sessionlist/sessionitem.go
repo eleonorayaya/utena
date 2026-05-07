@@ -1,9 +1,6 @@
 package sessionlist
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/session"
@@ -55,25 +52,11 @@ func (i sessionItem) Title() string {
 }
 
 func (i sessionItem) Description() string {
-	name := workspaceLabel(i.session)
+	name := i.session.WorkspaceDisplay()
 	if !i.session.LastUsedAt.IsZero() {
 		return name + " · " + common.TimeAgo(i.session.LastUsedAt)
 	}
 	return name
-}
-
-func workspaceLabel(s session.Session) string {
-	names := s.WorkspaceNames()
-	switch len(names) {
-	case 0:
-		return "no workspace"
-	case 1:
-		return names[0]
-	case 2, 3:
-		return fmt.Sprintf("%d workspaces · %s", len(names), strings.Join(names, ", "))
-	default:
-		return fmt.Sprintf("%d workspaces · %s, …", len(names), strings.Join(names[:3], ", "))
-	}
 }
 
 func (i sessionItem) FilterValue() string { return i.displayName() }
