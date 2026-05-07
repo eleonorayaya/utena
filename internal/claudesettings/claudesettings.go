@@ -18,9 +18,16 @@ type settingsLocal struct {
 	} `json:"sandbox"`
 }
 
+func defaultAllowWritePaths(workspacePath string) []string {
+	return []string{
+		filepath.Join(workspacePath, ".git"),
+		filepath.Join(workspacePath, ".bare"),
+	}
+}
+
 func defaultSettingsJSON(workspacePath string) ([]byte, error) {
 	var s settingsLocal
-	s.Sandbox.Filesystem.AllowWrite = []string{filepath.Join(workspacePath, ".git")}
+	s.Sandbox.Filesystem.AllowWrite = defaultAllowWritePaths(workspacePath)
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal settings: %w", err)
@@ -39,7 +46,7 @@ func settingsFileExists(path string) (bool, error) {
 	return false, fmt.Errorf("stat %s: %w", filepath.Base(path), err)
 }
 
-func mergeAllowWrite(data []byte, gitPath string) ([]byte, bool, error) {
+func mergeAllowWrite(data []byte, paths []string) ([]byte, bool, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, false, fmt.Errorf("parse settings: %w", err)
@@ -55,12 +62,27 @@ func mergeAllowWrite(data []byte, gitPath string) ([]byte, bool, error) {
 		sandbox["filesystem"] = filesystem
 	}
 	allowWrite, _ := filesystem["allowWrite"].([]any)
+
+	existing := make(map[string]struct{}, len(allowWrite))
 	for _, entry := range allowWrite {
-		if s, ok := entry.(string); ok && s == gitPath {
-			return nil, false, nil
+		if s, ok := entry.(string); ok {
+			existing[s] = struct{}{}
 		}
 	}
-	filesystem["allowWrite"] = append(allowWrite, gitPath)
+
+	changed := false
+	for _, p := range paths {
+		if _, ok := existing[p]; ok {
+			continue
+		}
+		allowWrite = append(allowWrite, p)
+		existing[p] = struct{}{}
+		changed = true
+	}
+	if !changed {
+		return nil, false, nil
+	}
+	filesystem["allowWrite"] = allowWrite
 	out, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return nil, false, fmt.Errorf("marshal settings: %w", err)
@@ -78,13 +100,12 @@ func EnsureWorkspaceRoot(workspacePath string) error {
 	if err != nil {
 		return err
 	}
-	gitPath := filepath.Join(workspacePath, ".git")
 	if exists {
 		data, err := os.ReadFile(settingsPath)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", settingsFileName, err)
 		}
-		merged, changed, err := mergeAllowWrite(data, gitPath)
+		merged, changed, err := mergeAllowWrite(data, defaultAllowWritePaths(workspacePath))
 		if err != nil || !changed {
 			return err
 		}
