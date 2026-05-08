@@ -32,6 +32,16 @@ func (s *WorktreeStore) Add(worktree *Worktree) error {
 	return nil
 }
 
+func (s *WorktreeStore) Update(worktree *Worktree) error {
+	if worktree == nil {
+		return errors.New("worktree cannot be nil")
+	}
+	if worktree.ID == 0 {
+		return errors.New("worktree ID cannot be zero")
+	}
+	return s.db.Save(worktree).Error
+}
+
 func (s *WorktreeStore) GetByID(id uint) (*Worktree, error) {
 	var worktree Worktree
 	if err := s.db.First(&worktree, "id = ?", id).Error; err != nil {

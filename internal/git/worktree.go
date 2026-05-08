@@ -11,9 +11,20 @@ var (
 	ErrWorktreeAlreadyExists = errors.New("worktree already exists")
 )
 
+type WorktreeStatus string
+
+const (
+	WorktreeStatusPending WorktreeStatus = "pending"
+	WorktreeStatusPresent WorktreeStatus = "present"
+	WorktreeStatusMissing WorktreeStatus = "missing"
+)
+
 type Worktree struct {
 	gorm.Model
-	Path     string `json:"path" gorm:"uniqueIndex"`
-	BranchID uint   `json:"branch_id" gorm:"uniqueIndex"`
-	RepoID   uint   `json:"repo_id" gorm:"index"`
+	Path        string         `json:"path" gorm:"uniqueIndex"`
+	BranchID    uint           `json:"branch_id" gorm:"uniqueIndex"`
+	RepoID      uint           `json:"repo_id" gorm:"index"`
+	WorkspaceID *uint          `json:"workspace_id,omitempty" gorm:"index"`
+	Status      WorktreeStatus `json:"status" gorm:"index"`
+	Branch      *Branch        `json:"branch,omitempty" gorm:"foreignKey:BranchID"`
 }

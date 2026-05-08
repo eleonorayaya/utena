@@ -29,7 +29,12 @@ func (s *SessionStore) loaded() *gorm.DB {
 			return db.Order("session_workspaces.position ASC")
 		}).
 		Preload("Workspaces.Workspace").
-		Preload("Workspaces.GitBranch")
+		Preload("Workspaces.GitBranch").
+		Preload("Worktrees", func(db *gorm.DB) *gorm.DB {
+			return db.Order("session_worktrees.position ASC")
+		}).
+		Preload("Worktrees.Worktree").
+		Preload("Worktrees.Worktree.Branch")
 }
 
 func (s *SessionStore) GetByID(id uint) (*Session, error) {

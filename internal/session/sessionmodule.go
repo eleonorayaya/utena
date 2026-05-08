@@ -26,7 +26,8 @@ func NewSessionModule(tmuxService *utmux.TmuxService, workspaceModule *workspace
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
-	service := NewSessionService(store, sessionWorkspaceStore, dismissedPRStore, sessionActionStore, workspaceModule.Service, workspaceModule.GitService, tmuxService, bus, branchPrefix, configDir, sessionsRoot)
+	sessionWorktreeStore := NewSessionWorktreeStore(database)
+	service := NewSessionService(store, sessionWorkspaceStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceModule.Service, workspaceModule.GitService, tmuxService, bus, branchPrefix, configDir, sessionsRoot)
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
@@ -63,7 +64,7 @@ func (m *SessionModule) OnAppEnd(ctx context.Context) error {
 }
 
 func (m *SessionModule) Models() []any {
-	return []any{&Session{}, &SessionWorkspace{}, &DismissedPR{}, &SessionAction{}}
+	return []any{&Session{}, &SessionWorkspace{}, &SessionWorktree{}, &DismissedPR{}, &SessionAction{}}
 }
 
 func (m *SessionModule) Routes() chi.Router {

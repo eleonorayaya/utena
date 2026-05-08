@@ -43,6 +43,7 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 		&utmux.TmuxSession{},
 		&Session{},
 		&SessionWorkspace{},
+		&SessionWorktree{},
 		&DismissedPR{},
 		&claude.ClaudeSession{},
 		&SessionAction{},
@@ -80,7 +81,8 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 	tmuxService := createTmuxService(t, database, mock, bus)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
-	service := NewSessionService(sessionStore, sessionWorkspaceStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	sessionWorktreeStore := NewSessionWorktreeStore(database)
+	service := NewSessionService(sessionStore, sessionWorkspaceStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
 
 	return &prTestEnv{
 		service:          service,
@@ -486,7 +488,8 @@ func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
-	service := NewSessionService(sessionStore, sessionWorkspaceStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	sessionWorktreeStore := NewSessionWorktreeStore(database)
+	service := NewSessionService(sessionStore, sessionWorkspaceStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
 
 	branchID := branch.ID
 	event := eventbus.Event{

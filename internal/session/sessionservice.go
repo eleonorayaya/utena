@@ -63,6 +63,7 @@ func tracedOp[T any](ctx context.Context, op string, fn func() (T, error), attrs
 type SessionService struct {
 	store                 *SessionStore
 	sessionWorkspaceStore *SessionWorkspaceStore
+	sessionWorktreeStore  *SessionWorktreeStore
 	dismissedPRStore      *DismissedPRStore
 	sessionActionStore    *SessionActionStore
 	workspaceService      *workspace.WorkspaceService
@@ -75,10 +76,11 @@ type SessionService struct {
 	setupTimeout          time.Duration
 }
 
-func NewSessionService(store *SessionStore, sessionWorkspaceStore *SessionWorkspaceStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
+func NewSessionService(store *SessionStore, sessionWorkspaceStore *SessionWorkspaceStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
 	return &SessionService{
 		store:                 store,
 		sessionWorkspaceStore: sessionWorkspaceStore,
+		sessionWorktreeStore:  sessionWorktreeStore,
 		dismissedPRStore:      dismissedPRStore,
 		sessionActionStore:    sessionActionStore,
 		workspaceService:      workspaceService,
@@ -106,9 +108,59 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	}
 	s.markOrphanedSessionsBroken(sessions)
 	s.backfillLegacyTmuxRecords(sessions)
+	s.backfillSessionWorktrees(ctx, sessions)
 	s.recoverStuckCreatingSessions(sessions)
 	s.reconcileTmuxState(ctx, sessions)
 	return nil
+}
+
+// backfillSessionWorktrees walks every existing SessionWorkspace junction row
+// and materialises a corresponding Worktree record + SessionWorktree junction
+// row when one does not already exist. Pre-existing data is the source of
+// truth: the old WorktreePath column drives Worktree.Path, and BranchID drives
+// Worktree.BranchID.
+//
+// Idempotent: a SessionWorktree row keyed on (SessionID, WorktreeID) is only
+// inserted once thanks to the uniqueIndex.
+func (s *SessionService) backfillSessionWorktrees(ctx context.Context, sessions []Session) {
+	for i := range sessions {
+		sess := &sessions[i]
+		if len(sess.Worktrees) > 0 {
+			continue
+		}
+		for j := range sess.Workspaces {
+			sw := &sess.Workspaces[j]
+			if sw.BranchID == nil || sw.WorktreePath == "" || sw.Workspace == nil {
+				continue
+			}
+			repoID := uint(0)
+			if sw.Workspace.RepoID != nil {
+				repoID = *sw.Workspace.RepoID
+			}
+			wsID := sw.WorkspaceID
+			wt, err := s.gitService.RegisterPendingWorktree(*sw.BranchID, repoID, &wsID, sw.WorktreePath)
+			if err != nil {
+				slog.WarnContext(ctx, "backfill: register pending worktree failed", "session", sess.ID, "workspace", sw.WorkspaceID, "error", err)
+				continue
+			}
+			if _, err := os.Stat(sw.WorktreePath); err == nil {
+				if wt.Status != git.WorktreeStatusPresent {
+					wt.Status = git.WorktreeStatusPresent
+					if updateErr := s.gitService.UpdateWorktree(wt); updateErr != nil {
+						slog.WarnContext(ctx, "backfill: failed to mark worktree present", "session", sess.ID, "error", updateErr)
+					}
+				}
+			} else if wt.Status == git.WorktreeStatusPending {
+				if err := s.gitService.MarkWorktreeMissing(wt); err != nil {
+					slog.WarnContext(ctx, "backfill: failed to mark worktree missing", "session", sess.ID, "error", err)
+				}
+			}
+			swt := &SessionWorktree{SessionID: sess.ID, WorktreeID: wt.ID, Position: sw.Position}
+			if err := s.sessionWorktreeStore.Add(swt); err != nil {
+				slog.DebugContext(ctx, "backfill: session-worktree row already exists", "session", sess.ID, "worktree", wt.ID, "error", err)
+			}
+		}
+	}
 }
 
 func (s *SessionService) backfillLegacyTmuxRecords(sessions []Session) {
@@ -299,6 +351,18 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, wo
 		return fmt.Errorf("add session-workspace junction: %w", err)
 	}
 
+	if err := s.eagerCreateWorktree(ctx, session.ID, ws, finalBranchName, worktreePath, 0); err != nil {
+		slog.WarnContext(ctx, "failed to eagerly create worktree record", "session", session.ID, "workspace", ws.Name, "error", err)
+	} else {
+		sw.BranchID = nil
+		if branchID, err := s.lookupBranchID(ctx, ws, finalBranchName); err == nil {
+			sw.BranchID = branchID
+			if updateErr := s.sessionWorkspaceStore.Update(sw); updateErr != nil {
+				slog.WarnContext(ctx, "failed to update legacy junction with branch id", "session", session.ID, "error", updateErr)
+			}
+		}
+	}
+
 	for _, action := range actions {
 		action.SessionID = session.ID
 		if err := s.sessionActionStore.Add(action); err != nil {
@@ -324,6 +388,52 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, wo
 	go s.runSetup(session.ID, tmuxName, branchName, baseBranchName)
 
 	return nil
+}
+
+// eagerCreateWorktree resolves the repo for the workspace, finds-or-creates the
+// branch record, and creates a Worktree record in pending status plus the
+// SessionWorktree junction row. It is idempotent: if the worktree record
+// already exists for the branch, it is reused (Status preserved).
+func (s *SessionService) eagerCreateWorktree(ctx context.Context, sessionID uint, ws *workspace.Workspace, branchName string, worktreePath string, position int) error {
+	if branchName == "" {
+		return fmt.Errorf("branch name is required")
+	}
+	repoID, err := s.resolveRepoID(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("resolve repo: %w", err)
+	}
+	branch, err := s.gitService.FindOrCreateBranch(ctx, branchName, repoID)
+	if err != nil {
+		return fmt.Errorf("find-or-create branch: %w", err)
+	}
+	wsID := ws.ID
+	wt, err := s.gitService.RegisterPendingWorktree(branch.ID, repoID, &wsID, worktreePath)
+	if err != nil {
+		return fmt.Errorf("register pending worktree: %w", err)
+	}
+	swt := &SessionWorktree{
+		SessionID:  sessionID,
+		WorktreeID: wt.ID,
+		Position:   position,
+	}
+	if err := s.sessionWorktreeStore.Add(swt); err != nil {
+		return fmt.Errorf("add session-worktree junction: %w", err)
+	}
+	return nil
+}
+
+// lookupBranchID returns the branch ID for the given workspace+branch name pair
+// without creating one if absent.
+func (s *SessionService) lookupBranchID(ctx context.Context, ws *workspace.Workspace, branchName string) (*uint, error) {
+	repoID, err := s.resolveRepoID(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+	branch, err := s.gitService.FindOrCreateBranch(ctx, branchName, repoID)
+	if err != nil {
+		return nil, err
+	}
+	return &branch.ID, nil
 }
 
 func (s *SessionService) runSetup(sessionID uint, tmuxName string, branchName string, baseBranchName string) {

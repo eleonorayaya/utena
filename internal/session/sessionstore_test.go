@@ -18,7 +18,7 @@ import (
 )
 
 func setupTestDB(t *testing.T) db.Database {
-	return testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &SessionWorkspace{}, &claude.ClaudeSession{}, &SessionAction{})
+	return testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &SessionWorkspace{}, &SessionWorktree{}, &claude.ClaudeSession{}, &SessionAction{})
 }
 
 func setupSessionStore(t *testing.T) (*SessionStore, uint, uint) {
@@ -36,6 +36,34 @@ func addTestSession(t *testing.T, store *SessionStore, swStore *SessionWorkspace
 	sess.WorkspaceID = wsID
 	require.NoError(t, store.Add(sess))
 	require.NoError(t, swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: wsID, Position: 0}))
+}
+
+// addTestSessionWithWorktree creates a session, a SessionWorkspace junction
+// row, a git.Worktree record, and a SessionWorktree junction row — mirroring
+// the post-CreateSession state. wsID owns the workspace; branchID/repoID can
+// be zero if the test does not need git refs (in which case no worktree row
+// is created).
+func addTestSessionWithWorktree(t *testing.T, database db.Database, store *SessionStore, swStore *SessionWorkspaceStore, swtStore *SessionWorktreeStore, sess *Session, wsID uint, branchID uint, repoID uint, worktreePath string, status git.WorktreeStatus) *git.Worktree {
+	t.Helper()
+	sess.WorkspaceID = wsID
+	require.NoError(t, store.Add(sess))
+	swsID := branchIDOrNil(branchID)
+	require.NoError(t, swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: wsID, BranchID: swsID, WorktreePath: worktreePath, Position: 0}))
+	if branchID == 0 || worktreePath == "" {
+		return nil
+	}
+	wsIDCopy := wsID
+	wt := &git.Worktree{Path: worktreePath, BranchID: branchID, RepoID: repoID, WorkspaceID: &wsIDCopy, Status: status}
+	require.NoError(t, database.Create(wt).Error)
+	require.NoError(t, swtStore.Add(&SessionWorktree{SessionID: sess.ID, WorktreeID: wt.ID, Position: 0}))
+	return wt
+}
+
+func branchIDOrNil(branchID uint) *uint {
+	if branchID == 0 {
+		return nil
+	}
+	return &branchID
 }
 
 func TestNewSessionStore(t *testing.T) {
@@ -315,7 +343,7 @@ func TestSessionStore_OnAppEnd(t *testing.T) {
 
 func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *utmux.TmuxSession) {
 	t.Helper()
-	database := testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &SessionWorkspace{}, &claude.ClaudeSession{}, &SessionAction{})
+	database := testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &SessionWorkspace{}, &SessionWorktree{}, &claude.ClaudeSession{}, &SessionAction{})
 
 	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena"}
 	database.Create(ws)

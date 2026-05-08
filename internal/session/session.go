@@ -44,6 +44,7 @@ type Session struct {
 	ClaudeSessions []claude.ClaudeSession `json:"claude_sessions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	SessionActions []SessionAction        `json:"session_actions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	Workspaces     []SessionWorkspace     `json:"workspaces,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Worktrees      []SessionWorktree      `json:"worktrees,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	BranchID       *uint                  `json:"branch_id,omitempty" gorm:"index"`
 	TmuxSessionID  *uint                  `json:"tmux_session_id,omitempty" gorm:"uniqueIndex"`
 	StatusError    string                 `json:"status_error,omitempty"`
@@ -60,6 +61,14 @@ type SessionWorkspace struct {
 	Position     int                  `json:"position"`
 	Workspace    *workspace.Workspace `json:"workspace,omitempty" gorm:"foreignKey:WorkspaceID;constraint:OnDelete:RESTRICT"`
 	GitBranch    *git.Branch          `json:"git_branch,omitempty" gorm:"foreignKey:BranchID"`
+}
+
+type SessionWorktree struct {
+	gorm.Model
+	SessionID  uint          `json:"session_id" gorm:"uniqueIndex:idx_session_worktree;index;not null"`
+	WorktreeID uint          `json:"worktree_id" gorm:"uniqueIndex:idx_session_worktree;index;not null"`
+	Position   int           `json:"position"`
+	Worktree   *git.Worktree `json:"worktree,omitempty" gorm:"foreignKey:WorktreeID;constraint:OnDelete:RESTRICT"`
 }
 
 func (s *Session) IsCreating() bool {
