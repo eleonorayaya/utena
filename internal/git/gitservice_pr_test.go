@@ -203,6 +203,7 @@ func TestSyncRepoPRs_CreatesBranchForUnknownHead(t *testing.T) {
 	branch, err := svc.branchStore.GetByNameAndRepo("new-branch", repo.ID)
 	require.NoError(t, err)
 	assert.True(t, branch.ExistsRemote)
+	assert.Equal(t, BranchStatusTracked, branch.Status)
 }
 
 func TestSearchPRs_FiltersByRepoAndState(t *testing.T) {

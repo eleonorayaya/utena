@@ -23,6 +23,10 @@ func NewGitModule(database db.Database, bus eventbus.EventBus) *GitModule {
 }
 
 func (m *GitModule) OnAppStart(ctx context.Context) error {
+	if err := m.Service.branchStore.BackfillStatus(); err != nil {
+		slog.WarnContext(ctx, "git: backfill branch status failed", "error", err)
+	}
+
 	if m.Service.githubClient == nil {
 		ghClient, err := NewGitHubClient(ctx)
 		if err != nil {

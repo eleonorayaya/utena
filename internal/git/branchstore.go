@@ -96,6 +96,18 @@ func (s *BranchStore) Upsert(branch *Branch) error {
 	return s.db.Save(branch).Error
 }
 
+// BackfillStatus migrates legacy rows: any Branch that has no Status set is
+// updated using the existing exists_local/exists_remote columns. Branches with
+// either exists_* flag are marked tracked; others (no observation yet, or
+// observed gone) default to pending — conservative, since we cannot know
+// retroactively whether a no-existence row was ever observed.
+func (s *BranchStore) BackfillStatus() error {
+	return s.db.Exec(
+		"UPDATE branches SET status = CASE WHEN exists_local OR exists_remote THEN ? ELSE ? END WHERE status IS NULL OR status = ''",
+		string(BranchStatusTracked), string(BranchStatusPending),
+	).Error
+}
+
 func (s *BranchStore) Delete(id uint) error {
 	var branch Branch
 	if err := s.db.First(&branch, "id = ?", id).Error; err != nil {

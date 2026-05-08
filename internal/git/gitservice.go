@@ -309,7 +309,7 @@ func (s *GitService) FindOrCreateBranch(ctx context.Context, name string, repoID
 	if err == nil {
 		return existing, nil
 	}
-	branch := &Branch{Name: name, RepoID: repoID}
+	branch := &Branch{Name: name, RepoID: repoID, Status: BranchStatusPending}
 	if err := s.branchStore.Upsert(branch); err != nil {
 		return nil, err
 	}
@@ -337,6 +337,7 @@ func (s *GitService) CreateBranch(ctx context.Context, repoPath string, branchNa
 		BaseBranchID: baseBranchID,
 		ExistsLocal:  true,
 	}
+	branch.Status = branch.DeriveStatus()
 	if err := s.branchStore.Upsert(branch); err != nil {
 		return nil, nil, err
 	}
@@ -452,6 +453,7 @@ func (s *GitService) SyncBranch(ctx context.Context, branch *Branch, repoPath st
 	branch.ExistsLocal = existsLocal
 	branch.ExistsRemote = existsRemote
 	branch.IsDirty = isDirty
+	branch.Status = branch.DeriveStatus()
 	return s.branchStore.Update(branch)
 }
 
@@ -473,6 +475,7 @@ func (s *GitService) CleanupBranch(ctx context.Context, branch *Branch, repoPath
 			return err
 		}
 		branch.ExistsLocal = false
+		branch.Status = branch.DeriveStatus()
 		return s.branchStore.Update(branch)
 	}
 	return nil
@@ -521,6 +524,7 @@ func (s *GitService) syncGitHubPR(ctx context.Context, ghPR *github.PullRequest,
 	branch, _ := s.branchStore.GetByNameAndRepo(headRef, repo.ID)
 	if branch == nil {
 		branch = &Branch{Name: headRef, RepoID: repo.ID, ExistsRemote: true}
+		branch.Status = branch.DeriveStatus()
 		if err := s.branchStore.Upsert(branch); err != nil {
 			return fmt.Errorf("failed to upsert branch %s: %w", headRef, err)
 		}
