@@ -87,7 +87,16 @@ func (s *GitService) SetupWorktreeAt(ctx context.Context, repoPath string, branc
 		return false, "", fmt.Errorf("branch %q already exists; use it as an existing branch instead", branchName)
 	}
 	if !creatingNew && !exists {
-		return false, "", fmt.Errorf("branch %q does not exist; provide a base branch to create it", branchName)
+		hasRemote, remErr := s.cli.hasRemoteBranch(ctx, repoPath, branchName)
+		if remErr != nil {
+			return false, "", fmt.Errorf("failed to check remote branch %q: %v", branchName, remErr)
+		}
+		if !hasRemote {
+			return false, "", fmt.Errorf("branch %q does not exist locally or on remote", branchName)
+		}
+		if fetchErr := s.cli.fetch(ctx, repoPath, branchName); fetchErr != nil {
+			return false, "", fmt.Errorf("failed to fetch branch %q: %v", branchName, fetchErr)
+		}
 	}
 
 	wtPath := destPath

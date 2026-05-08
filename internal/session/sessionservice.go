@@ -379,9 +379,7 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, branchName st
 	}
 
 	markBroken := func(stage string, err error) {
-		if multi {
-			rollback()
-		}
+		rollback()
 		msg := fmt.Sprintf("%s failed: %v", stage, err)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			msg = fmt.Sprintf("%s timed out after %s", stage, s.setupTimeout)
@@ -728,14 +726,10 @@ func (s *SessionService) RepairSession(_ context.Context, id uint) (*Session, er
 
 	primary := sess.Workspaces[0]
 	branchName := ""
-	baseBranchName := ""
 	if primary.GitBranch != nil {
 		branchName = primary.GitBranch.Name
-		if primary.GitBranch.BaseBranch != nil {
-			baseBranchName = primary.GitBranch.BaseBranch.Name
-		}
 	}
-	go s.runSetup(sess.ID, tmuxName, branchName, baseBranchName)
+	go s.runSetup(sess.ID, tmuxName, branchName, "")
 	return sess, nil
 }
 
@@ -1125,17 +1119,6 @@ func (s *SessionService) ensureSessionWorktrees(ctx context.Context, sess *Sessi
 		}
 		if err := s.gitService.PruneWorktrees(ctx, sw.Workspace.Path); err != nil {
 			slog.WarnContext(ctx, "prune worktrees before ensure failed", "workspace", sw.Workspace.Name, "error", err)
-		}
-		hasLocal, err := s.gitService.HasBranch(ctx, sw.Workspace.Path, sw.GitBranch.Name)
-		if err != nil {
-			slog.WarnContext(ctx, "failed to check local branch", "workspace", sw.Workspace.Name, "branch", sw.GitBranch.Name, "error", err)
-			continue
-		}
-		if !hasLocal {
-			if err := s.gitService.Fetch(ctx, sw.Workspace.Path, sw.GitBranch.Name); err != nil {
-				slog.WarnContext(ctx, "failed to fetch branch before ensure", "workspace", sw.Workspace.Name, "branch", sw.GitBranch.Name, "error", err)
-				continue
-			}
 		}
 		repoID := uint(0)
 		if sw.Workspace.RepoID != nil {
