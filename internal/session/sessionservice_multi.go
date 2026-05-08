@@ -383,6 +383,9 @@ func (s *SessionService) runMultiRepair(sessionID uint, tmuxName string) {
 		if sw.Workspace.RepoID != nil {
 			repoID = *sw.Workspace.RepoID
 		}
+		if err := s.gitService.PruneWorktrees(ctx, sw.Workspace.Path); err != nil {
+			slog.WarnContext(ctx, "prune worktrees before repair failed", "workspace", sw.Workspace.Name, "error", err)
+		}
 		if _, _, err := s.gitService.SetupWorktreeAt(ctx, sw.Workspace.Path, sw.GitBranch.Name, "", sw.GitBranch.ID, repoID, sw.WorktreePath); err != nil {
 			markBroken(fmt.Sprintf("worktree repair for workspace %q", sw.Workspace.Name), err)
 			return

@@ -252,6 +252,14 @@ func (s *gitCLI) worktreePath(repoPath string, branch string) string {
 	return filepath.Join(repoPath, ".worktrees", dirName)
 }
 
+func (s *gitCLI) pruneWorktrees(ctx context.Context, repoPath string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "prune")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree prune failed: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
+
 func (s *gitCLI) removeWorktree(ctx context.Context, repoPath string, worktreePath string) error {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "remove", worktreePath, "--force")
 	if output, err := cmd.CombinedOutput(); err != nil {

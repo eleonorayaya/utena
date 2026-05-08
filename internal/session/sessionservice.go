@@ -821,12 +821,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 	}
 
 	s.cleanupSessionBranches(ctx, session, deleteBranch)
-
-	if session.IsMulti() && session.SessionRoot != "" && s.isUnderSessionsRoot(session.SessionRoot) {
-		if err := os.RemoveAll(session.SessionRoot); err != nil {
-			slog.Warn("failed to remove session root", "path", session.SessionRoot, "error", err)
-		}
-	}
+	s.cleanupSessionRootDir(session)
 
 	if session.TmuxSessionID != nil {
 		if err := s.tmuxService.KillSession(*session.TmuxSessionID); err != nil {
@@ -840,15 +835,22 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 	return s.store.Update(session)
 }
 
-func (s *SessionService) isUnderSessionsRoot(path string) bool {
-	if s.sessionsRoot == "" {
-		return false
+// cleanupSessionRootDir removes the SessionRoot dir on disk when utena owns it
+// (i.e. it lives under the configured sessionsRoot). For single-workspace
+// sessions, SessionRoot is either a worktree dir under a repo (cleaned up by
+// gitService.CleanupBranch) or the workspace path itself when no worktree was
+// created — neither lives under sessionsRoot, so this helper is a no-op.
+func (s *SessionService) cleanupSessionRootDir(sess *Session) {
+	if sess.SessionRoot == "" || s.sessionsRoot == "" {
+		return
 	}
-	rel, err := filepath.Rel(s.sessionsRoot, path)
-	if err != nil {
-		return false
+	rel, err := filepath.Rel(s.sessionsRoot, sess.SessionRoot)
+	if err != nil || rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
+		return
 	}
-	return rel != "" && rel != "." && !strings.HasPrefix(rel, "..")
+	if err := os.RemoveAll(sess.SessionRoot); err != nil {
+		slog.Warn("failed to remove session root", "path", sess.SessionRoot, "error", err)
+	}
 }
 
 func (s *SessionService) cleanupSessionBranches(ctx context.Context, session *Session, deleteBranch bool) {
@@ -1036,6 +1038,7 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 	}
 
 	s.cleanupSessionBranches(ctx, sess, false)
+	s.cleanupSessionRootDir(sess)
 
 	if sess.TmuxSessionID != nil {
 		if err := s.tmuxService.KillSession(*sess.TmuxSessionID); err != nil {
@@ -1144,6 +1147,9 @@ func (s *SessionService) ensureSessionWorktrees(ctx context.Context, sess *Sessi
 			repoID := uint(0)
 			if sw.Workspace.RepoID != nil {
 				repoID = *sw.Workspace.RepoID
+			}
+			if err := s.gitService.PruneWorktrees(ctx, sw.Workspace.Path); err != nil {
+				slog.WarnContext(ctx, "prune worktrees before ensure failed", "workspace", sw.Workspace.Name, "error", err)
 			}
 			if _, _, err := s.gitService.SetupWorktreeAt(ctx, sw.Workspace.Path, sw.GitBranch.Name, "", sw.GitBranch.ID, repoID, sw.WorktreePath); err != nil {
 				slog.WarnContext(ctx, "failed to ensure session worktree on activation", "session", sess.ID, "workspace", sw.Workspace.Name, "branch", sw.GitBranch.Name, "error", err)

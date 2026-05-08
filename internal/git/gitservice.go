@@ -161,6 +161,10 @@ func (s *GitService) RemoveWorktree(ctx context.Context, repoPath string, worktr
 	return s.cli.removeWorktree(ctx, repoPath, worktreePath)
 }
 
+func (s *GitService) PruneWorktrees(ctx context.Context, repoPath string) error {
+	return s.cli.pruneWorktrees(ctx, repoPath)
+}
+
 func (s *GitService) MigrateToBare(ctx context.Context, workspacePath string) error {
 	return s.cli.migrateToBare(ctx, workspacePath)
 }
@@ -332,25 +336,29 @@ func (s *GitService) SyncBranch(ctx context.Context, branch *Branch, repoPath st
 	}
 
 	isDirty := false
-	wtPath := s.cli.worktreePath(repoPath, branch.Name)
 
 	wt, wtErr := s.worktreeStore.GetByBranchID(branch.ID)
 	if wtErr != nil && !errors.Is(wtErr, ErrWorktreeNotFound) {
 		return fmt.Errorf("failed to look up worktree for branch %s: %w", branch.Name, wtErr)
 	}
 
+	checkPath := s.cli.worktreePath(repoPath, branch.Name)
+	if wt != nil && wt.Path != "" {
+		checkPath = wt.Path
+	}
+
 	if existsLocal {
-		if valid, err := s.cli.validateWorktree(ctx, wtPath, branch.Name); err != nil {
-			slog.Warn("failed to validate worktree", "path", wtPath, "error", err)
+		if valid, err := s.cli.validateWorktree(ctx, checkPath, branch.Name); err != nil {
+			slog.Warn("failed to validate worktree", "path", checkPath, "error", err)
 		} else if valid {
 			if errors.Is(wtErr, ErrWorktreeNotFound) {
-				wt = &Worktree{Path: wtPath, BranchID: branch.ID, RepoID: branch.RepoID}
+				wt = &Worktree{Path: checkPath, BranchID: branch.ID, RepoID: branch.RepoID}
 				if err := s.worktreeStore.Add(wt); err != nil {
-					slog.Warn("failed to add worktree record", "path", wtPath, "error", err)
+					slog.Warn("failed to add worktree record", "path", checkPath, "error", err)
 				}
 			}
-			if dirty, err := s.cli.isDirty(ctx, wtPath); err != nil {
-				slog.Warn("failed to check dirty state", "path", wtPath, "error", err)
+			if dirty, err := s.cli.isDirty(ctx, checkPath); err != nil {
+				slog.Warn("failed to check dirty state", "path", checkPath, "error", err)
 			} else {
 				isDirty = dirty
 			}
