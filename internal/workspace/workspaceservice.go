@@ -108,13 +108,21 @@ func (s *WorkspaceService) AddWorkspace(ctx context.Context, path string, asRoot
 	}
 
 	if s.gitService != nil && ws.RepoID == nil {
-		if repo, err := s.gitService.FindOrCreateRepo(ctx, ws.Path); err == nil {
-			ws.RepoID = &repo.ID
-			if updateErr := s.store.Update(ws); updateErr != nil {
-				slog.Warn("failed to persist repo id for workspace", "workspace", ws.Name, "error", updateErr)
-			}
-		} else {
+		repo, err := s.gitService.FindOrCreateRepo(ctx, ws.Path)
+		if err != nil {
 			slog.Warn("failed to resolve repo id for workspace", "workspace", ws.Name, "error", err)
+			return ws, nil
+		}
+		if existing, lookupErr := s.store.GetByRepoID(repo.ID); lookupErr == nil && existing.ID != ws.ID {
+			if delErr := s.store.Delete(ws.ID); delErr != nil {
+				slog.Warn("failed to roll back duplicate-repo workspace", "path", path, "error", delErr)
+			}
+			s.store.RemoveWorkspaceFromConfig(path)
+			return nil, common.NewInvalidRequest(fmt.Sprintf("workspace %q already tracks this repository — remove it first or use a different repo", existing.Name))
+		}
+		ws.RepoID = &repo.ID
+		if updateErr := s.store.Update(ws); updateErr != nil {
+			slog.Warn("failed to persist repo id for workspace", "workspace", ws.Name, "error", updateErr)
 		}
 	}
 	return ws, nil

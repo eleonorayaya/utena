@@ -14,7 +14,7 @@ type Workspace struct {
 	IsGitRepo  bool      `json:"is_git_repo"`
 	IsBare     bool      `json:"is_bare" gorm:"default:false"`
 	IsHidden   bool      `json:"is_hidden" gorm:"default:false"`
-	RepoID     *uint     `json:"repo_id,omitempty" gorm:"index"`
+	RepoID     *uint     `json:"repo_id,omitempty" gorm:"uniqueIndex"`
 	Repo       *git.Repo `json:"repo,omitempty" gorm:"foreignKey:RepoID"`
 	LastUsedAt time.Time `json:"last_used_at,omitempty"`
 }
