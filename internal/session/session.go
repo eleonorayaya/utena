@@ -76,6 +76,9 @@ func (s *Session) IsCreating() bool {
 }
 
 func (s *Session) IsMulti() bool {
+	if len(s.Worktrees) > 0 {
+		return len(s.Worktrees) > 1
+	}
 	return len(s.Workspaces) > 1
 }
 
