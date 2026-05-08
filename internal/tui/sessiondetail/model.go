@@ -67,12 +67,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.sess = &s
 		m.prs = nil
 		m.pendingDeleteID = 0
-		if !s.IsMulti() && len(s.Worktrees) > 0 && s.Worktrees[0].Worktree != nil && s.Worktrees[0].Worktree.WorkspaceID != nil && *s.Worktrees[0].Worktree.WorkspaceID != 0 {
-			return m, provider.FetchPRs(*s.Worktrees[0].Worktree.WorkspaceID, "")
+		if !s.IsMulti() && len(s.Worktrees) > 0 && s.Worktrees[0].Workspace != nil {
+			return m, provider.FetchPRs(s.Worktrees[0].Workspace.ID, "")
 		}
 		return m, nil
 	case provider.PRsStateUpdatedMsg:
-		if m.sess != nil && len(m.sess.Worktrees) > 0 && m.sess.Worktrees[0].Worktree != nil && m.sess.Worktrees[0].Worktree.WorkspaceID != nil && msg.WorkspaceID == *m.sess.Worktrees[0].Worktree.WorkspaceID {
+		if m.sess != nil && len(m.sess.Worktrees) > 0 && m.sess.Worktrees[0].Workspace != nil && msg.WorkspaceID == m.sess.Worktrees[0].Workspace.ID {
 			m.prs = filterPRsByBranch(msg.PullRequests, m.sess.Worktrees[0].Worktree.Branch)
 		}
 		return m, nil

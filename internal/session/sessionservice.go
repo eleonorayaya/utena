@@ -290,8 +290,7 @@ func (s *SessionService) eagerCreateWorktree(ctx context.Context, sessionID uint
 	if err != nil {
 		return fmt.Errorf("find-or-create branch: %w", err)
 	}
-	wsID := ws.ID
-	wt, err := s.gitService.RegisterPendingWorktree(branch.ID, repoID, &wsID, worktreePath)
+	wt, err := s.gitService.RegisterPendingWorktree(branch.ID, repoID, worktreePath)
 	if err != nil {
 		return fmt.Errorf("register pending worktree: %w", err)
 	}
@@ -314,31 +313,18 @@ func (s *SessionService) resolveWorktreeWorkspace(ctx context.Context, wt *git.W
 	if wt == nil {
 		return nil, fmt.Errorf("worktree is nil")
 	}
-	if wt.WorkspaceID != nil {
-		if ws, ok := cache[*wt.WorkspaceID]; ok {
-			return ws, nil
-		}
-		ws, err := s.workspaceService.GetWorkspace(ctx, *wt.WorkspaceID)
-		if err == nil {
-			cache[*wt.WorkspaceID] = ws
-			return ws, nil
-		}
+	if wt.RepoID == 0 {
+		return nil, fmt.Errorf("worktree %d has no repo", wt.ID)
 	}
-	if wt.RepoID != 0 {
-		ws, err := s.workspaceService.GetWorkspaceByRepoID(ctx, wt.RepoID)
-		if err == nil {
-			if wt.WorkspaceID == nil {
-				wsID := ws.ID
-				wt.WorkspaceID = &wsID
-				if updateErr := s.gitService.UpdateWorktree(wt); updateErr != nil {
-					slog.WarnContext(ctx, "failed to backfill worktree workspace_id", "worktree", wt.ID, "error", updateErr)
-				}
-			}
-			cache[ws.ID] = ws
-			return ws, nil
-		}
+	if ws, ok := cache[wt.RepoID]; ok {
+		return ws, nil
 	}
-	return nil, fmt.Errorf("no workspace bound to worktree %d", wt.ID)
+	ws, err := s.workspaceService.GetWorkspaceByRepoID(ctx, wt.RepoID)
+	if err != nil {
+		return nil, err
+	}
+	cache[wt.RepoID] = ws
+	return ws, nil
 }
 
 func (s *SessionService) runSetup(sessionID uint, tmuxName string, branchName string, baseBranchName string) {
@@ -826,9 +812,18 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		return nil, err
 	}
 
-	for _, wsID := range sessionWorkspaceIDs(session) {
-		if err := s.workspaceService.Touch(ctx, wsID); err != nil {
-			slog.Warn("failed to touch workspace last-used timestamp", "workspace", wsID, "error", err)
+	wsCache := make(map[uint]*workspace.Workspace)
+	for i := range session.Worktrees {
+		wt := session.Worktrees[i].Worktree
+		if wt == nil {
+			continue
+		}
+		ws, err := s.resolveWorktreeWorkspace(ctx, wt, wsCache)
+		if err != nil {
+			continue
+		}
+		if err := s.workspaceService.Touch(ctx, ws.ID); err != nil {
+			slog.Warn("failed to touch workspace last-used timestamp", "workspace", ws.ID, "error", err)
 		}
 	}
 
@@ -1136,24 +1131,6 @@ func (s *SessionService) sessionBranchIDs(sess *Session) []uint {
 			continue
 		}
 		out = append(out, wt.BranchID)
-	}
-	return out
-}
-
-func sessionWorkspaceIDs(sess *Session) []uint {
-	out := make([]uint, 0, len(sess.Worktrees))
-	seen := make(map[uint]struct{}, len(sess.Worktrees))
-	for i := range sess.Worktrees {
-		wt := sess.Worktrees[i].Worktree
-		if wt == nil || wt.WorkspaceID == nil || *wt.WorkspaceID == 0 {
-			continue
-		}
-		id := *wt.WorkspaceID
-		if _, dup := seen[id]; dup {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
 	}
 	return out
 }

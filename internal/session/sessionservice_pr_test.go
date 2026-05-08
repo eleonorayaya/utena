@@ -39,13 +39,11 @@ type prTestEnv struct {
 func (env *prTestEnv) attachBranchWorktree(t *testing.T, sessionID uint, branchID uint, position int) *git.Worktree {
 	t.Helper()
 	env.wtSeq++
-	wsID := env.workspace.ID
 	wt := &git.Worktree{
-		Path:        filepath.Join(env.workspace.Path, ".worktrees", fmt.Sprintf("pr-test-%d", env.wtSeq)),
-		BranchID:    branchID,
-		RepoID:      env.repo.ID,
-		WorkspaceID: &wsID,
-		Status:      git.WorktreeStatusPresent,
+		Path:     filepath.Join(env.workspace.Path, ".worktrees", fmt.Sprintf("pr-test-%d", env.wtSeq)),
+		BranchID: branchID,
+		RepoID:   env.repo.ID,
+		Status:   git.WorktreeStatusPresent,
 	}
 	require.NoError(t, env.database.Create(wt).Error)
 	require.NoError(t, env.swtStore.Add(&SessionWorktree{SessionID: sessionID, WorktreeID: wt.ID, Position: position}))

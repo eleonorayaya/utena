@@ -130,7 +130,7 @@ func (s *GitService) SetupWorktreeAt(ctx context.Context, repoPath string, branc
 	return true, path, nil
 }
 
-func (s *GitService) RegisterPendingWorktree(branchID uint, repoID uint, workspaceID *uint, path string) (*Worktree, error) {
+func (s *GitService) RegisterPendingWorktree(branchID uint, repoID uint, path string) (*Worktree, error) {
 	if branchID == 0 {
 		return nil, fmt.Errorf("branchID is required")
 	}
@@ -143,10 +143,6 @@ func (s *GitService) RegisterPendingWorktree(branchID uint, repoID uint, workspa
 		}
 		if existing.RepoID != repoID && repoID != 0 {
 			existing.RepoID = repoID
-			changed = true
-		}
-		if workspaceID != nil && (existing.WorkspaceID == nil || *existing.WorkspaceID != *workspaceID) {
-			existing.WorkspaceID = workspaceID
 			changed = true
 		}
 		if existing.Status == "" {
@@ -164,11 +160,10 @@ func (s *GitService) RegisterPendingWorktree(branchID uint, repoID uint, workspa
 		return nil, fmt.Errorf("failed to look up worktree: %w", err)
 	}
 	wt := &Worktree{
-		Path:        path,
-		BranchID:    branchID,
-		RepoID:      repoID,
-		WorkspaceID: workspaceID,
-		Status:      WorktreeStatusPending,
+		Path:     path,
+		BranchID: branchID,
+		RepoID:   repoID,
+		Status:   WorktreeStatusPending,
 	}
 	if err := s.worktreeStore.Add(wt); err != nil {
 		return nil, err

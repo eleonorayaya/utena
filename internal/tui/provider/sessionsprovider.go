@@ -151,8 +151,8 @@ func (p sessionsProvider) deriveActiveWorkspace() tea.Cmd {
 			continue
 		}
 		var wid uint
-		if !s.IsMulti() && len(s.Worktrees) > 0 && s.Worktrees[0].Worktree != nil && s.Worktrees[0].Worktree.WorkspaceID != nil {
-			wid = *s.Worktrees[0].Worktree.WorkspaceID
+		if !s.IsMulti() && len(s.Worktrees) > 0 && s.Worktrees[0].Workspace != nil {
+			wid = s.Worktrees[0].Workspace.ID
 		}
 		return func() tea.Msg {
 			return setActiveWorkspaceMsg{workspaceID: wid}

@@ -34,38 +34,40 @@ func (s *SessionStore) loaded() *gorm.DB {
 }
 
 func (s *SessionStore) enrichWorkspaces(sessions []*Session) error {
-	idSet := make(map[uint]struct{})
+	repoSet := make(map[uint]struct{})
 	for _, sess := range sessions {
 		for i := range sess.Worktrees {
 			wt := sess.Worktrees[i].Worktree
-			if wt == nil || wt.WorkspaceID == nil || *wt.WorkspaceID == 0 {
+			if wt == nil || wt.RepoID == 0 {
 				continue
 			}
-			idSet[*wt.WorkspaceID] = struct{}{}
+			repoSet[wt.RepoID] = struct{}{}
 		}
 	}
-	if len(idSet) == 0 {
+	if len(repoSet) == 0 {
 		return nil
 	}
-	ids := make([]uint, 0, len(idSet))
-	for id := range idSet {
-		ids = append(ids, id)
+	repoIDs := make([]uint, 0, len(repoSet))
+	for id := range repoSet {
+		repoIDs = append(repoIDs, id)
 	}
 	var workspaces []workspace.Workspace
-	if err := s.db.Where("id IN ?", ids).Find(&workspaces).Error; err != nil {
+	if err := s.db.Where("repo_id IN ?", repoIDs).Find(&workspaces).Error; err != nil {
 		return err
 	}
-	byID := make(map[uint]*workspace.Workspace, len(workspaces))
+	byRepoID := make(map[uint]*workspace.Workspace, len(workspaces))
 	for i := range workspaces {
-		byID[workspaces[i].ID] = &workspaces[i]
+		if workspaces[i].RepoID != nil {
+			byRepoID[*workspaces[i].RepoID] = &workspaces[i]
+		}
 	}
 	for _, sess := range sessions {
 		for i := range sess.Worktrees {
 			wt := sess.Worktrees[i].Worktree
-			if wt == nil || wt.WorkspaceID == nil {
+			if wt == nil {
 				continue
 			}
-			if ws, ok := byID[*wt.WorkspaceID]; ok {
+			if ws, ok := byRepoID[wt.RepoID]; ok {
 				sess.Worktrees[i].Workspace = ws
 			}
 		}
@@ -105,7 +107,7 @@ func (s *SessionStore) List() ([]Session, error) {
 func (s *SessionStore) ListByWorkspace(workspaceID uint) ([]Session, error) {
 	var sessions []Session
 	if err := s.loaded().
-		Where("sessions.id IN (SELECT swt.session_id FROM session_worktrees swt JOIN worktrees wt ON swt.worktree_id = wt.id WHERE wt.workspace_id = ? AND swt.deleted_at IS NULL AND wt.deleted_at IS NULL)", workspaceID).
+		Where("sessions.id IN (SELECT swt.session_id FROM session_worktrees swt JOIN worktrees wt ON swt.worktree_id = wt.id JOIN workspaces ws ON ws.repo_id = wt.repo_id WHERE ws.id = ? AND swt.deleted_at IS NULL AND wt.deleted_at IS NULL AND ws.deleted_at IS NULL)", workspaceID).
 		Order("sessions.last_used_at DESC").
 		Find(&sessions).Error; err != nil {
 		return nil, err
@@ -192,7 +194,7 @@ func (s *SessionStore) Delete(id uint) error {
 func (s *SessionStore) GetByWorkspaceAndName(workspaceID uint, name string, excludeStatuses ...SessionStatus) (*Session, error) {
 	var session Session
 	q := s.db.Where(
-		"name = ? AND id IN (SELECT swt.session_id FROM session_worktrees swt JOIN worktrees wt ON swt.worktree_id = wt.id WHERE wt.workspace_id = ? AND swt.deleted_at IS NULL AND wt.deleted_at IS NULL)",
+		"name = ? AND id IN (SELECT swt.session_id FROM session_worktrees swt JOIN worktrees wt ON swt.worktree_id = wt.id JOIN workspaces ws ON ws.repo_id = wt.repo_id WHERE ws.id = ? AND swt.deleted_at IS NULL AND wt.deleted_at IS NULL AND ws.deleted_at IS NULL)",
 		name, workspaceID,
 	)
 	if len(excludeStatuses) > 0 {

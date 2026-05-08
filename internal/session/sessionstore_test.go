@@ -63,11 +63,10 @@ func attachTestWorktree(t *testing.T, database db.Database, swtStore *SessionWor
 	require.NoError(t, database.Create(branch).Error)
 
 	wt := &git.Worktree{
-		Path:        fmt.Sprintf("/tmp/utena-test-worktree-%d-%d", sessionID, position),
-		BranchID:    branch.ID,
-		RepoID:      repoID,
-		WorkspaceID: &wsID,
-		Status:      git.WorktreeStatusPending,
+		Path:     fmt.Sprintf("/tmp/utena-test-worktree-%d-%d", sessionID, position),
+		BranchID: branch.ID,
+		RepoID:   repoID,
+		Status:   git.WorktreeStatusPending,
 	}
 	require.NoError(t, database.Create(wt).Error)
 
@@ -85,12 +84,12 @@ func attachExistingWorktree(t *testing.T, database db.Database, swtStore *Sessio
 	if repoID == 0 && ws.RepoID != nil {
 		repoID = *ws.RepoID
 	}
+	_ = wsID
 	wt := &git.Worktree{
-		Path:        worktreePath,
-		BranchID:    branch.ID,
-		RepoID:      repoID,
-		WorkspaceID: &wsID,
-		Status:      git.WorktreeStatusPresent,
+		Path:     worktreePath,
+		BranchID: branch.ID,
+		RepoID:   repoID,
+		Status:   git.WorktreeStatusPresent,
 	}
 	require.NoError(t, database.Create(wt).Error)
 	require.NoError(t, swtStore.Add(&SessionWorktree{SessionID: sessionID, WorktreeID: wt.ID, Position: position}))

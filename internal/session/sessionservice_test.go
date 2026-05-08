@@ -603,13 +603,12 @@ func TestSessionService_ActivateSession_PendingPR_CreatesWorktree(t *testing.T) 
 		LastUsedAt:  time.Now(),
 	}
 	require.NoError(t, sessionStore.Add(pending))
-	wsIDPtr := wsGitID
+	_ = wsGitID
 	wt := &git.Worktree{
-		Path:        worktreePathPinned,
-		BranchID:    branch.ID,
-		RepoID:      repo.ID,
-		WorkspaceID: &wsIDPtr,
-		Status:      git.WorktreeStatusPending,
+		Path:     worktreePathPinned,
+		BranchID: branch.ID,
+		RepoID:   repo.ID,
+		Status:   git.WorktreeStatusPending,
 	}
 	require.NoError(t, gitDB.Create(wt).Error)
 	require.NoError(t, service.sessionWorktreeStore.Add(&SessionWorktree{SessionID: pending.ID, WorktreeID: wt.ID, Position: 0}))
