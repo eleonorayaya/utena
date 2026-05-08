@@ -613,6 +613,10 @@ func TestSessionService_ActivateSession_PendingPR_CreatesWorktree(t *testing.T) 
 	}
 	require.NoError(t, sessionStore.Add(pending))
 	require.NoError(t, service.sessionWorkspaceStore.Add(&SessionWorkspace{SessionID: pending.ID, WorkspaceID: wsGitID, BranchID: &branchID, WorktreePath: filepath.Join(repoPath, ".worktrees", "harleyk--catalog-docs"), Position: 0}))
+	tmuxRecord, err := service.tmuxService.RegisterPending(fmt.Sprintf("git-repo-%s", branchName), filepath.Join(repoPath, ".worktrees", "harleyk--catalog-docs"), nil)
+	require.NoError(t, err)
+	pending.TmuxSessionID = &tmuxRecord.ID
+	require.NoError(t, sessionStore.Update(pending))
 
 	ctx := context.Background()
 	result, err := service.ActivateSession(ctx, pending.ID)
@@ -640,6 +644,10 @@ func TestSessionService_ActivateSession_RecreatesMissingTmux(t *testing.T) {
 		LastUsedAt: time.Now(),
 	}
 	addTestSession(t, sessionStore, swStoreFor(service), session, ws1ID)
+	tmuxRecord, err := service.tmuxService.RegisterPending("utena-session-1", "/tmp/utena", nil)
+	require.NoError(t, err)
+	session.TmuxSessionID = &tmuxRecord.ID
+	require.NoError(t, sessionStore.Update(session))
 
 	ctx := context.Background()
 	result, err := service.ActivateSession(ctx, session.ID)

@@ -105,9 +105,50 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 		return nil
 	}
 	s.markOrphanedSessionsBroken(sessions)
+	s.backfillLegacyTmuxRecords(sessions)
 	s.recoverStuckCreatingSessions(sessions)
 	s.reconcileTmuxState(ctx, sessions)
 	return nil
+}
+
+func (s *SessionService) backfillLegacyTmuxRecords(sessions []Session) {
+	for i := range sessions {
+		sess := &sessions[i]
+		if sess.TmuxSessionID != nil {
+			continue
+		}
+		if sess.Status == StatusDeleted || sess.Status == StatusArchived {
+			continue
+		}
+		if len(sess.Workspaces) == 0 {
+			continue
+		}
+		var tmuxName, startDir string
+		if sess.IsMulti() {
+			tmuxName = SanitizeTmuxName(sess.Name)
+			startDir = sess.SessionRoot
+		} else {
+			ws := sess.Workspaces[0].Workspace
+			if ws == nil {
+				continue
+			}
+			tmuxName = BuildTmuxSessionName(ws.Name, sess.Name)
+			startDir = sess.SessionRoot
+			if startDir == "" {
+				startDir = sess.Workspaces[0].WorktreePath
+			}
+		}
+		env := map[string]string{envSessionID: fmt.Sprintf("%d", sess.ID)}
+		record, err := s.tmuxService.RegisterPending(tmuxName, startDir, env)
+		if err != nil {
+			slog.Warn("backfill: failed to register pending tmux record", "session", sess.ID, "error", err)
+			continue
+		}
+		sess.TmuxSessionID = &record.ID
+		if err := s.store.Update(sess); err != nil {
+			slog.Warn("backfill: failed to persist tmux session id", "session", sess.ID, "error", err)
+		}
+	}
 }
 
 func (s *SessionService) markOrphanedSessionsBroken(sessions []Session) {
@@ -690,20 +731,10 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 
 	s.ensureSessionWorktrees(ctx, session)
 
-	tmuxName := ""
-	if session.TmuxSessionID != nil {
-		ts, tsErr := s.tmuxService.GetSession(*session.TmuxSessionID)
-		if tsErr == nil {
-			tmuxName = ts.Name
-		}
+	if session.TmuxSession == nil {
+		return nil, fmt.Errorf("session has no tmux record; please repair")
 	}
-	if tmuxName == "" {
-		var ws *workspace.Workspace
-		if !session.IsMulti() && len(session.Workspaces) > 0 {
-			ws = session.Workspaces[0].Workspace
-		}
-		tmuxName = s.computeTmuxName(session, ws)
-	}
+	tmuxName := session.TmuxSession.Name
 
 	if !s.tmuxService.HasSession(tmuxName) {
 		startDir := session.SessionRoot
@@ -828,13 +859,6 @@ func (s *SessionService) cleanupSessionBranches(ctx context.Context, session *Se
 			slog.Warn("failed to cleanup branch", "workspace_id", sw.WorkspaceID, "error", err)
 		}
 	}
-}
-
-func (s *SessionService) computeTmuxName(sess *Session, ws *workspace.Workspace) string {
-	if ws != nil {
-		return BuildTmuxSessionName(ws.Name, sess.Name)
-	}
-	return SanitizeTmuxName(sess.Name)
 }
 
 func (s *SessionService) nameFromBranch(branchName string) string {
