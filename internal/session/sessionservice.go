@@ -13,11 +13,13 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/claudesettings"
 	"github.com/eleonorayaya/utena/internal/common"
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	slogctx "github.com/veqryn/slog-context"
+	"gorm.io/gorm"
 )
 
 type SetupWarning struct{ Message string }
@@ -393,7 +395,8 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, wo
 // eagerCreateWorktree resolves the repo for the workspace, finds-or-creates the
 // branch record, and creates a Worktree record in pending status plus the
 // SessionWorktree junction row. It is idempotent: if the worktree record
-// already exists for the branch, it is reused (Status preserved).
+// already exists for the branch, it is reused (Status preserved); a duplicate
+// SessionWorktree row is silently ignored.
 func (s *SessionService) eagerCreateWorktree(ctx context.Context, sessionID uint, ws *workspace.Workspace, branchName string, worktreePath string, position int) error {
 	if branchName == "" {
 		return fmt.Errorf("branch name is required")
@@ -417,7 +420,11 @@ func (s *SessionService) eagerCreateWorktree(ctx context.Context, sessionID uint
 		Position:   position,
 	}
 	if err := s.sessionWorktreeStore.Add(swt); err != nil {
-		return fmt.Errorf("add session-worktree junction: %w", err)
+		// duplicate junction rows are expected on repair / re-entry — surface
+		// only unexpected failures
+		if !errors.Is(err, gorm.ErrDuplicatedKey) && !db.IsUniqueConstraintError(err) {
+			return fmt.Errorf("add session-worktree junction: %w", err)
+		}
 	}
 	return nil
 }
@@ -434,6 +441,38 @@ func (s *SessionService) lookupBranchID(ctx context.Context, ws *workspace.Works
 		return nil, err
 	}
 	return &branch.ID, nil
+}
+
+// materializeWorktreesFromLegacy creates SessionWorktree+Worktree records for a
+// session that only carries SessionWorkspace data — used when runSetup is
+// invoked for a session whose backfill has not yet run (typically tests that
+// build sessions by hand without going through CreateSession).
+func (s *SessionService) materializeWorktreesFromLegacy(ctx context.Context, sess *Session, finalBranchName string) error {
+	if len(sess.Workspaces) == 0 {
+		return fmt.Errorf("session has neither SessionWorktree nor SessionWorkspace rows")
+	}
+	for i := range sess.Workspaces {
+		sw := &sess.Workspaces[i]
+		ws := sw.Workspace
+		if ws == nil {
+			continue
+		}
+		branchName := finalBranchName
+		if branchName == "" && sw.GitBranch != nil {
+			branchName = sw.GitBranch.Name
+		}
+		if branchName == "" {
+			continue
+		}
+		path := sw.WorktreePath
+		if path == "" {
+			path = s.gitService.WorktreePath(ws.Path, branchName)
+		}
+		if err := s.eagerCreateWorktree(ctx, sess.ID, ws, branchName, path, sw.Position); err != nil {
+			return fmt.Errorf("eager create for workspace %d: %w", ws.ID, err)
+		}
+	}
+	return nil
 }
 
 // syncLegacyJunction backfills the SessionWorkspace junction for a given
@@ -582,8 +621,24 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, branchName st
 	}
 
 	if len(sess.Worktrees) == 0 {
-		markBroken("missing worktrees", fmt.Errorf("session %d has no SessionWorktree rows", sess.ID))
-		return
+		if err := s.materializeWorktreesFromLegacy(ctx, sess, finalBranchName); err != nil {
+			markBroken("materialize worktrees", err)
+			return
+		}
+		refreshed, err := s.store.GetByID(sess.ID)
+		if err != nil {
+			markBroken("reload session", err)
+			return
+		}
+		// Preserve the in-memory state we have already mutated (Status, etc).
+		refreshed.Status = sess.Status
+		refreshed.StatusError = sess.StatusError
+		refreshed.TmuxSessionID = sess.TmuxSessionID
+		sess = refreshed
+		if len(sess.Worktrees) == 0 {
+			markBroken("missing worktrees", fmt.Errorf("session %d has no SessionWorktree rows after materialize", sess.ID))
+			return
+		}
 	}
 
 	for i := range sess.Worktrees {
