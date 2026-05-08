@@ -258,6 +258,22 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, wo
 		}
 	}
 
+	finalBranchName := branchName
+	if baseBranchName != "" {
+		finalBranchName = s.branchPrefix + session.Name
+	}
+	startDir := s.gitService.WorktreePath(ws.Path, finalBranchName)
+	env := map[string]string{envSessionID: fmt.Sprintf("%d", session.ID)}
+	tmuxRecord, err := s.tmuxService.RegisterPending(tmuxName, startDir, env)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to register pending tmux record", "session", session.ID, "tmux", tmuxName, "error", err)
+	} else {
+		session.TmuxSessionID = &tmuxRecord.ID
+		if err := s.store.Update(session); err != nil {
+			slog.WarnContext(ctx, "failed to persist tmux session id", "session", session.ID, "error", err)
+		}
+	}
+
 	if err := s.workspaceService.Touch(ctx, ws.ID); err != nil {
 		slog.Warn("failed to touch workspace last-used timestamp", "workspace", ws.ID, "error", err)
 	}
@@ -453,22 +469,39 @@ func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *w
 }
 
 func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string, sessionRoot string) error {
-	if s.tmuxService.HasSession(tmuxName) {
-		if sess.TmuxSessionID == nil {
-			if ts, err := s.tmuxService.GetSessionByName(tmuxName); err == nil {
-				sess.TmuxSessionID = &ts.ID
+	if sess.TmuxSessionID != nil {
+		record, err := s.tmuxService.GetSession(*sess.TmuxSessionID)
+		if err != nil {
+			return fmt.Errorf("failed to load tmux record: %v", err)
+		}
+		isFirstSpawn := record.Status == utmux.TmuxStatusPending
+
+		if s.tmuxService.HasSession(tmuxName) {
+			slog.InfoContext(ctx, "setup tmux: reusing existing tmux process", "tmux", tmuxName)
+			if _, err := tracedOp(ctx, "tmux spawn-for-record", func() (*utmux.TmuxSession, error) {
+				return s.tmuxService.SpawnForRecord(record.ID)
+			}, "tmux", tmuxName, "tmux_id", record.ID); err != nil {
+				return fmt.Errorf("failed to mark tmux active: %v", err)
+			}
+		} else {
+			if _, err := tracedOp(ctx, "tmux spawn-for-record", func() (*utmux.TmuxSession, error) {
+				return s.tmuxService.SpawnForRecord(record.ID)
+			}, "tmux", tmuxName, "tmux_id", record.ID); err != nil {
+				return fmt.Errorf("failed to spawn tmux session: %v", err)
 			}
 		}
-		slog.InfoContext(ctx, "setup tmux: reusing existing session", "tmux", tmuxName)
+
+		if isFirstSpawn {
+			s.dispatchOnCreateActions(ctx, sess, tmuxName, record.StartDir)
+		}
 		return nil
 	}
 
-	if sess.TmuxSessionID != nil {
-		if err := traceOp(ctx, "tmux recreate-session", func() error {
-			return s.tmuxService.RecreateSession(*sess.TmuxSessionID)
-		}, "tmux", tmuxName, "tmux_id", *sess.TmuxSessionID); err != nil {
-			return fmt.Errorf("failed to recreate tmux session: %v", err)
+	if s.tmuxService.HasSession(tmuxName) {
+		if ts, err := s.tmuxService.GetSessionByName(tmuxName); err == nil {
+			sess.TmuxSessionID = &ts.ID
 		}
+		slog.InfoContext(ctx, "setup tmux: reusing existing session", "tmux", tmuxName)
 		return nil
 	}
 
@@ -490,15 +523,23 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName 
 			return fmt.Errorf("failed to create tmux session: %v", err)
 		}
 	} else {
-		if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate); err != nil {
-			slog.Warn("failed to load session actions", "session", sess.ID, "error", err)
-		} else if len(actions) > 0 {
-			slog.InfoContext(ctx, "setup tmux: dispatching on-create actions", "tmux", tmuxName, "count", len(actions))
-			go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
-		}
+		s.dispatchOnCreateActions(ctx, sess, tmuxName, startDir)
 	}
 	sess.TmuxSessionID = &ts.ID
 	return nil
+}
+
+func (s *SessionService) dispatchOnCreateActions(ctx context.Context, sess *Session, tmuxName, startDir string) {
+	actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to load session actions", "session", sess.ID, "error", err)
+		return
+	}
+	if len(actions) == 0 {
+		return
+	}
+	slog.InfoContext(ctx, "setup tmux: dispatching on-create actions", "tmux", tmuxName, "count", len(actions))
+	go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
 }
 
 func (s *SessionService) setupWorktreeInit(ctx context.Context, sess *Session, ws *workspace.Workspace, worktreeCreated bool, worktreePath string, branchName string, baseBranchName string) error {
@@ -985,7 +1026,7 @@ func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Sessio
 	if sess.TmuxSessionID != nil {
 		ts, tsErr := s.tmuxService.GetSession(*sess.TmuxSessionID)
 		if tsErr == nil {
-			tmuxAlive = ts.IsAlive
+			tmuxAlive = ts.Status == utmux.TmuxStatusActive
 		}
 	}
 

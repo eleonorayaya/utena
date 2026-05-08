@@ -36,11 +36,76 @@ func NewTmuxService(runner tmuxRunner, store *TmuxStore, bus eventbus.EventBus) 
 }
 
 func (t *TmuxService) OnAppStart(ctx context.Context) error {
+	if err := t.store.BackfillStatus(); err != nil {
+		slog.WarnContext(ctx, "tmux: backfill status from is_alive failed", "error", err)
+	}
 	return nil
 }
 
 func (t *TmuxService) OnAppEnd(ctx context.Context) error {
 	return nil
+}
+
+// RegisterPending inserts a TmuxSession record in the pending state without
+// spawning a tmux process. It is idempotent: if a record with that name already
+// exists in pending or inactive status, the existing record is returned. If a
+// record exists in active status, ErrTmuxSessionAlreadyExists is returned —
+// the caller should not be re-registering an active session.
+func (t *TmuxService) RegisterPending(name, startDir string, env map[string]string) (*TmuxSession, error) {
+	defer t.lockName(name)()
+	if existing, err := t.store.GetByName(name); err == nil {
+		if existing.Status == TmuxStatusActive {
+			return nil, ErrTmuxSessionAlreadyExists
+		}
+		return existing, nil
+	} else if !errors.Is(err, ErrTmuxSessionNotFound) {
+		return nil, err
+	}
+	ts := &TmuxSession{
+		Name:     name,
+		StartDir: startDir,
+		Env:      env,
+		Status:   TmuxStatusPending,
+	}
+	if err := t.store.Add(ts); err != nil {
+		if errors.Is(err, ErrTmuxSessionAlreadyExists) {
+			existing, getErr := t.store.GetByName(name)
+			if getErr != nil {
+				return nil, getErr
+			}
+			if existing.Status == TmuxStatusActive {
+				return nil, ErrTmuxSessionAlreadyExists
+			}
+			return existing, nil
+		}
+		return nil, err
+	}
+	return ts, nil
+}
+
+// SpawnForRecord spawns the tmux process for an existing record and transitions
+// it to active. The runner-newSession failure does not delete the record —
+// callers can retry. Idempotent for the (rare) case the tmux session already
+// exists by name: the record is just transitioned to active.
+func (t *TmuxService) SpawnForRecord(id uint) (*TmuxSession, error) {
+	if t.runner == nil {
+		return nil, ErrTmuxNotAvailable
+	}
+	ts, err := t.store.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	defer t.lockName(ts.Name)()
+	if !t.runner.hasSession(ts.Name) {
+		if err := t.runner.newSession(ts.Name, ts.StartDir, ts.Env); err != nil {
+			return nil, err
+		}
+	}
+	ts.Status = TmuxStatusActive
+	if err := t.store.Update(ts); err != nil {
+		return nil, err
+	}
+	return ts, nil
 }
 
 func (t *TmuxService) CreateSession(name, startDir string, env map[string]string) (*TmuxSession, error) {
@@ -55,7 +120,7 @@ func (t *TmuxService) CreateSession(name, startDir string, env map[string]string
 		Name:     name,
 		StartDir: startDir,
 		Env:      env,
-		IsAlive:  true,
+		Status:   TmuxStatusActive,
 	}
 	if err := t.store.Add(ts); err != nil {
 		if !errors.Is(err, ErrTmuxSessionAlreadyExists) {
@@ -67,7 +132,7 @@ func (t *TmuxService) CreateSession(name, startDir string, env map[string]string
 		}
 		existing.StartDir = startDir
 		existing.Env = env
-		existing.IsAlive = true
+		existing.Status = TmuxStatusActive
 		if updateErr := t.store.Update(existing); updateErr != nil {
 			return nil, updateErr
 		}
@@ -88,7 +153,7 @@ func (t *TmuxService) KillSession(id uint) error {
 	if err := t.runner.killSession(ts.Name); err != nil {
 		return err
 	}
-	ts.IsAlive = false
+	ts.Status = TmuxStatusInactive
 	return t.store.Update(ts)
 }
 
@@ -107,7 +172,7 @@ func (t *TmuxService) KillSessionByName(name string) error {
 		}
 		return err
 	}
-	ts.IsAlive = false
+	ts.Status = TmuxStatusInactive
 	return t.store.Update(ts)
 }
 
@@ -123,7 +188,7 @@ func (t *TmuxService) RecreateSession(id uint) error {
 	if err := t.runner.newSession(ts.Name, ts.StartDir, ts.Env); err != nil {
 		return err
 	}
-	ts.IsAlive = true
+	ts.Status = TmuxStatusActive
 	return t.store.Update(ts)
 }
 
@@ -174,7 +239,7 @@ func (t *TmuxService) GetOrTrackSession(name, startDir string, env map[string]st
 	if !errors.Is(err, ErrTmuxSessionNotFound) {
 		return nil, err
 	}
-	ts = &TmuxSession{Name: name, StartDir: startDir, Env: env, IsAlive: true}
+	ts = &TmuxSession{Name: name, StartDir: startDir, Env: env, Status: TmuxStatusActive}
 	if err := t.store.Add(ts); err != nil {
 		return nil, err
 	}
@@ -191,9 +256,9 @@ func (t *TmuxService) ListSessionNames() ([]string, error) {
 func (t *TmuxService) HandleSessionCreated(ctx context.Context, tmuxName string) error {
 	ts, err := t.store.GetByName(tmuxName)
 	if err == nil {
-		ts.IsAlive = true
+		ts.Status = TmuxStatusActive
 		if updateErr := t.store.Update(ts); updateErr != nil {
-			slog.Warn("failed to mark tmux session alive", "tmux", tmuxName, "error", updateErr)
+			slog.Warn("failed to mark tmux session active", "tmux", tmuxName, "error", updateErr)
 		}
 	}
 	return t.eventBus.Publish(ctx, eventbus.Event{
@@ -205,9 +270,9 @@ func (t *TmuxService) HandleSessionCreated(ctx context.Context, tmuxName string)
 func (t *TmuxService) HandleSessionClosed(ctx context.Context, tmuxName string) error {
 	ts, err := t.store.GetByName(tmuxName)
 	if err == nil {
-		ts.IsAlive = false
+		ts.Status = TmuxStatusInactive
 		if updateErr := t.store.Update(ts); updateErr != nil {
-			slog.Warn("failed to mark tmux session dead", "tmux", tmuxName, "error", updateErr)
+			slog.Warn("failed to mark tmux session inactive", "tmux", tmuxName, "error", updateErr)
 		}
 	}
 	delete(t.windowsBySession, tmuxName)

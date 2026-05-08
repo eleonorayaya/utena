@@ -326,7 +326,7 @@ func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *u
 	branch := &git.Branch{Name: "feature-x", RepoID: repo.ID, ExistsLocal: true}
 	database.Create(branch)
 
-	ts := &utmux.TmuxSession{Name: "utena-feature-x", StartDir: "/tmp/utena", IsAlive: true}
+	ts := &utmux.TmuxSession{Name: "utena-feature-x", StartDir: "/tmp/utena", Status: utmux.TmuxStatusActive}
 	database.Create(ts)
 
 	return database, ws.ID, branch, ts
@@ -352,7 +352,7 @@ func TestSessionStore_GetByID_LoadsGitBranchAndTmuxSession(t *testing.T) {
 	require.Equal(t, "feature-x", retrieved.GitBranch.Name)
 	require.NotNil(t, retrieved.TmuxSession)
 	require.Equal(t, "utena-feature-x", retrieved.TmuxSession.Name)
-	require.True(t, retrieved.TmuxSession.IsAlive)
+	require.Equal(t, utmux.TmuxStatusActive, retrieved.TmuxSession.Status)
 }
 
 func TestSessionStore_GetByBranchID(t *testing.T) {

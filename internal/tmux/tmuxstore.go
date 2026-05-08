@@ -79,6 +79,30 @@ func (s *TmuxStore) Update(session *TmuxSession) error {
 	return s.db.Save(session).Error
 }
 
+// BackfillStatus migrates legacy rows: any TmuxSession that has no Status set
+// (older schema where IsAlive bool was the source of truth) is updated using
+// the orphan is_alive column when present. Safe to run on fresh tables (the
+// is_alive column may not exist; we tolerate the error).
+func (s *TmuxStore) BackfillStatus() error {
+	hasIsAlive := false
+	if err := s.db.Exec("SELECT is_alive FROM tmux_sessions LIMIT 1").Error; err == nil {
+		hasIsAlive = true
+	}
+	if hasIsAlive {
+		if err := s.db.Exec(
+			"UPDATE tmux_sessions SET status = CASE WHEN is_alive THEN ? ELSE ? END WHERE status IS NULL OR status = ''",
+			string(TmuxStatusActive), string(TmuxStatusInactive),
+		).Error; err != nil {
+			return err
+		}
+		return nil
+	}
+	return s.db.Exec(
+		"UPDATE tmux_sessions SET status = ? WHERE status IS NULL OR status = ''",
+		string(TmuxStatusInactive),
+	).Error
+}
+
 func (s *TmuxStore) Delete(id uint) error {
 	if id == 0 {
 		return errors.New("tmux session ID cannot be zero")

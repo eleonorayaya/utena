@@ -11,11 +11,19 @@ var (
 	ErrTmuxSessionAlreadyExists = errors.New("tmux session already exists")
 )
 
+type TmuxSessionStatus string
+
+const (
+	TmuxStatusPending  TmuxSessionStatus = "pending"
+	TmuxStatusActive   TmuxSessionStatus = "active"
+	TmuxStatusInactive TmuxSessionStatus = "inactive"
+)
+
 type TmuxSession struct {
 	gorm.Model
 	Name     string            `json:"name" gorm:"uniqueIndex"`
 	StartDir string            `json:"start_dir"`
 	Env      map[string]string `json:"env" gorm:"serializer:json"`
-	IsAlive  bool              `json:"is_alive"`
+	Status   TmuxSessionStatus `json:"status" gorm:"index"`
 	Windows  []Window          `json:"windows,omitempty" gorm:"-"`
 }

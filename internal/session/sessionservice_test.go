@@ -398,6 +398,36 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	require.True(t, info.IsDir())
 
 	require.True(t, mock.HasSessionByName("git-repo-my-feature"))
+
+	finalSess, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+	require.NotNil(t, finalSess.TmuxSessionID)
+	require.NotNil(t, finalSess.TmuxSession)
+	require.Equal(t, "git-repo-my-feature", finalSess.TmuxSession.Name)
+	require.Equal(t, utmux.TmuxStatusActive, finalSess.TmuxSession.Status)
+}
+
+func TestSessionService_CreateSession_EagerlyRegistersPendingTmuxRecord(t *testing.T) {
+	repoPath := initTestRepo(t)
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+
+	prev := service.setupTimeout
+	service.setupTimeout = 1 * time.Nanosecond
+	defer func() { service.setupTimeout = prev }()
+
+	session := &Session{
+		Name:        "eager",
+		WorkspaceID: wsGitID,
+	}
+
+	ctx := context.Background()
+	require.NoError(t, service.CreateSession(ctx, session, wsGitID, "main", ""))
+
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved.TmuxSessionID, "TmuxSessionID should be linked synchronously by CreateSession")
+	require.NotNil(t, retrieved.TmuxSession)
+	require.Equal(t, "git-repo-eager", retrieved.TmuxSession.Name)
 }
 
 func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testing.T) {
@@ -653,7 +683,7 @@ func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 	swStore := NewSessionWorkspaceStore(database)
 	service := NewSessionService(sessionStore, swStore, NewDismissedPRStore(database), NewSessionActionStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
 
-	ts := &utmux.TmuxSession{Name: "utena-session-1", StartDir: "/tmp/utena", IsAlive: true}
+	ts := &utmux.TmuxSession{Name: "utena-session-1", StartDir: "/tmp/utena", Status: utmux.TmuxStatusActive}
 	require.NoError(t, database.Create(ts).Error)
 	session := &Session{
 		Name:          "session-1",

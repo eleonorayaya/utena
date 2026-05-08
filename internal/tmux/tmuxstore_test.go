@@ -22,7 +22,7 @@ func TestAddAndGetByID(t *testing.T) {
 		Name:     "dev",
 		StartDir: "/home/user/dev",
 		Env:      map[string]string{"TERM": "xterm"},
-		IsAlive:  true,
+		Status:   TmuxStatusActive,
 	}
 	require.NoError(t, store.Add(session))
 	assert.NotZero(t, session.ID)
@@ -31,7 +31,7 @@ func TestAddAndGetByID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "dev", got.Name)
 	assert.Equal(t, "/home/user/dev", got.StartDir)
-	assert.True(t, got.IsAlive)
+	assert.Equal(t, TmuxStatusActive, got.Status)
 	assert.Equal(t, map[string]string{"TERM": "xterm"}, got.Env)
 }
 
@@ -58,19 +58,19 @@ func TestNameUniqueness(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrTmuxSessionAlreadyExists))
 }
 
-func TestUpdateIsAlive(t *testing.T) {
+func TestUpdateStatus(t *testing.T) {
 	database := setupTestDB(t)
 	store := NewTmuxStore(database)
 
-	session := &TmuxSession{Name: "sess", IsAlive: false}
+	session := &TmuxSession{Name: "sess", Status: TmuxStatusInactive}
 	require.NoError(t, store.Add(session))
 
-	session.IsAlive = true
+	session.Status = TmuxStatusActive
 	require.NoError(t, store.Update(session))
 
 	got, err := store.GetByID(session.ID)
 	require.NoError(t, err)
-	assert.True(t, got.IsAlive)
+	assert.Equal(t, TmuxStatusActive, got.Status)
 }
 
 func TestEnvJSONRoundTrip(t *testing.T) {

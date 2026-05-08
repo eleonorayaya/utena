@@ -1,12 +1,14 @@
 package tmux
 
 import (
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -109,4 +111,90 @@ func TestTmuxService_ConcurrentKillCreateNoOverlap(t *testing.T) {
 
 	require.Equal(t, int32(1), atomic.LoadInt32(&maxInFlight),
 		"per-name lock should keep at most one tmux op in flight for the same name")
+}
+
+func newTestService(t *testing.T) *TmuxService {
+	t.Helper()
+	database := testdb.New(t, &TmuxSession{})
+	store := NewTmuxStore(database)
+	return NewTmuxService(NewMockRunner(), store, eventbus.NewEventBus())
+}
+
+func TestTmuxService_RegisterPending_CreatesPendingRecord(t *testing.T) {
+	svc := newTestService(t)
+
+	ts, err := svc.RegisterPending("name", "/start", map[string]string{"FOO": "bar"})
+	require.NoError(t, err)
+	assert.Equal(t, "name", ts.Name)
+	assert.Equal(t, "/start", ts.StartDir)
+	assert.Equal(t, TmuxStatusPending, ts.Status)
+	assert.Equal(t, "bar", ts.Env["FOO"])
+}
+
+func TestTmuxService_RegisterPending_IdempotentOnPending(t *testing.T) {
+	svc := newTestService(t)
+
+	first, err := svc.RegisterPending("name", "/start", nil)
+	require.NoError(t, err)
+
+	second, err := svc.RegisterPending("name", "/different", nil)
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, second.ID)
+	assert.Equal(t, "/start", second.StartDir, "RegisterPending must not mutate StartDir on retry")
+}
+
+func TestTmuxService_RegisterPending_IdempotentOnInactive(t *testing.T) {
+	svc := newTestService(t)
+
+	first, err := svc.RegisterPending("name", "/start", nil)
+	require.NoError(t, err)
+
+	first.Status = TmuxStatusInactive
+	require.NoError(t, svc.store.Update(first))
+
+	second, err := svc.RegisterPending("name", "/start", nil)
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, second.ID)
+	assert.Equal(t, TmuxStatusInactive, second.Status, "RegisterPending must not flip an inactive record back to pending")
+}
+
+func TestTmuxService_RegisterPending_RejectsActive(t *testing.T) {
+	svc := newTestService(t)
+
+	first, err := svc.RegisterPending("name", "/start", nil)
+	require.NoError(t, err)
+
+	first.Status = TmuxStatusActive
+	require.NoError(t, svc.store.Update(first))
+
+	_, err = svc.RegisterPending("name", "/start", nil)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTmuxSessionAlreadyExists))
+}
+
+func TestTmuxService_SpawnForRecord_TransitionsPendingToActive(t *testing.T) {
+	svc := newTestService(t)
+
+	ts, err := svc.RegisterPending("name", "/start", nil)
+	require.NoError(t, err)
+
+	spawned, err := svc.SpawnForRecord(ts.ID)
+	require.NoError(t, err)
+	assert.Equal(t, TmuxStatusActive, spawned.Status)
+
+	mock := svc.runner.(*MockRunner)
+	assert.True(t, mock.HasSessionByName("name"))
+}
+
+func TestTmuxService_SpawnForRecord_DoubleSpawnIsSafe(t *testing.T) {
+	svc := newTestService(t)
+
+	ts, err := svc.RegisterPending("name", "/start", nil)
+	require.NoError(t, err)
+
+	_, err = svc.SpawnForRecord(ts.ID)
+	require.NoError(t, err)
+
+	_, err = svc.SpawnForRecord(ts.ID)
+	require.NoError(t, err, "spawn should be idempotent if tmux process already exists by name")
 }

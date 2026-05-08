@@ -154,6 +154,17 @@ func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMul
 		}
 	}
 
+	tmuxEnv := map[string]string{envSessionID: fmt.Sprintf("%d", sess.ID)}
+	tmuxRecord, err := s.tmuxService.RegisterPending(tmuxName, sessionRoot, tmuxEnv)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to register pending tmux record", "session", sess.ID, "tmux", tmuxName, "error", err)
+	} else {
+		sess.TmuxSessionID = &tmuxRecord.ID
+		if err := s.store.Update(sess); err != nil {
+			slog.WarnContext(ctx, "failed to persist tmux session id", "session", sess.ID, "error", err)
+		}
+	}
+
 	for _, w := range slots {
 		if err := s.workspaceService.Touch(ctx, w.workspace.ID); err != nil {
 			slog.WarnContext(ctx, "failed to touch workspace last-used timestamp", "workspace", w.workspace.ID, "error", err)
