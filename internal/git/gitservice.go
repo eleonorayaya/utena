@@ -76,10 +76,6 @@ func (s *GitService) Fetch(ctx context.Context, repoPath string, branch string) 
 	return s.cli.fetch(ctx, repoPath, branch)
 }
 
-func (s *GitService) SetupWorktree(ctx context.Context, repoPath string, branchName string, baseBranch string, branchID uint, repoID uint) (bool, string, error) {
-	return s.SetupWorktreeAt(ctx, repoPath, branchName, baseBranch, branchID, repoID, "")
-}
-
 func (s *GitService) SetupWorktreeAt(ctx context.Context, repoPath string, branchName string, baseBranch string, branchID uint, repoID uint, destPath string) (bool, string, error) {
 	creatingNew := baseBranch != ""
 
@@ -259,38 +255,6 @@ func (s *GitService) GetBranch(id uint) (*Branch, error) {
 
 func (s *GitService) ListBranchesByRepo(repoID uint) []Branch {
 	return s.branchStore.ListByRepo(repoID)
-}
-
-func (s *GitService) EnsureWorktree(ctx context.Context, branch *Branch, repoPath string) (string, error) {
-	existing, err := s.worktreeStore.GetByBranchID(branch.ID)
-	if err == nil {
-		return existing.Path, nil
-	}
-	if !errors.Is(err, ErrWorktreeNotFound) {
-		return "", fmt.Errorf("failed to check existing worktree: %w", err)
-	}
-
-	if branch.ExistsRemote {
-		if err := s.cli.pull(ctx, repoPath, branch.Name); err != nil {
-			slog.Warn("failed to pull branch before worktree checkout", "branch", branch.Name, "error", err)
-		}
-	}
-
-	wtPath, err := s.cli.checkoutWorktree(ctx, repoPath, branch.Name, "")
-	if err != nil {
-		return "", err
-	}
-
-	wt := &Worktree{
-		Path:     wtPath,
-		BranchID: branch.ID,
-		RepoID:   branch.RepoID,
-	}
-	if err := s.worktreeStore.Add(wt); err != nil {
-		return "", err
-	}
-
-	return wtPath, nil
 }
 
 func (s *GitService) GetStartDir(branch *Branch, repoPath string) string {

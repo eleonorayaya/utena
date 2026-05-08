@@ -7,14 +7,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/eleonorayaya/utena/internal/claudesettings"
 	"github.com/eleonorayaya/utena/internal/common"
-	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/workspace"
-	slogctx "github.com/veqryn/slog-context"
 )
 
 type CreateMultiSessionInput struct {
@@ -27,9 +23,8 @@ type CreateMultiSessionInput struct {
 }
 
 type multiSlot struct {
-	workspace  *workspace.Workspace
-	subdirName string
-	destPath   string
+	workspace *workspace.Workspace
+	destPath  string
 }
 
 func (s *SessionService) resolveRepoID(ctx context.Context, ws *workspace.Workspace) (uint, error) {
@@ -100,7 +95,6 @@ func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMul
 			suffix++
 		}
 		usedSubdirs[name] = struct{}{}
-		slots[i].subdirName = name
 		slots[i].destPath = filepath.Join(sessionRoot, name)
 	}
 
@@ -134,9 +128,10 @@ func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMul
 
 	for i, w := range slots {
 		sw := &SessionWorkspace{
-			SessionID:   sess.ID,
-			WorkspaceID: w.workspace.ID,
-			Position:    i,
+			SessionID:    sess.ID,
+			WorkspaceID:  w.workspace.ID,
+			WorktreePath: w.destPath,
+			Position:     i,
 		}
 		if err := s.sessionWorkspaceStore.Add(sw); err != nil {
 			if delErr := s.store.Delete(sess.ID); delErr != nil {
@@ -171,255 +166,7 @@ func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMul
 		}
 	}
 
-	go s.runMultiSetup(sess.ID, slots, sessionRoot, tmuxName, input.Branch, input.BaseBranch)
+	go s.runSetup(sess.ID, tmuxName, input.Branch, input.BaseBranch)
 
 	return sess, nil
-}
-
-func (s *SessionService) runMultiSetup(sessionID uint, slots []multiSlot, sessionRoot, tmuxName, branchName, baseBranchName string) {
-	ctx, cancel := context.WithTimeout(context.Background(), s.setupTimeout)
-	defer cancel()
-
-	sess, err := s.store.GetByID(sessionID)
-	if err != nil {
-		slog.Error("runMultiSetup: failed to load session", "id", sessionID, "error", err)
-		return
-	}
-
-	ctx = slogctx.Append(ctx,
-		"session", sess.ID,
-		"branch", branchName,
-		"base_branch", baseBranchName,
-		"session_root", sessionRoot,
-		"workspace_count", len(slots),
-	)
-	slog.InfoContext(ctx, "multi-workspace session setup: start", "tmux", tmuxName, "timeout", s.setupTimeout)
-	setupStart := time.Now()
-	defer func() {
-		slog.InfoContext(ctx, "multi-workspace session setup: done", "status", sess.Status, "duration_ms", time.Since(setupStart).Milliseconds())
-	}()
-
-	type slotResult struct {
-		slot         multiSlot
-		branch       *git.Branch
-		worktreePath string
-	}
-	var done []slotResult
-	rollback := func() {
-		for i := len(done) - 1; i >= 0; i-- {
-			r := done[i]
-			if r.worktreePath == "" {
-				continue
-			}
-			if err := s.gitService.RemoveWorktree(ctx, r.slot.workspace.Path, r.worktreePath); err != nil {
-				slog.WarnContext(ctx, "rollback: failed to remove worktree", "workspace", r.slot.workspace.Name, "path", r.worktreePath, "error", err)
-			}
-		}
-		if err := os.RemoveAll(sessionRoot); err != nil {
-			slog.WarnContext(ctx, "rollback: failed to remove session root", "path", sessionRoot, "error", err)
-		}
-	}
-
-	markBroken := func(stage string, w *workspace.Workspace, err error) {
-		var msg string
-		switch {
-		case errors.Is(ctx.Err(), context.DeadlineExceeded):
-			msg = fmt.Sprintf("%s timed out after %s (workspace %q)", stage, s.setupTimeout, w.Name)
-		default:
-			msg = fmt.Sprintf("%s failed for workspace %q: %v", stage, w.Name, err)
-		}
-		rollback()
-		if updateErr := s.markSessionBroken(sess, msg); updateErr != nil {
-			slog.ErrorContext(ctx, "failed to persist broken status", "stage", stage, "error", updateErr)
-		}
-	}
-
-	junctionRows, err := s.sessionWorkspaceStore.ListBySessionID(sess.ID)
-	if err != nil {
-		markBroken("load junction rows", slots[0].workspace, err)
-		return
-	}
-	junctionByWorkspaceID := map[uint]*SessionWorkspace{}
-	for i := range junctionRows {
-		junctionByWorkspaceID[junctionRows[i].WorkspaceID] = &junctionRows[i]
-	}
-
-	creatingNew := baseBranchName != ""
-	finalBranchName := branchName
-	if creatingNew {
-		finalBranchName = s.branchPrefix + sess.Name
-	}
-
-	var setupWarnings []string
-
-	for _, slot := range slots {
-		ws := slot.workspace
-		if err := s.setupBranch(ctx, ws, branchName, baseBranchName); err != nil {
-			var w SetupWarning
-			if errors.As(err, &w) {
-				setupWarnings = append(setupWarnings, fmt.Sprintf("%s: %s", ws.Name, w.Message))
-			} else {
-				markBroken("branch setup", ws, err)
-				return
-			}
-		}
-
-		repoID, err := s.resolveRepoID(ctx, ws)
-		if err != nil {
-			markBroken("repo lookup", ws, err)
-			return
-		}
-
-		branch, err := tracedOp(ctx, "find-or-create-branch", func() (*git.Branch, error) {
-			return s.gitService.FindOrCreateBranch(ctx, finalBranchName, repoID)
-		}, "name", finalBranchName, "ws", ws.Name)
-		if err != nil {
-			markBroken("find-or-create-branch", ws, err)
-			return
-		}
-
-		var wtPath string
-		_, wtPath, err = s.gitService.SetupWorktreeAt(ctx, ws.Path, finalBranchName, baseBranchName, branch.ID, repoID, slot.destPath)
-		if err != nil {
-			markBroken("worktree setup", ws, err)
-			return
-		}
-
-		if row := junctionByWorkspaceID[ws.ID]; row != nil {
-			row.BranchID = &branch.ID
-			row.WorktreePath = wtPath
-			if updateErr := s.sessionWorkspaceStore.Update(row); updateErr != nil {
-				slog.WarnContext(ctx, "failed to update session workspace junction", "workspace", ws.ID, "error", updateErr)
-			}
-		}
-
-		done = append(done, slotResult{slot: slot, branch: branch, worktreePath: wtPath})
-	}
-
-	for _, r := range done {
-		env := []string{
-			envSessionRoot + "=" + sessionRoot,
-			envSessionName + "=" + sess.Name,
-			envBranch + "=" + finalBranchName,
-			envWorktreePath + "=" + r.worktreePath,
-			envWorkspaceName + "=" + r.slot.workspace.Name,
-			envWorkspacePath + "=" + r.slot.workspace.Path,
-		}
-		wsScript := filepath.Join(r.slot.workspace.Path, ".utena", worktreeSetupName)
-		if err := traceOp(ctx, "worktree-setup script", func() error {
-			return s.runScript(ctx, wsScript, r.worktreePath, env)
-		}, "script", wsScript, "ws", r.slot.workspace.Name); err != nil {
-			slog.WarnContext(ctx, "workspace worktree-setup script failed", "ws", r.slot.workspace.Name, "error", err)
-			setupWarnings = append(setupWarnings, fmt.Sprintf("%s: %s", r.slot.workspace.Name, err.Error()))
-		}
-	}
-
-	globalEnv := []string{
-		envSessionRoot + "=" + sessionRoot,
-		envSessionName + "=" + sess.Name,
-		envBranch + "=" + finalBranchName,
-	}
-	globalScript := filepath.Join(s.configDir, worktreeSetupName)
-	if err := traceOp(ctx, "global worktree-setup script", func() error {
-		return s.runScript(ctx, globalScript, sessionRoot, globalEnv)
-	}, "script", globalScript); err != nil {
-		slog.WarnContext(ctx, "global worktree-setup script failed", "error", err)
-		setupWarnings = append(setupWarnings, fmt.Sprintf("global: %s", err.Error()))
-	}
-
-	gitDirs := make([]string, 0, len(done))
-	for _, r := range done {
-		gitDirs = append(gitDirs, filepath.Join(r.worktreePath, ".git"))
-	}
-	if err := claudesettings.EnsureSessionRoot(sessionRoot, gitDirs); err != nil {
-		slog.WarnContext(ctx, "ensure session-root claude settings failed", "error", err)
-		setupWarnings = append(setupWarnings, fmt.Sprintf("claude-settings: %s", err.Error()))
-	}
-
-	if err := s.setupTmux(ctx, sess, tmuxName, sessionRoot); err != nil {
-		markBroken("tmux setup", slots[0].workspace, err)
-		return
-	}
-
-	sess.Status = StatusActive
-	sess.StatusError = strings.Join(setupWarnings, "; ")
-	if err := s.store.Update(sess); err != nil {
-		markBroken("persist active status", slots[0].workspace, err)
-		return
-	}
-}
-
-func (s *SessionService) runMultiRepair(sessionID uint, tmuxName string) {
-	ctx, cancel := context.WithTimeout(context.Background(), s.setupTimeout)
-	defer cancel()
-
-	sess, err := s.store.GetByID(sessionID)
-	if err != nil {
-		slog.Error("runMultiRepair: failed to load session", "id", sessionID, "error", err)
-		return
-	}
-
-	ctx = slogctx.Append(ctx, "session", sess.ID, "session_root", sess.SessionRoot, "workspace_count", len(sess.Workspaces))
-	slog.InfoContext(ctx, "multi-workspace session repair: start", "tmux", tmuxName, "timeout", s.setupTimeout)
-	setupStart := time.Now()
-	defer func() {
-		slog.InfoContext(ctx, "multi-workspace session repair: done", "status", sess.Status, "duration_ms", time.Since(setupStart).Milliseconds())
-	}()
-
-	markBroken := func(stage string, err error) {
-		msg := fmt.Sprintf("%s failed: %v", stage, err)
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			msg = fmt.Sprintf("%s timed out after %s", stage, s.setupTimeout)
-		}
-		if updateErr := s.markSessionBroken(sess, msg); updateErr != nil {
-			slog.ErrorContext(ctx, "failed to persist broken status", "stage", stage, "error", updateErr)
-		}
-	}
-
-	if sess.SessionRoot != "" {
-		if err := os.MkdirAll(sess.SessionRoot, 0o755); err != nil {
-			markBroken("ensure session root", err)
-			return
-		}
-	}
-
-	var setupWarnings []string
-	gitDirs := make([]string, 0, len(sess.Workspaces))
-	for i := range sess.Workspaces {
-		sw := &sess.Workspaces[i]
-		if sw.Workspace == nil || sw.GitBranch == nil || sw.WorktreePath == "" {
-			continue
-		}
-		repoID := uint(0)
-		if sw.Workspace.RepoID != nil {
-			repoID = *sw.Workspace.RepoID
-		}
-		if err := s.gitService.PruneWorktrees(ctx, sw.Workspace.Path); err != nil {
-			slog.WarnContext(ctx, "prune worktrees before repair failed", "workspace", sw.Workspace.Name, "error", err)
-		}
-		if _, _, err := s.gitService.SetupWorktreeAt(ctx, sw.Workspace.Path, sw.GitBranch.Name, "", sw.GitBranch.ID, repoID, sw.WorktreePath); err != nil {
-			markBroken(fmt.Sprintf("worktree repair for workspace %q", sw.Workspace.Name), err)
-			return
-		}
-		gitDirs = append(gitDirs, filepath.Join(sw.WorktreePath, ".git"))
-	}
-
-	if len(gitDirs) > 0 && sess.SessionRoot != "" {
-		if err := claudesettings.EnsureSessionRoot(sess.SessionRoot, gitDirs); err != nil {
-			slog.WarnContext(ctx, "ensure session-root claude settings failed", "error", err)
-			setupWarnings = append(setupWarnings, fmt.Sprintf("claude-settings: %s", err.Error()))
-		}
-	}
-
-	if err := s.setupTmux(ctx, sess, tmuxName, sess.SessionRoot); err != nil {
-		markBroken("tmux setup", err)
-		return
-	}
-
-	sess.Status = StatusActive
-	sess.StatusError = strings.Join(setupWarnings, "; ")
-	if err := s.store.Update(sess); err != nil {
-		markBroken("persist active status", err)
-		return
-	}
 }

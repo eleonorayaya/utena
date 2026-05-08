@@ -104,7 +104,7 @@ func TestSessionService_isSessionGitHealthy_NoBranches(t *testing.T) {
 	require.True(t, service.isSessionGitHealthy(ctx, sess), "slots without branches must not block health")
 }
 
-func TestSessionService_RepairSession_RoutesMultiToRepairPath(t *testing.T) {
+func TestSessionService_RepairSession_MultiTransitionsToCreating(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, ws2ID := setupSessionService(t)
 	ctx := context.Background()
 	swStore := NewSessionWorkspaceStore(service.store.db)
@@ -122,6 +122,11 @@ func TestSessionService_RepairSession_RoutesMultiToRepairPath(t *testing.T) {
 	require.NoError(t, swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: ws1ID, Position: 0, WorktreePath: filepath.Join(sessionRoot, "a")}))
 	require.NoError(t, swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: ws2ID, Position: 1, WorktreePath: filepath.Join(sessionRoot, "b")}))
 
+	tmuxRecord, err := service.tmuxService.RegisterPending(SanitizeTmuxName(sess.Name), sessionRoot, nil)
+	require.NoError(t, err)
+	sess.TmuxSessionID = &tmuxRecord.ID
+	require.NoError(t, sessionStore.Update(sess))
+
 	updated, err := service.RepairSession(ctx, sess.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusCreating, updated.Status, "RepairSession must transition the session to creating before kicking off async repair")
@@ -133,8 +138,24 @@ func TestSessionService_RepairSession_RoutesMultiToRepairPath(t *testing.T) {
 		}
 		return final.Status != StatusCreating
 	}, 3*time.Second, 50*time.Millisecond)
+}
 
-	if _, err := os.Stat(sessionRoot); err != nil {
-		require.Failf(t, "session root not created", "expected %q to exist after repair: %v", sessionRoot, err)
+func TestSessionService_RepairSession_RejectsSessionWithoutTmuxRecord(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+	ctx := context.Background()
+	swStore := NewSessionWorkspaceStore(service.store.db)
+
+	sess := &Session{
+		Name:        "no-tmux",
+		WorkspaceID: ws1ID,
+		Status:      StatusBroken,
+		StatusError: "something",
+		LastUsedAt:  time.Now(),
 	}
+	require.NoError(t, sessionStore.Add(sess))
+	require.NoError(t, swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: ws1ID, Position: 0}))
+
+	_, err := service.RepairSession(ctx, sess.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tmux record")
 }

@@ -604,16 +604,18 @@ func TestSessionService_ActivateSession_PendingPR_CreatesWorktree(t *testing.T) 
 	require.NoError(t, gitDB.Create(branch).Error)
 
 	branchID := branch.ID
+	worktreePathPinned := filepath.Join(repoPath, ".worktrees", "harleyk--catalog-docs")
 	pending := &Session{
 		Name:        branchName,
 		WorkspaceID: wsGitID,
 		BranchID:    &branchID,
 		Status:      StatusPending,
+		SessionRoot: worktreePathPinned,
 		LastUsedAt:  time.Now(),
 	}
 	require.NoError(t, sessionStore.Add(pending))
-	require.NoError(t, service.sessionWorkspaceStore.Add(&SessionWorkspace{SessionID: pending.ID, WorkspaceID: wsGitID, BranchID: &branchID, WorktreePath: filepath.Join(repoPath, ".worktrees", "harleyk--catalog-docs"), Position: 0}))
-	tmuxRecord, err := service.tmuxService.RegisterPending(fmt.Sprintf("git-repo-%s", branchName), filepath.Join(repoPath, ".worktrees", "harleyk--catalog-docs"), nil)
+	require.NoError(t, service.sessionWorkspaceStore.Add(&SessionWorkspace{SessionID: pending.ID, WorkspaceID: wsGitID, BranchID: &branchID, WorktreePath: worktreePathPinned, Position: 0}))
+	tmuxRecord, err := service.tmuxService.RegisterPending(fmt.Sprintf("git-repo-%s", branchName), worktreePathPinned, nil)
 	require.NoError(t, err)
 	pending.TmuxSessionID = &tmuxRecord.ID
 	require.NoError(t, sessionStore.Update(pending))
