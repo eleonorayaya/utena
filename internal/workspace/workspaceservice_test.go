@@ -16,7 +16,7 @@ func setupWorkspaceService(t *testing.T) (*WorkspaceService, *WorkspaceStore) {
 	t.Helper()
 	database := setupTestDB(t)
 	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
-	service := NewWorkspaceService(store)
+	service := NewWorkspaceService(store, nil)
 	return service, store
 }
 
@@ -124,19 +124,35 @@ func setupWorkspaceServiceWithConfig(t *testing.T) (*WorkspaceService, *Workspac
 	database := testdb.New(t, &Workspace{})
 
 	store := NewWorkspaceStore(database, fs, configDir)
-	service := NewWorkspaceService(store)
+	service := NewWorkspaceService(store, nil)
 	return service, store
 }
 
-func TestWorkspaceService_AddWorkspace(t *testing.T) {
+func TestWorkspaceService_AddWorkspace_GitRepo(t *testing.T) {
+	service, _ := setupWorkspaceServiceWithConfig(t)
+	wsDir := initTestRepo(t)
+
+	ctx := context.Background()
+	ws, err := service.AddWorkspace(ctx, wsDir, false)
+	require.NoError(t, err)
+	require.NotNil(t, ws)
+	require.Equal(t, filepath.Base(wsDir), ws.Name)
+	require.Equal(t, wsDir, ws.Path)
+	require.True(t, ws.IsGitRepo)
+}
+
+func TestWorkspaceService_AddWorkspace_RejectsNonGit(t *testing.T) {
 	service, _ := setupWorkspaceServiceWithConfig(t)
 	wsDir := t.TempDir()
 
 	ctx := context.Background()
 	ws, err := service.AddWorkspace(ctx, wsDir, false)
-	require.NoError(t, err)
-	require.Equal(t, filepath.Base(wsDir), ws.Name)
-	require.Equal(t, wsDir, ws.Path)
+	require.Error(t, err)
+	require.Nil(t, ws)
+	require.Contains(t, err.Error(), "not a git repository")
+
+	workspaces, _ := service.ListWorkspaces(ctx)
+	require.Empty(t, workspaces, "rejected workspace should not be persisted")
 }
 
 func TestWorkspaceService_AddWorkspaceAsRoot(t *testing.T) {

@@ -16,6 +16,8 @@ func initTestRepo(t *testing.T) string {
 	run(t, dir, "git", "init", "-b", "main")
 	run(t, dir, "git", "config", "user.email", "test@test.com")
 	run(t, dir, "git", "config", "user.name", "Test")
+	run(t, dir, "git", "config", "commit.gpgsign", "false")
+	run(t, dir, "git", "config", "tag.gpgsign", "false")
 	run(t, dir, "git", "commit", "--allow-empty", "-m", "init")
 	return dir
 }
@@ -24,6 +26,10 @@ func run(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "command %q failed: %s", name+" "+joinArgs(args), string(out))
 }

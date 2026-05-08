@@ -31,6 +31,13 @@ func setupSessionStore(t *testing.T) (*SessionStore, uint, uint) {
 	return NewSessionStore(database), ws1.ID, ws2.ID
 }
 
+func addTestSession(t *testing.T, store *SessionStore, swStore *SessionWorkspaceStore, sess *Session, wsID uint) {
+	t.Helper()
+	sess.WorkspaceID = wsID
+	require.NoError(t, store.Add(sess))
+	require.NoError(t, swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: wsID, Position: 0}))
+}
+
 func TestNewSessionStore(t *testing.T) {
 	store, _, _ := setupSessionStore(t)
 	require.NotNil(t, store)
@@ -146,23 +153,20 @@ func TestSessionStore_List_Empty(t *testing.T) {
 
 func TestSessionStore_ListByWorkspace(t *testing.T) {
 	store, ws1ID, ws2ID := setupSessionStore(t)
+	swStore := NewSessionWorkspaceStore(store.db)
 
 	now := time.Now()
-	session1 := &Session{Name: "session-1", WorkspaceID: ws1ID, LastUsedAt: now.Add(-2 * time.Hour)}
-	session2 := &Session{Name: "session-2", WorkspaceID: ws2ID, LastUsedAt: now}
-	session3 := &Session{Name: "session-3", WorkspaceID: ws1ID, LastUsedAt: now.Add(-1 * time.Hour)}
+	session1 := &Session{Name: "session-1", LastUsedAt: now.Add(-2 * time.Hour)}
+	session2 := &Session{Name: "session-2", LastUsedAt: now}
+	session3 := &Session{Name: "session-3", LastUsedAt: now.Add(-1 * time.Hour)}
 
-	require.NoError(t, store.Add(session1))
-	require.NoError(t, store.Add(session2))
-	require.NoError(t, store.Add(session3))
+	addTestSession(t, store, swStore, session1, ws1ID)
+	addTestSession(t, store, swStore, session2, ws2ID)
+	addTestSession(t, store, swStore, session3, ws1ID)
 
 	ws1Sessions, err := store.ListByWorkspace(ws1ID)
 	require.NoError(t, err)
 	require.Len(t, ws1Sessions, 2)
-
-	for _, session := range ws1Sessions {
-		require.Equal(t, ws1ID, session.WorkspaceID)
-	}
 
 	require.Equal(t, "session-3", ws1Sessions[0].Name, "Most recent ws-1 session should be first")
 	require.Equal(t, "session-1", ws1Sessions[1].Name, "Older ws-1 session should be second")
@@ -354,6 +358,7 @@ func TestSessionStore_GetByID_LoadsGitBranchAndTmuxSession(t *testing.T) {
 func TestSessionStore_GetByBranchID(t *testing.T) {
 	database, wsID, branch, ts := setupTestDBWithGitAndTmux(t)
 	store := NewSessionStore(database)
+	swStore := NewSessionWorkspaceStore(database)
 
 	session := &Session{
 		Name:          "utena-feature-x",
@@ -364,6 +369,7 @@ func TestSessionStore_GetByBranchID(t *testing.T) {
 		LastUsedAt:    time.Now(),
 	}
 	require.NoError(t, store.Add(session))
+	require.NoError(t, swStore.Add(&SessionWorkspace{SessionID: session.ID, WorkspaceID: wsID, BranchID: &branch.ID, Position: 0}))
 
 	retrieved, err := store.GetByBranchID(branch.ID)
 	require.NoError(t, err)

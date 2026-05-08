@@ -101,18 +101,18 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	workspaceID := data.WorkspaceID
-	if workspaceID == 0 && len(data.WorkspaceIDs) == 1 {
-		workspaceID = data.WorkspaceIDs[0]
+	if len(data.WorkspaceIDs) != 1 {
+		common.RenderError(w, r, common.NewInvalidRequest("workspace_ids must contain exactly one id for a single-workspace session"))
+		return
 	}
+	workspaceID := data.WorkspaceIDs[0]
 
 	session := &Session{
-		Name:        data.Name,
-		WorkspaceID: workspaceID,
-		TodoID:      data.TodoID,
+		Name:   data.Name,
+		TodoID: data.TodoID,
 	}
 
-	if err := c.service.CreateSession(ctx, session, data.Branch, data.BaseBranch, data.CreateWorktree); err != nil {
+	if err := c.service.CreateSession(ctx, session, workspaceID, data.Branch, data.BaseBranch); err != nil {
 		common.RenderError(w, r, err)
 		return
 	}

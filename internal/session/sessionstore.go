@@ -54,7 +54,7 @@ func (s *SessionStore) List() ([]Session, error) {
 func (s *SessionStore) ListByWorkspace(workspaceID uint) ([]Session, error) {
 	var sessions []Session
 	if err := s.loaded().
-		Where("sessions.workspace_id = ? OR sessions.id IN (SELECT session_id FROM session_workspaces WHERE workspace_id = ? AND deleted_at IS NULL)", workspaceID, workspaceID).
+		Where("sessions.id IN (SELECT session_id FROM session_workspaces WHERE workspace_id = ? AND deleted_at IS NULL)", workspaceID).
 		Order("sessions.last_used_at DESC").
 		Find(&sessions).Error; err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func (s *SessionStore) Delete(id uint) error {
 
 func (s *SessionStore) GetByWorkspaceAndName(workspaceID uint, name string, excludeStatuses ...SessionStatus) (*Session, error) {
 	var session Session
-	q := s.db.Where("workspace_id = ? AND name = ?", workspaceID, name)
+	q := s.db.Where("name = ? AND id IN (SELECT session_id FROM session_workspaces WHERE workspace_id = ? AND deleted_at IS NULL)", name, workspaceID)
 	if len(excludeStatuses) > 0 {
 		q = q.Where("status NOT IN ?", excludeStatuses)
 	}
@@ -128,7 +128,7 @@ func (s *SessionStore) GetByWorkspaceAndName(workspaceID uint, name string, excl
 
 func (s *SessionStore) GetByBranchID(branchID uint) (*Session, error) {
 	var session Session
-	if err := s.loaded().First(&session, "sessions.branch_id = ? OR sessions.id IN (SELECT session_id FROM session_workspaces WHERE branch_id = ? AND deleted_at IS NULL)", branchID, branchID).Error; err != nil {
+	if err := s.loaded().First(&session, "sessions.id IN (SELECT session_id FROM session_workspaces WHERE branch_id = ? AND deleted_at IS NULL)", branchID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound
 		}
@@ -146,17 +146,6 @@ func (s *SessionStore) GetByTmuxSessionID(tmuxSessionID uint) (*Session, error) 
 		return nil, err
 	}
 	return &session, nil
-}
-
-func (s *SessionStore) hasPendingBackfill() bool {
-	var count int64
-	err := s.db.Model(&Session{}).
-		Where("workspace_id <> 0 AND id NOT IN (SELECT session_id FROM session_workspaces WHERE deleted_at IS NULL)").
-		Count(&count).Error
-	if err != nil {
-		return true
-	}
-	return count > 0
 }
 
 func (s *SessionStore) OnAppStart(ctx context.Context) error {

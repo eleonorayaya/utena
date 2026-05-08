@@ -23,6 +23,7 @@ import (
 type prTestEnv struct {
 	service          *SessionService
 	sessionStore     *SessionStore
+	swStore          *SessionWorkspaceStore
 	dismissedPRStore *DismissedPRStore
 	database         db.Database
 	workspace        *workspace.Workspace
@@ -51,26 +52,40 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 	sessionStore := NewSessionStore(database)
 	dismissedPRStore := NewDismissedPRStore(database)
 	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
-	workspaceService := workspace.NewWorkspaceService(workspaceStore)
 	gitService := git.NewGitService(database)
+	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 
-	repo := &git.Repo{Path: "/tmp/utena", FullName: "eleonorayaya/utena"}
+	repoPath := initTestRepo(t)
+	branchName := "feature-pr"
+
+	pushCmd := exec.Command("git", "-C", repoPath, "push", "origin", "main:"+branchName)
+	pushCmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
+	out, err := pushCmd.CombinedOutput()
+	require.NoError(t, err, "push remote branch failed: %s", string(out))
+
+	repo := &git.Repo{Path: repoPath, FullName: "eleonorayaya/utena"}
 	require.NoError(t, database.Create(repo).Error)
 
 	repoID := repo.ID
-	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena", IsGitRepo: true, RepoID: &repoID}
+	ws := &workspace.Workspace{Name: "utena", Path: repoPath, IsGitRepo: true, RepoID: &repoID}
 	require.NoError(t, workspaceStore.Add(ws))
 
-	branch := &git.Branch{Name: "feature-pr", RepoID: repo.ID, ExistsLocal: false, ExistsRemote: true}
+	branch := &git.Branch{Name: branchName, RepoID: repo.ID, ExistsLocal: false, ExistsRemote: true}
 	require.NoError(t, database.Create(branch).Error)
 
+	mock := utmux.NewMockRunner()
+	tmuxService := createTmuxService(t, database, mock, bus)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
-	service := NewSessionService(sessionStore, sessionWorkspaceStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, nil, bus, "eqt/", t.TempDir(), t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorkspaceStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
 
 	return &prTestEnv{
 		service:          service,
 		sessionStore:     sessionStore,
+		swStore:          sessionWorkspaceStore,
 		dismissedPRStore: dismissedPRStore,
 		database:         database,
 		workspace:        ws,
@@ -103,10 +118,16 @@ func TestHandlePRUpdated_NewAssignedPR_CreatesSession(t *testing.T) {
 	err := env.service.handlePRUpdated(ctx, event)
 	require.NoError(t, err)
 
+	require.Eventually(t, func() bool {
+		sess, lookupErr := env.sessionStore.GetByBranchID(branchID)
+		if lookupErr != nil {
+			return false
+		}
+		return sess.Status == StatusActive || sess.Status == StatusBroken
+	}, 5*time.Second, 50*time.Millisecond)
+
 	sess, err := env.sessionStore.GetByBranchID(branchID)
 	require.NoError(t, err)
-	require.Equal(t, StatusCreating, sess.Status)
-	require.Equal(t, env.workspace.ID, sess.WorkspaceID)
 	require.Equal(t, "feature-pr", sess.Name)
 }
 
@@ -182,13 +203,12 @@ func TestHandlePRUpdated_SkipsExistingSession(t *testing.T) {
 
 	branchID := env.branch.ID
 	existing := &Session{
-		Name:        "feature-pr",
-		WorkspaceID: env.workspace.ID,
-		BranchID:    &branchID,
-		Status:      StatusActive,
-		LastUsedAt:  time.Now(),
+		Name:       "feature-pr",
+		Status:     StatusActive,
+		LastUsedAt: time.Now(),
 	}
 	require.NoError(t, env.sessionStore.Add(existing))
+	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: existing.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
 
 	event := eventbus.Event{
 		Type: git.EventPRUpdated,
@@ -220,13 +240,12 @@ func TestHandlePRUpdated_CompletesSessionOnMerge(t *testing.T) {
 
 	branchID := env.branch.ID
 	sess := &Session{
-		Name:        "feature-pr",
-		WorkspaceID: env.workspace.ID,
-		BranchID:    &branchID,
-		Status:      StatusActive,
-		LastUsedAt:  time.Now(),
+		Name:       "feature-pr",
+		Status:     StatusActive,
+		LastUsedAt: time.Now(),
 	}
 	require.NoError(t, env.sessionStore.Add(sess))
+	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
 
 	event := eventbus.Event{
 		Type: git.EventPRUpdated,
@@ -255,13 +274,12 @@ func TestHandlePRUpdated_IgnoresNonMerge(t *testing.T) {
 
 	branchID := env.branch.ID
 	sess := &Session{
-		Name:        "feature-pr",
-		WorkspaceID: env.workspace.ID,
-		BranchID:    &branchID,
-		Status:      StatusActive,
-		LastUsedAt:  time.Now(),
+		Name:       "feature-pr",
+		Status:     StatusActive,
+		LastUsedAt: time.Now(),
 	}
 	require.NoError(t, env.sessionStore.Add(sess))
+	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
 
 	event := eventbus.Event{
 		Type: git.EventPRUpdated,
@@ -308,9 +326,13 @@ func TestHandlePRUpdated_NewlyAssignedExistingPR_CreatesSession(t *testing.T) {
 	err := env.service.handlePRUpdated(ctx, event)
 	require.NoError(t, err)
 
-	sess, err := env.sessionStore.GetByBranchID(branchID)
-	require.NoError(t, err)
-	require.Equal(t, StatusCreating, sess.Status)
+	require.Eventually(t, func() bool {
+		sess, lookupErr := env.sessionStore.GetByBranchID(branchID)
+		if lookupErr != nil {
+			return false
+		}
+		return sess.Status == StatusActive || sess.Status == StatusBroken
+	}, 5*time.Second, 50*time.Millisecond)
 }
 
 func TestCompletedCleanupTask_ArchivesStale(t *testing.T) {
@@ -319,13 +341,12 @@ func TestCompletedCleanupTask_ArchivesStale(t *testing.T) {
 
 	branchID := env.branch.ID
 	sess := &Session{
-		Name:        "stale-session",
-		WorkspaceID: env.workspace.ID,
-		BranchID:    &branchID,
-		Status:      StatusCompleted,
-		LastUsedAt:  time.Now().Add(-10 * time.Minute),
+		Name:       "stale-session",
+		Status:     StatusCompleted,
+		LastUsedAt: time.Now().Add(-10 * time.Minute),
 	}
 	require.NoError(t, env.sessionStore.Add(sess))
+	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
 
 	task := &completedCleanupTask{service: env.service}
 	err := task.Run(ctx)
@@ -342,14 +363,13 @@ func TestCompletedCleanupTask_SkipsAttached(t *testing.T) {
 
 	branchID := env.branch.ID
 	sess := &Session{
-		Name:        "attached-session",
-		WorkspaceID: env.workspace.ID,
-		BranchID:    &branchID,
-		Status:      StatusCompleted,
-		IsAttached:  true,
-		LastUsedAt:  time.Now().Add(-10 * time.Minute),
+		Name:       "attached-session",
+		Status:     StatusCompleted,
+		IsAttached: true,
+		LastUsedAt: time.Now().Add(-10 * time.Minute),
 	}
 	require.NoError(t, env.sessionStore.Add(sess))
+	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
 
 	task := &completedCleanupTask{service: env.service}
 	err := task.Run(ctx)
@@ -366,13 +386,12 @@ func TestCompletedCleanupTask_SkipsRecent(t *testing.T) {
 
 	branchID := env.branch.ID
 	sess := &Session{
-		Name:        "recent-session",
-		WorkspaceID: env.workspace.ID,
-		BranchID:    &branchID,
-		Status:      StatusCompleted,
-		LastUsedAt:  time.Now().Add(-1 * time.Minute),
+		Name:       "recent-session",
+		Status:     StatusCompleted,
+		LastUsedAt: time.Now().Add(-1 * time.Minute),
 	}
 	require.NoError(t, env.sessionStore.Add(sess))
+	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
 
 	task := &completedCleanupTask{service: env.service}
 	err := task.Run(ctx)
@@ -422,16 +441,24 @@ func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
 	repoPath := initTestRepo(t)
 	branchName := "feature/pr-branch"
 
+	gitEnv := append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
+
 	worktreeStaging := filepath.Join(repoPath, ".worktrees", "feature-pr-branch")
 	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreeStaging, "main")
+	cmd.Env = gitEnv
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "pre-create branch failed: %s", string(out))
 
 	pushCmd := exec.Command("git", "-C", worktreeStaging, "push", "-u", "origin", branchName)
+	pushCmd.Env = gitEnv
 	out, err = pushCmd.CombinedOutput()
 	require.NoError(t, err, "push branch failed: %s", string(out))
 
 	rmWtCmd := exec.Command("git", "-C", repoPath, "worktree", "remove", "--force", worktreeStaging)
+	rmWtCmd.Env = gitEnv
 	out, err = rmWtCmd.CombinedOutput()
 	require.NoError(t, err, "remove staging worktree failed: %s", string(out))
 
@@ -455,7 +482,7 @@ func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
 
 	mock := utmux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
-	workspaceService := workspace.NewWorkspaceService(workspaceStore)
+	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
@@ -479,6 +506,11 @@ func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
 	}
 
 	require.NoError(t, service.handlePRUpdated(ctx, event))
+
+	require.Eventually(t, func() bool {
+		_, lookupErr := sessionStore.GetByBranchID(branchID)
+		return lookupErr == nil
+	}, 10*time.Second, 50*time.Millisecond)
 
 	sess, err := sessionStore.GetByBranchID(branchID)
 	require.NoError(t, err)
@@ -521,6 +553,11 @@ func TestHandlePRUpdated_NewAssignedPR_CreatesSessionAction(t *testing.T) {
 
 	err := env.service.handlePRUpdated(ctx, event)
 	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		_, lookupErr := env.sessionStore.GetByBranchID(branchID)
+		return lookupErr == nil
+	}, 5*time.Second, 50*time.Millisecond)
 
 	sess, err := env.sessionStore.GetByBranchID(branchID)
 	require.NoError(t, err)

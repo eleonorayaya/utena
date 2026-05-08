@@ -67,13 +67,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.sess = &s
 		m.prs = nil
 		m.pendingDeleteID = 0
-		if s.WorkspaceID != 0 {
-			return m, provider.FetchPRs(s.WorkspaceID, "")
+		if !s.IsMulti() && len(s.Workspaces) > 0 && s.Workspaces[0].WorkspaceID != 0 {
+			return m, provider.FetchPRs(s.Workspaces[0].WorkspaceID, "")
 		}
 		return m, nil
 	case provider.PRsStateUpdatedMsg:
-		if m.sess != nil && msg.WorkspaceID == m.sess.WorkspaceID {
-			m.prs = filterPRsByBranch(msg.PullRequests, m.sess.GitBranch)
+		if m.sess != nil && len(m.sess.Workspaces) > 0 && msg.WorkspaceID == m.sess.Workspaces[0].WorkspaceID {
+			m.prs = filterPRsByBranch(msg.PullRequests, m.sess.Workspaces[0].GitBranch)
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -175,9 +175,9 @@ func (m Model) View() string {
 		}
 	}
 
-	if s.GitBranch != nil {
+	if !s.IsMulti() && len(s.Workspaces) > 0 && s.Workspaces[0].GitBranch != nil {
 		b.WriteString("\n" + sectionStyle().Render("Git") + "\n")
-		b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(s.GitBranch.Name) + "\n")
+		b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(s.Workspaces[0].GitBranch.Name) + "\n")
 		for _, pr := range m.prs {
 			b.WriteString(labelStyle().Render("PR") + valueStyle().Render(fmt.Sprintf("#%d %s (%s)", pr.Number, pr.Title, pr.State)) + "\n")
 		}

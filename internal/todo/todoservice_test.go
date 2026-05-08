@@ -15,7 +15,7 @@ func setupTodoService(t *testing.T) (*TodoService, *TodoStore, *workspace.Worksp
 	database := setupTestDB(t)
 	todoStore := NewTodoStore(database)
 	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
-	workspaceService := workspace.NewWorkspaceService(workspaceStore)
+	workspaceService := workspace.NewWorkspaceService(workspaceStore, nil)
 	service := NewTodoService(todoStore, workspaceService)
 
 	return service, todoStore, workspaceStore

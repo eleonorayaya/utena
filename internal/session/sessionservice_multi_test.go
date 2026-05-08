@@ -10,31 +10,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSessionService_OnAppStart_BackfillsLegacySessionWorkspace(t *testing.T) {
+func TestSessionService_OnAppStart_MarksOrphanedSessionBroken(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
 	ctx := context.Background()
 
-	legacy := &Session{
-		Name:        "legacy-session",
+	orphan := &Session{
+		Name:        "orphan-session",
 		WorkspaceID: ws1ID,
 		Status:      StatusActive,
 		LastUsedAt:  time.Now(),
 	}
-	require.NoError(t, sessionStore.Add(legacy))
+	require.NoError(t, sessionStore.Add(orphan))
 
 	require.NoError(t, service.OnAppStart(ctx))
 
-	loaded, err := sessionStore.GetByID(legacy.ID)
+	loaded, err := sessionStore.GetByID(orphan.ID)
 	require.NoError(t, err)
-	require.Len(t, loaded.Workspaces, 1, "backfill should add one junction row")
-	require.Equal(t, ws1ID, loaded.Workspaces[0].WorkspaceID)
-	require.Equal(t, 0, loaded.Workspaces[0].Position)
-	require.NotEmpty(t, loaded.SessionRoot, "backfill should set SessionRoot")
-
-	require.NoError(t, service.OnAppStart(ctx))
-	again, err := sessionStore.GetByID(legacy.ID)
-	require.NoError(t, err)
-	require.Len(t, again.Workspaces, 1, "second backfill must remain idempotent")
+	require.Equal(t, StatusBroken, loaded.Status)
+	require.Contains(t, loaded.StatusError, "predates")
 }
 
 func TestSessionService_CreateMultiSession_RejectsSingleWorkspace(t *testing.T) {

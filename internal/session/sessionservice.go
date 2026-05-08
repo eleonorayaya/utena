@@ -99,61 +99,33 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.eventBus.Subscribe(eventbus.TmuxClientAttached, s.handleTmuxClientAttached)
 	s.eventBus.Subscribe(eventbus.TmuxClientDetached, s.handleTmuxClientDetached)
 	s.eventBus.Subscribe(git.EventPRUpdated, s.handlePRUpdated)
-	s.backfillSessionWorkspaces(ctx)
-	s.recoverStuckCreatingSessions()
-	s.reconcileTmuxState(ctx)
+	sessions, err := s.store.List()
+	if err != nil {
+		slog.Warn("startup: failed to list sessions", "error", err)
+		return nil
+	}
+	s.markOrphanedSessionsBroken(sessions)
+	s.recoverStuckCreatingSessions(sessions)
+	s.reconcileTmuxState(ctx, sessions)
 	return nil
 }
 
-func (s *SessionService) backfillSessionWorkspaces(ctx context.Context) {
-	if !s.store.hasPendingBackfill() {
-		return
-	}
-	sessions, err := s.store.List()
-	if err != nil {
-		slog.Warn("backfill: failed to list sessions", "error", err)
-		return
-	}
+func (s *SessionService) markOrphanedSessionsBroken(sessions []Session) {
 	for i := range sessions {
 		sess := &sessions[i]
-		if len(sess.Workspaces) > 0 || sess.WorkspaceID == 0 {
+		if sess.Status == StatusDeleted || sess.Status == StatusArchived || sess.Status == StatusBroken {
 			continue
 		}
-		ws, err := s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID)
-		if err != nil {
-			slog.Warn("backfill: workspace not found", "session", sess.ID, "workspace", sess.WorkspaceID, "error", err)
+		if len(sess.Workspaces) > 0 {
 			continue
 		}
-		wtPath := ws.Path
-		if sess.BranchID != nil && sess.GitBranch != nil {
-			wtPath = s.gitService.GetStartDir(sess.GitBranch, ws.Path)
-		}
-		sw := &SessionWorkspace{
-			SessionID:    sess.ID,
-			WorkspaceID:  ws.ID,
-			BranchID:     sess.BranchID,
-			WorktreePath: wtPath,
-			Position:     0,
-		}
-		if err := s.sessionWorkspaceStore.Add(sw); err != nil {
-			slog.Warn("backfill: failed to add session workspace junction", "session", sess.ID, "error", err)
-			continue
-		}
-		if sess.SessionRoot == "" {
-			sess.SessionRoot = wtPath
-			if err := s.store.Update(sess); err != nil {
-				slog.Warn("backfill: failed to persist session root", "session", sess.ID, "error", err)
-			}
+		if err := s.markSessionBroken(sess, "session predates multi-workspace migration — please recreate"); err != nil {
+			slog.Warn("orphan check: failed to mark session broken", "session", sess.ID, "error", err)
 		}
 	}
 }
 
-func (s *SessionService) recoverStuckCreatingSessions() {
-	sessions, err := s.store.List()
-	if err != nil {
-		slog.Warn("failed to list sessions for stuck-creating recovery", "error", err)
-		return
-	}
+func (s *SessionService) recoverStuckCreatingSessions(sessions []Session) {
 	for i := range sessions {
 		sess := &sessions[i]
 		if sess.Status != StatusCreating {
@@ -220,68 +192,63 @@ func (s *SessionService) findSessionByTmuxName(tmuxName string) (*Session, error
 	return s.store.GetByTmuxSessionID(ts.ID)
 }
 
-func (s *SessionService) CreateSession(ctx context.Context, session *Session, branchName string, baseBranchName string, createWorktree bool, actions ...*SessionAction) error {
-	var ws *workspace.Workspace
-	if session.WorkspaceID != 0 {
-		var err error
-		ws, err = s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
-		if err != nil {
-			return err
-		}
+func (s *SessionService) CreateSession(ctx context.Context, session *Session, workspaceID uint, branchName string, baseBranchName string, actions ...*SessionAction) error {
+	if workspaceID == 0 {
+		return common.NewInvalidRequest("workspace_id is required")
+	}
+	ws, err := s.workspaceService.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if !ws.IsGitRepo {
+		return common.NewInvalidRequest(fmt.Sprintf("workspace %q is not a git repository", ws.Name))
 	}
 
-	if session.TodoID != nil && ws != nil && ws.IsGitRepo && baseBranchName == "" {
+	if session.TodoID != nil && baseBranchName == "" && branchName == "" {
 		baseBranchName = "main"
-		createWorktree = true
 	}
 
-	if ws != nil && ws.IsBare {
-		createWorktree = true
+	if branchName == "" && baseBranchName == "" {
+		return common.NewInvalidRequest("branch or base_branch is required")
 	}
 
-	if ws != nil && ws.IsGitRepo && branchName != "" && baseBranchName == "" && branchName != "main" {
-		createWorktree = true
+	if session.Name == "" && branchName != "" {
+		session.Name = s.nameFromBranch(branchName)
 	}
-
-	var tmuxName string
-	switch {
-	case session.Name != "":
-		if ws != nil {
-			tmuxName = BuildTmuxSessionName(ws.Name, session.Name)
-		} else {
-			tmuxName = SanitizeTmuxName(session.Name)
-		}
-	case branchName != "":
-		if session.Name == "" {
-			session.Name = s.nameFromBranch(branchName)
-		}
-		if ws != nil {
-			tmuxName = BuildTmuxSessionName(ws.Name, session.Name)
-		} else {
-			tmuxName = SanitizeTmuxName(session.Name)
-		}
-	default:
+	if session.Name == "" {
 		return common.NewInvalidRequest("session name or branch is required")
 	}
+	tmuxName := BuildTmuxSessionName(ws.Name, session.Name)
 
+	session.WorkspaceID = ws.ID
 	session.Status = StatusCreating
 
 	if session.LastUsedAt.IsZero() {
 		session.LastUsedAt = time.Now()
 	}
 
-	if session.WorkspaceID != 0 && session.Name != "" {
-		_, err := s.store.GetByWorkspaceAndName(session.WorkspaceID, session.Name, StatusDeleted, StatusArchived)
-		switch {
-		case err == nil:
-			return fmt.Errorf("session %q already exists in workspace: %w", session.Name, ErrSessionAlreadyExists)
-		case !errors.Is(err, ErrSessionNotFound):
-			return fmt.Errorf("failed to check for duplicate session: %w", err)
-		}
+	_, err = s.store.GetByWorkspaceAndName(ws.ID, session.Name, StatusDeleted, StatusArchived)
+	switch {
+	case err == nil:
+		return fmt.Errorf("session %q already exists in workspace: %w", session.Name, ErrSessionAlreadyExists)
+	case !errors.Is(err, ErrSessionNotFound):
+		return fmt.Errorf("failed to check for duplicate session: %w", err)
 	}
 
 	if err := s.store.Add(session); err != nil {
 		return err
+	}
+
+	sw := &SessionWorkspace{
+		SessionID:   session.ID,
+		WorkspaceID: ws.ID,
+		Position:    0,
+	}
+	if err := s.sessionWorkspaceStore.Add(sw); err != nil {
+		if delErr := s.store.Delete(session.ID); delErr != nil {
+			slog.WarnContext(ctx, "failed to roll back session after junction add failure", "session", session.ID, "error", delErr)
+		}
+		return fmt.Errorf("add session-workspace junction: %w", err)
 	}
 
 	for _, action := range actions {
@@ -291,18 +258,16 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, br
 		}
 	}
 
-	if session.WorkspaceID != 0 {
-		if err := s.workspaceService.Touch(ctx, session.WorkspaceID); err != nil {
-			slog.Warn("failed to touch workspace last-used timestamp", "workspace", session.WorkspaceID, "error", err)
-		}
+	if err := s.workspaceService.Touch(ctx, ws.ID); err != nil {
+		slog.Warn("failed to touch workspace last-used timestamp", "workspace", ws.ID, "error", err)
 	}
 
-	go s.runSetup(session.ID, ws, tmuxName, branchName, baseBranchName, createWorktree)
+	go s.runSetup(session.ID, ws, tmuxName, branchName, baseBranchName)
 
 	return nil
 }
 
-func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxName string, branchName string, baseBranchName string, createWorktree bool) {
+func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxName string, branchName string, baseBranchName string) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.setupTimeout)
 	defer cancel()
 
@@ -312,17 +277,13 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 		return
 	}
 
-	wsName := ""
-	if ws != nil {
-		wsName = ws.Name
-	}
 	ctx = slogctx.Append(ctx,
 		"session", sess.ID,
-		"ws", wsName,
+		"ws", ws.Name,
 		"branch", branchName,
 		"base_branch", baseBranchName,
 	)
-	slog.InfoContext(ctx, "session setup: start", "tmux", tmuxName, "create_worktree", createWorktree, "timeout", s.setupTimeout)
+	slog.InfoContext(ctx, "session setup: start", "tmux", tmuxName, "timeout", s.setupTimeout)
 	setupStart := time.Now()
 	defer func() {
 		slog.InfoContext(ctx, "session setup: done", "status", sess.Status, "duration_ms", time.Since(setupStart).Milliseconds())
@@ -340,88 +301,67 @@ func (s *SessionService) runSetup(sessionID uint, ws *workspace.Workspace, tmuxN
 		}
 	}
 
-	var worktreeCreated bool
-	var worktreePath string
 	var setupWarning string
-
-	hasBranch := ws != nil && ws.IsGitRepo && (branchName != "" || baseBranchName != "")
-	if hasBranch {
-		if err := s.setupBranch(ctx, ws, branchName, baseBranchName); err != nil {
-			var w SetupWarning
-			if errors.As(err, &w) {
-				setupWarning = w.Message
-				sess.StatusError = w.Message
-				if updateErr := s.store.Update(sess); updateErr != nil {
-					slog.WarnContext(ctx, "failed to persist setup warning", "error", updateErr)
-				}
-			} else {
-				markBroken("branch setup", err)
-				return
-			}
-		}
-
-		finalBranchName := branchName
-		if baseBranchName != "" {
-			finalBranchName = s.branchPrefix + sess.Name
-		}
-		if ws.RepoID != nil {
-			branch, err := tracedOp(ctx, "find-or-create-branch", func() (*git.Branch, error) {
-				return s.gitService.FindOrCreateBranch(ctx, finalBranchName, *ws.RepoID)
-			}, "name", finalBranchName)
-			if err != nil {
-				markBroken("find-or-create-branch", err)
-				return
-			}
-			sess.BranchID = &branch.ID
+	if err := s.setupBranch(ctx, ws, branchName, baseBranchName); err != nil {
+		var w SetupWarning
+		if errors.As(err, &w) {
+			setupWarning = w.Message
+			sess.StatusError = w.Message
 			if updateErr := s.store.Update(sess); updateErr != nil {
-				markBroken("persist branch id", updateErr)
-				return
+				slog.WarnContext(ctx, "failed to persist setup warning", "error", updateErr)
 			}
-		}
-
-		if createWorktree {
-			created, wtPath, err := s.setupWorktree(ctx, sess, ws, branchName, baseBranchName)
-			if err != nil {
-				markBroken("worktree setup", err)
-				return
-			}
-			worktreeCreated = created
-			worktreePath = wtPath
-
-			if err := s.setupWorktreeInit(ctx, sess, ws, worktreeCreated, worktreePath, branchName, baseBranchName); err != nil {
-				slog.Warn("worktree init failed, continuing", "error", err)
-			}
+		} else {
+			markBroken("branch setup", err)
+			return
 		}
 	}
 
-	sessionRoot := worktreePath
-	if sessionRoot == "" && ws != nil {
-		sessionRoot = ws.Path
+	finalBranchName := branchName
+	if baseBranchName != "" {
+		finalBranchName = s.branchPrefix + sess.Name
 	}
-	if sessionRoot != "" {
-		sess.SessionRoot = sessionRoot
-		if updateErr := s.store.Update(sess); updateErr != nil {
-			slog.WarnContext(ctx, "failed to persist session root", "error", updateErr)
-		}
+	repoID, err := s.resolveRepoID(ctx, ws)
+	if err != nil {
+		markBroken("repo lookup", err)
+		return
 	}
-
-	if ws != nil {
-		existing, _ := s.sessionWorkspaceStore.ListBySessionID(sess.ID)
-		if len(existing) == 0 {
-			sw := &SessionWorkspace{
-				SessionID:    sess.ID,
-				WorkspaceID:  ws.ID,
-				BranchID:     sess.BranchID,
-				WorktreePath: worktreePath,
-				Position:     0,
-			}
-			if err := s.sessionWorkspaceStore.Add(sw); err != nil {
-				slog.WarnContext(ctx, "failed to add session workspace junction", "error", err)
-			}
-		}
+	branch, err := tracedOp(ctx, "find-or-create-branch", func() (*git.Branch, error) {
+		return s.gitService.FindOrCreateBranch(ctx, finalBranchName, repoID)
+	}, "name", finalBranchName)
+	if err != nil {
+		markBroken("find-or-create-branch", err)
+		return
 	}
 
-	if err := s.setupTmux(ctx, sess, tmuxName, sessionRoot); err != nil {
+	worktreeCreated, worktreePath, err := s.setupWorktree(ctx, sess, ws, branch.ID, repoID, branchName, baseBranchName)
+	if err != nil {
+		markBroken("worktree setup", err)
+		return
+	}
+
+	if err := s.setupWorktreeInit(ctx, sess, ws, worktreeCreated, worktreePath, branchName, baseBranchName); err != nil {
+		slog.Warn("worktree init failed, continuing", "error", err)
+	}
+
+	sess.SessionRoot = worktreePath
+	if updateErr := s.store.Update(sess); updateErr != nil {
+		markBroken("persist session root", updateErr)
+		return
+	}
+
+	rows, _ := s.sessionWorkspaceStore.ListBySessionID(sess.ID)
+	if len(rows) == 0 {
+		markBroken("update session-workspace junction", fmt.Errorf("session %d has no junction row", sess.ID))
+		return
+	}
+	row := &rows[0]
+	row.BranchID = &branch.ID
+	row.WorktreePath = worktreePath
+	if updateErr := s.sessionWorkspaceStore.Update(row); updateErr != nil {
+		slog.WarnContext(ctx, "failed to update session workspace junction", "error", updateErr)
+	}
+
+	if err := s.setupTmux(ctx, sess, tmuxName, worktreePath); err != nil {
 		markBroken("tmux setup", err)
 		return
 	}
@@ -494,18 +434,10 @@ func (s *SessionService) setupBranch(ctx context.Context, ws *workspace.Workspac
 	return nil
 }
 
-func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *workspace.Workspace, branchName string, baseBranchName string) (bool, string, error) {
+func (s *SessionService) setupWorktree(ctx context.Context, sess *Session, ws *workspace.Workspace, branchID, repoID uint, branchName string, baseBranchName string) (bool, string, error) {
 	finalBranchName := branchName
 	if baseBranchName != "" {
 		finalBranchName = s.branchPrefix + sess.Name
-	}
-
-	var branchID, repoID uint
-	if sess.BranchID != nil {
-		branchID = *sess.BranchID
-	}
-	if ws.RepoID != nil {
-		repoID = *ws.RepoID
 	}
 
 	var (
@@ -542,7 +474,7 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName 
 
 	startDir := sessionRoot
 	if startDir == "" {
-		startDir = s.resolveStartDir(ctx, sess)
+		startDir = sess.SessionRoot
 	}
 	env := map[string]string{envSessionID: fmt.Sprintf("%d", sess.ID)}
 
@@ -653,7 +585,7 @@ func (s *SessionService) RefreshSession(ctx context.Context, id uint) (*Session,
 	return s.ReconcileSession(ctx, id)
 }
 
-func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, error) {
+func (s *SessionService) RepairSession(_ context.Context, id uint) (*Session, error) {
 	sess, err := s.store.GetByID(id)
 	if err != nil {
 		return nil, err
@@ -663,24 +595,14 @@ func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, 
 		return nil, ErrSessionNotBroken
 	}
 
+	if len(sess.Workspaces) == 0 {
+		return nil, common.NewInvalidRequest("session has no workspaces; cannot repair — please recreate")
+	}
+
 	sess.Status = StatusCreating
 	sess.StatusError = ""
 	if err := s.store.Update(sess); err != nil {
 		return nil, fmt.Errorf("failed to mark session for repair: %w", err)
-	}
-
-	var ws *workspace.Workspace
-	if sess.WorkspaceID != 0 {
-		ws, _ = s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID)
-	}
-
-	branchName := ""
-	baseBranchName := ""
-	if sess.GitBranch != nil {
-		branchName = sess.GitBranch.Name
-		if sess.GitBranch.BaseBranch != nil {
-			baseBranchName = sess.GitBranch.BaseBranch.Name
-		}
 	}
 
 	if sess.IsMulti() {
@@ -689,25 +611,27 @@ func (s *SessionService) RepairSession(ctx context.Context, id uint) (*Session, 
 		return sess, nil
 	}
 
-	tmuxName := s.computeTmuxName(sess, ws)
-	hasWorktree := sess.BranchID != nil && s.gitService.HasWorktree(*sess.BranchID)
-	go s.runSetup(sess.ID, ws, tmuxName, branchName, baseBranchName, hasWorktree)
+	primary := sess.Workspaces[0]
+	tmuxName := SanitizeTmuxName(sess.Name)
+	if primary.Workspace != nil {
+		tmuxName = BuildTmuxSessionName(primary.Workspace.Name, sess.Name)
+	}
+	branchName := ""
+	baseBranchName := ""
+	if primary.GitBranch != nil {
+		branchName = primary.GitBranch.Name
+		if primary.GitBranch.BaseBranch != nil {
+			baseBranchName = primary.GitBranch.BaseBranch.Name
+		}
+	}
+	go s.runSetup(sess.ID, primary.Workspace, tmuxName, branchName, baseBranchName)
 	return sess, nil
 }
 
-func (s *SessionService) UpdateSession(ctx context.Context, session *Session) error {
-	existing, err := s.store.GetByID(session.ID)
-	if err != nil {
+func (s *SessionService) UpdateSession(_ context.Context, session *Session) error {
+	if _, err := s.store.GetByID(session.ID); err != nil {
 		return err
 	}
-
-	if session.WorkspaceID != 0 && session.WorkspaceID != existing.WorkspaceID {
-		_, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
-		if err != nil {
-			return err
-		}
-	}
-
 	return s.store.Update(session)
 }
 
@@ -734,14 +658,14 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 	}
 	if tmuxName == "" {
 		var ws *workspace.Workspace
-		if session.WorkspaceID != 0 {
-			ws, _ = s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
+		if !session.IsMulti() && len(session.Workspaces) > 0 {
+			ws = session.Workspaces[0].Workspace
 		}
 		tmuxName = s.computeTmuxName(session, ws)
 	}
 
 	if !s.tmuxService.HasSession(tmuxName) {
-		startDir := s.resolveStartDir(ctx, session)
+		startDir := session.SessionRoot
 		env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", session.ID)}
 		ts, createErr := s.tmuxService.CreateSession(tmuxName, startDir, env)
 		if createErr != nil {
@@ -854,27 +778,14 @@ func (s *SessionService) cleanupSessionRootDir(sess *Session) {
 }
 
 func (s *SessionService) cleanupSessionBranches(ctx context.Context, session *Session, deleteBranch bool) {
-	if len(session.Workspaces) > 0 {
-		for i := range session.Workspaces {
-			sw := &session.Workspaces[i]
-			if sw.GitBranch == nil || sw.Workspace == nil {
-				continue
-			}
-			if err := s.gitService.CleanupBranch(ctx, sw.GitBranch, sw.Workspace.Path, deleteBranch); err != nil {
-				slog.Warn("failed to cleanup branch", "workspace_id", sw.WorkspaceID, "error", err)
-			}
+	for i := range session.Workspaces {
+		sw := &session.Workspaces[i]
+		if sw.GitBranch == nil || sw.Workspace == nil {
+			continue
 		}
-		return
-	}
-	if session.BranchID != nil && session.GitBranch != nil && session.WorkspaceID != 0 {
-		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
-		if err == nil {
-			if err := s.gitService.CleanupBranch(ctx, session.GitBranch, ws.Path, deleteBranch); err != nil {
-				slog.Warn("failed to cleanup branch", "error", err)
-			}
-			return
+		if err := s.gitService.CleanupBranch(ctx, sw.GitBranch, sw.Workspace.Path, deleteBranch); err != nil {
+			slog.Warn("failed to cleanup branch", "workspace_id", sw.WorkspaceID, "error", err)
 		}
-		slog.Warn("workspace not found during cleanup, skipping worktree/branch removal", "workspace_id", session.WorkspaceID)
 	}
 }
 
@@ -894,25 +805,6 @@ func (s *SessionService) nameFromBranch(branchName string) string {
 		return branchName
 	}
 	return stripped
-}
-
-func (s *SessionService) resolveStartDir(ctx context.Context, session *Session) string {
-	if session.SessionRoot != "" {
-		return session.SessionRoot
-	}
-	if session.BranchID != nil && session.GitBranch != nil {
-		ws, _ := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
-		if ws != nil {
-			return s.gitService.GetStartDir(session.GitBranch, ws.Path)
-		}
-	}
-	if session.WorkspaceID != 0 {
-		ws, err := s.workspaceService.GetWorkspace(ctx, session.WorkspaceID)
-		if err == nil {
-			return ws.Path
-		}
-	}
-	return ""
 }
 
 func (s *SessionService) handleTmuxSessionCreated(ctx context.Context, event eventbus.Event) error {
@@ -1013,12 +905,7 @@ func (s *SessionService) handleTmuxClientDetached(ctx context.Context, event eve
 	return s.store.Update(sess)
 }
 
-func (s *SessionService) reconcileTmuxState(ctx context.Context) {
-	sessions, err := s.store.List()
-	if err != nil {
-		slog.Error("failed to list sessions for reconciliation", "error", err)
-		return
-	}
+func (s *SessionService) reconcileTmuxState(ctx context.Context, sessions []Session) {
 	for _, sess := range sessions {
 		if sess.Status != StatusDeleted {
 			if _, err := s.RefreshSession(ctx, sess.ID); err != nil {
@@ -1064,14 +951,19 @@ func (s *SessionService) DismissSession(ctx context.Context, id uint) error {
 		return fmt.Errorf("can only dismiss pending sessions")
 	}
 
-	if sess.BranchID != nil && s.dismissedPRStore != nil {
-		prs := s.gitService.GetPRsForBranch(*sess.BranchID)
-		for _, pr := range prs {
-			if err := s.dismissedPRStore.Add(&DismissedPR{
-				PullRequestID: pr.ID,
-				DismissedAt:   time.Now(),
-			}); err != nil {
-				slog.Warn("failed to record dismissed PR", "pr", pr.ID, "error", err)
+	if s.dismissedPRStore != nil {
+		for i := range sess.Workspaces {
+			sw := &sess.Workspaces[i]
+			if sw.BranchID == nil {
+				continue
+			}
+			for _, pr := range s.gitService.GetPRsForBranch(*sw.BranchID) {
+				if err := s.dismissedPRStore.Add(&DismissedPR{
+					PullRequestID: pr.ID,
+					DismissedAt:   time.Now(),
+				}); err != nil {
+					slog.Warn("failed to record dismissed PR", "pr", pr.ID, "error", err)
+				}
 			}
 		}
 	}
@@ -1119,77 +1011,74 @@ func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Sessio
 }
 
 func sessionWorkspaceIDs(sess *Session) []uint {
-	if len(sess.Workspaces) > 0 {
-		out := make([]uint, 0, len(sess.Workspaces))
-		for i := range sess.Workspaces {
-			if sess.Workspaces[i].WorkspaceID != 0 {
-				out = append(out, sess.Workspaces[i].WorkspaceID)
-			}
+	out := make([]uint, 0, len(sess.Workspaces))
+	for i := range sess.Workspaces {
+		if sess.Workspaces[i].WorkspaceID != 0 {
+			out = append(out, sess.Workspaces[i].WorkspaceID)
 		}
-		return out
 	}
-	if sess.WorkspaceID != 0 {
-		return []uint{sess.WorkspaceID}
-	}
-	return nil
+	return out
 }
 
 func (s *SessionService) ensureSessionWorktrees(ctx context.Context, sess *Session) {
-	if len(sess.Workspaces) > 0 {
-		for i := range sess.Workspaces {
-			sw := &sess.Workspaces[i]
-			if sw.GitBranch == nil || sw.Workspace == nil || sw.WorktreePath == "" {
-				continue
-			}
+	multi := sess.IsMulti()
+	for i := range sess.Workspaces {
+		sw := &sess.Workspaces[i]
+		if sw.GitBranch == nil || sw.Workspace == nil {
+			continue
+		}
+		if sw.WorktreePath != "" {
 			if _, err := os.Stat(sw.WorktreePath); err == nil {
 				continue
 			}
+		}
+		if err := s.gitService.PruneWorktrees(ctx, sw.Workspace.Path); err != nil {
+			slog.WarnContext(ctx, "prune worktrees before ensure failed", "workspace", sw.Workspace.Name, "error", err)
+		}
+		if multi {
 			repoID := uint(0)
 			if sw.Workspace.RepoID != nil {
 				repoID = *sw.Workspace.RepoID
 			}
-			if err := s.gitService.PruneWorktrees(ctx, sw.Workspace.Path); err != nil {
-				slog.WarnContext(ctx, "prune worktrees before ensure failed", "workspace", sw.Workspace.Name, "error", err)
-			}
 			if _, _, err := s.gitService.SetupWorktreeAt(ctx, sw.Workspace.Path, sw.GitBranch.Name, "", sw.GitBranch.ID, repoID, sw.WorktreePath); err != nil {
 				slog.WarnContext(ctx, "failed to ensure session worktree on activation", "session", sess.ID, "workspace", sw.Workspace.Name, "branch", sw.GitBranch.Name, "error", err)
 			}
+			continue
 		}
-		if sess.IsMulti() && sess.SessionRoot != "" {
-			if err := os.MkdirAll(sess.SessionRoot, 0o755); err != nil {
-				slog.WarnContext(ctx, "failed to ensure session root", "session", sess.ID, "path", sess.SessionRoot, "error", err)
+		wtPath, err := s.gitService.EnsureWorktree(ctx, sw.GitBranch, sw.Workspace.Path)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to ensure session worktree on activation", "session", sess.ID, "workspace", sw.Workspace.Name, "branch", sw.GitBranch.Name, "error", err)
+			continue
+		}
+		if sw.WorktreePath == "" || sw.WorktreePath != wtPath {
+			sw.WorktreePath = wtPath
+			if updateErr := s.sessionWorkspaceStore.Update(sw); updateErr != nil {
+				slog.WarnContext(ctx, "failed to persist worktree path", "session", sess.ID, "error", updateErr)
 			}
 		}
-		return
+		if sess.SessionRoot == "" {
+			sess.SessionRoot = wtPath
+			if updateErr := s.store.Update(sess); updateErr != nil {
+				slog.WarnContext(ctx, "failed to persist session root", "session", sess.ID, "error", updateErr)
+			}
+		}
 	}
-	if sess.BranchID != nil && sess.GitBranch != nil && sess.WorkspaceID != 0 {
-		if ws, wsErr := s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID); wsErr == nil && ws != nil {
-			if _, wtErr := s.gitService.EnsureWorktree(ctx, sess.GitBranch, ws.Path); wtErr != nil {
-				slog.WarnContext(ctx, "failed to ensure worktree on activation", "session", sess.ID, "branch", sess.GitBranch.Name, "error", wtErr)
-			}
+	if multi && sess.SessionRoot != "" {
+		if err := os.MkdirAll(sess.SessionRoot, 0o755); err != nil {
+			slog.WarnContext(ctx, "failed to ensure session root", "session", sess.ID, "path", sess.SessionRoot, "error", err)
 		}
 	}
 }
 
 func (s *SessionService) isSessionGitHealthy(ctx context.Context, sess *Session) bool {
-	if len(sess.Workspaces) > 0 {
-		for i := range sess.Workspaces {
-			sw := &sess.Workspaces[i]
-			if sw.GitBranch == nil || sw.Workspace == nil {
-				continue
-			}
-			if !s.gitService.IsHealthy(ctx, sw.GitBranch, sw.Workspace.Path) {
-				return false
-			}
+	for i := range sess.Workspaces {
+		sw := &sess.Workspaces[i]
+		if sw.GitBranch == nil || sw.Workspace == nil {
+			continue
 		}
-		return true
-	}
-	if sess.BranchID != nil && sess.GitBranch != nil {
-		ws, _ := s.workspaceService.GetWorkspace(ctx, sess.WorkspaceID)
-		if ws == nil {
-			return true
+		if !s.gitService.IsHealthy(ctx, sw.GitBranch, sw.Workspace.Path) {
+			return false
 		}
-		return s.gitService.IsHealthy(ctx, sess.GitBranch, ws.Path)
 	}
 	return true
 }
@@ -1250,10 +1139,7 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 		return
 	}
 
-	sess := &Session{
-		WorkspaceID: ws.ID,
-		BranchID:    pr.HeadBranchID,
-	}
+	sess := &Session{}
 
 	prompt := fmt.Sprintf(
 		"/review the latest changes for the PR %s are checked out in the current working directory. "+
@@ -1269,7 +1155,7 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 		Options: marshalOptions(ClaudeActionOptions{Prompt: prompt}),
 	}
 
-	if err := s.CreateSession(ctx, sess, branch.Name, "", false, reviewAction); err != nil {
+	if err := s.CreateSession(ctx, sess, ws.ID, branch.Name, "", reviewAction); err != nil {
 		slog.Warn("failed to create session for PR", "pr", pr.Number, "error", err)
 		return
 	}

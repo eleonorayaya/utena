@@ -21,21 +21,9 @@ func ActivateSession(id uint) tea.Cmd {
 	return func() tea.Msg { return activateSessionMsg{id: id} }
 }
 
-func CreateSession(name string, workspaceID uint, branch, baseBranch, workspacePath string) tea.Cmd {
+func CreateSession(name string, workspaceIDs []uint, branch, baseBranch string) tea.Cmd {
 	return func() tea.Msg {
 		return createSessionIntentMsg{
-			name:          name,
-			workspaceID:   workspaceID,
-			branch:        branch,
-			baseBranch:    baseBranch,
-			workspacePath: workspacePath,
-		}
-	}
-}
-
-func CreateMultiSession(name string, workspaceIDs []uint, branch, baseBranch string) tea.Cmd {
-	return func() tea.Msg {
-		return createMultiSessionIntentMsg{
 			name:         name,
 			workspaceIDs: workspaceIDs,
 			branch:       branch,
@@ -47,9 +35,9 @@ func CreateMultiSession(name string, workspaceIDs []uint, branch, baseBranch str
 func CreateSessionFromTodo(name string, workspaceID uint, todoID uint) tea.Cmd {
 	return func() tea.Msg {
 		return createSessionIntentMsg{
-			name:        name,
-			workspaceID: workspaceID,
-			todoID:      &todoID,
+			name:         name,
+			workspaceIDs: []uint{workspaceID},
+			todoID:       &todoID,
 		}
 	}
 }
@@ -78,19 +66,11 @@ type activateSessionMsg struct {
 }
 
 type createSessionIntentMsg struct {
-	name          string
-	workspaceID   uint
-	branch        string
-	baseBranch    string
-	workspacePath string
-	todoID        *uint
-}
-
-type createMultiSessionIntentMsg struct {
 	name         string
 	workspaceIDs []uint
 	branch       string
 	baseBranch   string
+	todoID       *uint
 }
 
 type repairSessionIntentMsg struct {
@@ -170,7 +150,10 @@ func (p sessionsProvider) deriveActiveWorkspace() tea.Cmd {
 		if !s.IsAttached {
 			continue
 		}
-		wid := s.WorkspaceID
+		var wid uint
+		if !s.IsMulti() && len(s.Workspaces) > 0 {
+			wid = s.Workspaces[0].WorkspaceID
+		}
 		return func() tea.Msg {
 			return setActiveWorkspaceMsg{workspaceID: wid}
 		}
@@ -206,10 +189,7 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, p.client.fetchSessions()
 
 	case createSessionIntentMsg:
-		return p, p.client.createSession(msg.name, msg.workspaceID, msg.branch, msg.baseBranch, msg.todoID)
-
-	case createMultiSessionIntentMsg:
-		return p, p.client.createMultiSession(msg.name, msg.workspaceIDs, msg.branch, msg.baseBranch)
+		return p, p.client.createSession(msg.name, msg.workspaceIDs, msg.branch, msg.baseBranch, msg.todoID)
 
 	case SessionCreatedMsg:
 		return p, p.client.fetchSessions()
