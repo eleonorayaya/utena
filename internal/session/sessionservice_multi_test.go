@@ -11,14 +11,13 @@ import (
 )
 
 func TestSessionService_OnAppStart_MarksOrphanedSessionBroken(t *testing.T) {
-	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+	service, sessionStore, _, _, _, _ := setupSessionService(t)
 	ctx := context.Background()
 
 	orphan := &Session{
-		Name:        "orphan-session",
-		WorkspaceID: ws1ID,
-		Status:      StatusActive,
-		LastUsedAt:  time.Now(),
+		Name:       "orphan-session",
+		Status:     StatusActive,
+		LastUsedAt: time.Now(),
 	}
 	require.NoError(t, sessionStore.Add(orphan))
 
@@ -94,33 +93,30 @@ func TestSessionService_CreateMultiSession_RejectsExistingSessionRootDir(t *test
 	require.Contains(t, err.Error(), "already exists on disk")
 }
 
-func TestSessionService_isSessionGitHealthy_NoBranches(t *testing.T) {
+func TestSessionService_isSessionGitHealthy_NoWorktrees(t *testing.T) {
 	service, _, _, _, _, _ := setupSessionService(t)
 	ctx := context.Background()
 
-	sess := &Session{Workspaces: []SessionWorkspace{
-		{WorkspaceID: 1, Workspace: nil, GitBranch: nil},
-	}}
-	require.True(t, service.isSessionGitHealthy(ctx, sess), "slots without branches must not block health")
+	sess := &Session{}
+	require.True(t, service.isSessionGitHealthy(ctx, sess), "session without worktrees must not block health")
 }
 
 func TestSessionService_RepairSession_MultiTransitionsToCreating(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, ws2ID := setupSessionService(t)
 	ctx := context.Background()
-	swStore := NewSessionWorkspaceStore(service.store.db)
+	swtStore := NewSessionWorktreeStore(service.store.db)
 
 	sessionRoot := filepath.Join(service.sessionsRoot, "repair-multi")
 	sess := &Session{
 		Name:        "repair-multi",
-		WorkspaceID: ws1ID,
 		Status:      StatusBroken,
 		StatusError: "something",
 		SessionRoot: sessionRoot,
 		LastUsedAt:  time.Now(),
 	}
 	require.NoError(t, sessionStore.Add(sess))
-	require.NoError(t, swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: ws1ID, Position: 0, WorktreePath: filepath.Join(sessionRoot, "a")}))
-	require.NoError(t, swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: ws2ID, Position: 1, WorktreePath: filepath.Join(sessionRoot, "b")}))
+	attachTestWorktree(t, service.store.db, swtStore, sess.ID, ws1ID, 0)
+	attachTestWorktree(t, service.store.db, swtStore, sess.ID, ws2ID, 1)
 
 	tmuxRecord, err := service.tmuxService.RegisterPending(SanitizeTmuxName(sess.Name), sessionRoot, nil)
 	require.NoError(t, err)
@@ -143,17 +139,16 @@ func TestSessionService_RepairSession_MultiTransitionsToCreating(t *testing.T) {
 func TestSessionService_RepairSession_RejectsSessionWithoutTmuxRecord(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
 	ctx := context.Background()
-	swStore := NewSessionWorkspaceStore(service.store.db)
+	swtStore := NewSessionWorktreeStore(service.store.db)
 
 	sess := &Session{
 		Name:        "no-tmux",
-		WorkspaceID: ws1ID,
 		Status:      StatusBroken,
 		StatusError: "something",
 		LastUsedAt:  time.Now(),
 	}
 	require.NoError(t, sessionStore.Add(sess))
-	require.NoError(t, swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: ws1ID, Position: 0}))
+	attachTestWorktree(t, service.store.db, swtStore, sess.ID, ws1ID, 0)
 
 	_, err := service.RepairSession(ctx, sess.ID)
 	require.Error(t, err)

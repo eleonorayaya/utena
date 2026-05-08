@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/workspace"
 	"gorm.io/gorm"
 )
 
@@ -21,20 +22,54 @@ func NewSessionStore(database db.Database) *SessionStore {
 
 func (s *SessionStore) loaded() *gorm.DB {
 	return s.db.
-		Joins("GitBranch").
 		Joins("TmuxSession").
 		Preload("ClaudeSessions").
 		Preload("SessionActions").
-		Preload("Workspaces", func(db *gorm.DB) *gorm.DB {
-			return db.Order("session_workspaces.position ASC")
-		}).
-		Preload("Workspaces.Workspace").
-		Preload("Workspaces.GitBranch").
 		Preload("Worktrees", func(db *gorm.DB) *gorm.DB {
 			return db.Order("session_worktrees.position ASC")
 		}).
 		Preload("Worktrees.Worktree").
 		Preload("Worktrees.Worktree.Branch")
+}
+
+func (s *SessionStore) enrichWorkspaces(sessions []*Session) error {
+	idSet := make(map[uint]struct{})
+	for _, sess := range sessions {
+		for i := range sess.Worktrees {
+			wt := sess.Worktrees[i].Worktree
+			if wt == nil || wt.WorkspaceID == nil || *wt.WorkspaceID == 0 {
+				continue
+			}
+			idSet[*wt.WorkspaceID] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return nil
+	}
+	ids := make([]uint, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	var workspaces []workspace.Workspace
+	if err := s.db.Where("id IN ?", ids).Find(&workspaces).Error; err != nil {
+		return err
+	}
+	byID := make(map[uint]*workspace.Workspace, len(workspaces))
+	for i := range workspaces {
+		byID[workspaces[i].ID] = &workspaces[i]
+	}
+	for _, sess := range sessions {
+		for i := range sess.Worktrees {
+			wt := sess.Worktrees[i].Worktree
+			if wt == nil || wt.WorkspaceID == nil {
+				continue
+			}
+			if ws, ok := byID[*wt.WorkspaceID]; ok {
+				sess.Worktrees[i].Workspace = ws
+			}
+		}
+	}
+	return nil
 }
 
 func (s *SessionStore) GetByID(id uint) (*Session, error) {
@@ -45,6 +80,9 @@ func (s *SessionStore) GetByID(id uint) (*Session, error) {
 		}
 		return nil, err
 	}
+	if err := s.enrichWorkspaces([]*Session{&session}); err != nil {
+		return nil, err
+	}
 	return &session, nil
 }
 
@@ -53,15 +91,29 @@ func (s *SessionStore) List() ([]Session, error) {
 	if err := s.loaded().Order("sessions.last_used_at DESC").Find(&sessions).Error; err != nil {
 		return nil, err
 	}
+	ptrs := make([]*Session, len(sessions))
+	for i := range sessions {
+		ptrs[i] = &sessions[i]
+	}
+	if err := s.enrichWorkspaces(ptrs); err != nil {
+		return nil, err
+	}
 	return sessions, nil
 }
 
 func (s *SessionStore) ListByWorkspace(workspaceID uint) ([]Session, error) {
 	var sessions []Session
 	if err := s.loaded().
-		Where("sessions.id IN (SELECT session_id FROM session_workspaces WHERE workspace_id = ? AND deleted_at IS NULL)", workspaceID).
+		Where("sessions.id IN (SELECT swt.session_id FROM session_worktrees swt JOIN worktrees wt ON swt.worktree_id = wt.id WHERE wt.workspace_id = ? AND swt.deleted_at IS NULL AND wt.deleted_at IS NULL)", workspaceID).
 		Order("sessions.last_used_at DESC").
 		Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	ptrs := make([]*Session, len(sessions))
+	for i := range sessions {
+		ptrs[i] = &sessions[i]
+	}
+	if err := s.enrichWorkspaces(ptrs); err != nil {
 		return nil, err
 	}
 	return sessions, nil
@@ -72,7 +124,7 @@ func (s *SessionStore) Add(session *Session) error {
 		return errors.New("session cannot be nil")
 	}
 
-	if err := s.db.Omit("ClaudeSessions", "GitBranch", "TmuxSession", "Workspaces").Create(session).Error; err != nil {
+	if err := s.db.Omit("ClaudeSessions", "TmuxSession").Create(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return fmt.Errorf("session '%s' already exists: %w", session.Name, ErrSessionAlreadyExists)
 		}
@@ -97,7 +149,7 @@ func (s *SessionStore) Update(session *Session) error {
 		return err
 	}
 
-	return s.db.Omit("ClaudeSessions", "GitBranch", "TmuxSession", "Workspaces").Save(session).Error
+	return s.db.Omit("ClaudeSessions", "TmuxSession").Save(session).Error
 }
 
 func (s *SessionStore) Delete(id uint) error {
@@ -118,7 +170,10 @@ func (s *SessionStore) Delete(id uint) error {
 
 func (s *SessionStore) GetByWorkspaceAndName(workspaceID uint, name string, excludeStatuses ...SessionStatus) (*Session, error) {
 	var session Session
-	q := s.db.Where("name = ? AND id IN (SELECT session_id FROM session_workspaces WHERE workspace_id = ? AND deleted_at IS NULL)", name, workspaceID)
+	q := s.db.Where(
+		"name = ? AND id IN (SELECT swt.session_id FROM session_worktrees swt JOIN worktrees wt ON swt.worktree_id = wt.id WHERE wt.workspace_id = ? AND swt.deleted_at IS NULL AND wt.deleted_at IS NULL)",
+		name, workspaceID,
+	)
 	if len(excludeStatuses) > 0 {
 		q = q.Where("status NOT IN ?", excludeStatuses)
 	}
@@ -133,10 +188,16 @@ func (s *SessionStore) GetByWorkspaceAndName(workspaceID uint, name string, excl
 
 func (s *SessionStore) GetByBranchID(branchID uint) (*Session, error) {
 	var session Session
-	if err := s.loaded().First(&session, "sessions.id IN (SELECT session_id FROM session_workspaces WHERE branch_id = ? AND deleted_at IS NULL)", branchID).Error; err != nil {
+	if err := s.loaded().First(&session,
+		"sessions.id IN (SELECT swt.session_id FROM session_worktrees swt JOIN worktrees wt ON swt.worktree_id = wt.id WHERE wt.branch_id = ? AND swt.deleted_at IS NULL AND wt.deleted_at IS NULL)",
+		branchID,
+	).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound
 		}
+		return nil, err
+	}
+	if err := s.enrichWorkspaces([]*Session{&session}); err != nil {
 		return nil, err
 	}
 	return &session, nil
@@ -148,6 +209,9 @@ func (s *SessionStore) GetByTmuxSessionID(tmuxSessionID uint) (*Session, error) 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound
 		}
+		return nil, err
+	}
+	if err := s.enrichWorkspaces([]*Session{&session}); err != nil {
 		return nil, err
 	}
 	return &session, nil

@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,12 +24,32 @@ import (
 type prTestEnv struct {
 	service          *SessionService
 	sessionStore     *SessionStore
-	swStore          *SessionWorkspaceStore
+	swtStore         *SessionWorktreeStore
 	dismissedPRStore *DismissedPRStore
 	database         db.Database
 	workspace        *workspace.Workspace
 	repo             *git.Repo
 	branch           *git.Branch
+	wtSeq            int
+}
+
+// attachBranchWorktree creates a Worktree row tied to the env's workspace+repo
+// and the supplied branch, then links it to the given session via a fresh
+// SessionWorktree row.
+func (env *prTestEnv) attachBranchWorktree(t *testing.T, sessionID uint, branchID uint, position int) *git.Worktree {
+	t.Helper()
+	env.wtSeq++
+	wsID := env.workspace.ID
+	wt := &git.Worktree{
+		Path:        filepath.Join(env.workspace.Path, ".worktrees", fmt.Sprintf("pr-test-%d", env.wtSeq)),
+		BranchID:    branchID,
+		RepoID:      env.repo.ID,
+		WorkspaceID: &wsID,
+		Status:      git.WorktreeStatusPresent,
+	}
+	require.NoError(t, env.database.Create(wt).Error)
+	require.NoError(t, env.swtStore.Add(&SessionWorktree{SessionID: sessionID, WorktreeID: wt.ID, Position: position}))
+	return wt
 }
 
 func setupPRTestEnv(t *testing.T) *prTestEnv {
@@ -42,7 +63,6 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 		&git.PullRequest{},
 		&utmux.TmuxSession{},
 		&Session{},
-		&SessionWorkspace{},
 		&SessionWorktree{},
 		&DismissedPR{},
 		&claude.ClaudeSession{},
@@ -80,14 +100,13 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 	mock := utmux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	sessionActionStore := NewSessionActionStore(database)
-	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorkspaceStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
 
 	return &prTestEnv{
 		service:          service,
 		sessionStore:     sessionStore,
-		swStore:          sessionWorkspaceStore,
+		swtStore:         sessionWorktreeStore,
 		dismissedPRStore: dismissedPRStore,
 		database:         database,
 		workspace:        ws,
@@ -210,7 +229,7 @@ func TestHandlePRUpdated_SkipsExistingSession(t *testing.T) {
 		LastUsedAt: time.Now(),
 	}
 	require.NoError(t, env.sessionStore.Add(existing))
-	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: existing.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
+	env.attachBranchWorktree(t, existing.ID, branchID, 0)
 
 	event := eventbus.Event{
 		Type: git.EventPRUpdated,
@@ -247,7 +266,7 @@ func TestHandlePRUpdated_CompletesSessionOnMerge(t *testing.T) {
 		LastUsedAt: time.Now(),
 	}
 	require.NoError(t, env.sessionStore.Add(sess))
-	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
+	env.attachBranchWorktree(t, sess.ID, branchID, 0)
 
 	event := eventbus.Event{
 		Type: git.EventPRUpdated,
@@ -281,7 +300,7 @@ func TestHandlePRUpdated_IgnoresNonMerge(t *testing.T) {
 		LastUsedAt: time.Now(),
 	}
 	require.NoError(t, env.sessionStore.Add(sess))
-	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
+	env.attachBranchWorktree(t, sess.ID, branchID, 0)
 
 	event := eventbus.Event{
 		Type: git.EventPRUpdated,
@@ -348,7 +367,7 @@ func TestCompletedCleanupTask_ArchivesStale(t *testing.T) {
 		LastUsedAt: time.Now().Add(-10 * time.Minute),
 	}
 	require.NoError(t, env.sessionStore.Add(sess))
-	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
+	env.attachBranchWorktree(t, sess.ID, branchID, 0)
 
 	task := &completedCleanupTask{service: env.service}
 	err := task.Run(ctx)
@@ -371,7 +390,7 @@ func TestCompletedCleanupTask_SkipsAttached(t *testing.T) {
 		LastUsedAt: time.Now().Add(-10 * time.Minute),
 	}
 	require.NoError(t, env.sessionStore.Add(sess))
-	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
+	env.attachBranchWorktree(t, sess.ID, branchID, 0)
 
 	task := &completedCleanupTask{service: env.service}
 	err := task.Run(ctx)
@@ -393,7 +412,7 @@ func TestCompletedCleanupTask_SkipsRecent(t *testing.T) {
 		LastUsedAt: time.Now().Add(-1 * time.Minute),
 	}
 	require.NoError(t, env.sessionStore.Add(sess))
-	require.NoError(t, env.swStore.Add(&SessionWorkspace{SessionID: sess.ID, WorkspaceID: env.workspace.ID, BranchID: &branchID, Position: 0}))
+	env.attachBranchWorktree(t, sess.ID, branchID, 0)
 
 	task := &completedCleanupTask{service: env.service}
 	err := task.Run(ctx)
@@ -487,9 +506,8 @@ func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
-	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorkspaceStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
 
 	branchID := branch.ID
 	event := eventbus.Event{

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
@@ -33,14 +32,12 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 
 	mock := utmux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
-	gitDB := testdb.New(t, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
-	gitService := git.NewGitService(gitDB)
+	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
-	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorkspaceStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
@@ -49,7 +46,7 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 
 func TestSessionRouter_ListSessions(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, ws2ID := setupSessionRouter(t)
-	swStore := NewSessionWorkspaceStore(sessionStore.db)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
 
 	now := time.Now()
 	session1 := &Session{Name: "session-1", Status: StatusActive, LastUsedAt: now}
@@ -79,7 +76,7 @@ func TestSessionRouter_ListSessions(t *testing.T) {
 
 func TestSessionRouter_GetSessionByID(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
-	swStore := NewSessionWorkspaceStore(sessionStore.db)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
 
 	session := &Session{
 		Name:       "session-1",
@@ -117,7 +114,7 @@ func TestSessionRouter_GetSessionByID_NotFound(t *testing.T) {
 
 func TestSessionRouter_ListSessionsByWorkspace(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, ws2ID := setupSessionRouter(t)
-	swStore := NewSessionWorkspaceStore(sessionStore.db)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
 
 	now := time.Now()
 	session1 := &Session{Name: "session-1", Status: StatusActive, LastUsedAt: now}
@@ -170,7 +167,7 @@ func TestSessionRouter_CreateSession_InvalidWorkspace(t *testing.T) {
 
 func TestSessionRouter_UpdateSession(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
-	swStore := NewSessionWorkspaceStore(sessionStore.db)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
 
 	session := &Session{
 		Name:       "session-1",
@@ -199,7 +196,7 @@ func TestSessionRouter_UpdateSession(t *testing.T) {
 
 func TestSessionRouter_DeleteSession(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
-	swStore := NewSessionWorkspaceStore(sessionStore.db)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
 
 	session := &Session{
 		Name:       "session-1",
@@ -232,14 +229,13 @@ func TestSessionRouter_RepairSession_NotFound(t *testing.T) {
 }
 
 func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
-	router, sessionStore, _, tmux, ws1ID, _ := setupSessionRouter(t)
+	router, sessionStore, _, tmux, _, _ := setupSessionRouter(t)
 
 	tmux.Sessions["utena-alive-session"] = true
 	session := &Session{
-		Name:        "alive-session",
-		WorkspaceID: ws1ID,
-		Status:      StatusActive,
-		LastUsedAt:  time.Now(),
+		Name:       "alive-session",
+		Status:     StatusActive,
+		LastUsedAt: time.Now(),
 	}
 	require.NoError(t, sessionStore.Add(session))
 
@@ -252,13 +248,12 @@ func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
 }
 
 func TestSessionRouter_ActivateSession_RejectsBrokenSession(t *testing.T) {
-	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, _, _ := setupSessionRouter(t)
 
 	session := &Session{
-		Name:        "broken-session",
-		WorkspaceID: ws1ID,
-		Status:      StatusBroken,
-		LastUsedAt:  time.Now(),
+		Name:       "broken-session",
+		Status:     StatusBroken,
+		LastUsedAt: time.Now(),
 	}
 	require.NoError(t, sessionStore.Add(session))
 
@@ -271,13 +266,12 @@ func TestSessionRouter_ActivateSession_RejectsBrokenSession(t *testing.T) {
 }
 
 func TestSessionRouter_GetSessionByID_ShowsCreatingStatus(t *testing.T) {
-	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, _, _ := setupSessionRouter(t)
 
 	session := &Session{
-		Name:        "creating-session",
-		WorkspaceID: ws1ID,
-		Status:      StatusCreating,
-		LastUsedAt:  time.Now(),
+		Name:       "creating-session",
+		Status:     StatusCreating,
+		LastUsedAt: time.Now(),
 	}
 	require.NoError(t, sessionStore.Add(session))
 
@@ -295,11 +289,10 @@ func TestSessionRouter_GetSessionByID_ShowsCreatingStatus(t *testing.T) {
 }
 
 func TestSessionRouter_GetSessionByID_ShowsBrokenStatusError(t *testing.T) {
-	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
+	router, sessionStore, _, _, _, _ := setupSessionRouter(t)
 
 	session := &Session{
 		Name:        "broken-session",
-		WorkspaceID: ws1ID,
 		Status:      StatusBroken,
 		StatusError: "worktree setup failed: timeout",
 		LastUsedAt:  time.Now(),

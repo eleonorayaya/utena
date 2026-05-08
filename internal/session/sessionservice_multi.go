@@ -127,28 +127,12 @@ func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMul
 	}
 
 	for i, w := range slots {
-		sw := &SessionWorkspace{
-			SessionID:    sess.ID,
-			WorkspaceID:  w.workspace.ID,
-			WorktreePath: w.destPath,
-			Position:     i,
-		}
-		if err := s.sessionWorkspaceStore.Add(sw); err != nil {
+		if err := s.eagerCreateWorktree(ctx, sess.ID, w.workspace, input.Branch, w.destPath, i); err != nil {
 			if delErr := s.store.Delete(sess.ID); delErr != nil {
-				slog.ErrorContext(ctx, "failed to delete session after junction add failure", "session", sess.ID, "error", delErr)
+				slog.ErrorContext(ctx, "failed to delete session after worktree creation failure", "session", sess.ID, "error", delErr)
 			}
 			_ = os.RemoveAll(sessionRoot)
-			return nil, fmt.Errorf("add session-workspace junction for workspace %d: %w", w.workspace.ID, err)
-		}
-		if err := s.eagerCreateWorktree(ctx, sess.ID, w.workspace, input.Branch, w.destPath, i); err != nil {
-			slog.WarnContext(ctx, "failed to eagerly create worktree record", "session", sess.ID, "workspace", w.workspace.Name, "error", err)
-		} else {
-			if branchID, err := s.lookupBranchID(ctx, w.workspace, input.Branch); err == nil {
-				sw.BranchID = branchID
-				if updateErr := s.sessionWorkspaceStore.Update(sw); updateErr != nil {
-					slog.WarnContext(ctx, "failed to update legacy junction with branch id", "session", sess.ID, "error", updateErr)
-				}
-			}
+			return nil, fmt.Errorf("eager create worktree for workspace %d: %w", w.workspace.ID, err)
 		}
 	}
 

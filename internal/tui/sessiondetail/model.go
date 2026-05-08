@@ -67,13 +67,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.sess = &s
 		m.prs = nil
 		m.pendingDeleteID = 0
-		if !s.IsMulti() && len(s.Workspaces) > 0 && s.Workspaces[0].WorkspaceID != 0 {
-			return m, provider.FetchPRs(s.Workspaces[0].WorkspaceID, "")
+		if !s.IsMulti() && len(s.Worktrees) > 0 && s.Worktrees[0].Worktree != nil && s.Worktrees[0].Worktree.WorkspaceID != nil && *s.Worktrees[0].Worktree.WorkspaceID != 0 {
+			return m, provider.FetchPRs(*s.Worktrees[0].Worktree.WorkspaceID, "")
 		}
 		return m, nil
 	case provider.PRsStateUpdatedMsg:
-		if m.sess != nil && len(m.sess.Workspaces) > 0 && msg.WorkspaceID == m.sess.Workspaces[0].WorkspaceID {
-			m.prs = filterPRsByBranch(msg.PullRequests, m.sess.Workspaces[0].GitBranch)
+		if m.sess != nil && len(m.sess.Worktrees) > 0 && m.sess.Worktrees[0].Worktree != nil && m.sess.Worktrees[0].Worktree.WorkspaceID != nil && msg.WorkspaceID == *m.sess.Worktrees[0].Worktree.WorkspaceID {
+			m.prs = filterPRsByBranch(msg.PullRequests, m.sess.Worktrees[0].Worktree.Branch)
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -175,9 +175,9 @@ func (m Model) View() string {
 		}
 	}
 
-	if !s.IsMulti() && len(s.Workspaces) > 0 && s.Workspaces[0].GitBranch != nil {
+	if !s.IsMulti() && len(s.Worktrees) > 0 && s.Worktrees[0].Worktree != nil && s.Worktrees[0].Worktree.Branch != nil {
 		b.WriteString("\n" + sectionStyle().Render("Git") + "\n")
-		b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(s.Workspaces[0].GitBranch.Name) + "\n")
+		b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(s.Worktrees[0].Worktree.Branch.Name) + "\n")
 		for _, pr := range m.prs {
 			b.WriteString(labelStyle().Render("PR") + valueStyle().Render(fmt.Sprintf("#%d %s (%s)", pr.Number, pr.Title, pr.State)) + "\n")
 		}

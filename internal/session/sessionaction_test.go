@@ -30,7 +30,7 @@ func setupActionTestDB(t *testing.T) (*SessionActionStore, *Session) {
 	store := NewSessionActionStore(database)
 	ws := &workspace.Workspace{Name: "test-ws", Path: "/tmp/test"}
 	require.NoError(t, database.Create(ws).Error)
-	sess := &Session{Name: "test", WorkspaceID: ws.ID, Status: StatusPending}
+	sess := &Session{Name: "test", Status: StatusPending}
 	require.NoError(t, database.Create(sess).Error)
 	return store, sess
 }

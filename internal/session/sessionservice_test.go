@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/db"
-	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
@@ -41,21 +40,19 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 
 	mock := utmux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
-	gitDB := testdb.New(t, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
-	gitService := git.NewGitService(gitDB)
+	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
-	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
 	configDir := t.TempDir()
 	sessionsRoot := t.TempDir()
-	service := NewSessionService(sessionStore, sessionWorkspaceStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir, sessionsRoot)
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir, sessionsRoot)
 	return service, sessionStore, workspaceStore, mock, ws1.ID, ws2.ID
 }
 
-func swStoreFor(svc *SessionService) *SessionWorkspaceStore {
-	return svc.sessionWorkspaceStore
+func swtStoreFor(svc *SessionService) *SessionWorktreeStore {
+	return svc.sessionWorktreeStore
 }
 
 func waitForStatus(t *testing.T, store *SessionStore, id uint, status SessionStatus, timeout time.Duration) {
@@ -95,7 +92,7 @@ func TestSessionService_OnAppStart_RecoversStuckCreatingSessions(t *testing.T) {
 		Status:     StatusCreating,
 		LastUsedAt: time.Now().Add(-1 * time.Hour),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), stuck, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), stuck, ws1ID)
 
 	require.NoError(t, service.OnAppStart(ctx))
 
@@ -114,7 +111,7 @@ func TestSessionService_OnAppEnd(t *testing.T) {
 
 func TestSessionService_ListSessions(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, ws2ID := setupSessionService(t)
-	swStore := swStoreFor(service)
+	swStore := swtStoreFor(service)
 
 	now := time.Now()
 	session1 := &Session{Name: "session-1", Status: StatusActive, LastUsedAt: now.Add(-1 * time.Hour)}
@@ -132,7 +129,7 @@ func TestSessionService_ListSessions(t *testing.T) {
 
 func TestSessionService_ListSessionsByWorkspace(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, ws2ID := setupSessionService(t)
-	swStore := swStoreFor(service)
+	swStore := swtStoreFor(service)
 
 	now := time.Now()
 	session1 := &Session{Name: "session-1", Status: StatusActive, LastUsedAt: now.Add(-1 * time.Hour)}
@@ -168,7 +165,7 @@ func TestSessionService_GetSession(t *testing.T) {
 		Status:     StatusActive,
 		LastUsedAt: time.Now(),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), session, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	ctx := context.Background()
 	retrieved, err := service.GetSession(ctx, session.ID)
@@ -232,7 +229,7 @@ func TestSessionService_UpdateSession(t *testing.T) {
 		Status:     StatusActive,
 		LastUsedAt: time.Now(),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), session, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	session.IsAttached = true
 	ctx := context.Background()
@@ -252,7 +249,7 @@ func TestSessionService_DeleteSession(t *testing.T) {
 		Status:     StatusActive,
 		LastUsedAt: time.Now(),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), session, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	ctx := context.Background()
 	require.NoError(t, service.DeleteSession(ctx, session.ID, true, false))
@@ -279,7 +276,7 @@ func TestSessionService_DeleteSession_Creating_Blocked(t *testing.T) {
 		Status:     StatusCreating,
 		LastUsedAt: time.Now(),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), sess, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), sess, ws1ID)
 
 	ctx := context.Background()
 	err := service.DeleteSession(ctx, sess.ID, true, false)
@@ -295,7 +292,7 @@ func TestSessionService_DeleteSession_Creating_Force(t *testing.T) {
 		Status:     StatusCreating,
 		LastUsedAt: time.Now(),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), sess, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), sess, ws1ID)
 
 	ctx := context.Background()
 	err := service.DeleteSession(ctx, sess.ID, true, true)
@@ -372,9 +369,8 @@ func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir st
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
-	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorkspaceStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir, t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir, t.TempDir())
 	return service, sessionStore, mock, wsGit.ID, database, gitService
 }
 
@@ -383,12 +379,11 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	service, sessionStore, mock, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
 	session := &Session{
-		Name:        "my-feature",
-		WorkspaceID: wsGitID,
+		Name: "my-feature",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, session.WorkspaceID, "", "main")
+	err := service.CreateSession(ctx, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -418,8 +413,7 @@ func TestSessionService_CreateSession_EagerlyRegistersPendingTmuxRecord(t *testi
 	defer func() { service.setupTimeout = prev }()
 
 	session := &Session{
-		Name:        "eager",
-		WorkspaceID: wsGitID,
+		Name: "eager",
 	}
 
 	ctx := context.Background()
@@ -448,11 +442,10 @@ func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testi
 	require.NoError(t, err, "push branch failed: %s", string(out))
 
 	session := &Session{
-		Name:        branchName,
-		WorkspaceID: wsGitID,
+		Name: branchName,
 	}
 
-	err = service.CreateSession(ctx, session, session.WorkspaceID, branchName, "")
+	err = service.CreateSession(ctx, session, wsGitID, branchName, "")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -470,11 +463,10 @@ func TestSessionService_CreateSession_WithWorktree_ReusesLocalOnlyBranch(t *test
 	require.NoError(t, err, "pre-create worktree failed: %s", string(out))
 
 	session := &Session{
-		Name:        branchName,
-		WorkspaceID: wsGitID,
+		Name: branchName,
 	}
 
-	err = service.CreateSession(ctx, session, session.WorkspaceID, branchName, "")
+	err = service.CreateSession(ctx, session, wsGitID, branchName, "")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -486,12 +478,11 @@ func TestSessionService_CreateSession_TimesOut(t *testing.T) {
 	service.setupTimeout = 1 * time.Nanosecond
 
 	session := &Session{
-		Name:        "slow-feature",
-		WorkspaceID: wsGitID,
+		Name: "slow-feature",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, session.WorkspaceID, "", "main")
+	err := service.CreateSession(ctx, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusBroken, 5*time.Second)
@@ -507,12 +498,11 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	service, sessionStore, mock, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
 	session := &Session{
-		Name:        "my-feature",
-		WorkspaceID: wsGitID,
+		Name: "my-feature",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, session.WorkspaceID, "", "nonexistent")
+	err := service.CreateSession(ctx, session, wsGitID, "", "nonexistent")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusBroken, 5*time.Second)
@@ -539,9 +529,9 @@ func TestSessionService_CreateSession_ExistingBranch_AutoCreatesWorktree(t *test
 	out, err = pushCmd.CombinedOutput()
 	require.NoError(t, err, "push branch failed: %s", string(out))
 
-	session := &Session{WorkspaceID: wsGitID}
+	session := &Session{}
 
-	err = service.CreateSession(ctx, session, session.WorkspaceID, branchName, "")
+	err = service.CreateSession(ctx, session, wsGitID, branchName, "")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -563,7 +553,7 @@ func TestSessionService_ActivateSession_TouchesWorkspace(t *testing.T) {
 		Status:     StatusActive,
 		LastUsedAt: time.Now().Add(-1 * time.Hour),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), session, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	ctx := context.Background()
 	_, err := service.ActivateSession(ctx, session.ID)
@@ -582,7 +572,7 @@ func TestSessionService_ActivateSession_RejectsBrokenSession(t *testing.T) {
 		Status:     StatusBroken,
 		LastUsedAt: time.Now(),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), session, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	ctx := context.Background()
 	_, err := service.ActivateSession(ctx, session.ID)
@@ -605,18 +595,24 @@ func TestSessionService_ActivateSession_PendingPR_CreatesWorktree(t *testing.T) 
 	branch := &git.Branch{Name: branchName, RepoID: repo.ID, ExistsLocal: false, ExistsRemote: true}
 	require.NoError(t, gitDB.Create(branch).Error)
 
-	branchID := branch.ID
 	worktreePathPinned := filepath.Join(repoPath, ".worktrees", "harleyk--catalog-docs")
 	pending := &Session{
 		Name:        branchName,
-		WorkspaceID: wsGitID,
-		BranchID:    &branchID,
 		Status:      StatusPending,
 		SessionRoot: worktreePathPinned,
 		LastUsedAt:  time.Now(),
 	}
 	require.NoError(t, sessionStore.Add(pending))
-	require.NoError(t, service.sessionWorkspaceStore.Add(&SessionWorkspace{SessionID: pending.ID, WorkspaceID: wsGitID, BranchID: &branchID, WorktreePath: worktreePathPinned, Position: 0}))
+	wsIDPtr := wsGitID
+	wt := &git.Worktree{
+		Path:        worktreePathPinned,
+		BranchID:    branch.ID,
+		RepoID:      repo.ID,
+		WorkspaceID: &wsIDPtr,
+		Status:      git.WorktreeStatusPending,
+	}
+	require.NoError(t, gitDB.Create(wt).Error)
+	require.NoError(t, service.sessionWorktreeStore.Add(&SessionWorktree{SessionID: pending.ID, WorktreeID: wt.ID, Position: 0}))
 	tmuxRecord, err := service.tmuxService.RegisterPending(fmt.Sprintf("git-repo-%s", branchName), worktreePathPinned, nil)
 	require.NoError(t, err)
 	pending.TmuxSessionID = &tmuxRecord.ID
@@ -647,7 +643,7 @@ func TestSessionService_ActivateSession_RecreatesMissingTmux(t *testing.T) {
 		Status:     StatusActive,
 		LastUsedAt: time.Now(),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), session, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 	tmuxRecord, err := service.tmuxService.RegisterPending("utena-session-1", "/tmp/utena", nil)
 	require.NoError(t, err)
 	session.TmuxSessionID = &tmuxRecord.ID
@@ -670,7 +666,7 @@ func TestSessionService_RefreshSession_DetectsMissingTmux(t *testing.T) {
 		Status:     StatusActive,
 		LastUsedAt: time.Now(),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), session, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	ctx := context.Background()
 	tmux.RemoveSession("utena-session-1")
@@ -692,9 +688,8 @@ func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 	tmuxService := createTmuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
-	swStore := NewSessionWorkspaceStore(database)
 	swtStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, swStore, swtStore, NewDismissedPRStore(database), NewSessionActionStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	service := NewSessionService(sessionStore, swtStore, NewDismissedPRStore(database), NewSessionActionStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
 
 	ts := &utmux.TmuxSession{Name: "utena-session-1", StartDir: "/tmp/utena", Status: utmux.TmuxStatusActive}
 	require.NoError(t, database.Create(ts).Error)
@@ -704,7 +699,7 @@ func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 		TmuxSessionID: &ts.ID,
 		LastUsedAt:    time.Now(),
 	}
-	addTestSession(t, sessionStore, swStore, session, ws.ID)
+	addTestSession(t, sessionStore, swtStore, session, ws.ID)
 
 	ctx := context.Background()
 	refreshed, err := service.RefreshSession(ctx, session.ID)
@@ -721,7 +716,7 @@ func TestSessionService_RepairSession_NotBroken(t *testing.T) {
 		Status:     StatusActive,
 		LastUsedAt: time.Now(),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), session, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	ctx := context.Background()
 	_, err := service.RepairSession(ctx, session.ID)
@@ -738,7 +733,7 @@ func TestSessionService_Reconcile_MarksMissingTmuxBroken(t *testing.T) {
 		Status:     StatusActive,
 		LastUsedAt: time.Now(),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), session, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	ctx := context.Background()
 	tmux.RemoveSession("utena-session-1")
@@ -761,7 +756,7 @@ func TestSessionService_Reconcile_SkipsDeleted(t *testing.T) {
 		Status:     StatusDeleted,
 		LastUsedAt: time.Now(),
 	}
-	addTestSession(t, sessionStore, swStoreFor(service), session, ws1ID)
+	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	ctx := context.Background()
 	sessions, err := sessionStore.List()
@@ -790,12 +785,11 @@ func TestSessionService_WorktreeInit_RunsUserLevelScript(t *testing.T) {
 	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, configDir)
 
 	session := &Session{
-		Name:        "init-test",
-		WorkspaceID: wsGitID,
+		Name: "init-test",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, session.WorkspaceID, "", "main")
+	err := service.CreateSession(ctx, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -814,12 +808,11 @@ func TestSessionService_WorktreeInit_RunsRepoLevelScript(t *testing.T) {
 	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
 	session := &Session{
-		Name:        "repo-init",
-		WorkspaceID: wsGitID,
+		Name: "repo-init",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, session.WorkspaceID, "", "main")
+	err := service.CreateSession(ctx, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -849,12 +842,11 @@ func TestSessionService_WorktreeInit_SkipsWhenReusingWorktree(t *testing.T) {
 	require.NoError(t, err, "push branch failed: %s", string(out))
 
 	session := &Session{
-		Name:        branchName,
-		WorkspaceID: wsGitID,
+		Name: branchName,
 	}
 
 	ctx := context.Background()
-	err = service.CreateSession(ctx, session, session.WorkspaceID, branchName, "")
+	err = service.CreateSession(ctx, session, wsGitID, branchName, "")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -872,12 +864,11 @@ func TestSessionService_WorktreeInit_FailingScriptContinues(t *testing.T) {
 	service, sessionStore, mock, wsGitID := setupWorktreeSessionService(t, repoPath, configDir)
 
 	session := &Session{
-		Name:        "fail-init",
-		WorkspaceID: wsGitID,
+		Name: "fail-init",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, session.WorkspaceID, "", "main")
+	err := service.CreateSession(ctx, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -893,12 +884,11 @@ func TestSessionService_WorktreeInit_MissingScriptsSkipped(t *testing.T) {
 	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
 	session := &Session{
-		Name:        "no-scripts",
-		WorkspaceID: wsGitID,
+		Name: "no-scripts",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, session.WorkspaceID, "", "main")
+	err := service.CreateSession(ctx, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -918,12 +908,11 @@ func TestSessionService_WorktreeInit_WorkingDirIsWorktree(t *testing.T) {
 	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, configDir)
 
 	session := &Session{
-		Name:        "wd-test",
-		WorkspaceID: wsGitID,
+		Name: "wd-test",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, session.WorkspaceID, "", "main")
+	err := service.CreateSession(ctx, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -941,9 +930,9 @@ func TestSessionService_CreateSession_DirtyMainRepo_SetsWarning(t *testing.T) {
 
 	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
-	sess := &Session{Name: "warn-feature", WorkspaceID: wsGitID}
+	sess := &Session{Name: "warn-feature"}
 	ctx := context.Background()
-	require.NoError(t, service.CreateSession(ctx, sess, sess.WorkspaceID, "", "main"))
+	require.NoError(t, service.CreateSession(ctx, sess, wsGitID, "", "main"))
 
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
 
@@ -957,9 +946,9 @@ func TestSessionService_CreateSession_CleanRepo_NoWarning(t *testing.T) {
 	repoPath := initTestRepo(t)
 	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
-	sess := &Session{Name: "clean-feature", WorkspaceID: wsGitID}
+	sess := &Session{Name: "clean-feature"}
 	ctx := context.Background()
-	require.NoError(t, service.CreateSession(ctx, sess, sess.WorkspaceID, "", "main"))
+	require.NoError(t, service.CreateSession(ctx, sess, wsGitID, "", "main"))
 
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
 
@@ -976,9 +965,9 @@ func TestSessionService_RepairSession_ClearsWarning(t *testing.T) {
 
 	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
-	sess := &Session{Name: "warn-repair", WorkspaceID: wsGitID}
+	sess := &Session{Name: "warn-repair"}
 	ctx := context.Background()
-	require.NoError(t, service.CreateSession(ctx, sess, sess.WorkspaceID, "", "main"))
+	require.NoError(t, service.CreateSession(ctx, sess, wsGitID, "", "main"))
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
 
 	warned, err := sessionStore.GetByID(sess.ID)
@@ -1021,9 +1010,8 @@ func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionSe
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
-	sessionWorkspaceStore := NewSessionWorkspaceStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorkspaceStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir, t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir, t.TempDir())
 	return service, sessionStore, mock, wsGit.ID, repoPath
 }
 
@@ -1031,12 +1019,11 @@ func TestRunSetup_BareWorkspace_LinksClaudeSettings(t *testing.T) {
 	service, sessionStore, _, wsID, repoPath := setupBareWorktreeSessionService(t, t.TempDir())
 
 	session := &Session{
-		Name:        "my-feature",
-		WorkspaceID: wsID,
+		Name: "my-feature",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, session.WorkspaceID, "", "main")
+	err := service.CreateSession(ctx, session, wsID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)

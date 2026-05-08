@@ -14,10 +14,8 @@ func TestValidateSession(t *testing.T) {
 		errorMsg    string
 	}{
 		{
-			name: "valid session",
-			session: &Session{
-				WorkspaceID: 1,
-			},
+			name:        "valid session",
+			session:     &Session{Name: "valid"},
 			expectError: false,
 		},
 		{
@@ -27,10 +25,8 @@ func TestValidateSession(t *testing.T) {
 			errorMsg:    "cannot be nil",
 		},
 		{
-			name: "empty fields allowed",
-			session: &Session{
-				WorkspaceID: 1,
-			},
+			name:        "empty fields allowed",
+			session:     &Session{},
 			expectError: false,
 		},
 	}
