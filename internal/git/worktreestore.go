@@ -99,3 +99,16 @@ func (s *WorktreeStore) ListByRepo(repoID uint) []Worktree {
 	s.db.Find(&worktrees, "repo_id = ?", repoID)
 	return worktrees
 }
+
+// BackfillStatus migrates legacy rows to the present state. Pre-state-machine
+// code only inserted Worktree records after a successful on-disk
+// `git worktree add` (see GitService.ensureWorktreeRecord), so legacy rows
+// with empty Status correspond to worktrees that were observed present at
+// insert time. Subsequent reconciliation will demote any that have since
+// disappeared on disk.
+func (s *WorktreeStore) BackfillStatus() error {
+	return s.db.Exec(
+		"UPDATE worktrees SET status = ? WHERE status IS NULL OR status = ''",
+		string(WorktreeStatusPresent),
+	).Error
+}

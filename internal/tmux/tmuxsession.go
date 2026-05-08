@@ -27,3 +27,6 @@ type TmuxSession struct {
 	Status   TmuxSessionStatus `json:"status" gorm:"index"`
 	Windows  []Window          `json:"windows,omitempty" gorm:"-"`
 }
+
+func (t *TmuxSession) GetStatus() TmuxSessionStatus  { return t.Status }
+func (t *TmuxSession) SetStatus(s TmuxSessionStatus) { t.Status = s }

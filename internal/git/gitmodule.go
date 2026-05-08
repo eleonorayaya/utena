@@ -26,6 +26,9 @@ func (m *GitModule) OnAppStart(ctx context.Context) error {
 	if err := m.Service.branchStore.BackfillStatus(); err != nil {
 		slog.WarnContext(ctx, "git: backfill branch status failed", "error", err)
 	}
+	if err := m.Service.worktreeStore.BackfillStatus(); err != nil {
+		slog.WarnContext(ctx, "git: backfill worktree status failed", "error", err)
+	}
 
 	if m.Service.githubClient == nil {
 		ghClient, err := NewGitHubClient(ctx)

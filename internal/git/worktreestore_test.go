@@ -101,6 +101,40 @@ func TestWorktreeStore_GetByBranchID_ReturnsErrorWhenNotFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrWorktreeNotFound)
 }
 
+func TestWorktreeStore_BackfillStatus_DefaultsLegacyRowsToPresent(t *testing.T) {
+	database := setupWorktreeTestDB(t)
+	repo, branch := createWorktreeTestRepoAndBranch(t, database, "/test/repo", "feature")
+	store := NewWorktreeStore(database)
+
+	require.NoError(t, store.Add(&Worktree{Path: "/test/repo/.worktrees/feature", BranchID: branch.ID, RepoID: repo.ID}))
+	require.NoError(t, database.Exec("UPDATE worktrees SET status = '' WHERE 1=1").Error)
+
+	require.NoError(t, store.BackfillStatus())
+
+	got, err := store.GetByBranchID(branch.ID)
+	require.NoError(t, err)
+	require.Equal(t, WorktreeStatusPresent, got.Status)
+}
+
+func TestWorktreeStore_BackfillStatus_PreservesExplicitStatus(t *testing.T) {
+	database := setupWorktreeTestDB(t)
+	repo, branch := createWorktreeTestRepoAndBranch(t, database, "/test/repo", "feature")
+	store := NewWorktreeStore(database)
+
+	require.NoError(t, store.Add(&Worktree{
+		Path:     "/test/repo/.worktrees/feature",
+		BranchID: branch.ID,
+		RepoID:   repo.ID,
+		Status:   WorktreeStatusMissing,
+	}))
+
+	require.NoError(t, store.BackfillStatus())
+
+	got, err := store.GetByBranchID(branch.ID)
+	require.NoError(t, err)
+	require.Equal(t, WorktreeStatusMissing, got.Status)
+}
+
 func TestWorktreeStore_ListByRepo(t *testing.T) {
 	database := setupWorktreeTestDB(t)
 	repoStore := NewRepoStore(database)

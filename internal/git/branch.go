@@ -31,6 +31,9 @@ type Branch struct {
 	Status       BranchStatus `json:"status" gorm:"index"`
 }
 
+func (b *Branch) GetStatus() BranchStatus  { return b.Status }
+func (b *Branch) SetStatus(s BranchStatus) { b.Status = s }
+
 func (b *Branch) DeriveStatus() BranchStatus {
 	if b.ExistsLocal || b.ExistsRemote {
 		return BranchStatusTracked

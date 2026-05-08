@@ -28,3 +28,6 @@ type Worktree struct {
 	Status      WorktreeStatus `json:"status" gorm:"index"`
 	Branch      *Branch        `json:"branch,omitempty" gorm:"foreignKey:BranchID"`
 }
+
+func (w *Worktree) GetStatus() WorktreeStatus  { return w.Status }
+func (w *Worktree) SetStatus(s WorktreeStatus) { w.Status = s }
