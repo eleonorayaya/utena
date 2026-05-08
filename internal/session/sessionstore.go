@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"gorm.io/gorm"
@@ -126,7 +127,7 @@ func (s *SessionStore) Add(session *Session) error {
 
 	if err := s.db.Omit("ClaudeSessions", "TmuxSession").Create(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return fmt.Errorf("session '%s' already exists: %w", session.Name, ErrSessionAlreadyExists)
+			return common.WrapConflict(sessionConflictMessage(session), ErrSessionAlreadyExists)
 		}
 		return err
 	}
@@ -149,7 +150,23 @@ func (s *SessionStore) Update(session *Session) error {
 		return err
 	}
 
-	return s.db.Omit("ClaudeSessions", "TmuxSession").Save(session).Error
+	if err := s.db.Omit("ClaudeSessions", "TmuxSession").Save(session).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+			return common.WrapConflict(sessionConflictMessage(session), ErrSessionAlreadyExists)
+		}
+		return err
+	}
+	return nil
+}
+
+// sessionConflictMessage produces a friendly message for a unique-constraint
+// violation on the Session table. The only user-visible unique index is on
+// TmuxSessionID (one Session per tmux record).
+func sessionConflictMessage(session *Session) string {
+	if session.TmuxSessionID != nil {
+		return fmt.Sprintf("session %q already claims this tmux record — kill the existing session first", session.Name)
+	}
+	return fmt.Sprintf("session %q already exists", session.Name)
 }
 
 func (s *SessionStore) Delete(id uint) error {

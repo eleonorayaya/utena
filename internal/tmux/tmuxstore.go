@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"gorm.io/gorm"
 )
@@ -25,7 +26,10 @@ func (s *TmuxStore) Add(session *TmuxSession) error {
 
 	if err := s.db.Create(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return fmt.Errorf("tmux session '%s' already exists: %w", session.Name, ErrTmuxSessionAlreadyExists)
+			return common.WrapConflict(
+				fmt.Sprintf("tmux session %q already exists — pick a different name or kill the existing one", session.Name),
+				ErrTmuxSessionAlreadyExists,
+			)
 		}
 		return err
 	}
@@ -76,7 +80,16 @@ func (s *TmuxStore) Update(session *TmuxSession) error {
 		return err
 	}
 
-	return s.db.Save(session).Error
+	if err := s.db.Save(session).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+			return common.WrapConflict(
+				fmt.Sprintf("tmux session %q already exists — pick a different name or kill the existing one", session.Name),
+				ErrTmuxSessionAlreadyExists,
+			)
+		}
+		return err
+	}
+	return nil
 }
 
 // BackfillStatus migrates legacy rows: any TmuxSession that has no Status set

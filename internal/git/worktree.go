@@ -3,12 +3,13 @@ package git
 import (
 	"errors"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"gorm.io/gorm"
 )
 
 var (
 	ErrWorktreeNotFound      = errors.New("worktree not found")
-	ErrWorktreeAlreadyExists = errors.New("worktree already exists")
+	ErrWorktreeAlreadyExists = common.NewConflict("worktree already exists")
 )
 
 type WorktreeStatus string

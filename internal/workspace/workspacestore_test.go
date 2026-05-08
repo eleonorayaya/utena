@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/git"
@@ -92,6 +93,27 @@ func TestWorkspaceStore_Add_Duplicate(t *testing.T) {
 	err = store.Add(ws2)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "already exists")
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, common.CategoryConflict, appErr.Category)
+	require.Contains(t, err.Error(), "/same/path")
+}
+
+func TestWorkspaceStore_Add_DuplicateRepo(t *testing.T) {
+	store := setupWorkspaceStore(t)
+	repo := &git.Repo{Path: "/test/shared", FullName: "owner/shared"}
+	require.NoError(t, store.db.Create(repo).Error)
+
+	require.NoError(t, store.Add(&Workspace{Name: "first", Path: "/path/a", RepoID: &repo.ID}))
+
+	err := store.Add(&Workspace{Name: "second", Path: "/path/b", RepoID: &repo.ID})
+	require.Error(t, err)
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, common.CategoryConflict, appErr.Category)
+	require.Contains(t, err.Error(), "repo")
 }
 
 func TestWorkspaceStore_GetByID(t *testing.T) {

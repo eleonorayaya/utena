@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/stretchr/testify/assert"
@@ -56,6 +57,30 @@ func TestNameUniqueness(t *testing.T) {
 	err := store.Add(&TmuxSession{Name: "unique"})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTmuxSessionAlreadyExists))
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, common.CategoryConflict, appErr.Category)
+	assert.Contains(t, err.Error(), "tmux session")
+	assert.Contains(t, err.Error(), `"unique"`)
+}
+
+func TestUpdateNameUniqueness(t *testing.T) {
+	database := setupTestDB(t)
+	store := NewTmuxStore(database)
+
+	require.NoError(t, store.Add(&TmuxSession{Name: "alpha"}))
+	beta := &TmuxSession{Name: "beta"}
+	require.NoError(t, store.Add(beta))
+
+	beta.Name = "alpha"
+	err := store.Update(beta)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTmuxSessionAlreadyExists))
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, common.CategoryConflict, appErr.Category)
 }
 
 func TestUpdateStatus(t *testing.T) {

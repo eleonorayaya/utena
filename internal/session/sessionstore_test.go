@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/claude"
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/git"
@@ -143,6 +144,13 @@ func TestSessionStore_Add_DuplicateTmuxSessionID(t *testing.T) {
 	err = store.Add(session2)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrSessionAlreadyExists))
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, common.CategoryConflict, appErr.Category)
+	require.Contains(t, err.Error(), "session")
+	require.Contains(t, err.Error(), `"session-2"`)
+	require.Contains(t, err.Error(), "tmux record")
 }
 
 func TestSessionStore_GetByID(t *testing.T) {

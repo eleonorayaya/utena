@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"gorm.io/gorm"
 )
@@ -25,7 +26,10 @@ func (s *BranchStore) Add(branch *Branch) error {
 
 	if err := s.db.Create(branch).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return fmt.Errorf("branch '%s' in repo %d already exists: %w", branch.Name, branch.RepoID, ErrBranchAlreadyExists)
+			return common.WrapConflict(
+				fmt.Sprintf("branch %q already exists in this repo — pick a different name or use the existing branch", branch.Name),
+				ErrBranchAlreadyExists,
+			)
 		}
 		return err
 	}
@@ -76,7 +80,16 @@ func (s *BranchStore) Update(branch *Branch) error {
 		return err
 	}
 
-	return s.db.Save(branch).Error
+	if err := s.db.Save(branch).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+			return common.WrapConflict(
+				fmt.Sprintf("branch %q already exists in this repo — pick a different name or use the existing branch", branch.Name),
+				ErrBranchAlreadyExists,
+			)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *BranchStore) Upsert(branch *Branch) error {

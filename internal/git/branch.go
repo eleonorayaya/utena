@@ -3,12 +3,13 @@ package git
 import (
 	"errors"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"gorm.io/gorm"
 )
 
 var (
 	ErrBranchNotFound      = errors.New("branch not found")
-	ErrBranchAlreadyExists = errors.New("branch already exists")
+	ErrBranchAlreadyExists = common.NewConflict("branch already exists")
 )
 
 type BranchStatus string

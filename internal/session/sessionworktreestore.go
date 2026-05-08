@@ -4,9 +4,12 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"gorm.io/gorm"
 )
+
+var ErrSessionWorktreeAlreadyExists = common.NewConflict("session is already linked to this worktree")
 
 type SessionWorktreeStore struct {
 	db db.Database
@@ -22,7 +25,10 @@ func (s *SessionWorktreeStore) Add(swt *SessionWorktree) error {
 	}
 	if err := s.db.Omit("Worktree").Create(swt).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return fmt.Errorf("session worktree already exists: %w", err)
+			return common.WrapConflict(
+				fmt.Sprintf("session %d is already linked to worktree %d", swt.SessionID, swt.WorktreeID),
+				ErrSessionWorktreeAlreadyExists,
+			)
 		}
 		return err
 	}
@@ -36,7 +42,16 @@ func (s *SessionWorktreeStore) Update(swt *SessionWorktree) error {
 	if swt.ID == 0 {
 		return errors.New("session worktree ID cannot be zero")
 	}
-	return s.db.Omit("Worktree").Save(swt).Error
+	if err := s.db.Omit("Worktree").Save(swt).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+			return common.WrapConflict(
+				fmt.Sprintf("session %d is already linked to worktree %d", swt.SessionID, swt.WorktreeID),
+				ErrSessionWorktreeAlreadyExists,
+			)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *SessionWorktreeStore) ListBySessionID(sessionID uint) ([]SessionWorktree, error) {

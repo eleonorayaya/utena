@@ -13,13 +13,11 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/claudesettings"
 	"github.com/eleonorayaya/utena/internal/common"
-	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	utmux "github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	slogctx "github.com/veqryn/slog-context"
-	"gorm.io/gorm"
 )
 
 type SetupWarning struct{ Message string }
@@ -310,7 +308,7 @@ func (s *SessionService) eagerCreateWorktree(ctx context.Context, sessionID uint
 	if err := s.sessionWorktreeStore.Add(swt); err != nil {
 		// duplicate junction rows are expected on repair / re-entry — surface
 		// only unexpected failures
-		if !errors.Is(err, gorm.ErrDuplicatedKey) && !db.IsUniqueConstraintError(err) {
+		if !errors.Is(err, ErrSessionWorktreeAlreadyExists) {
 			return fmt.Errorf("add session-worktree junction: %w", err)
 		}
 	}

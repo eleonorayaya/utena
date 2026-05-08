@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"gorm.io/gorm"
 )
 
 var (
 	ErrRepoNotFound      = errors.New("repo not found")
-	ErrRepoAlreadyExists = errors.New("repo already exists")
+	ErrRepoAlreadyExists = common.NewConflict("repo already exists")
 )
 
 type Repo struct {

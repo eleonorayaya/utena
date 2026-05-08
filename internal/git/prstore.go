@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"gorm.io/gorm"
 )
@@ -25,7 +26,10 @@ func (s *PRStore) Add(pr *PullRequest) error {
 
 	if err := s.db.Create(pr).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return fmt.Errorf("pull request #%d in repo %d already exists: %w", pr.Number, pr.RepoID, ErrPRAlreadyExists)
+			return common.WrapConflict(
+				fmt.Sprintf("pull request #%d is already tracked for this repo", pr.Number),
+				ErrPRAlreadyExists,
+			)
 		}
 		return err
 	}
@@ -105,5 +109,14 @@ func (s *PRStore) Update(pr *PullRequest) error {
 		return err
 	}
 
-	return s.db.Save(pr).Error
+	if err := s.db.Save(pr).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+			return common.WrapConflict(
+				fmt.Sprintf("pull request #%d is already tracked for this repo", pr.Number),
+				ErrPRAlreadyExists,
+			)
+		}
+		return err
+	}
+	return nil
 }

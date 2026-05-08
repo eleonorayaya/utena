@@ -3,12 +3,13 @@ package tmux
 import (
 	"errors"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"gorm.io/gorm"
 )
 
 var (
 	ErrTmuxSessionNotFound      = errors.New("tmux session not found")
-	ErrTmuxSessionAlreadyExists = errors.New("tmux session already exists")
+	ErrTmuxSessionAlreadyExists = common.NewConflict("tmux session already exists")
 )
 
 type TmuxSessionStatus string

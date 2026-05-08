@@ -3,6 +3,7 @@ package git
 import (
 	"testing"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/stretchr/testify/require"
@@ -70,6 +71,32 @@ func TestBranchStore_UniqueConstraint(t *testing.T) {
 	err := branchStore.Add(&Branch{Name: "main", RepoID: repo.ID})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrBranchAlreadyExists)
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, common.CategoryConflict, appErr.Category)
+	require.Contains(t, err.Error(), "branch")
+	require.Contains(t, err.Error(), `"main"`)
+}
+
+func TestBranchStore_Update_UniqueConstraint(t *testing.T) {
+	database := setupBranchTestDB(t)
+	repoStore := NewRepoStore(database)
+	branchStore := NewBranchStore(database)
+
+	repo := createTestRepo(t, repoStore)
+	require.NoError(t, branchStore.Add(&Branch{Name: "main", RepoID: repo.ID}))
+	feature := &Branch{Name: "feature", RepoID: repo.ID}
+	require.NoError(t, branchStore.Add(feature))
+
+	feature.Name = "main"
+	err := branchStore.Update(feature)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrBranchAlreadyExists)
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, common.CategoryConflict, appErr.Category)
 }
 
 func TestBranchStore_SameNameDifferentRepo(t *testing.T) {

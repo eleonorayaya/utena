@@ -3,6 +3,7 @@ package git
 import (
 	"testing"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/stretchr/testify/require"
@@ -86,6 +87,12 @@ func TestRepoStore_PathUniqueness(t *testing.T) {
 	err := store.Add(repo2)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrRepoAlreadyExists)
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, common.CategoryConflict, appErr.Category)
+	require.Contains(t, err.Error(), "repo")
+	require.Contains(t, err.Error(), "/home/user/project")
 }
 
 func TestRepoStore_List(t *testing.T) {

@@ -3,6 +3,7 @@ package git
 import (
 	"testing"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/stretchr/testify/require"
@@ -76,6 +77,12 @@ func TestPRStore_UniqueConstraint(t *testing.T) {
 	err := prStore.Add(&PullRequest{RepoID: repo.ID, Number: 1, Title: "Duplicate", State: PRStateOpen})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrPRAlreadyExists)
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, common.CategoryConflict, appErr.Category)
+	require.Contains(t, err.Error(), "pull request")
+	require.Contains(t, err.Error(), "#1")
 }
 
 func TestPRStore_ListByBranch(t *testing.T) {
