@@ -107,7 +107,7 @@ func (s *SessionStore) List() ([]Session, error) {
 func (s *SessionStore) ListByWorkspace(workspaceID uint) ([]Session, error) {
 	var sessions []Session
 	if err := s.loaded().
-		Where("sessions.id IN (SELECT swt.session_id FROM session_worktrees swt JOIN worktrees wt ON swt.worktree_id = wt.id JOIN workspaces ws ON ws.repo_id = wt.repo_id WHERE ws.id = ? AND swt.deleted_at IS NULL AND wt.deleted_at IS NULL AND ws.deleted_at IS NULL)", workspaceID).
+		Where("sessions.id IN (?)", s.sessionsForWorkspace(workspaceID)).
 		Order("sessions.last_used_at DESC").
 		Find(&sessions).Error; err != nil {
 		return nil, err
@@ -120,6 +120,15 @@ func (s *SessionStore) ListByWorkspace(workspaceID uint) ([]Session, error) {
 		return nil, err
 	}
 	return sessions, nil
+}
+
+func (s *SessionStore) sessionsForWorkspace(workspaceID uint) *gorm.DB {
+	return s.db.
+		Model(&SessionWorktree{}).
+		Select("session_worktrees.session_id").
+		Joins("JOIN worktrees ON worktrees.id = session_worktrees.worktree_id").
+		Joins("JOIN workspaces ON workspaces.repo_id = worktrees.repo_id").
+		Where("workspaces.id = ?", workspaceID)
 }
 
 func (s *SessionStore) Add(session *Session) error {
@@ -193,10 +202,7 @@ func (s *SessionStore) Delete(id uint) error {
 
 func (s *SessionStore) GetByWorkspaceAndName(workspaceID uint, name string, excludeStatuses ...SessionStatus) (*Session, error) {
 	var session Session
-	q := s.db.Where(
-		"name = ? AND id IN (SELECT swt.session_id FROM session_worktrees swt JOIN worktrees wt ON swt.worktree_id = wt.id JOIN workspaces ws ON ws.repo_id = wt.repo_id WHERE ws.id = ? AND swt.deleted_at IS NULL AND wt.deleted_at IS NULL AND ws.deleted_at IS NULL)",
-		name, workspaceID,
-	)
+	q := s.db.Where("name = ? AND id IN (?)", name, s.sessionsForWorkspace(workspaceID))
 	if len(excludeStatuses) > 0 {
 		q = q.Where("status NOT IN ?", excludeStatuses)
 	}
@@ -210,11 +216,13 @@ func (s *SessionStore) GetByWorkspaceAndName(workspaceID uint, name string, excl
 }
 
 func (s *SessionStore) GetByBranchID(branchID uint) (*Session, error) {
+	subquery := s.db.
+		Model(&SessionWorktree{}).
+		Select("session_worktrees.session_id").
+		Joins("JOIN worktrees ON worktrees.id = session_worktrees.worktree_id").
+		Where("worktrees.branch_id = ?", branchID)
 	var session Session
-	if err := s.loaded().First(&session,
-		"sessions.id IN (SELECT swt.session_id FROM session_worktrees swt JOIN worktrees wt ON swt.worktree_id = wt.id WHERE wt.branch_id = ? AND swt.deleted_at IS NULL AND wt.deleted_at IS NULL)",
-		branchID,
-	).Error; err != nil {
+	if err := s.loaded().First(&session, "sessions.id IN (?)", subquery).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound
 		}
