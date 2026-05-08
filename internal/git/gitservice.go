@@ -130,10 +130,6 @@ func (s *GitService) SetupWorktreeAt(ctx context.Context, repoPath string, branc
 	return true, path, nil
 }
 
-// RegisterPendingWorktree creates a Worktree DB record in the pending state
-// without performing any on-disk operation. If a record already exists for the
-// branch, it is returned unchanged (idempotent). If the existing record's path
-// differs, it is updated; status is preserved (a present record stays present).
 func (s *GitService) RegisterPendingWorktree(branchID uint, repoID uint, workspaceID *uint, path string) (*Worktree, error) {
 	if branchID == 0 {
 		return nil, fmt.Errorf("branchID is required")
@@ -180,8 +176,6 @@ func (s *GitService) RegisterPendingWorktree(branchID uint, repoID uint, workspa
 	return wt, nil
 }
 
-// MarkWorktreeMissing transitions a worktree record to the missing status. The
-// record itself persists.
 func (s *GitService) MarkWorktreeMissing(wt *Worktree) error {
 	if wt == nil {
 		return fmt.Errorf("worktree is nil")
@@ -193,7 +187,6 @@ func (s *GitService) MarkWorktreeMissing(wt *Worktree) error {
 	return s.worktreeStore.Update(wt)
 }
 
-// UpdateWorktree persists changes to an existing worktree record.
 func (s *GitService) UpdateWorktree(wt *Worktree) error {
 	if wt == nil {
 		return fmt.Errorf("worktree is nil")
@@ -201,13 +194,10 @@ func (s *GitService) UpdateWorktree(wt *Worktree) error {
 	return s.worktreeStore.Update(wt)
 }
 
-// GetWorktree fetches a worktree record by its primary key.
 func (s *GitService) GetWorktree(id uint) (*Worktree, error) {
 	return s.worktreeStore.GetByID(id)
 }
 
-// GetWorktreeByBranchID returns the worktree record bound to the given branch
-// or ErrWorktreeNotFound if none exists.
 func (s *GitService) GetWorktreeByBranchID(branchID uint) (*Worktree, error) {
 	return s.worktreeStore.GetByBranchID(branchID)
 }

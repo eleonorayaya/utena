@@ -169,6 +169,10 @@ func sessionConflictMessage(session *Session) string {
 	return fmt.Sprintf("session %q already exists", session.Name)
 }
 
+func (s *SessionStore) ClearAttachedExcept(id uint) error {
+	return s.db.Model(&Session{}).Where("is_attached = ? AND id != ?", true, id).Update("is_attached", false).Error
+}
+
 func (s *SessionStore) Delete(id uint) error {
 	if id == 0 {
 		return errors.New("session ID cannot be zero")

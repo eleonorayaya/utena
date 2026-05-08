@@ -278,11 +278,6 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, wo
 	return nil
 }
 
-// eagerCreateWorktree resolves the repo for the workspace, finds-or-creates the
-// branch record, and creates a Worktree record in pending status plus the
-// SessionWorktree junction row. It is idempotent: if the worktree record
-// already exists for the branch, it is reused (Status preserved); a duplicate
-// SessionWorktree row is silently ignored.
 func (s *SessionService) eagerCreateWorktree(ctx context.Context, sessionID uint, ws *workspace.Workspace, branchName string, worktreePath string, position int) error {
 	if branchName == "" {
 		return fmt.Errorf("branch name is required")
@@ -315,10 +310,6 @@ func (s *SessionService) eagerCreateWorktree(ctx context.Context, sessionID uint
 	return nil
 }
 
-// resolveWorktreeWorkspace returns the workspace bound to the given worktree
-// record. It first consults the cache, then the worktree's WorkspaceID, then
-// falls back to a repo-id lookup. The result is cached for the lifetime of the
-// caller-supplied map.
 func (s *SessionService) resolveWorktreeWorkspace(ctx context.Context, wt *git.Worktree, cache map[uint]*workspace.Workspace) (*workspace.Workspace, error) {
 	if wt == nil {
 		return nil, fmt.Errorf("worktree is nil")
@@ -824,18 +815,8 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 		return session, nil
 	}
 
-	if allSessions, err := s.store.List(); err == nil {
-		for _, existing := range allSessions {
-			if existing.IsAttached {
-				slog.Info("clearing attached flag", "session", existing.ID)
-				existing.IsAttached = false
-				if updateErr := s.store.Update(&existing); updateErr != nil {
-					slog.Warn("failed to clear attached flag", "session", existing.ID, "error", updateErr)
-				}
-			}
-		}
-	} else {
-		slog.Warn("failed to list sessions while clearing attached flags", "error", err)
+	if err := s.store.ClearAttachedExcept(session.ID); err != nil {
+		slog.Warn("failed to clear stale attached flags", "error", err)
 	}
 
 	session.LastUsedAt = time.Now()
@@ -1036,11 +1017,13 @@ func (s *SessionService) handleTmuxClientDetached(ctx context.Context, event eve
 }
 
 func (s *SessionService) reconcileTmuxState(ctx context.Context, sessions []Session) {
-	for _, sess := range sessions {
-		if sess.Status != StatusDeleted {
-			if _, err := s.RefreshSession(ctx, sess.ID); err != nil {
-				slog.Warn("failed to refresh session during reconcile", "session", sess.ID, "error", err)
-			}
+	for i := range sessions {
+		sess := &sessions[i]
+		if sess.Status == StatusDeleted {
+			continue
+		}
+		if _, err := s.reconcileLoadedSession(ctx, sess); err != nil {
+			slog.Warn("failed to refresh session during reconcile", "session", sess.ID, "error", err)
 		}
 	}
 }
@@ -1103,7 +1086,10 @@ func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Sessio
 	if err != nil {
 		return nil, err
 	}
+	return s.reconcileLoadedSession(ctx, sess)
+}
 
+func (s *SessionService) reconcileLoadedSession(ctx context.Context, sess *Session) (*Session, error) {
 	if sess.Status == StatusCreating || sess.Status == StatusDeleted || sess.Status == StatusArchived || sess.Status == StatusPending {
 		return sess, nil
 	}
@@ -1118,6 +1104,8 @@ func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Sessio
 
 	gitHealthy := s.isSessionGitHealthy(ctx, sess)
 
+	prevStatus := sess.Status
+	prevError := sess.StatusError
 	if !gitHealthy {
 		sess.Status = StatusBroken
 		sess.StatusError = "worktree or branch is unhealthy"
@@ -1131,14 +1119,15 @@ func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Sessio
 		}
 	}
 
+	if sess.Status == prevStatus && sess.StatusError == prevError {
+		return sess, nil
+	}
 	if err := s.store.Update(sess); err != nil {
 		return nil, fmt.Errorf("failed to persist reconciled session: %w", err)
 	}
 	return sess, nil
 }
 
-// sessionBranchIDs returns the branch IDs associated with the session via its
-// SessionWorktree junction rows.
 func (s *SessionService) sessionBranchIDs(sess *Session) []uint {
 	out := make([]uint, 0, len(sess.Worktrees))
 	for i := range sess.Worktrees {
