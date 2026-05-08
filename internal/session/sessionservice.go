@@ -260,9 +260,15 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, wo
 		return common.NewInvalidRequest("session name or branch is required")
 	}
 	tmuxName := BuildTmuxSessionName(ws.Name, session.Name)
+	finalBranchName := branchName
+	if baseBranchName != "" {
+		finalBranchName = s.branchPrefix + session.Name
+	}
+	worktreePath := s.gitService.WorktreePath(ws.Path, finalBranchName)
 
 	session.WorkspaceID = ws.ID
 	session.Status = StatusCreating
+	session.SessionRoot = worktreePath
 
 	if session.LastUsedAt.IsZero() {
 		session.LastUsedAt = time.Now()
@@ -281,9 +287,10 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, wo
 	}
 
 	sw := &SessionWorkspace{
-		SessionID:   session.ID,
-		WorkspaceID: ws.ID,
-		Position:    0,
+		SessionID:    session.ID,
+		WorkspaceID:  ws.ID,
+		WorktreePath: worktreePath,
+		Position:     0,
 	}
 	if err := s.sessionWorkspaceStore.Add(sw); err != nil {
 		if delErr := s.store.Delete(session.ID); delErr != nil {
@@ -299,13 +306,8 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, wo
 		}
 	}
 
-	finalBranchName := branchName
-	if baseBranchName != "" {
-		finalBranchName = s.branchPrefix + session.Name
-	}
-	startDir := s.gitService.WorktreePath(ws.Path, finalBranchName)
 	env := map[string]string{envSessionID: fmt.Sprintf("%d", session.ID)}
-	tmuxRecord, err := s.tmuxService.RegisterPending(tmuxName, startDir, env)
+	tmuxRecord, err := s.tmuxService.RegisterPending(tmuxName, worktreePath, env)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to register pending tmux record", "session", session.ID, "tmux", tmuxName, "error", err)
 	} else {
