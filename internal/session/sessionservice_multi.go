@@ -48,8 +48,8 @@ func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMul
 	if len(input.WorkspaceIDs) < 2 {
 		return nil, common.NewInvalidRequest("multi-workspace session requires at least 2 workspaces")
 	}
-	if input.Branch == "" {
-		return nil, common.NewInvalidRequest("branch is required for multi-workspace session")
+	if input.Branch == "" && input.BaseBranch == "" {
+		return nil, common.NewInvalidRequest("branch or base_branch is required for multi-workspace session")
 	}
 	if s.sessionsRoot == "" {
 		return nil, common.NewInvalidRequest("sessions root is not configured")
@@ -99,6 +99,10 @@ func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMul
 	}
 
 	tmuxName := SanitizeTmuxName(input.Name)
+	finalBranchName := input.Branch
+	if input.BaseBranch != "" {
+		finalBranchName = s.branchPrefix + input.Name
+	}
 
 	for _, w := range slots {
 		_, err := s.store.GetByWorkspaceAndName(w.workspace.ID, input.Name, StatusDeleted, StatusArchived)
@@ -127,7 +131,7 @@ func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMul
 	}
 
 	for i, w := range slots {
-		if err := s.eagerCreateWorktree(ctx, sess.ID, w.workspace, input.Branch, w.destPath, i); err != nil {
+		if err := s.eagerCreateWorktree(ctx, sess.ID, w.workspace, finalBranchName, w.destPath, i); err != nil {
 			if delErr := s.store.Delete(sess.ID); delErr != nil {
 				slog.ErrorContext(ctx, "failed to delete session after worktree creation failure", "session", sess.ID, "error", delErr)
 			}
