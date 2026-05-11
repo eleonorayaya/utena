@@ -54,9 +54,11 @@ func (t *TmuxService) OnAppEnd(ctx context.Context) error {
 func (t *TmuxService) RegisterPending(name, startDir string, env map[string]string) (*TmuxSession, error) {
 	defer t.lockName(name)()
 	if existing, err := t.store.GetByName(name); err == nil {
-		if existing.Status == TmuxStatusActive {
-			return nil, ErrTmuxSessionAlreadyExists
-		}
+		// Adopt whatever's there. The Session.TmuxSessionID unique constraint
+		// will reject the caller's link if another session already owns this
+		// tmux record — that's where real conflicts surface. If the previous
+		// owner was deleted, its FK was nil'd and the record is unclaimed; the
+		// new session adopts the running tmux process cleanly.
 		return existing, nil
 	} else if !errors.Is(err, ErrTmuxSessionNotFound) {
 		return nil, err
@@ -150,8 +152,9 @@ func (t *TmuxService) KillSession(id uint) error {
 		return err
 	}
 	defer t.lockName(ts.Name)()
-	if err := t.runner.killSession(ts.Name); err != nil {
-		return err
+	killErr := t.runner.killSession(ts.Name)
+	if killErr != nil {
+		slog.Warn("tmux runner killSession failed; marking record inactive anyway", "name", ts.Name, "error", killErr)
 	}
 	ts.Status = TmuxStatusInactive
 	return t.store.Update(ts)

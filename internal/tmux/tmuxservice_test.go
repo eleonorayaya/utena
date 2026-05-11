@@ -1,7 +1,6 @@
 package tmux
 
 import (
-	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -158,7 +157,12 @@ func TestTmuxService_RegisterPending_IdempotentOnInactive(t *testing.T) {
 	assert.Equal(t, TmuxStatusInactive, second.Status, "RegisterPending must not flip an inactive record back to pending")
 }
 
-func TestTmuxService_RegisterPending_RejectsActive(t *testing.T) {
+func TestTmuxService_RegisterPending_AdoptsActiveRecord(t *testing.T) {
+	// When a tmux record exists in Active status (e.g. previous owner deleted
+	// itself without killing the tmux process, or the daemon was off and missed
+	// the close hook), RegisterPending returns the existing record so the new
+	// owner can adopt it. Real "another session is already linked" conflicts
+	// are caught at the caller's Session.TmuxSessionID unique-constraint write.
 	svc := newTestService(t)
 
 	first, err := svc.RegisterPending("name", "/start", nil)
@@ -167,9 +171,10 @@ func TestTmuxService_RegisterPending_RejectsActive(t *testing.T) {
 	first.Status = TmuxStatusActive
 	require.NoError(t, svc.store.Update(first))
 
-	_, err = svc.RegisterPending("name", "/start", nil)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrTmuxSessionAlreadyExists))
+	second, err := svc.RegisterPending("name", "/start", nil)
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, second.ID, "adoption returns the same record")
+	assert.Equal(t, TmuxStatusActive, second.Status, "status preserved on adoption")
 }
 
 func TestTmuxService_SpawnForRecord_TransitionsPendingToActive(t *testing.T) {

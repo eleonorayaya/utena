@@ -268,12 +268,14 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, wo
 	env := map[string]string{envSessionID: fmt.Sprintf("%d", session.ID)}
 	tmuxRecord, err := s.tmuxService.RegisterPending(tmuxName, worktreePath, env)
 	if err != nil {
-		slog.WarnContext(ctx, "failed to register pending tmux record", "session", session.ID, "tmux", tmuxName, "error", err)
-	} else {
-		session.TmuxSessionID = &tmuxRecord.ID
-		if err := s.store.Update(session); err != nil {
-			slog.WarnContext(ctx, "failed to persist tmux session id", "session", session.ID, "error", err)
+		if delErr := s.store.Delete(session.ID); delErr != nil {
+			slog.WarnContext(ctx, "failed to roll back session after tmux registration failure", "session", session.ID, "error", delErr)
 		}
+		return fmt.Errorf("register tmux session %q: %w", tmuxName, err)
+	}
+	session.TmuxSessionID = &tmuxRecord.ID
+	if err := s.store.Update(session); err != nil {
+		return fmt.Errorf("persist tmux session id: %w", err)
 	}
 
 	if err := s.workspaceService.Touch(ctx, ws.ID); err != nil {
