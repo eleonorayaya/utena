@@ -205,6 +205,13 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, br
 		return common.NewInvalidRequest("session name or branch is required")
 	}
 
+	if ws != nil {
+		if existing, err := s.store.GetByWorkspaceAndName(ws.ID, session.Name, StatusDeleted, StatusArchived, StatusCompleted); err == nil && existing != nil {
+			*session = *existing
+			return nil
+		}
+	}
+
 	session.Status = StatusCreating
 
 	if session.LastUsedAt.IsZero() {
