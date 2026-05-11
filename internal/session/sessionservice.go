@@ -225,6 +225,13 @@ func (s *SessionService) CreateSession(ctx context.Context, session *Session, wo
 	}
 	worktreePath := s.gitService.WorktreePath(ws.Path, finalBranchName)
 
+	if ws != nil {
+		if existing, err := s.store.GetByWorkspaceAndName(ws.ID, session.Name, StatusDeleted, StatusArchived, StatusCompleted); err == nil && existing != nil {
+			*session = *existing
+			return nil
+		}
+	}
+
 	session.Status = StatusCreating
 	session.SessionRoot = worktreePath
 

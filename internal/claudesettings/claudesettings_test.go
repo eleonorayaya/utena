@@ -14,19 +14,29 @@ func TestEnsureWorkspaceRoot_CreatesFileWhenMissing(t *testing.T) {
 		t.Fatalf("EnsureWorkspaceRoot: %v", err)
 	}
 
-	got, err := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
+	raw, err := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
 	if err != nil {
 		t.Fatalf("read settings.local.json: %v", err)
 	}
-	if len(got) == 0 {
-		t.Fatalf("expected non-empty settings.local.json")
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse result: %v", err)
 	}
-	want, err := defaultSettingsJSON(root)
-	if err != nil {
-		t.Fatalf("defaultSettingsJSON: %v", err)
-	}
-	if string(got) != string(want) {
-		t.Fatalf("contents do not match expected:\ngot:  %s\nwant: %s", got, want)
+	sandbox, _ := out["sandbox"].(map[string]any)
+	fs, _ := sandbox["filesystem"].(map[string]any)
+	allowWrite, _ := fs["allowWrite"].([]any)
+	wantPaths := []string{filepath.Join(root, ".git"), filepath.Join(root, ".bare")}
+	for _, want := range wantPaths {
+		found := false
+		for _, v := range allowWrite {
+			if v == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("allowWrite missing %q; got %v", want, allowWrite)
+		}
 	}
 }
 
@@ -58,15 +68,18 @@ func TestEnsureWorkspaceRoot_MergesIntoExistingSettings(t *testing.T) {
 	sandbox, _ := out["sandbox"].(map[string]any)
 	fs, _ := sandbox["filesystem"].(map[string]any)
 	allowWrite, _ := fs["allowWrite"].([]any)
-	gitPath := filepath.Join(root, ".git")
-	found := false
-	for _, v := range allowWrite {
-		if v == gitPath {
-			found = true
+	wantPaths := []string{filepath.Join(root, ".git"), filepath.Join(root, ".bare")}
+	for _, want := range wantPaths {
+		found := false
+		for _, v := range allowWrite {
+			if v == want {
+				found = true
+				break
+			}
 		}
-	}
-	if !found {
-		t.Fatalf("allowWrite missing %q; got %v", gitPath, allowWrite)
+		if !found {
+			t.Fatalf("allowWrite missing %q; got %v", want, allowWrite)
+		}
 	}
 }
 
@@ -90,15 +103,78 @@ func TestEnsureWorkspaceRoot_DoesNotDuplicateAllowWrite(t *testing.T) {
 	sandbox, _ := out["sandbox"].(map[string]any)
 	fs, _ := sandbox["filesystem"].(map[string]any)
 	allowWrite, _ := fs["allowWrite"].([]any)
-	gitPath := filepath.Join(root, ".git")
-	count := 0
-	for _, v := range allowWrite {
-		if v == gitPath {
-			count++
+	wantPaths := []string{filepath.Join(root, ".git"), filepath.Join(root, ".bare")}
+	for _, want := range wantPaths {
+		count := 0
+		for _, v := range allowWrite {
+			if v == want {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("expected %q once in allowWrite, got %d times", want, count)
 		}
 	}
-	if count != 1 {
-		t.Fatalf("expected git path once in allowWrite, got %d times", count)
+}
+
+func TestEnsureWorkspaceRoot_AddsNewDefaultsToExistingSettings(t *testing.T) {
+	root := t.TempDir()
+	claudeDir := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(claudeDir, "settings.local.json")
+	gitPath := filepath.Join(root, ".git")
+	barePath := filepath.Join(root, ".bare")
+	initial := map[string]any{
+		"custom": true,
+		"sandbox": map[string]any{
+			"filesystem": map[string]any{
+				"allowWrite": []any{gitPath},
+			},
+		},
+	}
+	initialBytes, err := json.MarshalIndent(initial, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, initialBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EnsureWorkspaceRoot(root); err != nil {
+		t.Fatalf("EnsureWorkspaceRoot: %v", err)
+	}
+
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings.local.json: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse result: %v", err)
+	}
+	if out["custom"] != true {
+		t.Fatalf("existing key 'custom' was removed")
+	}
+	sandbox, _ := out["sandbox"].(map[string]any)
+	fs, _ := sandbox["filesystem"].(map[string]any)
+	allowWrite, _ := fs["allowWrite"].([]any)
+
+	gitCount, bareCount := 0, 0
+	for _, v := range allowWrite {
+		switch v {
+		case gitPath:
+			gitCount++
+		case barePath:
+			bareCount++
+		}
+	}
+	if gitCount != 1 {
+		t.Fatalf("expected %q once in allowWrite, got %d times: %v", gitPath, gitCount, allowWrite)
+	}
+	if bareCount != 1 {
+		t.Fatalf("expected %q once in allowWrite (newly added), got %d times: %v", barePath, bareCount, allowWrite)
 	}
 }
 

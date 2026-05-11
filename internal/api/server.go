@@ -13,7 +13,11 @@ import (
 func BuildServer(app *App, cfg Config) *http.Server {
 	r := chi.NewRouter()
 
-	httplogOpts := &httplog.Options{}
+	httplogOpts := &httplog.Options{
+		Skip: func(_ *http.Request, respStatus int) bool {
+			return respStatus >= 200 && respStatus < 300
+		},
+	}
 	if cfg.PrettyLogs {
 		httplogOpts.Schema = httplog.SchemaECS.Concise(true)
 	}
