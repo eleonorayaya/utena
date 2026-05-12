@@ -65,3 +65,16 @@ func (s *SessionWorktreeStore) ListBySessionID(sessionID uint) ([]SessionWorktre
 func (s *SessionWorktreeStore) DeleteBySessionID(sessionID uint) error {
 	return s.db.Where("session_id = ?", sessionID).Delete(&SessionWorktree{}).Error
 }
+
+// HardDeleteByWorktreeRepoID removes every session_worktrees row that points at
+// a worktree in the given repo. Used during bare-workspace migration to drop
+// the join rows before deleting the worktree records they reference — the
+// foreign key on worktree_id is RESTRICT, so the worktree deletion would fail
+// otherwise. A hard delete (not GORM's soft delete) is required because
+// SQLite's FK check sees physical rows regardless of deleted_at.
+func (s *SessionWorktreeStore) HardDeleteByWorktreeRepoID(repoID uint) error {
+	return s.db.Exec(
+		"DELETE FROM session_worktrees WHERE worktree_id IN (SELECT id FROM worktrees WHERE repo_id = ?)",
+		repoID,
+	).Error
+}

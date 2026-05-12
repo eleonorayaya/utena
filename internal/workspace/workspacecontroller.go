@@ -16,9 +16,20 @@ import (
 	"github.com/go-chi/render"
 )
 
+// SessionCleaner removes session/worktree DB rows that reference a repo,
+// so the bare-workspace migration can drop the worktree records without
+// hitting the RESTRICT foreign key on session_worktrees.worktree_id. The
+// session module owns this logic; the workspace module receives an
+// implementation via SetSessionCleaner after both modules are constructed
+// (session imports workspace, so the dependency has to flow this way).
+type SessionCleaner interface {
+	DetachWorktreesByRepoID(ctx context.Context, repoID uint) error
+}
+
 type WorkspaceController struct {
-	service    *WorkspaceService
-	gitService *git.GitService
+	service        *WorkspaceService
+	gitService     *git.GitService
+	sessionCleaner SessionCleaner
 }
 
 func NewWorkspaceController(service *WorkspaceService, gitService *git.GitService) *WorkspaceController {
@@ -26,6 +37,10 @@ func NewWorkspaceController(service *WorkspaceService, gitService *git.GitServic
 		service:    service,
 		gitService: gitService,
 	}
+}
+
+func (c *WorkspaceController) SetSessionCleaner(cleaner SessionCleaner) {
+	c.sessionCleaner = cleaner
 }
 
 func (c *WorkspaceController) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
@@ -273,16 +288,20 @@ func (c *WorkspaceController) MigrateWorkspaceToBare(w http.ResponseWriter, r *h
 		return
 	}
 
+	if ws.RepoID != nil {
+		if c.sessionCleaner == nil {
+			common.RenderError(w, r, fmt.Errorf("session cleaner not configured; cannot safely clear worktrees for repo %d", *ws.RepoID))
+			return
+		}
+		if err := c.sessionCleaner.DetachWorktreesByRepoID(ctx, *ws.RepoID); err != nil {
+			common.RenderError(w, r, fmt.Errorf("failed to clear worktree records before bare migration: %w", err))
+			return
+		}
+	}
+
 	if err := c.gitService.MigrateToBare(ctx, ws.Path); err != nil {
 		common.RenderError(w, r, err)
 		return
-	}
-
-	if ws.RepoID != nil {
-		if err := c.gitService.DeleteWorktreesByRepoID(*ws.RepoID); err != nil {
-			common.RenderError(w, r, fmt.Errorf("migration succeeded but failed to clear worktree records: %w", err))
-			return
-		}
 	}
 
 	if err := c.service.MarkAsBare(ctx, uint(id)); err != nil {

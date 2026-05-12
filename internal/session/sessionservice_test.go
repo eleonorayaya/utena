@@ -303,6 +303,52 @@ func TestSessionService_DeleteSession_Creating_Force(t *testing.T) {
 	require.Equal(t, StatusDeleted, retrieved.Status)
 }
 
+func TestSessionService_DetachWorktreesByRepoID(t *testing.T) {
+	service, sessionStore, workspaceStore, _, ws1ID, ws2ID := setupSessionService(t)
+	swStore := swtStoreFor(service)
+	database := service.store.db
+
+	soloIn1 := &Session{Name: "solo-1", Status: StatusActive, LastUsedAt: time.Now()}
+	soloIn2 := &Session{Name: "solo-2", Status: StatusActive, LastUsedAt: time.Now()}
+	addTestSession(t, sessionStore, swStore, soloIn1, ws1ID)
+	addTestSession(t, sessionStore, swStore, soloIn2, ws2ID)
+
+	multi := &Session{Name: "multi", Status: StatusActive, LastUsedAt: time.Now()}
+	addTestSession(t, sessionStore, swStore, multi, ws1ID)
+	attachTestWorktree(t, database, swStore, multi.ID, ws2ID, 1)
+
+	ws1, err := workspaceStore.GetByID(ws1ID)
+	require.NoError(t, err)
+	require.NotNil(t, ws1.RepoID)
+	repo1ID := *ws1.RepoID
+
+	ctx := context.Background()
+	require.NoError(t, service.DetachWorktreesByRepoID(ctx, repo1ID))
+
+	var wtCount int64
+	require.NoError(t, database.Model(&git.Worktree{}).Where("repo_id = ?", repo1ID).Count(&wtCount).Error)
+	require.Zero(t, wtCount, "all worktrees in the migrated repo should be deleted")
+
+	soloIn1Reloaded, err := sessionStore.GetByID(soloIn1.ID)
+	require.NoError(t, err)
+	require.Empty(t, soloIn1Reloaded.Worktrees, "solo session in migrated repo should have no worktrees left")
+
+	soloIn2Reloaded, err := sessionStore.GetByID(soloIn2.ID)
+	require.NoError(t, err)
+	require.Len(t, soloIn2Reloaded.Worktrees, 1, "session in untouched repo must keep its worktree")
+
+	multiReloaded, err := sessionStore.GetByID(multi.ID)
+	require.NoError(t, err)
+	require.Len(t, multiReloaded.Worktrees, 1, "multi-repo session should keep its remaining worktree")
+	require.NotNil(t, multiReloaded.Worktrees[0].Worktree)
+	require.NotEqual(t, repo1ID, multiReloaded.Worktrees[0].Worktree.RepoID)
+}
+
+func TestSessionService_DetachWorktreesByRepoID_NoRows(t *testing.T) {
+	service, _, _, _, _, _ := setupSessionService(t)
+	require.NoError(t, service.DetachWorktreesByRepoID(context.Background(), 99999))
+}
+
 func initTestRepo(t *testing.T) string {
 	t.Helper()
 	bareDir := t.TempDir()

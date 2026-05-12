@@ -875,6 +875,24 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 	return s.store.Update(session)
 }
 
+// DetachWorktreesByRepoID drops every session ↔ worktree link for the given
+// repo and then removes the worktree records themselves. It is the DB-side
+// half of a bare-workspace migration: the on-disk worktrees are about to be
+// invalidated by the conversion (the old .git directory moves to a backup
+// path) so any session linkage to them is no longer meaningful. Sessions that
+// span multiple repos keep their other worktrees; sessions whose only worktree
+// was in this repo remain in the DB with an empty Worktrees slice for the user
+// to clean up.
+func (s *SessionService) DetachWorktreesByRepoID(ctx context.Context, repoID uint) error {
+	if err := s.sessionWorktreeStore.HardDeleteByWorktreeRepoID(repoID); err != nil {
+		return fmt.Errorf("failed to detach session worktrees for repo %d: %w", repoID, err)
+	}
+	if err := s.gitService.DeleteWorktreesByRepoID(repoID); err != nil {
+		return fmt.Errorf("failed to delete worktrees for repo %d: %w", repoID, err)
+	}
+	return nil
+}
+
 // cleanupSessionRootDir removes the SessionRoot dir on disk when utena owns it
 // (i.e. it lives under the configured sessionsRoot). For single-workspace
 // sessions, SessionRoot is either a worktree dir under a repo (cleaned up by
