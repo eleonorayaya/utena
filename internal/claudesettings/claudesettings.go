@@ -18,7 +18,7 @@ type settingsLocal struct {
 	} `json:"sandbox"`
 }
 
-func defaultAllowWritePaths(workspacePath string) []string {
+func WorkspaceAllowWritePaths(workspacePath string) []string {
 	return []string{
 		filepath.Join(workspacePath, ".git"),
 		filepath.Join(workspacePath, ".bare"),
@@ -81,11 +81,15 @@ func mergeAllowWrite(data []byte, paths []string) ([]byte, bool, error) {
 }
 
 func EnsureWorkspaceRoot(workspacePath string) error {
-	return ensureSettingsFile(workspacePath, defaultAllowWritePaths(workspacePath))
+	return ensureSettingsFile(workspacePath, WorkspaceAllowWritePaths(workspacePath))
 }
 
-func EnsureSessionRoot(sessionRoot string, gitDirs []string) error {
-	return ensureSettingsFile(sessionRoot, gitDirs)
+func EnsureSessionRoot(sessionRoot string, workspacePaths []string) error {
+	allowWrite := make([]string, 0, len(workspacePaths)*2)
+	for _, p := range workspacePaths {
+		allowWrite = append(allowWrite, WorkspaceAllowWritePaths(p)...)
+	}
+	return ensureSettingsFile(sessionRoot, allowWrite)
 }
 
 func ensureSettingsFile(rootPath string, allowWrite []string) error {

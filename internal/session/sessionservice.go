@@ -524,11 +524,11 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, branchName st
 	}
 
 	if multi {
-		gitDirs := make([]string, 0, len(done))
+		workspacePaths := make([]string, 0, len(done))
 		for _, r := range done {
-			gitDirs = append(gitDirs, filepath.Join(r.worktreePath, ".git"))
+			workspacePaths = append(workspacePaths, r.ws.Path)
 		}
-		if err := claudesettings.EnsureSessionRoot(sess.SessionRoot, gitDirs); err != nil {
+		if err := claudesettings.EnsureSessionRoot(sess.SessionRoot, workspacePaths); err != nil {
 			slog.WarnContext(ctx, "ensure session-root claude settings failed", "error", err)
 			setupWarnings = append(setupWarnings, fmt.Sprintf("claude-settings: %s", err.Error()))
 		}

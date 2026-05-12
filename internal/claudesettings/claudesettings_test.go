@@ -252,14 +252,14 @@ func TestLinkWorktree_PreservesExistingFile(t *testing.T) {
 	}
 }
 
-func TestEnsureSessionRoot_CreatesFileWithAllGitDirs(t *testing.T) {
+func TestEnsureSessionRoot_CreatesFileWithGitAndBareForEachWorkspace(t *testing.T) {
 	root := t.TempDir()
-	gitDirs := []string{
-		filepath.Join(root, "repo-a", ".git"),
-		filepath.Join(root, "repo-b", ".git"),
+	workspaces := []string{
+		filepath.Join(root, "repo-a"),
+		filepath.Join(root, "repo-b"),
 	}
 
-	if err := EnsureSessionRoot(root, gitDirs); err != nil {
+	if err := EnsureSessionRoot(root, workspaces); err != nil {
 		t.Fatalf("EnsureSessionRoot: %v", err)
 	}
 
@@ -274,29 +274,35 @@ func TestEnsureSessionRoot_CreatesFileWithAllGitDirs(t *testing.T) {
 	sandbox, _ := out["sandbox"].(map[string]any)
 	fs, _ := sandbox["filesystem"].(map[string]any)
 	allowWrite, _ := fs["allowWrite"].([]any)
-	if len(allowWrite) != 2 {
-		t.Fatalf("expected 2 allowWrite entries, got %d: %v", len(allowWrite), allowWrite)
+	if len(allowWrite) != 4 {
+		t.Fatalf("expected 4 allowWrite entries (.git + .bare per workspace), got %d: %v", len(allowWrite), allowWrite)
 	}
-	for _, want := range gitDirs {
+	want := []string{
+		filepath.Join(workspaces[0], ".git"),
+		filepath.Join(workspaces[0], ".bare"),
+		filepath.Join(workspaces[1], ".git"),
+		filepath.Join(workspaces[1], ".bare"),
+	}
+	for _, w := range want {
 		found := false
 		for _, v := range allowWrite {
-			if v == want {
+			if v == w {
 				found = true
 			}
 		}
 		if !found {
-			t.Fatalf("allowWrite missing %q; got %v", want, allowWrite)
+			t.Fatalf("allowWrite missing %q; got %v", w, allowWrite)
 		}
 	}
 }
 
 func TestEnsureSessionRoot_IsIdempotent(t *testing.T) {
 	root := t.TempDir()
-	gitDirs := []string{filepath.Join(root, "a", ".git")}
-	if err := EnsureSessionRoot(root, gitDirs); err != nil {
+	workspaces := []string{filepath.Join(root, "a")}
+	if err := EnsureSessionRoot(root, workspaces); err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSessionRoot(root, gitDirs); err != nil {
+	if err := EnsureSessionRoot(root, workspaces); err != nil {
 		t.Fatalf("second call: %v", err)
 	}
 
@@ -306,9 +312,10 @@ func TestEnsureSessionRoot_IsIdempotent(t *testing.T) {
 	sandbox, _ := out["sandbox"].(map[string]any)
 	fs, _ := sandbox["filesystem"].(map[string]any)
 	allowWrite, _ := fs["allowWrite"].([]any)
+	gitPath := filepath.Join(workspaces[0], ".git")
 	count := 0
 	for _, v := range allowWrite {
-		if v == gitDirs[0] {
+		if v == gitPath {
 			count++
 		}
 	}
