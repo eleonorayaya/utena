@@ -65,3 +65,13 @@ func (s *SessionWorktreeStore) ListBySessionID(sessionID uint) ([]SessionWorktre
 func (s *SessionWorktreeStore) DeleteBySessionID(sessionID uint) error {
 	return s.db.Where("session_id = ?", sessionID).Delete(&SessionWorktree{}).Error
 }
+
+// HardDeleteByWorktreeRepoID bypasses GORM's soft delete because SQLite's
+// FK check sees physical rows regardless of deleted_at — soft-deleted join
+// rows would still block deleting the worktrees they point at.
+func (s *SessionWorktreeStore) HardDeleteByWorktreeRepoID(repoID uint) error {
+	return s.db.Exec(
+		"DELETE FROM session_worktrees WHERE worktree_id IN (SELECT id FROM worktrees WHERE repo_id = ?)",
+		repoID,
+	).Error
+}

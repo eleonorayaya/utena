@@ -25,7 +25,6 @@ func (wr *WorkspaceRouter) Routes() chi.Router {
 	r.Get("/{id}/prs", wr.controller.ListPRs)
 	r.Get("/{id}", wr.controller.GetWorkspaceByID)
 	r.Put("/{id}/hidden", wr.controller.SetWorkspaceHidden)
-	r.Post("/{id}/migrate-bare", wr.controller.MigrateWorkspaceToBare)
 	r.Delete("/{id}", wr.controller.DeleteWorkspace)
 
 	return r

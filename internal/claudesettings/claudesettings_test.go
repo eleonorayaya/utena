@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -321,6 +322,64 @@ func TestEnsureSessionRoot_IsIdempotent(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected git dir once after re-run, got %d times", count)
+	}
+}
+
+func TestEnsureMultiSessionGuide_CreatesFileWhenMissing(t *testing.T) {
+	root := t.TempDir()
+	checkouts := []SessionCheckout{
+		{Subdir: "utena", WorkspaceName: "utena"},
+		{Subdir: "other", WorkspaceName: "other-project"},
+	}
+	if err := EnsureMultiSessionGuide(root, checkouts); err != nil {
+		t.Fatalf("EnsureMultiSessionGuide: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	for _, want := range []string{"`utena/`", "`other/`", "other-project", "only**", "canonical"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("CLAUDE.md missing %q; got:\n%s", want, body)
+		}
+	}
+}
+
+func TestEnsureMultiSessionGuide_PreservesUserCLAUDEMd(t *testing.T) {
+	root := t.TempDir()
+	userContent := []byte("# my project notes\n")
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), userContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureMultiSessionGuide(root, []SessionCheckout{{Subdir: "a", WorkspaceName: "a"}}); err != nil {
+		t.Fatalf("EnsureMultiSessionGuide: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(userContent) {
+		t.Fatalf("user CLAUDE.md was overwritten; got:\n%s", got)
+	}
+}
+
+func TestEnsureMultiSessionGuide_RewritesUtenaAuthoredFile(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureMultiSessionGuide(root, []SessionCheckout{{Subdir: "a", WorkspaceName: "a"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureMultiSessionGuide(root, []SessionCheckout{
+		{Subdir: "a", WorkspaceName: "a"},
+		{Subdir: "b", WorkspaceName: "b"},
+	}); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "`b/`") {
+		t.Fatalf("expected rewrite to include new checkout; got:\n%s", body)
 	}
 }
 

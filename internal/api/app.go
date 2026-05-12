@@ -116,6 +116,12 @@ func (a *App) Routes() chi.Router {
 	for _, m := range a.modules() {
 		r.Mount(m.path, m.module.Routes())
 	}
+	bareMigration := &bareMigrationHandler{
+		workspaceService: a.Workspace.Service,
+		gitService:       a.Git.Service,
+		sessionService:   a.Session.Service,
+	}
+	r.Post("/workspaces/{id}/migrate-bare", bareMigration.handle)
 	return r
 }
 

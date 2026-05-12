@@ -525,12 +525,21 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, branchName st
 
 	if multi {
 		workspacePaths := make([]string, 0, len(done))
+		checkouts := make([]claudesettings.SessionCheckout, 0, len(done))
 		for _, r := range done {
 			workspacePaths = append(workspacePaths, r.ws.Path)
+			checkouts = append(checkouts, claudesettings.SessionCheckout{
+				Subdir:        filepath.Base(r.worktreePath),
+				WorkspaceName: r.ws.Name,
+			})
 		}
 		if err := claudesettings.EnsureSessionRoot(sess.SessionRoot, workspacePaths); err != nil {
 			slog.WarnContext(ctx, "ensure session-root claude settings failed", "error", err)
 			setupWarnings = append(setupWarnings, fmt.Sprintf("claude-settings: %s", err.Error()))
+		}
+		if err := claudesettings.EnsureMultiSessionGuide(sess.SessionRoot, checkouts); err != nil {
+			slog.WarnContext(ctx, "ensure multi-session CLAUDE.md failed", "error", err)
+			setupWarnings = append(setupWarnings, fmt.Sprintf("claude-guide: %s", err.Error()))
 		}
 	} else if len(done) == 1 && done[0].created {
 		ws := done[0].ws
@@ -873,6 +882,19 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 	session.Status = StatusDeleted
 
 	return s.store.Update(session)
+}
+
+// DetachWorktreesByRepoID drops join rows first so the worktree delete
+// doesn't trip the RESTRICT FK on session_worktrees.worktree_id. Sessions
+// left with no remaining worktrees are kept for the user to clean up.
+func (s *SessionService) DetachWorktreesByRepoID(ctx context.Context, repoID uint) error {
+	if err := s.sessionWorktreeStore.HardDeleteByWorktreeRepoID(repoID); err != nil {
+		return fmt.Errorf("failed to detach session worktrees for repo %d: %w", repoID, err)
+	}
+	if err := s.gitService.DeleteWorktreesByRepoID(repoID); err != nil {
+		return fmt.Errorf("failed to delete worktrees for repo %d: %w", repoID, err)
+	}
+	return nil
 }
 
 // cleanupSessionRootDir removes the SessionRoot dir on disk when utena owns it

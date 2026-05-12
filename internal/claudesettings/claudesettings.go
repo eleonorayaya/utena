@@ -6,9 +6,49 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-const settingsFileName = "settings.local.json"
+const (
+	settingsFileName         = "settings.local.json"
+	multiSessionGuideName    = "CLAUDE.md"
+	multiSessionGuideMarker  = "<!-- utena:multi-session-guide -->"
+	multiSessionGuideContent = multiSessionGuideMarker + `
+# Session checkouts
+
+The directories below are the **only** canonical copies of these projects for this session. Read from and edit them here; do not look at or modify any other copy of these projects elsewhere on this filesystem.
+
+%s`
+)
+
+type SessionCheckout struct {
+	Subdir        string
+	WorkspaceName string
+}
+
+// EnsureMultiSessionGuide writes a CLAUDE.md at the session root telling
+// Claude that the listed subdirectory checkouts are the canonical copies
+// for this session. Skips if the file already exists and wasn't authored
+// by utena (no marker), so the user's customizations stay intact.
+func EnsureMultiSessionGuide(sessionRoot string, checkouts []SessionCheckout) error {
+	path := filepath.Join(sessionRoot, multiSessionGuideName)
+	if existing, err := os.ReadFile(path); err == nil {
+		if !strings.Contains(string(existing), multiSessionGuideMarker) {
+			return nil
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", multiSessionGuideName, err)
+	}
+	var list strings.Builder
+	for _, c := range checkouts {
+		fmt.Fprintf(&list, "- `%s/` — workspace `%s`\n", c.Subdir, c.WorkspaceName)
+	}
+	body := fmt.Sprintf(multiSessionGuideContent, list.String())
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", multiSessionGuideName, err)
+	}
+	return nil
+}
 
 type settingsLocal struct {
 	Sandbox struct {
