@@ -216,21 +216,10 @@ func (s *gitCLI) hasBranch(ctx context.Context, repoPath string, branch string) 
 	return true, nil
 }
 
-func (s *gitCLI) validateWorktree(ctx context.Context, worktreePath string, expectedBranch string) (bool, error) {
+func (s *gitCLI) validateWorktree(worktreePath string) (bool, error) {
 	info, err := os.Stat(worktreePath)
 	if err != nil || !info.IsDir() {
 		return false, nil
-	}
-
-	currentBranch, err := s.currentBranch(ctx, worktreePath)
-	if err != nil {
-		return false, fmt.Errorf("worktree exists at %s but failed to read branch: %w", worktreePath, err)
-	}
-	if currentBranch == "" {
-		return true, nil
-	}
-	if currentBranch != expectedBranch {
-		return false, fmt.Errorf("worktree at %s has branch %q, expected %q", worktreePath, currentBranch, expectedBranch)
 	}
 	return true, nil
 }

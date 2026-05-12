@@ -104,7 +104,7 @@ func (s *GitService) SetupWorktreeAt(ctx context.Context, repoPath string, branc
 		wtPath = s.cli.worktreePath(repoPath, branchName)
 	}
 
-	alreadyExists, err := s.cli.validateWorktree(ctx, wtPath, branchName)
+	alreadyExists, err := s.cli.validateWorktree(wtPath)
 	if err != nil {
 		return false, "", err
 	}
@@ -234,8 +234,8 @@ func (s *GitService) HasBranch(ctx context.Context, repoPath string, branch stri
 	return s.cli.hasBranch(ctx, repoPath, branch)
 }
 
-func (s *GitService) ValidateWorktree(ctx context.Context, worktreePath string, expectedBranch string) (bool, error) {
-	return s.cli.validateWorktree(ctx, worktreePath, expectedBranch)
+func (s *GitService) ValidateWorktree(worktreePath string) (bool, error) {
+	return s.cli.validateWorktree(worktreePath)
 }
 
 func (s *GitService) WorktreePath(repoPath string, branch string) string {
@@ -373,7 +373,7 @@ func (s *GitService) IsHealthy(ctx context.Context, branch *Branch, repoPath str
 	if err != nil {
 		return false
 	}
-	valid, err := s.cli.validateWorktree(ctx, wt.Path, branch.Name)
+	valid, err := s.cli.validateWorktree(wt.Path)
 	if err != nil || !valid {
 		return false
 	}
@@ -403,7 +403,7 @@ func (s *GitService) SyncBranch(ctx context.Context, branch *Branch, repoPath st
 	}
 
 	if existsLocal {
-		if valid, err := s.cli.validateWorktree(ctx, checkPath, branch.Name); err != nil {
+		if valid, err := s.cli.validateWorktree(checkPath); err != nil {
 			slog.Warn("failed to validate worktree", "path", checkPath, "error", err)
 		} else if valid {
 			if errors.Is(wtErr, ErrWorktreeNotFound) {
@@ -443,18 +443,6 @@ func (s *GitService) SyncBranch(ctx context.Context, branch *Branch, repoPath st
 }
 
 func (s *GitService) CleanupBranch(ctx context.Context, branch *Branch, repoPath string, deleteBranch bool) error {
-	wt, err := s.worktreeStore.GetByBranchID(branch.ID)
-	if err != nil && !errors.Is(err, ErrWorktreeNotFound) {
-		return fmt.Errorf("failed to look up worktree: %w", err)
-	}
-	if wt != nil && branch.Name != s.cli.defaultBranch(ctx, repoPath) {
-		if err := s.cli.removeWorktree(ctx, repoPath, wt.Path); err != nil {
-			return err
-		}
-		if err := s.worktreeStore.Delete(wt.ID); err != nil {
-			return fmt.Errorf("failed to delete worktree record: %w", err)
-		}
-	}
 	if deleteBranch {
 		if err := s.cli.deleteBranch(ctx, repoPath, branch.Name); err != nil {
 			return err

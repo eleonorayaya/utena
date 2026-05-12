@@ -435,4 +435,3 @@ func TestWorkspaceRouter_CheckBranchExists_MissingName(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
-

@@ -154,7 +154,21 @@ func TestGitCLI_ValidateWorktree_DetachedHead(t *testing.T) {
 
 	run(t, worktreePath, "git", "checkout", "--detach")
 
-	exists, err := svc.validateWorktree(context.Background(), worktreePath, "eqt/my-feature")
+	exists, err := svc.validateWorktree(worktreePath)
+	require.NoError(t, err)
+	require.True(t, exists)
+}
+
+func TestGitCLI_ValidateWorktree_DifferentBranch(t *testing.T) {
+	repo := initTestRepo(t)
+
+	svc := newGitCLI()
+	worktreePath, err := svc.createWorktree(context.Background(), repo, "eqt/my-feature", "main", "")
+	require.NoError(t, err)
+
+	run(t, worktreePath, "git", "checkout", "-b", "eqt/something-else")
+
+	exists, err := svc.validateWorktree(worktreePath)
 	require.NoError(t, err)
 	require.True(t, exists)
 }

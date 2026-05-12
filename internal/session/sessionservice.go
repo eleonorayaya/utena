@@ -37,6 +37,11 @@ const (
 
 const defaultSetupTimeout = 5 * time.Minute
 
+const (
+	gitUnhealthyError    = "worktree or branch is unhealthy"
+	orphanedSessionError = "session predates multi-workspace migration — please recreate"
+)
+
 func traceOp(ctx context.Context, op string, fn func() error, attrs ...any) error {
 	opAttrs := append([]any{"op", op}, attrs...)
 	slog.InfoContext(ctx, "setup op: start", opAttrs...)
@@ -119,7 +124,7 @@ func (s *SessionService) markOrphanedSessionsBroken(sessions []Session) {
 		if len(sess.Worktrees) > 0 {
 			continue
 		}
-		if err := s.markSessionBroken(sess, "session predates multi-workspace migration — please recreate"); err != nil {
+		if err := s.markSessionBroken(sess, orphanedSessionError); err != nil {
 			slog.Warn("orphan check: failed to mark session broken", "session", sess.ID, "error", err)
 		}
 	}
@@ -373,25 +378,7 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, branchName st
 	var setupWarnings []string
 	wsCache := make(map[uint]*workspace.Workspace)
 
-	rollback := func() {
-		for i := len(done) - 1; i >= 0; i-- {
-			r := done[i]
-			if r.worktreePath == "" {
-				continue
-			}
-			if err := s.gitService.RemoveWorktree(ctx, r.ws.Path, r.worktreePath); err != nil {
-				slog.WarnContext(ctx, "rollback: failed to remove worktree", "workspace", r.ws.Name, "path", r.worktreePath, "error", err)
-			}
-		}
-		if multi && sess.SessionRoot != "" {
-			if err := os.RemoveAll(sess.SessionRoot); err != nil {
-				slog.WarnContext(ctx, "rollback: failed to remove session root", "path", sess.SessionRoot, "error", err)
-			}
-		}
-	}
-
 	markBroken := func(stage string, err error) {
-		rollback()
 		msg := fmt.Sprintf("%s failed: %v", stage, err)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			msg = fmt.Sprintf("%s timed out after %s", stage, s.setupTimeout)
@@ -870,7 +857,6 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 	}
 
 	s.cleanupSessionBranches(ctx, session, deleteBranch)
-	s.cleanupSessionRootDir(session)
 
 	if session.TmuxSessionID != nil {
 		if err := s.tmuxService.KillSession(*session.TmuxSessionID); err != nil {
@@ -895,24 +881,6 @@ func (s *SessionService) DetachWorktreesByRepoID(ctx context.Context, repoID uin
 		return fmt.Errorf("failed to delete worktrees for repo %d: %w", repoID, err)
 	}
 	return nil
-}
-
-// cleanupSessionRootDir removes the SessionRoot dir on disk when utena owns it
-// (i.e. it lives under the configured sessionsRoot). For single-workspace
-// sessions, SessionRoot is either a worktree dir under a repo (cleaned up by
-// gitService.CleanupBranch) or the workspace path itself when no worktree was
-// created — neither lives under sessionsRoot, so this helper is a no-op.
-func (s *SessionService) cleanupSessionRootDir(sess *Session) {
-	if sess.SessionRoot == "" || s.sessionsRoot == "" {
-		return
-	}
-	rel, err := filepath.Rel(s.sessionsRoot, sess.SessionRoot)
-	if err != nil || rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
-		return
-	}
-	if err := os.RemoveAll(sess.SessionRoot); err != nil {
-		slog.Warn("failed to remove session root", "path", sess.SessionRoot, "error", err)
-	}
 }
 
 func (s *SessionService) cleanupSessionBranches(ctx context.Context, session *Session, deleteBranch bool) {
@@ -1063,9 +1031,6 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 		return nil, fmt.Errorf("cannot archive session in status %s", sess.Status)
 	}
 
-	s.cleanupSessionBranches(ctx, sess, false)
-	s.cleanupSessionRootDir(sess)
-
 	if sess.TmuxSessionID != nil {
 		if err := s.tmuxService.KillSession(*sess.TmuxSessionID); err != nil {
 			slog.Warn("failed to kill tmux session during archive", "session", sess.ID, "error", err)
@@ -1132,16 +1097,20 @@ func (s *SessionService) reconcileLoadedSession(ctx context.Context, sess *Sessi
 
 	prevStatus := sess.Status
 	prevError := sess.StatusError
+	canRecoverFromBroken := sess.Status == StatusBroken && sess.StatusError == gitUnhealthyError
+
 	if !gitHealthy {
 		sess.Status = StatusBroken
-		sess.StatusError = "worktree or branch is unhealthy"
+		sess.StatusError = gitUnhealthyError
 	} else if !tmuxAlive {
-		if sess.Status == StatusActive {
+		if sess.Status == StatusActive || canRecoverFromBroken {
 			sess.Status = StatusInactive
+			sess.StatusError = ""
 		}
 	} else {
-		if sess.Status == StatusInactive {
+		if sess.Status == StatusInactive || canRecoverFromBroken {
 			sess.Status = StatusActive
+			sess.StatusError = ""
 		}
 	}
 
