@@ -83,6 +83,46 @@ func TestSessionService_OnAppStart(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSessionService_Reconcile_RecoversBrokenSessionOnceGitHealthy(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+	ctx := context.Background()
+
+	sess := &Session{
+		Name:        "previously-broken",
+		Status:      StatusBroken,
+		StatusError: gitUnhealthyError,
+		LastUsedAt:  time.Now(),
+	}
+	addTestSession(t, sessionStore, swtStoreFor(service), sess, ws1ID)
+
+	require.NoError(t, service.OnAppStart(ctx))
+
+	loaded, err := sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, StatusBroken, loaded.Status, "broken-by-git-mismatch session should auto-revive once worktree is healthy again")
+	require.Empty(t, loaded.StatusError)
+}
+
+func TestSessionService_Reconcile_LeavesOrphanedBrokenSessionAlone(t *testing.T) {
+	service, sessionStore, _, _, _, _ := setupSessionService(t)
+	ctx := context.Background()
+
+	orphan := &Session{
+		Name:        "orphan-broken",
+		Status:      StatusBroken,
+		StatusError: orphanedSessionError,
+		LastUsedAt:  time.Now(),
+	}
+	require.NoError(t, sessionStore.Add(orphan))
+
+	require.NoError(t, service.OnAppStart(ctx))
+
+	loaded, err := sessionStore.GetByID(orphan.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusBroken, loaded.Status, "orphan-marked broken sessions must not auto-revive")
+	require.Contains(t, loaded.StatusError, "predates")
+}
+
 func TestSessionService_OnAppStart_RecoversStuckCreatingSessions(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
 	ctx := context.Background()
@@ -239,6 +279,27 @@ func TestSessionService_UpdateSession(t *testing.T) {
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.True(t, retrieved.IsAttached)
+}
+
+func TestSessionService_DeleteSession_PreservesWorktreeDirOnDisk(t *testing.T) {
+	repoPath := initTestRepo(t)
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+
+	session := &Session{Name: "keep-me"}
+	ctx := context.Background()
+	require.NoError(t, service.CreateSession(ctx, session, wsGitID, "", "main"))
+	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
+
+	worktreePath := filepath.Join(repoPath, ".worktrees", "eqt-keep-me")
+	info, err := os.Stat(worktreePath)
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+
+	require.NoError(t, service.DeleteSession(ctx, session.ID, true, false))
+
+	info, err = os.Stat(worktreePath)
+	require.NoError(t, err, "worktree dir must survive DeleteSession")
+	require.True(t, info.IsDir())
 }
 
 func TestSessionService_DeleteSession(t *testing.T) {

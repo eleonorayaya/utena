@@ -126,7 +126,7 @@ func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMul
 		SessionRoot: sessionRoot,
 	}
 	if err := s.store.Add(sess); err != nil {
-		_ = os.RemoveAll(sessionRoot)
+		slog.WarnContext(ctx, "session create failed; session root preserved", "path", sessionRoot, "error", err)
 		return nil, err
 	}
 
@@ -135,7 +135,7 @@ func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMul
 			if delErr := s.store.Delete(sess.ID); delErr != nil {
 				slog.ErrorContext(ctx, "failed to delete session after worktree creation failure", "session", sess.ID, "error", delErr)
 			}
-			_ = os.RemoveAll(sessionRoot)
+			slog.WarnContext(ctx, "session worktree create failed; session root preserved", "path", sessionRoot, "workspace", w.workspace.ID, "error", err)
 			return nil, fmt.Errorf("eager create worktree for workspace %d: %w", w.workspace.ID, err)
 		}
 	}
@@ -153,7 +153,7 @@ func (s *SessionService) CreateMultiSession(ctx context.Context, input CreateMul
 		if delErr := s.store.Delete(sess.ID); delErr != nil {
 			slog.WarnContext(ctx, "failed to roll back session after tmux registration failure", "session", sess.ID, "error", delErr)
 		}
-		_ = os.RemoveAll(sessionRoot)
+		slog.WarnContext(ctx, "tmux registration failed; session root preserved", "path", sessionRoot, "error", err)
 		return nil, fmt.Errorf("register tmux session %q: %w", tmuxName, err)
 	}
 	sess.TmuxSessionID = &tmuxRecord.ID
