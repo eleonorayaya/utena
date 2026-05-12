@@ -1,31 +1,20 @@
 package workspace
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
-	"time"
 
-	"github.com/eleonorayaya/utena/internal/claudesettings"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
 )
 
-// SessionCleaner is wired via SetSessionCleaner after construction because
-// the session module imports workspace, blocking a constructor dependency.
-type SessionCleaner interface {
-	DetachWorktreesByRepoID(ctx context.Context, repoID uint) error
-}
-
 type WorkspaceController struct {
-	service        *WorkspaceService
-	gitService     *git.GitService
-	sessionCleaner SessionCleaner
+	service    *WorkspaceService
+	gitService *git.GitService
 }
 
 func NewWorkspaceController(service *WorkspaceService, gitService *git.GitService) *WorkspaceController {
@@ -33,10 +22,6 @@ func NewWorkspaceController(service *WorkspaceService, gitService *git.GitServic
 		service:    service,
 		gitService: gitService,
 	}
-}
-
-func (c *WorkspaceController) SetSessionCleaner(cleaner SessionCleaner) {
-	c.sessionCleaner = cleaner
 }
 
 func (c *WorkspaceController) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
@@ -256,61 +241,6 @@ func (c *WorkspaceController) CheckBranchExists(w http.ResponseWriter, r *http.R
 	}
 
 	render.JSON(w, r, BranchExistsResponse{ExistsLocal: existsLocal, ExistsRemote: existsRemote})
-}
-
-func (c *WorkspaceController) MigrateWorkspaceToBare(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Minute)
-	defer cancel()
-	raw := chi.URLParam(r, "id")
-	id, err := strconv.ParseUint(raw, 10, 64)
-	if err != nil {
-		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
-		return
-	}
-
-	ws, err := c.service.GetWorkspace(ctx, uint(id))
-	if err != nil {
-		common.RenderError(w, r, err)
-		return
-	}
-
-	if !ws.IsGitRepo {
-		common.RenderError(w, r, common.NewInvalidRequest(fmt.Sprintf("workspace %q is not a git repository", ws.Name)))
-		return
-	}
-
-	if ws.IsBare {
-		common.RenderError(w, r, common.NewInvalidRequest(fmt.Sprintf("workspace %q is already using the bare pattern", ws.Name)))
-		return
-	}
-
-	if ws.RepoID != nil {
-		if c.sessionCleaner == nil {
-			common.RenderError(w, r, fmt.Errorf("session cleaner not configured; cannot safely clear worktrees for repo %d", *ws.RepoID))
-			return
-		}
-		if err := c.sessionCleaner.DetachWorktreesByRepoID(ctx, *ws.RepoID); err != nil {
-			common.RenderError(w, r, fmt.Errorf("failed to clear worktree records before bare migration: %w", err))
-			return
-		}
-	}
-
-	if err := c.gitService.MigrateToBare(ctx, ws.Path); err != nil {
-		common.RenderError(w, r, err)
-		return
-	}
-
-	if err := c.service.MarkAsBare(ctx, uint(id)); err != nil {
-		common.RenderError(w, r, err)
-		return
-	}
-
-	if err := claudesettings.EnsureWorkspaceRoot(ws.Path); err != nil {
-		slog.Warn("failed to bootstrap claude settings after bare migration",
-			"workspace", ws.Name, "error", err)
-	}
-
-	render.NoContent(w, r)
 }
 
 func (c *WorkspaceController) ListPRs(w http.ResponseWriter, r *http.Request) {

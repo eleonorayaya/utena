@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -344,4 +345,39 @@ func TestDaemon_RepairSession_AfterTmuxFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, session.StatusActive, response.Status)
 	require.True(t, mock.HasSessionByName("utena-repair-me"))
+}
+
+func TestDaemon_MigrateToBare_BootstrapsClaudeSettings(t *testing.T) {
+	app, router, _, ws1ID, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("POST", fmt.Sprintf("/workspaces/%d/migrate-bare", ws1ID), nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNoContent, w.Code, "body: %s", w.Body.String())
+
+	ws, err := app.Workspace.Store.GetByID(ws1ID)
+	require.NoError(t, err)
+	require.True(t, ws.IsBare, "workspace should be marked bare after migration")
+
+	settingsPath := filepath.Join(ws.Path, ".claude", "settings.local.json")
+	data, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, data)
+}
+
+func TestDaemon_MigrateToBare_DetachesLinkedSessions(t *testing.T) {
+	app, router, _, ws1ID, _ := setupTestRouter(t)
+
+	body := fmt.Sprintf(`{"name":"linked","workspace_ids":[%d],"base_branch":"main"}`, ws1ID)
+	createResp := createSessionViaAPI(t, router, body)
+	waitForSessionStatus(t, router, createResp.ID, session.StatusActive, 5*time.Second)
+
+	req := httptest.NewRequest("POST", fmt.Sprintf("/workspaces/%d/migrate-bare", ws1ID), nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNoContent, w.Code, "body: %s", w.Body.String())
+
+	sess, err := app.Session.Store.GetByID(createResp.ID)
+	require.NoError(t, err)
+	require.Empty(t, sess.Worktrees, "migrated repo should leave the session with no remaining worktrees")
 }
