@@ -18,21 +18,11 @@ type settingsLocal struct {
 	} `json:"sandbox"`
 }
 
-func defaultAllowWritePaths(workspacePath string) []string {
+func WorkspaceAllowWritePaths(workspacePath string) []string {
 	return []string{
 		filepath.Join(workspacePath, ".git"),
 		filepath.Join(workspacePath, ".bare"),
 	}
-}
-
-func defaultSettingsJSON(workspacePath string) ([]byte, error) {
-	var s settingsLocal
-	s.Sandbox.Filesystem.AllowWrite = defaultAllowWritePaths(workspacePath)
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("marshal settings: %w", err)
-	}
-	return append(data, '\n'), nil
 }
 
 func settingsFileExists(path string) (bool, error) {
@@ -91,7 +81,19 @@ func mergeAllowWrite(data []byte, paths []string) ([]byte, bool, error) {
 }
 
 func EnsureWorkspaceRoot(workspacePath string) error {
-	claudeDir := filepath.Join(workspacePath, ".claude")
+	return ensureSettingsFile(workspacePath, WorkspaceAllowWritePaths(workspacePath))
+}
+
+func EnsureSessionRoot(sessionRoot string, workspacePaths []string) error {
+	allowWrite := make([]string, 0, len(workspacePaths)*2)
+	for _, p := range workspacePaths {
+		allowWrite = append(allowWrite, WorkspaceAllowWritePaths(p)...)
+	}
+	return ensureSettingsFile(sessionRoot, allowWrite)
+}
+
+func ensureSettingsFile(rootPath string, allowWrite []string) error {
+	claudeDir := filepath.Join(rootPath, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		return fmt.Errorf("create .claude dir: %w", err)
 	}
@@ -100,25 +102,28 @@ func EnsureWorkspaceRoot(workspacePath string) error {
 	if err != nil {
 		return err
 	}
-	if exists {
-		data, err := os.ReadFile(settingsPath)
+	if !exists {
+		var s settingsLocal
+		s.Sandbox.Filesystem.AllowWrite = append([]string{}, allowWrite...)
+		data, err := json.MarshalIndent(s, "", "  ")
 		if err != nil {
-			return fmt.Errorf("read %s: %w", settingsFileName, err)
+			return fmt.Errorf("marshal settings: %w", err)
 		}
-		merged, changed, err := mergeAllowWrite(data, defaultAllowWritePaths(workspacePath))
-		if err != nil || !changed {
-			return err
-		}
-		if err := os.WriteFile(settingsPath, merged, 0o644); err != nil {
+		data = append(data, '\n')
+		if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", settingsFileName, err)
 		}
 		return nil
 	}
-	data, err := defaultSettingsJSON(workspacePath)
+	data, err := os.ReadFile(settingsPath)
 	if err != nil {
+		return fmt.Errorf("read %s: %w", settingsFileName, err)
+	}
+	merged, changed, err := mergeAllowWrite(data, allowWrite)
+	if err != nil || !changed {
 		return err
 	}
-	if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
+	if err := os.WriteFile(settingsPath, merged, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", settingsFileName, err)
 	}
 	return nil

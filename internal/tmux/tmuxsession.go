@@ -3,12 +3,21 @@ package tmux
 import (
 	"errors"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"gorm.io/gorm"
 )
 
 var (
 	ErrTmuxSessionNotFound      = errors.New("tmux session not found")
-	ErrTmuxSessionAlreadyExists = errors.New("tmux session already exists")
+	ErrTmuxSessionAlreadyExists = common.NewConflict("tmux session already exists")
+)
+
+type TmuxSessionStatus string
+
+const (
+	TmuxStatusPending  TmuxSessionStatus = "pending"
+	TmuxStatusActive   TmuxSessionStatus = "active"
+	TmuxStatusInactive TmuxSessionStatus = "inactive"
 )
 
 type TmuxSession struct {
@@ -16,6 +25,9 @@ type TmuxSession struct {
 	Name     string            `json:"name" gorm:"uniqueIndex"`
 	StartDir string            `json:"start_dir"`
 	Env      map[string]string `json:"env" gorm:"serializer:json"`
-	IsAlive  bool              `json:"is_alive"`
+	Status   TmuxSessionStatus `json:"status" gorm:"index"`
 	Windows  []Window          `json:"windows,omitempty" gorm:"-"`
 }
+
+func (t *TmuxSession) GetStatus() TmuxSessionStatus  { return t.Status }
+func (t *TmuxSession) SetStatus(s TmuxSessionStatus) { t.Status = s }

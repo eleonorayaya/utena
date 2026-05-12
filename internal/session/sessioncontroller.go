@@ -84,13 +84,35 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	session := &Session{
-		Name:        data.Name,
-		WorkspaceID: data.WorkspaceID,
-		TodoID:      data.TodoID,
+	if data.IsMulti() {
+		session, err := c.service.CreateMultiSession(ctx, CreateMultiSessionInput{
+			Name:         data.Name,
+			WorkspaceIDs: data.WorkspaceIDs,
+			Branch:       data.Branch,
+			BaseBranch:   data.BaseBranch,
+			TodoID:       data.TodoID,
+		})
+		if err != nil {
+			common.RenderError(w, r, err)
+			return
+		}
+		render.Status(r, http.StatusAccepted)
+		common.RenderResponse(w, r, NewSessionResponse(session))
+		return
 	}
 
-	if err := c.service.CreateSession(ctx, session, data.Branch, data.BaseBranch, data.CreateWorktree); err != nil {
+	if len(data.WorkspaceIDs) != 1 {
+		common.RenderError(w, r, common.NewInvalidRequest("workspace_ids must contain exactly one id for a single-workspace session"))
+		return
+	}
+	workspaceID := data.WorkspaceIDs[0]
+
+	session := &Session{
+		Name:   data.Name,
+		TodoID: data.TodoID,
+	}
+
+	if err := c.service.CreateSession(ctx, session, workspaceID, data.Branch, data.BaseBranch); err != nil {
 		common.RenderError(w, r, err)
 		return
 	}

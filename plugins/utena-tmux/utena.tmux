@@ -18,4 +18,5 @@ tmux set-hook -g window-renamed "run-shell '${script_dir}/sync-windows.sh \"#{se
 tmux set-hook -g after-kill-window "run-shell '${script_dir}/sync-windows.sh \"#{session_name}\"'"
 tmux set-hook -g after-select-window "run-shell '${script_dir}/sync-windows.sh \"#{session_name}\"'"
 
+tmux bind-key p display-popup -E -w 80% -h 80% "utena"
 tmux bind-key t display-popup -E -w 80% -h 80% "utena new-task"

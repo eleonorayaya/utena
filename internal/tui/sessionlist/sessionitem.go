@@ -52,13 +52,7 @@ func (i sessionItem) Title() string {
 }
 
 func (i sessionItem) Description() string {
-	var name string
-	if i.session.Workspace != nil {
-		name = i.session.Workspace.Name
-	}
-	if name == "" {
-		name = "no workspace"
-	}
+	name := i.session.WorkspaceDisplay()
 	if !i.session.LastUsedAt.IsZero() {
 		return name + " · " + common.TimeAgo(i.session.LastUsedAt)
 	}

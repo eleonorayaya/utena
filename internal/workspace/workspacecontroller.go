@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -70,7 +71,12 @@ func (c *WorkspaceController) AddWorkspace(w http.ResponseWriter, r *http.Reques
 
 	ws, err := c.service.AddWorkspace(ctx, req.Path, req.AsRoot)
 	if err != nil {
-		common.RenderError(w, r, common.WrapInvalidRequest("add workspace failed", err))
+		var appErr *common.AppError
+		if errors.As(err, &appErr) {
+			common.RenderError(w, r, err)
+		} else {
+			common.RenderError(w, r, common.WrapInvalidRequest("add workspace failed", err))
+		}
 		return
 	}
 

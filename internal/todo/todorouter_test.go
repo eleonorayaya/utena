@@ -25,7 +25,7 @@ func setupTodoRouter(t *testing.T) (*TodoRouter, *TodoStore, *workspace.Workspac
 	require.NoError(t, workspaceStore.Add(ws1))
 	require.NoError(t, workspaceStore.Add(ws2))
 
-	workspaceService := workspace.NewWorkspaceService(workspaceStore)
+	workspaceService := workspace.NewWorkspaceService(workspaceStore, nil)
 	service := NewTodoService(todoStore, workspaceService)
 	controller := NewTodoController(service)
 	router := NewTodoRouter(controller)

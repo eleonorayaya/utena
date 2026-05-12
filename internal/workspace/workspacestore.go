@@ -99,8 +99,8 @@ func (s *WorkspaceStore) Add(ws *Workspace) error {
 	}
 
 	if err := s.db.Omit("Repo").Create(ws).Error; err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return errors.New("workspace with this path already exists")
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+			return common.NewConflict(workspaceConflictMessage(ws, err))
 		}
 		return err
 	}
@@ -123,7 +123,29 @@ func (s *WorkspaceStore) Update(ws *Workspace) error {
 		return err
 	}
 
-	return s.db.Omit("Repo").Save(ws).Error
+	if err := s.db.Omit("Repo").Save(ws).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+			return common.NewConflict(workspaceConflictMessage(ws, err))
+		}
+		return err
+	}
+	return nil
+}
+
+// workspaceConflictMessage produces a friendly message for a unique-constraint
+// violation on the Workspace table. SQLite reports the offending column; we
+// surface either the path or the repo as the conflicting concept along with
+// a hint for what to do next.
+func workspaceConflictMessage(ws *Workspace, err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "workspaces.repo_id"):
+		return "another workspace already tracks this repo — remove it first or use a different repo"
+	case strings.Contains(msg, "workspaces.path"):
+		return fmt.Sprintf("a workspace at path %q already exists — remove it first or pick a different path", ws.Path)
+	default:
+		return fmt.Sprintf("workspace %q already exists", ws.Name)
+	}
 }
 
 func (s *WorkspaceStore) SetHidden(id uint, hidden bool) error {
@@ -186,7 +208,7 @@ func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
 
 	var existing Workspace
 	if err := s.db.First(&existing, "path = ?", path).Error; err == nil {
-		return nil, fmt.Errorf("workspace already exists: %s", path)
+		return nil, common.NewConflict(fmt.Sprintf("workspace at path %q already exists — remove it first or pick a different path", path))
 	}
 
 	isGit, isBare := s.detectRepoKind(path)

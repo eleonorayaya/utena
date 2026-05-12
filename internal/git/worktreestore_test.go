@@ -3,6 +3,7 @@ package git
 import (
 	"testing"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/stretchr/testify/require"
@@ -63,6 +64,12 @@ func TestWorktreeStore_PathUniqueness(t *testing.T) {
 	err := store.Add(&Worktree{Path: "/test/repo/.worktrees/same-path", BranchID: branch2.ID, RepoID: repo.ID})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrWorktreeAlreadyExists)
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, common.CategoryConflict, appErr.Category)
+	require.Contains(t, err.Error(), "worktree")
+	require.Contains(t, err.Error(), "/test/repo/.worktrees/same-path")
 }
 
 func TestWorktreeStore_BranchIDUniqueness(t *testing.T) {
@@ -75,6 +82,11 @@ func TestWorktreeStore_BranchIDUniqueness(t *testing.T) {
 	err := store.Add(&Worktree{Path: "/test/repo/.worktrees/wt2", BranchID: branch.ID, RepoID: repo.ID})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrWorktreeAlreadyExists)
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, common.CategoryConflict, appErr.Category)
+	require.Contains(t, err.Error(), "branch")
 }
 
 func TestWorktreeStore_DeleteByBranchID(t *testing.T) {
@@ -99,6 +111,40 @@ func TestWorktreeStore_GetByBranchID_ReturnsErrorWhenNotFound(t *testing.T) {
 
 	_, err := store.GetByBranchID(999)
 	require.ErrorIs(t, err, ErrWorktreeNotFound)
+}
+
+func TestWorktreeStore_BackfillStatus_DefaultsLegacyRowsToPresent(t *testing.T) {
+	database := setupWorktreeTestDB(t)
+	repo, branch := createWorktreeTestRepoAndBranch(t, database, "/test/repo", "feature")
+	store := NewWorktreeStore(database)
+
+	require.NoError(t, store.Add(&Worktree{Path: "/test/repo/.worktrees/feature", BranchID: branch.ID, RepoID: repo.ID}))
+	require.NoError(t, database.Exec("UPDATE worktrees SET status = '' WHERE 1=1").Error)
+
+	require.NoError(t, store.BackfillStatus())
+
+	got, err := store.GetByBranchID(branch.ID)
+	require.NoError(t, err)
+	require.Equal(t, WorktreeStatusPresent, got.Status)
+}
+
+func TestWorktreeStore_BackfillStatus_PreservesExplicitStatus(t *testing.T) {
+	database := setupWorktreeTestDB(t)
+	repo, branch := createWorktreeTestRepoAndBranch(t, database, "/test/repo", "feature")
+	store := NewWorktreeStore(database)
+
+	require.NoError(t, store.Add(&Worktree{
+		Path:     "/test/repo/.worktrees/feature",
+		BranchID: branch.ID,
+		RepoID:   repo.ID,
+		Status:   WorktreeStatusMissing,
+	}))
+
+	require.NoError(t, store.BackfillStatus())
+
+	got, err := store.GetByBranchID(branch.ID)
+	require.NoError(t, err)
+	require.Equal(t, WorktreeStatusMissing, got.Status)
 }
 
 func TestWorktreeStore_ListByRepo(t *testing.T) {

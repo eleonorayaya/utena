@@ -24,7 +24,9 @@ type Database interface {
 	Model(value any) *gorm.DB
 	Order(value any) *gorm.DB
 	Joins(query string, args ...any) *gorm.DB
+	Preload(query string, args ...any) *gorm.DB
 	Omit(columns ...string) *gorm.DB
+	Exec(sql string, values ...any) *gorm.DB
 	Migrate(models ...any) error
 	Close() error
 }

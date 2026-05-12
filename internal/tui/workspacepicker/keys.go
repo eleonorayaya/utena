@@ -7,21 +7,23 @@ import (
 
 type keyMap struct {
 	Select       key.Binding
+	Toggle       key.Binding
 	ToggleHidden key.Binding
 	AddDir       key.Binding
 	Back         key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Select, k.AddDir, k.Back}
+	return []key.Binding{k.Select, k.Toggle, k.AddDir, k.Back}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Select, k.ToggleHidden, k.AddDir, k.Back}}
+	return [][]key.Binding{{k.Select, k.Toggle, k.ToggleHidden, k.AddDir, k.Back}}
 }
 
 var Keys = keyMap{
 	Select:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+	Toggle:       key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle multi-select")),
 	ToggleHidden: key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "show hidden")),
 	AddDir:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add dir")),
 	Back:         key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),

@@ -3,12 +3,13 @@ package git
 import (
 	"errors"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"gorm.io/gorm"
 )
 
 var (
 	ErrPRNotFound      = errors.New("pull request not found")
-	ErrPRAlreadyExists = errors.New("pull request already exists")
+	ErrPRAlreadyExists = common.NewConflict("pull request already exists")
 )
 
 type PRState string

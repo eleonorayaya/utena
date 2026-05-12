@@ -29,7 +29,6 @@ type step int
 const (
 	workspacePickerStep step = iota
 	filePickerStep
-	dirTypeChoiceStep
 	branchPickerStep
 	branchManualInputStep
 	branchModeStep
@@ -44,6 +43,7 @@ type Model struct {
 	nameInput          textinput.Model
 	manualBranchInput  textinput.Model
 	selectedWorkspace  workspace.Workspace
+	selectedWorkspaces []workspace.Workspace
 	selectedBranch     string
 	selectedDirPath    string
 	nameErr            string
@@ -65,6 +65,7 @@ func New() Model {
 func (m Model) Init() (Model, tea.Cmd) {
 	m.activeStep = workspacePickerStep
 	m.selectedWorkspace = workspace.Workspace{}
+	m.selectedWorkspaces = nil
 	m.selectedBranch = ""
 	m.selectedDirPath = ""
 	m.nameErr = ""
@@ -91,7 +92,7 @@ func (m Model) Keys() help.KeyMap {
 		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, filepicker.Keys}}
 	case branchPickerStep:
 		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, branchpicker.Keys}}
-	case dirTypeChoiceStep, branchModeStep, branchManualInputStep:
+	case branchModeStep, branchManualInputStep:
 		return formKeys
 	default:
 		return formKeys
@@ -123,8 +124,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.updateWorkspacePicker(msg)
 	case filePickerStep:
 		return m.updateFilePicker(msg)
-	case dirTypeChoiceStep:
-		return m.updateDirTypeChoice(msg)
 	case branchPickerStep:
 		return m.updateBranchPicker(msg)
 	case branchManualInputStep:
@@ -149,16 +148,23 @@ func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
 func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspacepicker.SelectedMsg:
-		m.selectedWorkspace = msg.Workspace
-		if msg.Workspace.IsGitRepo {
-			m.activeStep = branchPickerStep
-			m.branchPicker = branchpicker.New()
-			m.branchPicker.SetSize(m.width, m.height)
-			return m, provider.RequestBranches(msg.Workspace.ID)
+		picked := msg.Workspaces
+		if len(picked) == 0 {
+			picked = []workspace.Workspace{msg.Workspace}
 		}
-		m.activeStep = nameInputStep
-		m.initNameInput()
-		return m, m.nameInput.Focus()
+		for _, ws := range picked {
+			if !ws.IsGitRepo {
+				m.nameErr = "selected workspace is not a git repository — sessions require a git workspace"
+				return m, nil
+			}
+		}
+		m.selectedWorkspaces = picked
+		m.selectedWorkspace = picked[0]
+		m.nameErr = ""
+		m.activeStep = branchPickerStep
+		m.branchPicker = branchpicker.New()
+		m.branchPicker.SetSize(m.width, m.height)
+		return m, provider.RequestBranches(picked[0].ID)
 
 	case workspacepicker.AddDirectoryMsg:
 		m.activeStep = filePickerStep
@@ -183,8 +189,8 @@ func (m Model) updateFilePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case filepicker.DirectorySelectedMsg:
 		m.selectedDirPath = msg.Path
-		m.activeStep = dirTypeChoiceStep
-		return m, nil
+		m.activeStep = workspacePickerStep
+		return m, provider.AddWorkspace(msg.Path, true)
 
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
@@ -196,23 +202,6 @@ func (m Model) updateFilePicker(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.filePicker, cmd = m.filePicker.Update(msg)
 	return m, cmd
-}
-
-func (m Model) updateDirTypeChoice(msg tea.Msg) (Model, tea.Cmd) {
-	if msg, ok := msg.(tea.KeyMsg); ok {
-		switch msg.String() {
-		case "w":
-			m.activeStep = workspacePickerStep
-			return m, provider.AddWorkspace(m.selectedDirPath, false)
-		case "r":
-			m.activeStep = workspacePickerStep
-			return m, provider.AddWorkspace(m.selectedDirPath, true)
-		case "esc":
-			m.activeStep = filePickerStep
-			return m, nil
-		}
-	}
-	return m, nil
 }
 
 func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
@@ -302,7 +291,7 @@ func (m Model) updateBranchMode(msg tea.Msg) (Model, tea.Cmd) {
 			m.initNameInput()
 			return m, m.nameInput.Focus()
 		case "e":
-			return m, provider.CreateSession("", m.selectedWorkspace.ID, m.selectedBranch, "", m.selectedWorkspace.Path)
+			return m, provider.CreateSession("", workspaceIDs(m.selectedWorkspaces), m.selectedBranch, "")
 		case "esc":
 			m.activeStep = branchPickerStep
 			return m, nil
@@ -324,14 +313,9 @@ func (m Model) updateNameInput(msg tea.Msg) (Model, tea.Cmd) {
 				m.nameErr = err.Error()
 				return m, nil
 			}
-			return m, provider.CreateSession(name, m.selectedWorkspace.ID, "", m.selectedBranch, m.selectedWorkspace.Path)
+			return m, provider.CreateSession(name, workspaceIDs(m.selectedWorkspaces), "", m.selectedBranch)
 		case key.Matches(msg, formKeys.Back):
-			if m.selectedWorkspace.IsGitRepo {
-				m.activeStep = branchModeStep
-				m.nameErr = ""
-				return m, nil
-			}
-			m.activeStep = workspacePickerStep
+			m.activeStep = branchModeStep
 			m.nameErr = ""
 			return m, nil
 		}
@@ -362,12 +346,6 @@ func (m Model) View() string {
 	switch m.activeStep {
 	case filePickerStep:
 		return m.filePicker.View()
-	case dirTypeChoiceStep:
-		return promptStyle().Render("Add: ") + pathStyle().Render(workspacepicker.AbbreviatePath(m.selectedDirPath)) +
-			"\n\n" +
-			"  w  add as workspace\n" +
-			"  r  add as root (scan subdirectories)\n\n" +
-			"  esc: back"
 	case branchPickerStep:
 		return m.branchPicker.View()
 	case branchManualInputStep:
@@ -402,4 +380,12 @@ func (m Model) View() string {
 
 func defaultSessionName(workspaceName string) string {
 	return strings.ToLower(strings.ReplaceAll(workspaceName, " ", "-"))
+}
+
+func workspaceIDs(wss []workspace.Workspace) []uint {
+	ids := make([]uint, len(wss))
+	for i, ws := range wss {
+		ids[i] = ws.ID
+	}
+	return ids
 }

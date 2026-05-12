@@ -152,10 +152,7 @@ func (t SessionTab) renderHeader(bg lipgloss.TerminalColor) []string {
 	var result []string
 	result = append(result, nameLine)
 
-	wsName := ""
-	if s.Workspace != nil {
-		wsName = s.Workspace.Name
-	}
+	wsName := s.WorkspaceDisplay()
 	if wsName != "" {
 		wsStyle := lipgloss.NewStyle().Foreground(theme.Current.Tertiary).Background(bg)
 		timeStr := ""

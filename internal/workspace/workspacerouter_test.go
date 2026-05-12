@@ -29,8 +29,8 @@ func setupWorkspaceRouter(t *testing.T) (*WorkspaceRouter, *WorkspaceStore) {
 	require.NoError(t, store.Add(ws1))
 	require.NoError(t, store.Add(ws2))
 
-	service := NewWorkspaceService(store)
 	gitService := git.NewGitService(database)
+	service := NewWorkspaceService(store, gitService)
 	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 
@@ -105,10 +105,10 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 
 	store := NewWorkspaceStore(database, fs, configDir)
 
-	wsDir := t.TempDir()
+	wsDir := initTestRepo(t)
 
-	service := NewWorkspaceService(store)
 	gitService := git.NewGitService(database)
+	service := NewWorkspaceService(store, gitService)
 	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 
@@ -130,16 +130,23 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 func initTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	gitEnv := append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
 	cmds := [][]string{
 		{"git", "init", "-b", "main"},
 		{"git", "config", "user.email", "test@test.com"},
 		{"git", "config", "user.name", "Test"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "config", "tag.gpgsign", "false"},
 		{"git", "commit", "--allow-empty", "-m", "init"},
 		{"git", "branch", "develop"},
 	}
 	for _, args := range cmds {
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
+		cmd.Env = gitEnv
 		out, err := cmd.CombinedOutput()
 		require.NoError(t, err, "command %v failed: %s", args, string(out))
 	}
@@ -155,8 +162,8 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	wsGit := &Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
 	require.NoError(t, store.Add(wsGit))
 
-	service := NewWorkspaceService(store)
 	gitService := git.NewGitService(database)
+	service := NewWorkspaceService(store, gitService)
 	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 
@@ -271,6 +278,8 @@ func initTestRepoWithOrigin(t *testing.T) string {
 		{"git", "init", "-b", "main"},
 		{"git", "config", "user.email", "test@test.com"},
 		{"git", "config", "user.name", "Test"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "config", "tag.gpgsign", "false"},
 		{"git", "commit", "--allow-empty", "-m", "init"},
 		{"git", "remote", "add", "origin", origin},
 		{"git", "push", "origin", "main"},
@@ -284,6 +293,8 @@ func initTestRepoWithOrigin(t *testing.T) string {
 	runCmd(t, clone, "git", "clone", origin, ".")
 	runCmd(t, clone, "git", "config", "user.email", "test@test.com")
 	runCmd(t, clone, "git", "config", "user.name", "Test")
+	runCmd(t, clone, "git", "config", "commit.gpgsign", "false")
+	runCmd(t, clone, "git", "config", "tag.gpgsign", "false")
 	runCmd(t, clone, "git", "branch", "local-only")
 	return clone
 }
@@ -292,6 +303,10 @@ func runCmd(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "command %s %v failed: %s", name, args, string(out))
 }
@@ -307,8 +322,8 @@ func setupBranchRouter(t *testing.T, repoPath string) (*WorkspaceRouter, *Worksp
 	notGit := &Workspace{Name: "plain", Path: "/plain", IsGitRepo: false}
 	require.NoError(t, store.Add(notGit))
 
-	service := NewWorkspaceService(store)
 	gitService := git.NewGitService(database)
+	service := NewWorkspaceService(store, gitService)
 	controller := NewWorkspaceController(service, gitService)
 	router := NewWorkspaceRouter(controller)
 

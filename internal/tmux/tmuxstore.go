@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"gorm.io/gorm"
 )
@@ -25,7 +26,10 @@ func (s *TmuxStore) Add(session *TmuxSession) error {
 
 	if err := s.db.Create(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return fmt.Errorf("tmux session '%s' already exists: %w", session.Name, ErrTmuxSessionAlreadyExists)
+			return common.WrapConflict(
+				fmt.Sprintf("tmux session %q already exists — pick a different name or kill the existing one", session.Name),
+				ErrTmuxSessionAlreadyExists,
+			)
 		}
 		return err
 	}
@@ -76,7 +80,40 @@ func (s *TmuxStore) Update(session *TmuxSession) error {
 		return err
 	}
 
-	return s.db.Save(session).Error
+	if err := s.db.Save(session).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+			return common.WrapConflict(
+				fmt.Sprintf("tmux session %q already exists — pick a different name or kill the existing one", session.Name),
+				ErrTmuxSessionAlreadyExists,
+			)
+		}
+		return err
+	}
+	return nil
+}
+
+// BackfillStatus migrates legacy rows: any TmuxSession that has no Status set
+// (older schema where IsAlive bool was the source of truth) is updated using
+// the orphan is_alive column when present. Safe to run on fresh tables (the
+// is_alive column may not exist; we tolerate the error).
+func (s *TmuxStore) BackfillStatus() error {
+	hasIsAlive := false
+	if err := s.db.Exec("SELECT is_alive FROM tmux_sessions LIMIT 1").Error; err == nil {
+		hasIsAlive = true
+	}
+	if hasIsAlive {
+		if err := s.db.Exec(
+			"UPDATE tmux_sessions SET status = CASE WHEN is_alive THEN ? ELSE ? END WHERE status IS NULL OR status = ''",
+			string(TmuxStatusActive), string(TmuxStatusInactive),
+		).Error; err != nil {
+			return err
+		}
+		return nil
+	}
+	return s.db.Exec(
+		"UPDATE tmux_sessions SET status = ? WHERE status IS NULL OR status = ''",
+		string(TmuxStatusInactive),
+	).Error
 }
 
 func (s *TmuxStore) Delete(id uint) error {

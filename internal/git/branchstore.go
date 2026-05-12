@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"gorm.io/gorm"
 )
@@ -25,7 +26,10 @@ func (s *BranchStore) Add(branch *Branch) error {
 
 	if err := s.db.Create(branch).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return fmt.Errorf("branch '%s' in repo %d already exists: %w", branch.Name, branch.RepoID, ErrBranchAlreadyExists)
+			return common.WrapConflict(
+				fmt.Sprintf("branch %q already exists in this repo — pick a different name or use the existing branch", branch.Name),
+				ErrBranchAlreadyExists,
+			)
 		}
 		return err
 	}
@@ -76,7 +80,16 @@ func (s *BranchStore) Update(branch *Branch) error {
 		return err
 	}
 
-	return s.db.Save(branch).Error
+	if err := s.db.Save(branch).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+			return common.WrapConflict(
+				fmt.Sprintf("branch %q already exists in this repo — pick a different name or use the existing branch", branch.Name),
+				ErrBranchAlreadyExists,
+			)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *BranchStore) Upsert(branch *Branch) error {
@@ -94,6 +107,18 @@ func (s *BranchStore) Upsert(branch *Branch) error {
 
 	branch.ID = existing.ID
 	return s.db.Save(branch).Error
+}
+
+// BackfillStatus migrates legacy rows: any Branch that has no Status set is
+// updated using the existing exists_local/exists_remote columns. Branches with
+// either exists_* flag are marked tracked; others (no observation yet, or
+// observed gone) default to pending — conservative, since we cannot know
+// retroactively whether a no-existence row was ever observed.
+func (s *BranchStore) BackfillStatus() error {
+	return s.db.Exec(
+		"UPDATE branches SET status = CASE WHEN exists_local OR exists_remote THEN ? ELSE ? END WHERE status IS NULL OR status = ''",
+		string(BranchStatusTracked), string(BranchStatusPending),
+	).Error
 }
 
 func (s *BranchStore) Delete(id uint) error {

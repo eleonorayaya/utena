@@ -150,8 +150,11 @@ func (s *gitCLI) fetch(ctx context.Context, repoPath string, branch string) erro
 	return nil
 }
 
-func (s *gitCLI) createWorktree(ctx context.Context, repoPath string, branchName string, baseBranch string) (string, error) {
-	worktreePath := s.worktreePath(repoPath, branchName)
+func (s *gitCLI) createWorktree(ctx context.Context, repoPath string, branchName string, baseBranch string, destPath string) (string, error) {
+	worktreePath := destPath
+	if worktreePath == "" {
+		worktreePath = s.worktreePath(repoPath, branchName)
+	}
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, baseBranch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
@@ -159,8 +162,11 @@ func (s *gitCLI) createWorktree(ctx context.Context, repoPath string, branchName
 	return worktreePath, nil
 }
 
-func (s *gitCLI) checkoutWorktree(ctx context.Context, repoPath string, branch string) (string, error) {
-	worktreePath := s.worktreePath(repoPath, branch)
+func (s *gitCLI) checkoutWorktree(ctx context.Context, repoPath string, branch string, destPath string) (string, error) {
+	worktreePath := destPath
+	if worktreePath == "" {
+		worktreePath = s.worktreePath(repoPath, branch)
+	}
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", worktreePath, branch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
@@ -246,6 +252,14 @@ func (s *gitCLI) worktreePath(repoPath string, branch string) string {
 	return filepath.Join(repoPath, ".worktrees", dirName)
 }
 
+func (s *gitCLI) pruneWorktrees(ctx context.Context, repoPath string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "prune")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree prune failed: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
+
 func (s *gitCLI) removeWorktree(ctx context.Context, repoPath string, worktreePath string) error {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "remove", worktreePath, "--force")
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -263,7 +277,7 @@ func (s *gitCLI) deleteBranch(ctx context.Context, repoPath string, branchName s
 }
 
 func (s *gitCLI) remoteURL(ctx context.Context, repoPath string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "remote", "get-url", "origin")
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "config", "--get", "remote.origin.url")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get remote URL: %w", err)

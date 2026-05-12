@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/stretchr/testify/assert"
@@ -22,7 +23,7 @@ func TestAddAndGetByID(t *testing.T) {
 		Name:     "dev",
 		StartDir: "/home/user/dev",
 		Env:      map[string]string{"TERM": "xterm"},
-		IsAlive:  true,
+		Status:   TmuxStatusActive,
 	}
 	require.NoError(t, store.Add(session))
 	assert.NotZero(t, session.ID)
@@ -31,7 +32,7 @@ func TestAddAndGetByID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "dev", got.Name)
 	assert.Equal(t, "/home/user/dev", got.StartDir)
-	assert.True(t, got.IsAlive)
+	assert.Equal(t, TmuxStatusActive, got.Status)
 	assert.Equal(t, map[string]string{"TERM": "xterm"}, got.Env)
 }
 
@@ -56,21 +57,45 @@ func TestNameUniqueness(t *testing.T) {
 	err := store.Add(&TmuxSession{Name: "unique"})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTmuxSessionAlreadyExists))
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, common.CategoryConflict, appErr.Category)
+	assert.Contains(t, err.Error(), "tmux session")
+	assert.Contains(t, err.Error(), `"unique"`)
 }
 
-func TestUpdateIsAlive(t *testing.T) {
+func TestUpdateNameUniqueness(t *testing.T) {
 	database := setupTestDB(t)
 	store := NewTmuxStore(database)
 
-	session := &TmuxSession{Name: "sess", IsAlive: false}
+	require.NoError(t, store.Add(&TmuxSession{Name: "alpha"}))
+	beta := &TmuxSession{Name: "beta"}
+	require.NoError(t, store.Add(beta))
+
+	beta.Name = "alpha"
+	err := store.Update(beta)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTmuxSessionAlreadyExists))
+
+	var appErr *common.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, common.CategoryConflict, appErr.Category)
+}
+
+func TestUpdateStatus(t *testing.T) {
+	database := setupTestDB(t)
+	store := NewTmuxStore(database)
+
+	session := &TmuxSession{Name: "sess", Status: TmuxStatusInactive}
 	require.NoError(t, store.Add(session))
 
-	session.IsAlive = true
+	session.Status = TmuxStatusActive
 	require.NoError(t, store.Update(session))
 
 	got, err := store.GetByID(session.ID)
 	require.NoError(t, err)
-	assert.True(t, got.IsAlive)
+	assert.Equal(t, TmuxStatusActive, got.Status)
 }
 
 func TestEnvJSONRoundTrip(t *testing.T) {

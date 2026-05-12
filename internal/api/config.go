@@ -12,6 +12,7 @@ type Config struct {
 	ConfigDir    string
 	PrettyLogs   bool
 	BranchPrefix string
+	SessionsRoot string
 }
 
 func LoadConfig(args []string) (Config, error) {
@@ -21,6 +22,7 @@ func LoadConfig(args []string) (Config, error) {
 	}
 
 	defaultConfigDir := filepath.Join(homeDir, ".config", "utena")
+	defaultSessionsRoot := filepath.Join(homeDir, "utena-sessions")
 
 	fs := flag.NewFlagSet("utena-daemon", flag.ContinueOnError)
 	cfg := Config{}
@@ -28,6 +30,7 @@ func LoadConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.ConfigDir, "config-dir", defaultConfigDir, "path to config directory")
 	fs.BoolVar(&cfg.PrettyLogs, "pretty-logs", false, "enable pretty log output")
 	fs.StringVar(&cfg.BranchPrefix, "branch-prefix", "eqt/", "prefix for git branches created with worktrees")
+	fs.StringVar(&cfg.SessionsRoot, "sessions-root", defaultSessionsRoot, "directory that holds multi-workspace session roots")
 
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -46,6 +49,9 @@ func LoadConfig(args []string) (Config, error) {
 	}
 	if v := os.Getenv("UTENA_BRANCH_PREFIX"); v != "" {
 		cfg.BranchPrefix = v
+	}
+	if v := os.Getenv("UTENA_SESSIONS_ROOT"); v != "" {
+		cfg.SessionsRoot = v
 	}
 
 	return cfg, nil

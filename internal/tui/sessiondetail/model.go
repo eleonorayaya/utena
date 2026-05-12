@@ -67,13 +67,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.sess = &s
 		m.prs = nil
 		m.pendingDeleteID = 0
-		if s.WorkspaceID != 0 {
-			return m, provider.FetchPRs(s.WorkspaceID, "")
+		if !s.IsMulti() && len(s.Worktrees) > 0 && s.Worktrees[0].Workspace != nil {
+			return m, provider.FetchPRs(s.Worktrees[0].Workspace.ID, "")
 		}
 		return m, nil
 	case provider.PRsStateUpdatedMsg:
-		if m.sess != nil && msg.WorkspaceID == m.sess.WorkspaceID {
-			m.prs = filterPRsByBranch(msg.PullRequests, m.sess.GitBranch)
+		if m.sess != nil && len(m.sess.Worktrees) > 0 && m.sess.Worktrees[0].Workspace != nil && msg.WorkspaceID == m.sess.Worktrees[0].Workspace.ID {
+			m.prs = filterPRsByBranch(msg.PullRequests, m.sess.Worktrees[0].Worktree.Branch)
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -162,8 +162,9 @@ func (m Model) View() string {
 
 	b.WriteString(labelStyle().Render("Status") + valueStyle().Render(string(s.Status)) + "\n")
 
-	if s.Workspace != nil {
-		b.WriteString(labelStyle().Render("Workspace") + valueStyle().Render(s.Workspace.Name) + "\n")
+	b.WriteString(labelStyle().Render("Workspace") + valueStyle().Render(s.WorkspaceDisplay()) + "\n")
+	if s.IsMulti() && s.SessionRoot != "" {
+		b.WriteString(labelStyle().Render("Root") + valueStyle().Render(s.SessionRoot) + "\n")
 	}
 
 	if s.TmuxSession != nil {
@@ -174,9 +175,9 @@ func (m Model) View() string {
 		}
 	}
 
-	if s.GitBranch != nil {
+	if !s.IsMulti() && len(s.Worktrees) > 0 && s.Worktrees[0].Worktree != nil && s.Worktrees[0].Worktree.Branch != nil {
 		b.WriteString("\n" + sectionStyle().Render("Git") + "\n")
-		b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(s.GitBranch.Name) + "\n")
+		b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(s.Worktrees[0].Worktree.Branch.Name) + "\n")
 		for _, pr := range m.prs {
 			b.WriteString(labelStyle().Render("PR") + valueStyle().Render(fmt.Sprintf("#%d %s (%s)", pr.Number, pr.Title, pr.State)) + "\n")
 		}

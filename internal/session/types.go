@@ -34,22 +34,25 @@ func (slr *SessionListResponse) Render(w http.ResponseWriter, r *http.Request) e
 }
 
 type CreateSessionRequest struct {
-	Name           string `json:"name,omitempty"`
-	WorkspaceID    uint   `json:"workspace_id"`
-	Branch         string `json:"branch,omitempty"`
-	BaseBranch     string `json:"base_branch,omitempty"`
-	CreateWorktree bool   `json:"create_worktree"`
-	TodoID         *uint  `json:"todo_id,omitempty"`
+	Name         string `json:"name,omitempty"`
+	WorkspaceIDs []uint `json:"workspace_ids,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	BaseBranch   string `json:"base_branch,omitempty"`
+	TodoID       *uint  `json:"todo_id,omitempty"`
 }
 
 func (c *CreateSessionRequest) Bind(r *http.Request) error {
-	if c.WorkspaceID == 0 {
-		return errors.New("workspace_id is required")
+	if len(c.WorkspaceIDs) == 0 {
+		return errors.New("workspace_ids is required")
 	}
 	if c.Name != "" {
 		return ValidateSessionName(c.Name)
 	}
 	return nil
+}
+
+func (c *CreateSessionRequest) IsMulti() bool {
+	return len(c.WorkspaceIDs) >= 2
 }
 
 type UpdateSessionRequest struct {

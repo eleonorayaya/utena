@@ -23,10 +23,14 @@ type AppError struct {
 }
 
 func (e *AppError) Error() string {
-	if e.Err != nil {
-		return e.Message + ": " + e.Err.Error()
+	if e.Err == nil {
+		return e.Message
 	}
-	return e.Message
+	var inner *AppError
+	if errors.As(e.Err, &inner) {
+		return e.Message
+	}
+	return e.Message + ": " + e.Err.Error()
 }
 
 func (e *AppError) Unwrap() error {

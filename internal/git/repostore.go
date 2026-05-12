@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"gorm.io/gorm"
 )
@@ -25,7 +26,10 @@ func (s *RepoStore) Add(repo *Repo) error {
 
 	if err := s.db.Create(repo).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return fmt.Errorf("repo '%s' already exists: %w", repo.Path, ErrRepoAlreadyExists)
+			return common.WrapConflict(
+				fmt.Sprintf("repo at path %q is already tracked", repo.Path),
+				ErrRepoAlreadyExists,
+			)
 		}
 		return err
 	}
@@ -87,7 +91,16 @@ func (s *RepoStore) Update(repo *Repo) error {
 		return err
 	}
 
-	return s.db.Save(repo).Error
+	if err := s.db.Save(repo).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+			return common.WrapConflict(
+				fmt.Sprintf("repo at path %q is already tracked", repo.Path),
+				ErrRepoAlreadyExists,
+			)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *RepoStore) Upsert(repo *Repo) error {

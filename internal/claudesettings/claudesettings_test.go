@@ -252,6 +252,78 @@ func TestLinkWorktree_PreservesExistingFile(t *testing.T) {
 	}
 }
 
+func TestEnsureSessionRoot_CreatesFileWithGitAndBareForEachWorkspace(t *testing.T) {
+	root := t.TempDir()
+	workspaces := []string{
+		filepath.Join(root, "repo-a"),
+		filepath.Join(root, "repo-b"),
+	}
+
+	if err := EnsureSessionRoot(root, workspaces); err != nil {
+		t.Fatalf("EnsureSessionRoot: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	sandbox, _ := out["sandbox"].(map[string]any)
+	fs, _ := sandbox["filesystem"].(map[string]any)
+	allowWrite, _ := fs["allowWrite"].([]any)
+	if len(allowWrite) != 4 {
+		t.Fatalf("expected 4 allowWrite entries (.git + .bare per workspace), got %d: %v", len(allowWrite), allowWrite)
+	}
+	want := []string{
+		filepath.Join(workspaces[0], ".git"),
+		filepath.Join(workspaces[0], ".bare"),
+		filepath.Join(workspaces[1], ".git"),
+		filepath.Join(workspaces[1], ".bare"),
+	}
+	for _, w := range want {
+		found := false
+		for _, v := range allowWrite {
+			if v == w {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("allowWrite missing %q; got %v", w, allowWrite)
+		}
+	}
+}
+
+func TestEnsureSessionRoot_IsIdempotent(t *testing.T) {
+	root := t.TempDir()
+	workspaces := []string{filepath.Join(root, "a")}
+	if err := EnsureSessionRoot(root, workspaces); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureSessionRoot(root, workspaces); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	raw, _ := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
+	var out map[string]any
+	_ = json.Unmarshal(raw, &out)
+	sandbox, _ := out["sandbox"].(map[string]any)
+	fs, _ := sandbox["filesystem"].(map[string]any)
+	allowWrite, _ := fs["allowWrite"].([]any)
+	gitPath := filepath.Join(workspaces[0], ".git")
+	count := 0
+	for _, v := range allowWrite {
+		if v == gitPath {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected git dir once after re-run, got %d times", count)
+	}
+}
+
 func TestLinkWorktree_IdempotentOnExistingCorrectSymlink(t *testing.T) {
 	root := t.TempDir()
 	if err := EnsureWorkspaceRoot(root); err != nil {
