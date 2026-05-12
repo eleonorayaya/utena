@@ -16,12 +16,8 @@ import (
 	"github.com/go-chi/render"
 )
 
-// SessionCleaner removes session/worktree DB rows that reference a repo,
-// so the bare-workspace migration can drop the worktree records without
-// hitting the RESTRICT foreign key on session_worktrees.worktree_id. The
-// session module owns this logic; the workspace module receives an
-// implementation via SetSessionCleaner after both modules are constructed
-// (session imports workspace, so the dependency has to flow this way).
+// SessionCleaner is wired via SetSessionCleaner after construction because
+// the session module imports workspace, blocking a constructor dependency.
 type SessionCleaner interface {
 	DetachWorktreesByRepoID(ctx context.Context, repoID uint) error
 }
