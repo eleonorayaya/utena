@@ -42,9 +42,9 @@ type Model struct {
 	branchPicker       branchpicker.Model
 	nameInput          textinput.Model
 	manualBranchInput  textinput.Model
-	selectedWorkspace  workspace.Workspace
 	selectedWorkspaces []workspace.Workspace
-	selectedBranch     string
+	pickingForIndex    int
+	pickedBranches     []string
 	selectedDirPath    string
 	nameErr            string
 	manualBranchErr    string
@@ -55,8 +55,8 @@ type Model struct {
 func New() Model {
 	return Model{
 		activeStep:        workspacePickerStep,
-		workspacePicker:   workspacepicker.New("Select workspace", false),
-		branchPicker:      branchpicker.New(),
+		workspacePicker:   workspacepicker.New("Select workspaces", true),
+		branchPicker:      branchpicker.New(""),
 		nameInput:         textinput.New(),
 		manualBranchInput: textinput.New(),
 	}
@@ -64,9 +64,9 @@ func New() Model {
 
 func (m Model) Init() (Model, tea.Cmd) {
 	m.activeStep = workspacePickerStep
-	m.selectedWorkspace = workspace.Workspace{}
 	m.selectedWorkspaces = nil
-	m.selectedBranch = ""
+	m.pickingForIndex = 0
+	m.pickedBranches = nil
 	m.selectedDirPath = ""
 	m.nameErr = ""
 	m.nameInput.SetValue("")
@@ -116,7 +116,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			sessionprogress.Start(msg.ID),
 		)
 	case provider.BranchExistsCheckedMsg:
-		return m.onBranchExistsChecked(msg), nil
+		return m.onBranchExistsChecked(msg)
 	}
 
 	switch m.activeStep {
@@ -145,6 +145,23 @@ func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
+func (m Model) currentWorkspace() workspace.Workspace {
+	if m.pickingForIndex < 0 || m.pickingForIndex >= len(m.selectedWorkspaces) {
+		return workspace.Workspace{}
+	}
+	return m.selectedWorkspaces[m.pickingForIndex]
+}
+
+func (m *Model) startBranchPicking(index int) tea.Cmd {
+	m.pickingForIndex = index
+	ws := m.selectedWorkspaces[index]
+	title := fmt.Sprintf("Select branch for %s (%d/%d)", ws.Name, index+1, len(m.selectedWorkspaces))
+	m.branchPicker = branchpicker.New(title)
+	m.branchPicker.SetSize(m.width, m.height)
+	m.activeStep = branchPickerStep
+	return provider.RequestBranches(ws.ID)
+}
+
 func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspacepicker.SelectedMsg:
@@ -159,12 +176,9 @@ func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 		m.selectedWorkspaces = picked
-		m.selectedWorkspace = picked[0]
+		m.pickedBranches = make([]string, len(picked))
 		m.nameErr = ""
-		m.activeStep = branchPickerStep
-		m.branchPicker = branchpicker.New()
-		m.branchPicker.SetSize(m.width, m.height)
-		return m, provider.RequestBranches(picked[0].ID)
+		return m, m.startBranchPicking(0)
 
 	case workspacepicker.AddDirectoryMsg:
 		m.activeStep = filePickerStep
@@ -207,14 +221,17 @@ func (m Model) updateFilePicker(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case branchpicker.SelectedMsg:
-		m.selectedBranch = msg.Branch
+		m.pickedBranches[m.pickingForIndex] = msg.Branch
+		if m.pickingForIndex+1 < len(m.selectedWorkspaces) {
+			return m, m.startBranchPicking(m.pickingForIndex + 1)
+		}
 		m.activeStep = branchModeStep
 		return m, nil
 
 	case branchpicker.FetchRequestedMsg:
 		var cmd tea.Cmd
 		m.branchPicker, cmd = m.branchPicker.Update(msg)
-		return m, tea.Batch(cmd, provider.FetchOriginBranches(m.selectedWorkspace.ID))
+		return m, tea.Batch(cmd, provider.FetchOriginBranches(m.currentWorkspace().ID))
 
 	case branchpicker.ManualEntryRequestedMsg:
 		m.initManualBranchInput()
@@ -228,8 +245,12 @@ func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if key.Matches(msg, formKeys.Back) {
-			m.activeStep = workspacePickerStep
-			return m, provider.RequestWorkspacesState()
+			if m.pickingForIndex == 0 {
+				m.activeStep = workspacePickerStep
+				m.pickedBranches = nil
+				return m, provider.RequestWorkspacesState()
+			}
+			return m, m.startBranchPicking(m.pickingForIndex - 1)
 		}
 	}
 
@@ -250,7 +271,7 @@ func (m Model) updateBranchManualInput(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			m.manualBranchErr = ""
 			m.pendingBranchCheck = name
-			return m, provider.CheckBranchExists(m.selectedWorkspace.ID, name)
+			return m, provider.CheckBranchExists(m.currentWorkspace().ID, name)
 		case key.Matches(msg, formKeys.Back):
 			m.activeStep = branchPickerStep
 			m.manualBranchErr = ""
@@ -264,23 +285,26 @@ func (m Model) updateBranchManualInput(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) onBranchExistsChecked(msg provider.BranchExistsCheckedMsg) Model {
+func (m Model) onBranchExistsChecked(msg provider.BranchExistsCheckedMsg) (Model, tea.Cmd) {
 	if m.activeStep != branchManualInputStep || m.pendingBranchCheck == "" || msg.Name != m.pendingBranchCheck {
-		return m
+		return m, nil
 	}
 	m.pendingBranchCheck = ""
 	if msg.Err != nil {
 		m.manualBranchErr = msg.Err.Error()
-		return m
+		return m, nil
 	}
 	if !msg.ExistsLocal && !msg.ExistsRemote {
 		m.manualBranchErr = "branch not found: " + msg.Name
-		return m
+		return m, nil
 	}
 	m.manualBranchErr = ""
-	m.selectedBranch = msg.Name
+	m.pickedBranches[m.pickingForIndex] = msg.Name
+	if m.pickingForIndex+1 < len(m.selectedWorkspaces) {
+		return m, m.startBranchPicking(m.pickingForIndex + 1)
+	}
 	m.activeStep = branchModeStep
-	return m
+	return m, nil
 }
 
 func (m Model) updateBranchMode(msg tea.Msg) (Model, tea.Cmd) {
@@ -291,10 +315,9 @@ func (m Model) updateBranchMode(msg tea.Msg) (Model, tea.Cmd) {
 			m.initNameInput()
 			return m, m.nameInput.Focus()
 		case "e":
-			return m, provider.CreateSession("", workspaceIDs(m.selectedWorkspaces), m.selectedBranch, "")
+			return m, provider.CreateSession("", buildSpecs(m.selectedWorkspaces, m.pickedBranches, false))
 		case "esc":
-			m.activeStep = branchPickerStep
-			return m, nil
+			return m, m.startBranchPicking(len(m.selectedWorkspaces) - 1)
 		}
 	}
 	return m, nil
@@ -313,7 +336,7 @@ func (m Model) updateNameInput(msg tea.Msg) (Model, tea.Cmd) {
 				m.nameErr = err.Error()
 				return m, nil
 			}
-			return m, provider.CreateSession(name, workspaceIDs(m.selectedWorkspaces), "", m.selectedBranch)
+			return m, provider.CreateSession(name, buildSpecs(m.selectedWorkspaces, m.pickedBranches, true))
 		case key.Matches(msg, formKeys.Back):
 			m.activeStep = branchModeStep
 			m.nameErr = ""
@@ -329,7 +352,9 @@ func (m Model) updateNameInput(msg tea.Msg) (Model, tea.Cmd) {
 func (m *Model) initNameInput() {
 	ti := textinput.New()
 	ti.Prompt = "Session name: "
-	ti.Placeholder = defaultSessionName(m.selectedWorkspace.Name)
+	if len(m.selectedWorkspaces) > 0 {
+		ti.Placeholder = defaultSessionName(m.selectedWorkspaces[0].Name)
+	}
 	m.nameInput = ti
 	m.nameErr = ""
 }
@@ -350,7 +375,8 @@ func (m Model) View() string {
 		return m.branchPicker.View()
 	case branchManualInputStep:
 		var b strings.Builder
-		b.WriteString("Enter a branch name (local or remote)\n\n")
+		ws := m.currentWorkspace()
+		fmt.Fprintf(&b, "Enter a branch name for %s (local or remote)\n\n", pathStyle().Render(ws.Name))
 		b.WriteString(m.manualBranchInput.View())
 		if m.pendingBranchCheck != "" {
 			b.WriteString("\n\nchecking…")
@@ -360,15 +386,22 @@ func (m Model) View() string {
 		}
 		return b.String()
 	case branchModeStep:
-		return promptStyle().Render("Branch: ") + pathStyle().Render(m.selectedBranch) +
-			"\n\n" +
-			"  n  New branch from " + pathStyle().Render(m.selectedBranch) + "\n" +
-			"  e  Use existing branch " + pathStyle().Render(m.selectedBranch) + "\n\n" +
-			"  esc: back"
+		var b strings.Builder
+		b.WriteString(promptStyle().Render("Branches picked:") + "\n")
+		for i, ws := range m.selectedWorkspaces {
+			fmt.Fprintf(&b, "  %s · %s\n", ws.Name, pathStyle().Render(m.pickedBranches[i]))
+		}
+		b.WriteString("\n  n  New branch per workspace (from the picked branches)\n")
+		b.WriteString("  e  Use existing branches\n\n")
+		b.WriteString("  esc: back")
+		return b.String()
 	case nameInputStep:
 		var b strings.Builder
-		fmt.Fprintf(&b, "Workspace: %s\n\n", m.selectedWorkspace.Name)
-		b.WriteString(m.nameInput.View())
+		b.WriteString(promptStyle().Render("Workspaces:") + "\n")
+		for i, ws := range m.selectedWorkspaces {
+			fmt.Fprintf(&b, "  %s · %s\n", ws.Name, pathStyle().Render(m.pickedBranches[i]))
+		}
+		b.WriteString("\n" + m.nameInput.View())
 		if m.nameErr != "" {
 			b.WriteString("\n" + errStyle().Render(m.nameErr))
 		}
@@ -382,10 +415,15 @@ func defaultSessionName(workspaceName string) string {
 	return strings.ToLower(strings.ReplaceAll(workspaceName, " ", "-"))
 }
 
-func workspaceIDs(wss []workspace.Workspace) []uint {
-	ids := make([]uint, len(wss))
+func buildSpecs(wss []workspace.Workspace, branches []string, isNew bool) []provider.SessionWorkspaceSpec {
+	out := make([]provider.SessionWorkspaceSpec, len(wss))
 	for i, ws := range wss {
-		ids[i] = ws.ID
+		out[i].WorkspaceID = ws.ID
+		if isNew {
+			out[i].BaseBranch = branches[i]
+		} else {
+			out[i].Branch = branches[i]
+		}
 	}
-	return ids
+	return out
 }

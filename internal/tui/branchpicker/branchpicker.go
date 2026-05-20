@@ -14,8 +14,11 @@ type Model struct {
 	isFetching bool
 }
 
-func New() Model {
-	return Model{list: ulist.New("Select base branch")}
+func New(title string) Model {
+	if title == "" {
+		title = "Select branch"
+	}
+	return Model{list: ulist.New(title)}
 }
 
 func (m *Model) SetSize(width, height int) {

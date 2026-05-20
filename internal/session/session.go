@@ -96,7 +96,3 @@ func SanitizeTmuxName(name string) string {
 	)
 	return strings.ToLower(r.Replace(name))
 }
-
-func BuildTmuxSessionName(workspaceName, name string) string {
-	return SanitizeTmuxName(workspaceName + "-" + name)
-}

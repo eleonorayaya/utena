@@ -269,19 +269,24 @@ func (c *client) repairSession(id uint) tea.Cmd {
 	}
 }
 
-func (c *client) createSession(name string, workspaceIDs []uint, branch string, baseBranch string, todoID *uint) tea.Cmd {
+func (c *client) createSession(name string, specs []SessionWorkspaceSpec, todoID *uint) tea.Cmd {
 	return func() tea.Msg {
+		wss := make([]map[string]any, 0, len(specs))
+		for _, s := range specs {
+			item := map[string]any{"workspace_id": s.WorkspaceID}
+			if s.Branch != "" {
+				item["branch"] = s.Branch
+			}
+			if s.BaseBranch != "" {
+				item["base_branch"] = s.BaseBranch
+			}
+			wss = append(wss, item)
+		}
 		body := map[string]interface{}{
-			"workspace_ids": workspaceIDs,
+			"workspaces": wss,
 		}
 		if name != "" {
 			body["name"] = name
-		}
-		if branch != "" {
-			body["branch"] = branch
-		}
-		if baseBranch != "" {
-			body["base_branch"] = baseBranch
 		}
 		if todoID != nil {
 			body["todo_id"] = *todoID
