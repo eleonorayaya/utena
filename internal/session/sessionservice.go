@@ -288,9 +288,6 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 	}
 
 	sessionRoot := filepath.Join(s.sessionsRoot, SanitizeSessionName(name))
-	if _, err := os.Stat(sessionRoot); err == nil {
-		return nil, common.NewInvalidRequest(fmt.Sprintf("session root %q already exists on disk", sessionRoot))
-	}
 
 	for _, sl := range slots {
 		if existing, err := s.store.GetByWorkspaceAndName(sl.ws.ID, name, StatusDeleted, StatusArchived, StatusCompleted); err == nil && existing != nil {
