@@ -14,12 +14,14 @@ import (
 
 type WorkspaceController struct {
 	service    *WorkspaceService
+	store      *WorkspaceStore
 	gitService *git.GitService
 }
 
-func NewWorkspaceController(service *WorkspaceService, gitService *git.GitService) *WorkspaceController {
+func NewWorkspaceController(service *WorkspaceService, store *WorkspaceStore, gitService *git.GitService) *WorkspaceController {
 	return &WorkspaceController{
 		service:    service,
+		store:      store,
 		gitService: gitService,
 	}
 }
@@ -56,6 +58,15 @@ func (c *WorkspaceController) GetWorkspaceByID(w http.ResponseWriter, r *http.Re
 	common.RenderResponse(w, r, response)
 }
 
+func renderServiceError(w http.ResponseWriter, r *http.Request, fallback string, err error) {
+	var appErr *common.AppError
+	if errors.As(err, &appErr) {
+		common.RenderError(w, r, err)
+		return
+	}
+	common.RenderError(w, r, common.WrapInvalidRequest(fallback, err))
+}
+
 func (c *WorkspaceController) AddWorkspace(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -67,12 +78,7 @@ func (c *WorkspaceController) AddWorkspace(w http.ResponseWriter, r *http.Reques
 
 	ws, err := c.service.AddWorkspace(ctx, req.Path, req.AsRoot)
 	if err != nil {
-		var appErr *common.AppError
-		if errors.As(err, &appErr) {
-			common.RenderError(w, r, err)
-		} else {
-			common.RenderError(w, r, common.WrapInvalidRequest("add workspace failed", err))
-		}
+		renderServiceError(w, r, "add workspace failed", err)
 		return
 	}
 
@@ -87,6 +93,41 @@ func (c *WorkspaceController) AddWorkspace(w http.ResponseWriter, r *http.Reques
 		}
 		common.RenderResponse(w, r, NewWorkspaceListResponse(workspaces))
 	}
+}
+
+func (c *WorkspaceController) CloneWorkspace(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req CloneWorkspaceRequest
+	if err := render.Bind(r, &req); err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	ws, err := c.service.CloneAndAddFromURL(ctx, CloneFromURLRequest{
+		CloneURL: req.CloneURL,
+		RootPath: req.RootPath,
+		DirName:  req.DirName,
+	})
+	if err != nil {
+		renderServiceError(w, r, "clone workspace failed", err)
+		return
+	}
+
+	render.Status(r, http.StatusCreated)
+	common.RenderResponse(w, r, NewWorkspaceResponse(ws))
+}
+
+func (c *WorkspaceController) ListRoots(w http.ResponseWriter, r *http.Request) {
+	if c.store == nil {
+		common.RenderError(w, r, fmt.Errorf("workspace store not configured"))
+		return
+	}
+	roots := c.store.ConfiguredRoots()
+	if roots == nil {
+		roots = []string{}
+	}
+	render.JSON(w, r, WorkspaceRootsResponse{Roots: roots})
 }
 
 func (c *WorkspaceController) SetWorkspaceHidden(w http.ResponseWriter, r *http.Request) {

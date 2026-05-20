@@ -31,7 +31,7 @@ func setupWorkspaceRouter(t *testing.T) (*WorkspaceRouter, *WorkspaceStore) {
 
 	gitService := git.NewGitService(database)
 	service := NewWorkspaceService(store, gitService)
-	controller := NewWorkspaceController(service, gitService)
+	controller := NewWorkspaceController(service, store, gitService)
 	router := NewWorkspaceRouter(controller)
 
 	return router, store
@@ -109,7 +109,7 @@ func TestWorkspaceRouter_AddWorkspace(t *testing.T) {
 
 	gitService := git.NewGitService(database)
 	service := NewWorkspaceService(store, gitService)
-	controller := NewWorkspaceController(service, gitService)
+	controller := NewWorkspaceController(service, store, gitService)
 	router := NewWorkspaceRouter(controller)
 
 	body := fmt.Sprintf(`{"path": %q, "as_root": false}`, wsDir)
@@ -164,7 +164,7 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 
 	gitService := git.NewGitService(database)
 	service := NewWorkspaceService(store, gitService)
-	controller := NewWorkspaceController(service, gitService)
+	controller := NewWorkspaceController(service, store, gitService)
 	router := NewWorkspaceRouter(controller)
 
 	req := httptest.NewRequest("GET", fmt.Sprintf("/%d/branches", wsGit.ID), nil)
@@ -324,7 +324,7 @@ func setupBranchRouter(t *testing.T, repoPath string) (*WorkspaceRouter, *Worksp
 
 	gitService := git.NewGitService(database)
 	service := NewWorkspaceService(store, gitService)
-	controller := NewWorkspaceController(service, gitService)
+	controller := NewWorkspaceController(service, store, gitService)
 	router := NewWorkspaceRouter(controller)
 
 	return router, ws
@@ -434,4 +434,130 @@ func TestWorkspaceRouter_CheckBranchExists_MissingName(t *testing.T) {
 	router.Routes().ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func setupCloneRouter(t *testing.T, roots []string) (*WorkspaceRouter, *WorkspaceStore) {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+
+	cfgBytes, err := json.Marshal(config{WorkspaceRoots: roots})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config.json"), cfgBytes, 0644))
+
+	database := testdb.New(t, &Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
+	store := NewWorkspaceStore(database, afero.NewOsFs(), configDir)
+	gitService := git.NewGitService(database)
+	service := NewWorkspaceService(store, gitService)
+	controller := NewWorkspaceController(service, store, gitService)
+	router := NewWorkspaceRouter(controller)
+	return router, store
+}
+
+func TestWorkspaceRouter_ListRoots(t *testing.T) {
+	root := t.TempDir()
+	router, _ := setupCloneRouter(t, []string{root})
+
+	req := httptest.NewRequest("GET", "/roots", nil)
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp WorkspaceRootsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, []string{root}, resp.Roots)
+}
+
+func TestWorkspaceRouter_ListRoots_Empty(t *testing.T) {
+	router, _ := setupCloneRouter(t, nil)
+
+	req := httptest.NewRequest("GET", "/roots", nil)
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp WorkspaceRootsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Empty(t, resp.Roots)
+}
+
+func TestWorkspaceRouter_CloneWorkspace_HappyPath(t *testing.T) {
+	root := t.TempDir()
+	router, store := setupCloneRouter(t, []string{root})
+
+	source := initTestRepo(t)
+
+	body := fmt.Sprintf(`{"clone_url": %q, "dir_name": "imported"}`, source)
+	req := httptest.NewRequest("POST", "/clone", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+
+	var resp WorkspaceResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, filepath.Join(root, "imported"), resp.Path)
+	require.True(t, resp.IsBare)
+
+	persisted, err := store.GetByPath(filepath.Join(root, "imported"))
+	require.NoError(t, err)
+	require.True(t, persisted.IsGitRepo)
+}
+
+func TestWorkspaceRouter_CloneWorkspace_MissingURL(t *testing.T) {
+	router, _ := setupCloneRouter(t, []string{t.TempDir()})
+
+	body := `{"dir_name": "x"}`
+	req := httptest.NewRequest("POST", "/clone", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestWorkspaceRouter_CloneWorkspace_NoRoots(t *testing.T) {
+	router, _ := setupCloneRouter(t, nil)
+	source := initTestRepo(t)
+
+	body := fmt.Sprintf(`{"clone_url": %q, "dir_name": "x"}`, source)
+	req := httptest.NewRequest("POST", "/clone", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+}
+
+func TestWorkspaceRouter_CloneWorkspace_MultipleRootsRequiresExplicit(t *testing.T) {
+	r1 := t.TempDir()
+	r2 := t.TempDir()
+	router, _ := setupCloneRouter(t, []string{r1, r2})
+	source := initTestRepo(t)
+
+	body := fmt.Sprintf(`{"clone_url": %q, "dir_name": "x"}`, source)
+	req := httptest.NewRequest("POST", "/clone", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+}
+
+func TestWorkspaceRouter_CloneWorkspace_TargetExists(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "imported"), 0755))
+	router, _ := setupCloneRouter(t, []string{root})
+	source := initTestRepo(t)
+
+	body := fmt.Sprintf(`{"clone_url": %q, "dir_name": "imported"}`, source)
+	req := httptest.NewRequest("POST", "/clone", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
 }

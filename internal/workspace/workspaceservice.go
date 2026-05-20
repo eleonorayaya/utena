@@ -4,11 +4,20 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
 )
+
+type CloneFromURLRequest struct {
+	CloneURL string
+	RootPath string
+	DirName  string
+}
 
 type WorkspaceService struct {
 	store      *WorkspaceStore
@@ -126,6 +135,72 @@ func (s *WorkspaceService) AddWorkspace(ctx context.Context, path string, asRoot
 		}
 	}
 	return ws, nil
+}
+
+func (s *WorkspaceService) CloneAndAddFromURL(ctx context.Context, req CloneFromURLRequest) (*Workspace, error) {
+	cloneURL := strings.TrimSpace(req.CloneURL)
+	if cloneURL == "" {
+		return nil, common.NewInvalidRequest("clone_url is required")
+	}
+	if s.gitService == nil {
+		return nil, fmt.Errorf("git service not configured")
+	}
+
+	roots := s.store.ConfiguredRoots()
+	rootPath, err := resolveRootPath(req.RootPath, roots)
+	if err != nil {
+		return nil, err
+	}
+
+	dirName := strings.TrimSpace(req.DirName)
+	if dirName == "" {
+		_, repoName, parseErr := s.gitService.ParseRepoFullName(cloneURL)
+		if parseErr != nil {
+			return nil, common.WrapInvalidRequest("cannot derive directory name from clone URL", parseErr)
+		}
+		dirName = repoName
+	}
+	if strings.ContainsAny(dirName, "/\\") {
+		return nil, common.NewInvalidRequest(fmt.Sprintf("invalid directory name %q (must not contain path separators)", dirName))
+	}
+
+	targetPath := filepath.Join(rootPath, dirName)
+	if _, statErr := os.Stat(targetPath); statErr == nil {
+		return nil, common.NewConflict(fmt.Sprintf("target path already exists: %s", targetPath))
+	} else if !os.IsNotExist(statErr) {
+		return nil, fmt.Errorf("failed to inspect target path %s: %w", targetPath, statErr)
+	}
+
+	if err := s.gitService.CloneBareWorkspace(ctx, cloneURL, targetPath); err != nil {
+		return nil, common.WrapInvalidRequest("git clone failed", err)
+	}
+
+	ws, addErr := s.AddWorkspace(ctx, targetPath, false)
+	if addErr != nil {
+		_ = os.RemoveAll(targetPath)
+		return nil, addErr
+	}
+	return ws, nil
+}
+
+func resolveRootPath(requested string, configured []string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	if requested != "" {
+		expanded := expandHome(requested)
+		for _, root := range configured {
+			if root == expanded {
+				return root, nil
+			}
+		}
+		return "", common.NewInvalidRequest(fmt.Sprintf("root_path %q is not a configured workspace root", requested))
+	}
+	if len(configured) == 0 {
+		return "", common.NewConflict("no workspace roots configured — add one before cloning from URL")
+	}
+	if len(configured) > 1 {
+		return "", common.NewConflict("multiple workspace roots configured — specify root_path")
+	}
+	return configured[0], nil
 }
 
 func (s *WorkspaceService) resolveRepoIDs(ctx context.Context, workspaces []Workspace) {

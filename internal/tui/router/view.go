@@ -12,6 +12,7 @@ const (
 	StatusView
 	WorkspaceListView
 	WorkspaceDetailView
+	WorkspaceCloneFormView
 	PRListView
 	SessionDetailView
 )

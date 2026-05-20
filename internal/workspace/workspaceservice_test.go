@@ -2,12 +2,14 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/db/testdb"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
@@ -241,4 +243,150 @@ func TestWorkspaceService_Touch_NotFound(t *testing.T) {
 	err := service.Touch(ctx, 99999)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
+}
+
+func setupServiceWithGitAndRoot(t *testing.T) (*WorkspaceService, string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	rootDir := filepath.Join(tmpDir, "projects")
+	require.NoError(t, os.MkdirAll(rootDir, 0755))
+
+	configDir := filepath.Join(tmpDir, "config")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+	cfgBytes, err := json.Marshal(config{WorkspaceRoots: []string{rootDir}})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config.json"), cfgBytes, 0644))
+
+	database := testdb.New(t, &Workspace{}, &git.Repo{})
+	store := NewWorkspaceStore(database, afero.NewOsFs(), configDir)
+	gitService := git.NewGitService(database)
+	service := NewWorkspaceService(store, gitService)
+	return service, rootDir
+}
+
+func setupServiceWithGitAndRoots(t *testing.T, rootCount int) (*WorkspaceService, []string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+
+	roots := make([]string, 0, rootCount)
+	for i := range rootCount {
+		r := filepath.Join(tmpDir, "root", string(rune('a'+i)))
+		require.NoError(t, os.MkdirAll(r, 0755))
+		roots = append(roots, r)
+	}
+
+	configDir := filepath.Join(tmpDir, "config")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+	cfgBytes, err := json.Marshal(config{WorkspaceRoots: roots})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config.json"), cfgBytes, 0644))
+
+	database := testdb.New(t, &Workspace{}, &git.Repo{})
+	store := NewWorkspaceStore(database, afero.NewOsFs(), configDir)
+	gitService := git.NewGitService(database)
+	service := NewWorkspaceService(store, gitService)
+	return service, roots
+}
+
+func TestWorkspaceService_CloneAndAddFromURL_HappyPath(t *testing.T) {
+	service, rootDir := setupServiceWithGitAndRoot(t)
+	source := initTestRepo(t)
+
+	ws, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+		CloneURL: source,
+		DirName:  "imported",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, ws)
+	require.Equal(t, filepath.Join(rootDir, "imported"), ws.Path)
+	require.True(t, ws.IsBare)
+	require.True(t, ws.IsGitRepo)
+
+	bareInfo, err := os.Stat(filepath.Join(ws.Path, ".bare"))
+	require.NoError(t, err)
+	require.True(t, bareInfo.IsDir())
+}
+
+func TestWorkspaceService_CloneAndAddFromURL_DerivesDirNameFromURL(t *testing.T) {
+	service, rootDir := setupServiceWithGitAndRoot(t)
+
+	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+		CloneURL: "git@github.com:foo/bar.git",
+	})
+	require.Error(t, err, "expected clone to fail with unreachable remote so we can verify path derivation")
+
+	_, statErr := os.Stat(filepath.Join(rootDir, "bar"))
+	require.True(t, os.IsNotExist(statErr), "failed clone should clean up the derived target dir")
+}
+
+func TestWorkspaceService_CloneAndAddFromURL_RejectsEmptyURL(t *testing.T) {
+	service, _ := setupServiceWithGitAndRoot(t)
+	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "clone_url is required")
+}
+
+func TestWorkspaceService_CloneAndAddFromURL_RejectsTargetExists(t *testing.T) {
+	service, rootDir := setupServiceWithGitAndRoot(t)
+	existing := filepath.Join(rootDir, "imported")
+	require.NoError(t, os.MkdirAll(existing, 0755))
+
+	source := initTestRepo(t)
+	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+		CloneURL: source,
+		DirName:  "imported",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already exists")
+}
+
+func TestWorkspaceService_CloneAndAddFromURL_NoConfiguredRoots(t *testing.T) {
+	service, _ := setupServiceWithGitAndRoots(t, 0)
+	source := initTestRepo(t)
+
+	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{CloneURL: source, DirName: "x"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no workspace roots configured")
+}
+
+func TestWorkspaceService_CloneAndAddFromURL_MultipleRootsRequiresExplicit(t *testing.T) {
+	service, roots := setupServiceWithGitAndRoots(t, 2)
+	source := initTestRepo(t)
+
+	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{CloneURL: source, DirName: "x"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "multiple workspace roots")
+
+	ws, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+		CloneURL: source,
+		RootPath: roots[1],
+		DirName:  "x",
+	})
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(roots[1], "x"), ws.Path)
+}
+
+func TestWorkspaceService_CloneAndAddFromURL_RejectsUnknownRoot(t *testing.T) {
+	service, _ := setupServiceWithGitAndRoot(t)
+	source := initTestRepo(t)
+
+	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+		CloneURL: source,
+		RootPath: "/nope",
+		DirName:  "x",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not a configured workspace root")
+}
+
+func TestWorkspaceService_CloneAndAddFromURL_RejectsPathSeparatorInDirName(t *testing.T) {
+	service, _ := setupServiceWithGitAndRoot(t)
+	source := initTestRepo(t)
+
+	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+		CloneURL: source,
+		DirName:  "weird/name",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid directory name")
 }
