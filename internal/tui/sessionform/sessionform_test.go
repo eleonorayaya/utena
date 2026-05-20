@@ -10,36 +10,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestForm_PickThenCreate_RetainsWorkspaceIDs(t *testing.T) {
+func TestForm_SingleWorkspaceFlow_RetainsSelectionAndBranch(t *testing.T) {
 	m := New()
 	m.SetSize(80, 24)
-
 	m, _ = m.Init()
 
 	ws := workspace.Workspace{Name: "test", Path: "/tmp/test", IsGitRepo: true}
 	ws.ID = 42
-	m, _ = m.Update(provider.WorkspacesStateUpdatedMsg{
-		Workspaces: []workspace.Workspace{ws},
-	})
+	m, _ = m.Update(provider.WorkspacesStateUpdatedMsg{Workspaces: []workspace.Workspace{ws}})
 
 	m, _ = m.Update(workspacepicker.SelectedMsg{
 		Workspace:  ws,
 		Workspaces: []workspace.Workspace{ws},
 	})
-	require.Equal(t, []workspace.Workspace{ws}, m.selectedWorkspaces, "form should retain picked workspaces after SelectedMsg")
+	require.Equal(t, []workspace.Workspace{ws}, m.selectedWorkspaces)
 	require.Equal(t, branchPickerStep, m.activeStep)
+	require.Equal(t, 0, m.pickingForIndex)
 
 	m, _ = m.Update(branchpicker.SelectedMsg{Branch: "main"})
-	require.Equal(t, "main", m.selectedBranch)
 	require.Equal(t, branchModeStep, m.activeStep)
-	require.Equal(t, []workspace.Workspace{ws}, m.selectedWorkspaces, "selectedWorkspaces must survive branch pick")
+	require.Equal(t, []string{"main"}, m.pickedBranches)
 
-	ids := workspaceIDs(m.selectedWorkspaces)
-	require.Equal(t, []uint{42}, ids, "workspaceIDs() must yield [42]")
+	specs := buildSpecs(m.selectedWorkspaces, m.pickedBranches, true)
+	require.Equal(t, []provider.SessionWorkspaceSpec{{WorkspaceID: 42, BaseBranch: "main"}}, specs)
 }
 
-// Toggle-then-select multi pick must surface both workspaces to selectedWorkspaces.
-func TestForm_MultiSelectFromPicker_RetainsAllIDs(t *testing.T) {
+func TestForm_MultiWorkspaceFlow_IteratesBranchPickerPerWorkspace(t *testing.T) {
 	m := New()
 	m.SetSize(80, 24)
 	m, _ = m.Init()
@@ -54,13 +50,25 @@ func TestForm_MultiSelectFromPicker_RetainsAllIDs(t *testing.T) {
 		Workspace:  ws1,
 		Workspaces: []workspace.Workspace{ws1, ws2},
 	})
-	require.Equal(t, []uint{10, 20}, workspaceIDs(m.selectedWorkspaces), "multi-select must yield both ids")
+	require.Equal(t, branchPickerStep, m.activeStep)
+	require.Equal(t, 0, m.pickingForIndex)
+
+	m, _ = m.Update(branchpicker.SelectedMsg{Branch: "main"})
+	require.Equal(t, branchPickerStep, m.activeStep, "should still be picking, now for ws2")
+	require.Equal(t, 1, m.pickingForIndex)
+
+	m, _ = m.Update(branchpicker.SelectedMsg{Branch: "develop"})
+	require.Equal(t, branchModeStep, m.activeStep)
+	require.Equal(t, []string{"main", "develop"}, m.pickedBranches)
+
+	specs := buildSpecs(m.selectedWorkspaces, m.pickedBranches, false)
+	require.Equal(t, []provider.SessionWorkspaceSpec{
+		{WorkspaceID: 10, Branch: "main"},
+		{WorkspaceID: 20, Branch: "develop"},
+	}, specs)
 }
 
-// Re-entering the form (e.g. after a previous session creation completed and the
-// user navigated back) should NOT carry state from the previous run AND should
-// still set workspace_ids correctly on the next create.
-func TestForm_ReInitAfterPreviousCreate_PicksWorkspaceCleanly(t *testing.T) {
+func TestForm_ReInitAfterPreviousCreate_ResetsState(t *testing.T) {
 	m := New()
 	m.SetSize(80, 24)
 	m, _ = m.Init()
@@ -70,17 +78,11 @@ func TestForm_ReInitAfterPreviousCreate_PicksWorkspaceCleanly(t *testing.T) {
 	m, _ = m.Update(provider.WorkspacesStateUpdatedMsg{Workspaces: []workspace.Workspace{wsA}})
 	m, _ = m.Update(workspacepicker.SelectedMsg{Workspace: wsA, Workspaces: []workspace.Workspace{wsA}})
 	m, _ = m.Update(branchpicker.SelectedMsg{Branch: "main"})
-	require.Equal(t, []uint{1}, workspaceIDs(m.selectedWorkspaces))
+	require.Equal(t, []string{"main"}, m.pickedBranches)
 
-	// Simulate: user finished, navigated away to progress, then back -> Init runs
 	m, _ = m.Init()
 	require.Nil(t, m.selectedWorkspaces, "Init must reset selectedWorkspaces")
+	require.Nil(t, m.pickedBranches, "Init must reset pickedBranches")
+	require.Equal(t, 0, m.pickingForIndex)
 	require.Equal(t, workspacePickerStep, m.activeStep)
-
-	wsB := workspace.Workspace{Name: "second", Path: "/tmp/b", IsGitRepo: true}
-	wsB.ID = 2
-	m, _ = m.Update(provider.WorkspacesStateUpdatedMsg{Workspaces: []workspace.Workspace{wsB}})
-	m, _ = m.Update(workspacepicker.SelectedMsg{Workspace: wsB, Workspaces: []workspace.Workspace{wsB}})
-	m, _ = m.Update(branchpicker.SelectedMsg{Branch: "develop"})
-	require.Equal(t, []uint{2}, workspaceIDs(m.selectedWorkspaces), "second create must carry the freshly-picked workspace id")
 }

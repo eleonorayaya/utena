@@ -140,7 +140,7 @@ func TestSessionRouter_ListSessionsByWorkspace(t *testing.T) {
 func TestSessionRouter_CreateSession_RejectsNoBranch(t *testing.T) {
 	router, _, _, _, ws1ID, _ := setupSessionRouter(t)
 
-	body := []byte(fmt.Sprintf(`{"name":"session-1","workspace_ids":[%d]}`, ws1ID))
+	body := []byte(fmt.Sprintf(`{"name":"session-1","workspaces":[{"workspace_id":%d}]}`, ws1ID))
 
 	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -154,7 +154,7 @@ func TestSessionRouter_CreateSession_RejectsNoBranch(t *testing.T) {
 func TestSessionRouter_CreateSession_InvalidWorkspace(t *testing.T) {
 	router, _, _, _, _, _ := setupSessionRouter(t)
 
-	body := []byte(`{"name":"session-1","workspace_ids":[99999],"branch":"main"}`)
+	body := []byte(`{"name":"session-1","workspaces":[{"workspace_id":99999,"branch":"main"}]}`)
 
 	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

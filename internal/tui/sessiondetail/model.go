@@ -163,7 +163,7 @@ func (m Model) View() string {
 	b.WriteString(labelStyle().Render("Status") + valueStyle().Render(string(s.Status)) + "\n")
 
 	b.WriteString(labelStyle().Render("Workspace") + valueStyle().Render(s.WorkspaceDisplay()) + "\n")
-	if s.IsMulti() && s.SessionRoot != "" {
+	if s.SessionRoot != "" {
 		b.WriteString(labelStyle().Render("Root") + valueStyle().Render(s.SessionRoot) + "\n")
 	}
 
@@ -175,11 +175,30 @@ func (m Model) View() string {
 		}
 	}
 
-	if !s.IsMulti() && len(s.Worktrees) > 0 && s.Worktrees[0].Worktree != nil && s.Worktrees[0].Worktree.Branch != nil {
-		b.WriteString("\n" + sectionStyle().Render("Git") + "\n")
-		b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(s.Worktrees[0].Worktree.Branch.Name) + "\n")
-		for _, pr := range m.prs {
-			b.WriteString(labelStyle().Render("PR") + valueStyle().Render(fmt.Sprintf("#%d %s (%s)", pr.Number, pr.Title, pr.State)) + "\n")
+	if len(s.Worktrees) > 0 {
+		hasBranch := false
+		for i := range s.Worktrees {
+			if s.Worktrees[i].Worktree != nil && s.Worktrees[i].Worktree.Branch != nil {
+				hasBranch = true
+				break
+			}
+		}
+		if hasBranch {
+			b.WriteString("\n" + sectionStyle().Render("Git") + "\n")
+			for i := range s.Worktrees {
+				wt := s.Worktrees[i].Worktree
+				if wt == nil || wt.Branch == nil {
+					continue
+				}
+				val := wt.Branch.Name
+				if s.IsMulti() && s.Worktrees[i].Workspace != nil {
+					val = s.Worktrees[i].Workspace.Name + " · " + val
+				}
+				b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(val) + "\n")
+			}
+			for _, pr := range m.prs {
+				b.WriteString(labelStyle().Render("PR") + valueStyle().Render(fmt.Sprintf("#%d %s (%s)", pr.Number, pr.Title, pr.State)) + "\n")
+			}
 		}
 	}
 

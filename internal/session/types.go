@@ -2,6 +2,7 @@ package session
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -33,26 +34,48 @@ func (slr *SessionListResponse) Render(w http.ResponseWriter, r *http.Request) e
 	return nil
 }
 
+type WorkspaceBranchSpec struct {
+	WorkspaceID uint   `json:"workspace_id"`
+	Branch      string `json:"branch,omitempty"`
+	BaseBranch  string `json:"base_branch,omitempty"`
+}
+
 type CreateSessionRequest struct {
-	Name         string `json:"name,omitempty"`
-	WorkspaceIDs []uint `json:"workspace_ids,omitempty"`
-	Branch       string `json:"branch,omitempty"`
-	BaseBranch   string `json:"base_branch,omitempty"`
-	TodoID       *uint  `json:"todo_id,omitempty"`
+	Name       string                `json:"name,omitempty"`
+	Workspaces []WorkspaceBranchSpec `json:"workspaces"`
+	TodoID     *uint                 `json:"todo_id,omitempty"`
 }
 
 func (c *CreateSessionRequest) Bind(r *http.Request) error {
-	if len(c.WorkspaceIDs) == 0 {
-		return errors.New("workspace_ids is required")
+	if len(c.Workspaces) == 0 {
+		return errors.New("workspaces is required")
+	}
+	seen := make(map[uint]struct{}, len(c.Workspaces))
+	hasBase := false
+	for i, ws := range c.Workspaces {
+		if ws.WorkspaceID == 0 {
+			return fmt.Errorf("workspaces[%d].workspace_id is required", i)
+		}
+		if _, dup := seen[ws.WorkspaceID]; dup {
+			return fmt.Errorf("workspace %d listed more than once", ws.WorkspaceID)
+		}
+		seen[ws.WorkspaceID] = struct{}{}
+		hasBranch := ws.Branch != ""
+		hasBaseBranch := ws.BaseBranch != ""
+		if hasBranch == hasBaseBranch {
+			return fmt.Errorf("workspaces[%d]: exactly one of branch or base_branch is required", i)
+		}
+		if hasBaseBranch {
+			hasBase = true
+		}
+	}
+	if hasBase && c.Name == "" {
+		return errors.New("name is required when any workspace uses base_branch")
 	}
 	if c.Name != "" {
 		return ValidateSessionName(c.Name)
 	}
 	return nil
-}
-
-func (c *CreateSessionRequest) IsMulti() bool {
-	return len(c.WorkspaceIDs) >= 2
 }
 
 type UpdateSessionRequest struct {

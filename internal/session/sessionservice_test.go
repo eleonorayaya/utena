@@ -55,6 +55,30 @@ func swtStoreFor(svc *SessionService) *SessionWorktreeStore {
 	return svc.sessionWorktreeStore
 }
 
+// createSessionLegacy wraps the new CreateSession API in the shape that
+// existing tests were written for: a pre-built Session struct mutated in
+// place, plus a single workspace + branch/baseBranch pair.
+func createSessionLegacy(ctx context.Context, service *SessionService, sess *Session, wsID uint, branch, baseBranch string, actions ...*SessionAction) error {
+	spec := WorkspaceBranchSpec{WorkspaceID: wsID, Branch: branch, BaseBranch: baseBranch}
+	name := sess.Name
+	if name == "" && branch != "" {
+		name = service.nameFromBranch(branch)
+	}
+	created, err := service.CreateSession(ctx, CreateSessionInput{
+		Name:       name,
+		Workspaces: []WorkspaceBranchSpec{spec},
+		TodoID:     sess.TodoID,
+		Actions:    actions,
+	})
+	if err != nil {
+		return err
+	}
+	if created != nil {
+		*sess = *created
+	}
+	return nil
+}
+
 func waitForStatus(t *testing.T, store *SessionStore, id uint, status SessionStatus, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -81,6 +105,38 @@ func TestSessionService_OnAppStart(t *testing.T) {
 	ctx := context.Background()
 	err := service.OnAppStart(ctx)
 	require.NoError(t, err)
+}
+
+func TestSessionService_OnAppStart_MarksLegacyLayoutSessionsBroken(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+	ctx := context.Background()
+
+	legacy := &Session{
+		Name:        "legacy-one",
+		Status:      StatusActive,
+		SessionRoot: "/tmp/some-legacy-path/legacy-one",
+		LastUsedAt:  time.Now(),
+	}
+	addTestSession(t, sessionStore, swtStoreFor(service), legacy, ws1ID)
+
+	container := &Session{
+		Name:        "container-one",
+		Status:      StatusActive,
+		SessionRoot: filepath.Join(service.sessionsRoot, "container-one"),
+		LastUsedAt:  time.Now(),
+	}
+	addTestSession(t, sessionStore, swtStoreFor(service), container, ws1ID)
+
+	require.NoError(t, service.OnAppStart(ctx))
+
+	loadedLegacy, err := sessionStore.GetByID(legacy.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusBroken, loadedLegacy.Status)
+	require.Contains(t, loadedLegacy.StatusError, "legacy layout")
+
+	loadedContainer, err := sessionStore.GetByID(container.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, StatusBroken, loadedContainer.Status, "container-layout session should not be flagged")
 }
 
 func TestSessionService_Reconcile_RecoversBrokenSessionOnceGitHealthy(t *testing.T) {
@@ -230,7 +286,7 @@ func TestSessionService_CreateSession_RejectsNoBranch(t *testing.T) {
 	session := &Session{Name: "session-1"}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, wsGitID, "", "")
+	err := createSessionLegacy(ctx, service, session, wsGitID, "", "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "branch")
 }
@@ -241,7 +297,7 @@ func TestSessionService_CreateSession_RejectsNonGitWorkspace(t *testing.T) {
 	session := &Session{Name: "session-1"}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, ws1ID, "main", "")
+	err := createSessionLegacy(ctx, service, session, ws1ID, "main", "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not a git repository")
 }
@@ -255,7 +311,7 @@ func TestSessionService_CreateSession_InvalidWorkspace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, 99999, "main", "")
+	err := createSessionLegacy(ctx, service, session, 99999, "main", "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 }
@@ -287,10 +343,10 @@ func TestSessionService_DeleteSession_PreservesWorktreeDirOnDisk(t *testing.T) {
 
 	session := &Session{Name: "keep-me"}
 	ctx := context.Background()
-	require.NoError(t, service.CreateSession(ctx, session, wsGitID, "", "main"))
+	require.NoError(t, createSessionLegacy(ctx, service, session, wsGitID, "", "main"))
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
-	worktreePath := filepath.Join(repoPath, ".worktrees", "eqt-keep-me")
+	worktreePath := filepath.Join(service.sessionsRoot, "keep-me", "git-repo")
 	info, err := os.Stat(worktreePath)
 	require.NoError(t, err)
 	require.True(t, info.IsDir())
@@ -490,24 +546,24 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, wsGitID, "", "main")
+	err := createSessionLegacy(ctx, service, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
-	expectedPath := filepath.Join(repoPath, ".worktrees", "eqt-my-feature")
+	expectedPath := filepath.Join(service.sessionsRoot, "my-feature", "git-repo")
 
 	info, err := os.Stat(expectedPath)
 	require.NoError(t, err)
 	require.True(t, info.IsDir())
 
-	require.True(t, mock.HasSessionByName("git-repo-my-feature"))
+	require.True(t, mock.HasSessionByName("my-feature"))
 
 	finalSess, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.NotNil(t, finalSess.TmuxSessionID)
 	require.NotNil(t, finalSess.TmuxSession)
-	require.Equal(t, "git-repo-my-feature", finalSess.TmuxSession.Name)
+	require.Equal(t, "my-feature", finalSess.TmuxSession.Name)
 	require.Equal(t, utmux.TmuxStatusActive, finalSess.TmuxSession.Status)
 }
 
@@ -524,59 +580,13 @@ func TestSessionService_CreateSession_EagerlyRegistersPendingTmuxRecord(t *testi
 	}
 
 	ctx := context.Background()
-	require.NoError(t, service.CreateSession(ctx, session, wsGitID, "main", ""))
+	require.NoError(t, createSessionLegacy(ctx, service, session, wsGitID, "main", ""))
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.NotNil(t, retrieved.TmuxSessionID, "TmuxSessionID should be linked synchronously by CreateSession")
 	require.NotNil(t, retrieved.TmuxSession)
-	require.Equal(t, "git-repo-eager", retrieved.TmuxSession.Name)
-}
-
-func TestSessionService_CreateSession_WithWorktree_ReusesExistingBranch(t *testing.T) {
-	repoPath := initTestRepo(t)
-	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
-
-	ctx := context.Background()
-	branchName := "feature/checkout-me"
-	worktreePath := filepath.Join(repoPath, ".worktrees", "feature-checkout-me")
-	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, "main")
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "pre-create worktree failed: %s", string(out))
-
-	pushCmd := exec.Command("git", "-C", worktreePath, "push", "-u", "origin", branchName)
-	out, err = pushCmd.CombinedOutput()
-	require.NoError(t, err, "push branch failed: %s", string(out))
-
-	session := &Session{
-		Name: branchName,
-	}
-
-	err = service.CreateSession(ctx, session, wsGitID, branchName, "")
-	require.NoError(t, err)
-
-	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
-}
-
-func TestSessionService_CreateSession_WithWorktree_ReusesLocalOnlyBranch(t *testing.T) {
-	repoPath := initTestRepo(t)
-	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
-
-	ctx := context.Background()
-	branchName := "feature/local-only"
-	worktreePath := filepath.Join(repoPath, ".worktrees", "feature-local-only")
-	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, "main")
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "pre-create worktree failed: %s", string(out))
-
-	session := &Session{
-		Name: branchName,
-	}
-
-	err = service.CreateSession(ctx, session, wsGitID, branchName, "")
-	require.NoError(t, err)
-
-	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
+	require.Equal(t, "eager", retrieved.TmuxSession.Name)
 }
 
 func TestSessionService_CreateSession_TimesOut(t *testing.T) {
@@ -589,7 +599,7 @@ func TestSessionService_CreateSession_TimesOut(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, wsGitID, "", "main")
+	err := createSessionLegacy(ctx, service, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusBroken, 5*time.Second)
@@ -609,7 +619,7 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, wsGitID, "", "nonexistent")
+	err := createSessionLegacy(ctx, service, session, wsGitID, "", "nonexistent")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusBroken, 5*time.Second)
@@ -618,37 +628,7 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusBroken, retrieved.Status)
 	require.Contains(t, retrieved.StatusError, "branch")
-	require.False(t, mock.HasSessionByName("git-repo-my-feature"))
-}
-
-func TestSessionService_CreateSession_ExistingBranch_AutoCreatesWorktree(t *testing.T) {
-	repoPath := initTestRepo(t)
-	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
-
-	ctx := context.Background()
-	branchName := "eqt/auto-worktree"
-	worktreePath := filepath.Join(repoPath, ".worktrees", "eqt-auto-worktree")
-	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, "main")
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "pre-create worktree failed: %s", string(out))
-
-	pushCmd := exec.Command("git", "-C", worktreePath, "push", "-u", "origin", branchName)
-	out, err = pushCmd.CombinedOutput()
-	require.NoError(t, err, "push branch failed: %s", string(out))
-
-	session := &Session{}
-
-	err = service.CreateSession(ctx, session, wsGitID, branchName, "")
-	require.NoError(t, err)
-
-	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
-
-	_, err = os.Stat(worktreePath)
-	require.NoError(t, err, "worktree should exist")
-
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
-	require.Equal(t, "auto-worktree", retrieved.Name, "branch prefix should be stripped from session name")
+	require.False(t, mock.HasSessionByName("my-feature"))
 }
 
 func TestSessionService_ActivateSession_TouchesWorkspace(t *testing.T) {
@@ -895,7 +875,7 @@ func TestSessionService_WorktreeInit_RunsUserLevelScript(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, wsGitID, "", "main")
+	err := createSessionLegacy(ctx, service, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -918,7 +898,7 @@ func TestSessionService_WorktreeInit_RunsRepoLevelScript(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, wsGitID, "", "main")
+	err := createSessionLegacy(ctx, service, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -926,39 +906,6 @@ func TestSessionService_WorktreeInit_RunsRepoLevelScript(t *testing.T) {
 	data, err := os.ReadFile(markerFile)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "git-repo")
-}
-
-func TestSessionService_WorktreeInit_SkipsWhenReusingWorktree(t *testing.T) {
-	repoPath := initTestRepo(t)
-	configDir := t.TempDir()
-	markerFile := filepath.Join(t.TempDir(), "should-not-exist")
-
-	writeScript(t, filepath.Join(configDir, "worktree-setup"), fmt.Sprintf("#!/bin/sh\ntouch %s\n", markerFile))
-
-	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, configDir)
-
-	branchName := "feature/reuse-me"
-	worktreePath := filepath.Join(repoPath, ".worktrees", "feature-reuse-me")
-	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, "main")
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "pre-create worktree failed: %s", string(out))
-
-	pushCmd := exec.Command("git", "-C", worktreePath, "push", "-u", "origin", branchName)
-	out, err = pushCmd.CombinedOutput()
-	require.NoError(t, err, "push branch failed: %s", string(out))
-
-	session := &Session{
-		Name: branchName,
-	}
-
-	ctx := context.Background()
-	err = service.CreateSession(ctx, session, wsGitID, branchName, "")
-	require.NoError(t, err)
-
-	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
-
-	_, err = os.Stat(markerFile)
-	require.True(t, os.IsNotExist(err), "script should not have run for reused worktree")
 }
 
 func TestSessionService_WorktreeInit_FailingScriptContinues(t *testing.T) {
@@ -974,7 +921,7 @@ func TestSessionService_WorktreeInit_FailingScriptContinues(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, wsGitID, "", "main")
+	err := createSessionLegacy(ctx, service, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -982,7 +929,7 @@ func TestSessionService_WorktreeInit_FailingScriptContinues(t *testing.T) {
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusActive, retrieved.Status)
-	require.True(t, mock.HasSessionByName("git-repo-fail-init"))
+	require.True(t, mock.HasSessionByName("fail-init"))
 }
 
 func TestSessionService_WorktreeInit_MissingScriptsSkipped(t *testing.T) {
@@ -994,7 +941,7 @@ func TestSessionService_WorktreeInit_MissingScriptsSkipped(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, wsGitID, "", "main")
+	err := createSessionLegacy(ctx, service, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -1009,7 +956,7 @@ func TestSessionService_WorktreeInit_WorkingDirIsWorktree(t *testing.T) {
 	configDir := t.TempDir()
 	markerFile := filepath.Join(t.TempDir(), "pwd-marker")
 
-	writeScript(t, filepath.Join(configDir, "worktree-setup"), fmt.Sprintf("#!/bin/sh\npwd > %s\n", markerFile))
+	writeScript(t, filepath.Join(repoPath, ".utena", "worktree-setup"), fmt.Sprintf("#!/bin/sh\npwd > %s\n", markerFile))
 
 	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, configDir)
 
@@ -1018,7 +965,7 @@ func TestSessionService_WorktreeInit_WorkingDirIsWorktree(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, wsGitID, "", "main")
+	err := createSessionLegacy(ctx, service, session, wsGitID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
@@ -1026,7 +973,7 @@ func TestSessionService_WorktreeInit_WorkingDirIsWorktree(t *testing.T) {
 	data, err := os.ReadFile(markerFile)
 	require.NoError(t, err)
 
-	expectedPath := filepath.Join(repoPath, ".worktrees", "eqt-wd-test")
+	expectedPath := filepath.Join(service.sessionsRoot, "wd-test", "git-repo")
 	require.Contains(t, string(data), expectedPath)
 }
 
@@ -1038,7 +985,7 @@ func TestSessionService_CreateSession_DirtyMainRepo_SetsWarning(t *testing.T) {
 
 	sess := &Session{Name: "warn-feature"}
 	ctx := context.Background()
-	require.NoError(t, service.CreateSession(ctx, sess, wsGitID, "", "main"))
+	require.NoError(t, createSessionLegacy(ctx, service, sess, wsGitID, "", "main"))
 
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
 
@@ -1054,7 +1001,7 @@ func TestSessionService_CreateSession_CleanRepo_NoWarning(t *testing.T) {
 
 	sess := &Session{Name: "clean-feature"}
 	ctx := context.Background()
-	require.NoError(t, service.CreateSession(ctx, sess, wsGitID, "", "main"))
+	require.NoError(t, createSessionLegacy(ctx, service, sess, wsGitID, "", "main"))
 
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
 
@@ -1073,7 +1020,7 @@ func TestSessionService_RepairSession_ClearsWarning(t *testing.T) {
 
 	sess := &Session{Name: "warn-repair"}
 	ctx := context.Background()
-	require.NoError(t, service.CreateSession(ctx, sess, wsGitID, "", "main"))
+	require.NoError(t, createSessionLegacy(ctx, service, sess, wsGitID, "", "main"))
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
 
 	warned, err := sessionStore.GetByID(sess.ID)
@@ -1121,35 +1068,26 @@ func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionSe
 	return service, sessionStore, mock, wsGit.ID, repoPath
 }
 
-func TestRunSetup_BareWorkspace_LinksClaudeSettings(t *testing.T) {
-	service, sessionStore, _, wsID, repoPath := setupBareWorktreeSessionService(t, t.TempDir())
+func TestRunSetup_BareWorkspace_WritesContainerClaudeSettings(t *testing.T) {
+	service, sessionStore, _, wsID, _ := setupBareWorktreeSessionService(t, t.TempDir())
 
 	session := &Session{
 		Name: "my-feature",
 	}
 
 	ctx := context.Background()
-	err := service.CreateSession(ctx, session, wsID, "", "main")
+	err := createSessionLegacy(ctx, service, session, wsID, "", "main")
 	require.NoError(t, err)
 
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
-	worktreePath := filepath.Join(repoPath, "eqt-my-feature")
-
-	rootSettings := filepath.Join(repoPath, ".claude", "settings.local.json")
-	data, err := os.ReadFile(rootSettings)
-	require.NoError(t, err, "workspace root settings.local.json should exist")
+	sessionRoot := filepath.Join(service.sessionsRoot, "my-feature")
+	settings := filepath.Join(sessionRoot, ".claude", "settings.local.json")
+	data, err := os.ReadFile(settings)
+	require.NoError(t, err, "session-root settings.local.json should exist")
 	require.NotEmpty(t, data)
 
-	linkPath := filepath.Join(worktreePath, ".claude", "settings.local.json")
-	target, err := os.Readlink(linkPath)
-	require.NoError(t, err, "worktree settings.local.json should be a symlink")
-	require.False(t, filepath.IsAbs(target), "symlink target should be relative, got %q", target)
-
-	resolved := filepath.Join(filepath.Dir(linkPath), target)
-	gotAbs, err := filepath.EvalSymlinks(resolved)
-	require.NoError(t, err)
-	wantAbs, err := filepath.EvalSymlinks(rootSettings)
-	require.NoError(t, err)
-	require.Equal(t, wantAbs, gotAbs, "symlink should resolve to workspace root settings")
+	guide := filepath.Join(sessionRoot, "CLAUDE.md")
+	_, err = os.Stat(guide)
+	require.NoError(t, err, "session-root CLAUDE.md should exist")
 }

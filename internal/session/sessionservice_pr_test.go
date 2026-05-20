@@ -535,16 +535,16 @@ func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
 	require.NoError(t, err)
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 10*time.Second)
 
-	expectedWorktree := filepath.Join(repoPath, "feature-pr-branch")
+	expectedWorktree := filepath.Join(service.sessionsRoot, sess.Name, "git-repo")
 	info, err := os.Stat(expectedWorktree)
 	require.NoError(t, err, "worktree should be created at %s", expectedWorktree)
 	require.True(t, info.IsDir())
 
-	tmuxName := BuildTmuxSessionName(wsGit.Name, sess.Name)
+	tmuxName := SanitizeTmuxName(sess.Name)
 	require.True(t, mock.HasSessionByName(tmuxName), "tmux session %s should exist", tmuxName)
 	ts, err := tmuxService.GetSessionByName(tmuxName)
 	require.NoError(t, err)
-	require.Equal(t, expectedWorktree, ts.StartDir, "tmux session should start in the worktree, not the bare workspace root")
+	require.Equal(t, filepath.Join(service.sessionsRoot, sess.Name), ts.StartDir, "tmux session should start at the session root")
 }
 
 func TestHandlePRUpdated_NewAssignedPR_CreatesSessionAction(t *testing.T) {
