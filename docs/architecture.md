@@ -1,11 +1,17 @@
 # Architecture Overview
 
+> **Reading order**: Start here for orientation. Then read `docs/backend-patterns.md` for coding conventions. When building something specific, see `docs/adding-features.md`.
+
+---
+
 ## System Components
 
 Utena consists of three main components:
-- **daemon** - HTTP API server managing workspace and session state
-- **tui** - Terminal UI client for user interaction
-- **tmux plugin** - TPM plugin that registers tmux hooks to sync state with the daemon
+- **daemon** — HTTP API server managing workspace and session state
+- **tui** — Terminal UI client for user interaction
+- **tmux plugin** — TPM plugin that registers tmux hooks to sync state with the daemon
+
+---
 
 ## Daemon Architecture
 
@@ -19,21 +25,21 @@ session (depends on: workspace, eventbus)
 tmux (depends on: session, eventbus)
 ```
 
-**Key principle**: Dependencies flow downward. Lower modules never depend on higher modules directly.
+**Key principle**: Dependencies flow downward. Lower modules never depend on higher modules directly. When a lower module needs to notify a higher one, it publishes an event.
 
 ### Event Flow
 
 ```
-session → (events) → eventbus → (events) → tmux
-tmux → (direct calls) → session
+tmux hooks → TmuxService → EventBus → SessionService
+SessionService → (direct calls) → TmuxService
 ```
 
-**Rationale**:
-- Session doesn't know about tmux (no dependency)
-- Tmux needs to update session state (direct calls)
-- Session needs to notify tmux of user actions (events)
+- Tmux hook events (session created, client attached, etc.) are published on the event bus and consumed by SessionService to update session state
+- SessionService calls TmuxService directly for session lifecycle operations (spawn, kill)
 
-See: `docs/event-bus.md` for details
+See: `internal/eventbus/events.go`, `internal/session/sessionservice.go`, `internal/tmux/tmuxservice.go`
+
+---
 
 ## Communication Patterns
 
@@ -43,26 +49,24 @@ HTTP PUT `/tmux/hooks/{event}` with session name from tmux hook.
 
 Flow:
 1. tmux fires a hook (e.g., session-created, client-session-changed)
-2. TPM plugin's hook.sh sends HTTP request to daemon
+2. TPM plugin's `hook.sh` sends HTTP request to daemon
 3. TmuxController receives request, extracts event type
-4. TmuxService calls SessionService methods directly
-5. Session state updated
+4. TmuxService publishes event on event bus
+5. SessionService handler updates session state
 
 See: `internal/tmux/tmuxservice.go`
 
 ### Daemon → tmux (Session Lifecycle)
 
-Event bus triggers tmux session creation/deletion.
+SessionService calls TmuxService directly to manage tmux sessions.
 
 Flow:
-1. HTTP POST `/sessions` creates new session
-2. SessionService publishes `SessionCreateRequested` event
-3. TmuxService subscribed to event
-4. TmuxService creates tmux session via `tmux new-session`
+1. HTTP POST `/sessions` creates new session record
+2. SessionService calls TmuxService to register a pending tmux session
+3. Background setup goroutine calls TmuxService to spawn the session
+4. Tmux session becomes active
 
-See:
-- Service publishing: `internal/session/sessionservice.go`
-- Tmux subscribing: `internal/tmux/tmuxservice.go`
+See: `internal/session/sessionservice.go`, `internal/tmux/tmuxservice.go`
 
 ### TUI → Daemon
 
@@ -75,23 +79,3 @@ Flow:
 4. User selects session → TUI calls `tmux switch-client -t <name>`
 
 See: `internal/tui/provider/client.go`
-
-## Dependency Inversion
-
-When Module A needs Module B's functionality but direct dependency would create a cycle:
-
-1. **Preferred**: Use event bus for one direction
-2. **Alternative**: Extract shared interface to common package
-
-Example: Session and tmux modules would create a cycle if Session depended on tmux. Instead, Session publishes events that tmux subscribes to.
-
-## Testing
-
-Each layer can be tested independently:
-
-- **Stores**: Test with in-memory data
-- **Services**: Mock store dependencies
-- **Controllers**: Use httptest with real service
-- **Integration**: Test full module stack
-
-See test files adjacent to source files (e.g., `internal/session/sessionservice_test.go`)

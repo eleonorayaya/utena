@@ -1,5 +1,7 @@
 # Adding Features
 
+> **Prerequisites**: Read `docs/architecture.md` for system orientation and `docs/backend-patterns.md` for coding conventions before using this guide.
+
 ## Adding a New HTTP Endpoint
 
 ### 1. Add Service Method
@@ -47,40 +49,7 @@ r.Post("/{id}/action", sr.controller.DoSomething)
 
 ## Adding Event-Based Communication
 
-### 1. Define Event
-
-```go
-// internal/eventbus/events.go
-const ThingHappened = "module.thing_happened"
-
-type ThingHappenedEvent struct {
-    ID   string
-    Data string
-}
-```
-
-### 2. Publish Event (in Service)
-
-See: `internal/session/sessionservice.go:64-71`
-
-### 3. Subscribe to Event (in OnAppStart)
-
-```go
-// internal/othermodule/service.go
-func (s *Service) OnAppStart(ctx context.Context) error {
-    s.eventBus.Subscribe(eventbus.ThingHappened, s.handleThingHappened)
-    return nil
-}
-
-func (s *Service) handleThingHappened(ctx context.Context, event eventbus.Event) error {
-    data, ok := event.Data.(eventbus.ThingHappenedEvent)
-    if !ok {
-        return nil
-    }
-    // Handle event
-    return nil
-}
-```
+See `docs/backend-patterns.md` Pattern 7 for the full event bus pattern including when to use it, how to define events, publish, and subscribe.
 
 ## Adding a New Module
 
@@ -104,28 +73,23 @@ func (m *Module) OnAppEnd(ctx context.Context) error
 func (m *Module) Routes() chi.Router
 ```
 
-### 3. Wire in Daemon
+### 3. Wire in App
 
-Add to `internal/api/daemon.go`:
+Add the module to `buildApp()` in `internal/api/app.go`:
 
 ```go
 newModule := newmodule.NewModule(dependencies, bus)
-
-// In OnAppStart section
-if err := newModule.OnAppStart(ctx); err != nil {
-    log.Fatalf("Failed to initialize module: %v", err)
-}
-
-// Mount routes
-r.Mount("/path", newModule.Routes())
-
-// In OnAppEnd section (reverse order)
-if err := newModule.OnAppEnd(ctx); err != nil {
-    log.Printf("Error cleaning up module: %v", err)
-}
 ```
 
-See: `internal/api/daemon.go:24-56`
+Then add it to the `modules()` slice in dependency order. The app calls `OnAppStart` and `OnAppEnd` on all modules automatically — modules are shut down in reverse order.
+
+Mount its routes in `Routes()`:
+
+```go
+r.Mount("/path", app.NewModule.Routes())
+```
+
+See: `internal/api/app.go`
 
 ## Testing New Features
 
