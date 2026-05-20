@@ -16,6 +16,7 @@ type TmuxService struct {
 	store            *TmuxStore
 	eventBus         eventbus.EventBus
 	windowsBySession map[string][]Window
+	windowsMu        sync.RWMutex
 	nameLocks        sync.Map
 }
 
@@ -221,6 +222,8 @@ func (t *TmuxService) GetSession(id uint) (*TmuxSession, error) {
 	if err != nil {
 		return nil, err
 	}
+	t.windowsMu.RLock()
+	defer t.windowsMu.RUnlock()
 	ts.Windows = t.windowsBySession[ts.Name]
 	return ts, nil
 }
@@ -230,6 +233,8 @@ func (t *TmuxService) GetSessionByName(name string) (*TmuxSession, error) {
 	if err != nil {
 		return nil, err
 	}
+	t.windowsMu.RLock()
+	defer t.windowsMu.RUnlock()
 	ts.Windows = t.windowsBySession[ts.Name]
 	return ts, nil
 }
@@ -278,7 +283,9 @@ func (t *TmuxService) HandleSessionClosed(ctx context.Context, tmuxName string) 
 			slog.Warn("failed to mark tmux session inactive", "tmux", tmuxName, "error", updateErr)
 		}
 	}
+	t.windowsMu.Lock()
 	delete(t.windowsBySession, tmuxName)
+	t.windowsMu.Unlock()
 	return t.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.TmuxSessionClosed,
 		Data: eventbus.TmuxHookEvent{TmuxSessionName: tmuxName},
@@ -314,9 +321,13 @@ func (t *TmuxService) SpawnWindow(sessionName, startDir, command string) error {
 }
 
 func (t *TmuxService) SyncWindows(ctx context.Context, tmuxName string, windows []Window) {
+	t.windowsMu.Lock()
+	defer t.windowsMu.Unlock()
 	t.windowsBySession[tmuxName] = windows
 }
 
 func (t *TmuxService) GetWindows(ctx context.Context, tmuxName string) []Window {
+	t.windowsMu.RLock()
+	defer t.windowsMu.RUnlock()
 	return t.windowsBySession[tmuxName]
 }
