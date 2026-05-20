@@ -74,6 +74,26 @@ func AddWorkspace(path string, asRoot bool) tea.Cmd {
 	return func() tea.Msg { return addWorkspaceIntentMsg{path: path, asRoot: asRoot} }
 }
 
+type WorkspaceClonedMsg struct {
+	Workspace workspace.Workspace
+	Err       error
+}
+
+type WorkspaceRootsMsg struct {
+	Roots []string
+	Err   error
+}
+
+func CloneWorkspace(cloneURL, rootPath, dirName string) tea.Cmd {
+	return func() tea.Msg {
+		return cloneWorkspaceIntentMsg{cloneURL: cloneURL, rootPath: rootPath, dirName: dirName}
+	}
+}
+
+func FetchWorkspaceRoots() tea.Cmd {
+	return func() tea.Msg { return fetchWorkspaceRootsIntentMsg{} }
+}
+
 type fetchWorkspacesIntentMsg struct{}
 type requestWorkspacesStateMsg struct{}
 
@@ -114,6 +134,24 @@ type setWorkspaceHiddenIntentMsg struct {
 type addWorkspaceIntentMsg struct {
 	path   string
 	asRoot bool
+}
+
+type cloneWorkspaceIntentMsg struct {
+	cloneURL string
+	rootPath string
+	dirName  string
+}
+
+type fetchWorkspaceRootsIntentMsg struct{}
+
+type workspaceClonedMsg struct {
+	workspace workspace.Workspace
+	err       error
+}
+
+type workspaceRootsMsg struct {
+	roots []string
+	err   error
 }
 
 type fetchPRsIntentMsg struct {
@@ -240,6 +278,30 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 
 	case workspaceMigratedToBareMsg:
 		return p, p.client.fetchWorkspaces()
+
+	case cloneWorkspaceIntentMsg:
+		return p, p.client.cloneWorkspace(msg.cloneURL, msg.rootPath, msg.dirName)
+
+	case workspaceClonedMsg:
+		ws := msg.workspace
+		err := msg.err
+		var refetch tea.Cmd
+		if err == nil {
+			refetch = p.client.fetchWorkspaces()
+		}
+		emit := func() tea.Msg { return WorkspaceClonedMsg{Workspace: ws, Err: err} }
+		if refetch == nil {
+			return p, emit
+		}
+		return p, tea.Batch(emit, refetch)
+
+	case fetchWorkspaceRootsIntentMsg:
+		return p, p.client.fetchWorkspaceRoots()
+
+	case workspaceRootsMsg:
+		roots := msg.roots
+		err := msg.err
+		return p, func() tea.Msg { return WorkspaceRootsMsg{Roots: roots, Err: err} }
 	}
 
 	return p, nil

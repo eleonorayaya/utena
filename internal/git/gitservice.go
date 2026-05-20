@@ -254,6 +254,14 @@ func (s *GitService) MigrateToBare(ctx context.Context, workspacePath string) er
 	return s.cli.migrateToBare(ctx, workspacePath)
 }
 
+func (s *GitService) CloneBareWorkspace(ctx context.Context, remoteURL, workspacePath string) error {
+	return s.cli.cloneBareWorkspace(ctx, remoteURL, workspacePath)
+}
+
+func (s *GitService) ParseRepoFullName(remoteURL string) (owner string, repo string, err error) {
+	return s.cli.parseRepoFullName(remoteURL)
+}
+
 func (s *GitService) DeleteBranch(ctx context.Context, repoPath string, branchName string) error {
 	return s.cli.deleteBranch(ctx, repoPath, branchName)
 }

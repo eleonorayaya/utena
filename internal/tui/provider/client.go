@@ -463,6 +463,75 @@ func (c *client) addWorkspace(path string, asRoot bool) tea.Cmd {
 	}
 }
 
+func (c *client) cloneWorkspace(cloneURL, rootPath, dirName string) tea.Cmd {
+	return func() tea.Msg {
+		body := map[string]string{"clone_url": cloneURL}
+		if rootPath != "" {
+			body["root_path"] = rootPath
+		}
+		if dirName != "" {
+			body["dir_name"] = dirName
+		}
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return workspaceClonedMsg{err: err}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/workspaces/clone", bytes.NewReader(jsonBody))
+		if err != nil {
+			return workspaceClonedMsg{err: err}
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		httpClient := &http.Client{}
+		res, err := httpClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] clone workspace %q: %v", cloneURL, err)
+			return workspaceClonedMsg{err: err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusCreated {
+			apiErr := parseAPIError(res, "clone workspace")
+			return workspaceClonedMsg{err: apiErr.Err}
+		}
+
+		var resp workspace.WorkspaceResponse
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			return workspaceClonedMsg{err: err}
+		}
+		if resp.Workspace == nil {
+			return workspaceClonedMsg{err: fmt.Errorf("clone workspace: empty response")}
+		}
+		return workspaceClonedMsg{workspace: *resp.Workspace}
+	}
+}
+
+func (c *client) fetchWorkspaceRoots() tea.Cmd {
+	return func() tea.Msg {
+		res, err := c.httpClient.Get(c.baseURL + "/workspaces/roots")
+		if err != nil {
+			log.Printf("[ERROR] fetch workspace roots: %v", err)
+			return workspaceRootsMsg{err: err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			apiErr := parseAPIError(res, "fetch workspace roots")
+			return workspaceRootsMsg{err: apiErr.Err}
+		}
+
+		var resp workspace.WorkspaceRootsResponse
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			return workspaceRootsMsg{err: err}
+		}
+		return workspaceRootsMsg{roots: resp.Roots}
+	}
+}
+
 func (c *client) fetchTodos() tea.Cmd {
 	return func() tea.Msg {
 		res, err := c.httpClient.Get(c.baseURL + "/todos")

@@ -426,3 +426,15 @@ func (s *WorkspaceStore) isGitRepository(path string) bool {
 	isGit, _ := s.detectRepoKind(path)
 	return isGit
 }
+
+func (s *WorkspaceStore) ConfiguredRoots() []string {
+	cfg, err := s.loadConfig()
+	if err != nil || cfg == nil {
+		return nil
+	}
+	roots := make([]string, 0, len(cfg.WorkspaceRoots))
+	for _, r := range cfg.WorkspaceRoots {
+		roots = append(roots, expandHome(r))
+	}
+	return roots
+}

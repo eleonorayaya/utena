@@ -300,25 +300,94 @@ func (s *gitCLI) migrateToBare(ctx context.Context, workspacePath string) error 
 		return fmt.Errorf("failed to create workspace directory (backup at %s): %w", backupPath, err)
 	}
 
-	barePath := filepath.Join(workspacePath, ".bare")
-	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", remoteURL, barePath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git clone --bare failed (backup at %s): %s: %w", backupPath, strings.TrimSpace(string(output)), err)
+	if err := s.runBareClone(ctx, remoteURL, workspacePath); err != nil {
+		return fmt.Errorf("%w (backup at %s)", err, backupPath)
 	}
 
-	if err := os.WriteFile(gitDir, []byte("gitdir: ./.bare\n"), 0644); err != nil {
-		return fmt.Errorf("failed to write .git file (backup at %s): %w", backupPath, err)
+	if err := writeBareMarker(workspacePath); err != nil {
+		return fmt.Errorf("%w (backup at %s)", err, backupPath)
 	}
 
-	cmd = exec.CommandContext(ctx, "git", "-C", workspacePath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to set fetch refspec (backup at %s): %s: %w", backupPath, strings.TrimSpace(string(output)), err)
+	if err := s.configureBareFetchRefspec(ctx, workspacePath); err != nil {
+		return fmt.Errorf("%w (backup at %s)", err, backupPath)
 	}
 
 	return nil
 }
 
+func (s *gitCLI) cloneBareWorkspace(ctx context.Context, remoteURL, workspacePath string) error {
+	remoteURL = strings.TrimSpace(remoteURL)
+	if remoteURL == "" {
+		return fmt.Errorf("remote URL is required")
+	}
+
+	if info, err := os.Stat(workspacePath); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("target path exists and is not a directory: %s", workspacePath)
+		}
+		entries, readErr := os.ReadDir(workspacePath)
+		if readErr != nil {
+			return fmt.Errorf("failed to read target directory %s: %w", workspacePath, readErr)
+		}
+		if len(entries) > 0 {
+			return fmt.Errorf("target directory is not empty: %s", workspacePath)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to inspect target path %s: %w", workspacePath, err)
+	}
+
+	if err := os.MkdirAll(workspacePath, 0755); err != nil {
+		return fmt.Errorf("failed to create workspace directory %s: %w", workspacePath, err)
+	}
+
+	if err := s.runBareClone(ctx, remoteURL, workspacePath); err != nil {
+		_ = os.RemoveAll(workspacePath)
+		return err
+	}
+
+	if err := writeBareMarker(workspacePath); err != nil {
+		_ = os.RemoveAll(workspacePath)
+		return err
+	}
+
+	if err := s.configureBareFetchRefspec(ctx, workspacePath); err != nil {
+		_ = os.RemoveAll(workspacePath)
+		return err
+	}
+
+	return nil
+}
+
+func (s *gitCLI) runBareClone(ctx context.Context, remoteURL, workspacePath string) error {
+	barePath := filepath.Join(workspacePath, ".bare")
+	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", remoteURL, barePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git clone --bare failed: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
+
+func writeBareMarker(workspacePath string) error {
+	gitDir := filepath.Join(workspacePath, ".git")
+	if err := os.WriteFile(gitDir, []byte("gitdir: ./.bare\n"), 0644); err != nil {
+		return fmt.Errorf("failed to write .git file: %w", err)
+	}
+	return nil
+}
+
+func (s *gitCLI) configureBareFetchRefspec(ctx context.Context, workspacePath string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", workspacePath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to set fetch refspec: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
+
 func (s *gitCLI) parseRepoFullName(remoteURL string) (owner string, repo string, err error) {
+	return ParseRepoFullName(remoteURL)
+}
+
+func ParseRepoFullName(remoteURL string) (owner string, repo string, err error) {
 	remoteURL = strings.TrimSpace(remoteURL)
 
 	if strings.HasPrefix(remoteURL, "git@") {

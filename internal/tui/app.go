@@ -16,6 +16,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/statusview"
 	"github.com/eleonorayaya/utena/internal/tui/todoform"
 	"github.com/eleonorayaya/utena/internal/tui/todolist"
+	"github.com/eleonorayaya/utena/internal/tui/workspacecloneform"
 	"github.com/eleonorayaya/utena/internal/tui/workspacedetail"
 	"github.com/eleonorayaya/utena/internal/tui/workspacelist"
 )
@@ -49,17 +50,18 @@ func NewApp(logPath, port string, initialView router.View, opts ...AppOption) Ap
 
 	baseURL := fmt.Sprintf("http://localhost:%s", port)
 	views := map[router.View]router.ViewEntry{
-		router.SessionListView:     &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
-		router.SessionDetailView:   &router.ViewAdapter[sessiondetail.Model]{Model: sessiondetail.New()},
-		router.SessionFormView:     &router.ViewAdapter[sessionform.Model]{Model: sessionform.New()},
-		router.SessionProgressView: &router.ViewAdapter[sessionprogress.Model]{Model: sessionprogress.New()},
-		router.TodoListView:        &router.ViewAdapter[todolist.Model]{Model: todolist.New()},
-		router.TodoFormView:        &router.ViewAdapter[todoform.Model]{Model: todoform.New()},
-		router.DebugView:           &router.ViewAdapter[debug.Model]{Model: debug.New(logPath, baseURL)},
-		router.StatusView:          &router.ViewAdapter[statusview.Model]{Model: statusview.New()},
-		router.WorkspaceListView:   &router.ViewAdapter[workspacelist.Model]{Model: workspacelist.New()},
-		router.WorkspaceDetailView: &router.ViewAdapter[workspacedetail.Model]{Model: workspacedetail.New()},
-		router.PRListView:          &router.ViewAdapter[prlist.Model]{Model: prlist.New()},
+		router.SessionListView:        &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
+		router.SessionDetailView:      &router.ViewAdapter[sessiondetail.Model]{Model: sessiondetail.New()},
+		router.SessionFormView:        &router.ViewAdapter[sessionform.Model]{Model: sessionform.New()},
+		router.SessionProgressView:    &router.ViewAdapter[sessionprogress.Model]{Model: sessionprogress.New()},
+		router.TodoListView:           &router.ViewAdapter[todolist.Model]{Model: todolist.New()},
+		router.TodoFormView:           &router.ViewAdapter[todoform.Model]{Model: todoform.New()},
+		router.DebugView:              &router.ViewAdapter[debug.Model]{Model: debug.New(logPath, baseURL)},
+		router.StatusView:             &router.ViewAdapter[statusview.Model]{Model: statusview.New()},
+		router.WorkspaceListView:      &router.ViewAdapter[workspacelist.Model]{Model: workspacelist.New()},
+		router.WorkspaceDetailView:    &router.ViewAdapter[workspacedetail.Model]{Model: workspacedetail.New()},
+		router.WorkspaceCloneFormView: &router.ViewAdapter[workspacecloneform.Model]{Model: workspacecloneform.New()},
+		router.PRListView:             &router.ViewAdapter[prlist.Model]{Model: prlist.New()},
 	}
 
 	return App{

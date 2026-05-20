@@ -55,6 +55,23 @@ func (a *AddWorkspaceRequest) Bind(r *http.Request) error {
 	return nil
 }
 
+type CloneWorkspaceRequest struct {
+	CloneURL string `json:"clone_url"`
+	RootPath string `json:"root_path,omitempty"`
+	DirName  string `json:"dir_name,omitempty"`
+}
+
+func (a *CloneWorkspaceRequest) Bind(r *http.Request) error {
+	if a.CloneURL == "" {
+		return fmt.Errorf("clone_url is required")
+	}
+	return nil
+}
+
+type WorkspaceRootsResponse struct {
+	Roots []string `json:"roots"`
+}
+
 type SetHiddenRequest struct {
 	Hidden bool `json:"hidden"`
 }

@@ -122,6 +122,8 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 		m.pendingDeleteID = item.workspace.ID
 		return m, m.list.NewStatusMessage(fmt.Sprintf("press d again to delete %s", item.workspace.Name)), true
+	case key.Matches(msg, keys.CloneFromURL):
+		return m, router.NavigateTo(router.WorkspaceCloneFormView), true
 	case key.Matches(msg, keys.Back):
 		return m, router.Back(), true
 	}

@@ -323,3 +323,83 @@ func TestGitCLI_ParseRepoFullName_InvalidURL(t *testing.T) {
 	_, _, err = svc.parseRepoFullName("git@github.com:only-owner")
 	require.Error(t, err)
 }
+
+func TestGitCLI_CloneBareWorkspace_HappyPath(t *testing.T) {
+	source := initTestRepo(t)
+
+	parent := t.TempDir()
+	target := filepath.Join(parent, "cloned")
+
+	svc := newGitCLI()
+	err := svc.cloneBareWorkspace(context.Background(), source, target)
+	require.NoError(t, err)
+
+	gitInfo, err := os.Stat(filepath.Join(target, ".git"))
+	require.NoError(t, err)
+	require.False(t, gitInfo.IsDir(), ".git should be a file pointing at .bare")
+
+	bareInfo, err := os.Stat(filepath.Join(target, ".bare"))
+	require.NoError(t, err)
+	require.True(t, bareInfo.IsDir(), ".bare should be a directory")
+
+	contents, err := os.ReadFile(filepath.Join(target, ".git"))
+	require.NoError(t, err)
+	require.Equal(t, "gitdir: ./.bare\n", string(contents))
+
+	cmd := exec.Command("git", "-C", target, "config", "--get", "remote.origin.fetch")
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	out, err := cmd.Output()
+	require.NoError(t, err)
+	require.Equal(t, "+refs/heads/*:refs/remotes/origin/*", trimOutput(out))
+
+	require.True(t, isBareWorkspace(target))
+}
+
+func TestGitCLI_CloneBareWorkspace_CreatesParents(t *testing.T) {
+	source := initTestRepo(t)
+
+	parent := t.TempDir()
+	target := filepath.Join(parent, "nested", "dirs", "cloned")
+
+	svc := newGitCLI()
+	err := svc.cloneBareWorkspace(context.Background(), source, target)
+	require.NoError(t, err)
+
+	require.True(t, isBareWorkspace(target))
+}
+
+func TestGitCLI_CloneBareWorkspace_RejectsNonEmptyTarget(t *testing.T) {
+	source := initTestRepo(t)
+
+	parent := t.TempDir()
+	target := filepath.Join(parent, "cloned")
+	require.NoError(t, os.MkdirAll(target, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(target, "stray"), []byte("x"), 0644))
+
+	svc := newGitCLI()
+	err := svc.cloneBareWorkspace(context.Background(), source, target)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not empty")
+
+	_, statErr := os.Stat(filepath.Join(target, "stray"))
+	require.NoError(t, statErr, "rejected clone must not delete user files")
+}
+
+func TestGitCLI_CloneBareWorkspace_RejectsEmptyURL(t *testing.T) {
+	svc := newGitCLI()
+	err := svc.cloneBareWorkspace(context.Background(), "", filepath.Join(t.TempDir(), "target"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "required")
+}
+
+func TestGitCLI_CloneBareWorkspace_CleansUpOnCloneFailure(t *testing.T) {
+	parent := t.TempDir()
+	target := filepath.Join(parent, "cloned")
+
+	svc := newGitCLI()
+	err := svc.cloneBareWorkspace(context.Background(), filepath.Join(parent, "does-not-exist"), target)
+	require.Error(t, err)
+
+	_, statErr := os.Stat(target)
+	require.True(t, os.IsNotExist(statErr), "failed clone should clean up its target dir, got: %v", statErr)
+}
