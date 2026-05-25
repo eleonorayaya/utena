@@ -469,6 +469,14 @@ func TestSessionService_DetachWorktreesByRepoID_NoRows(t *testing.T) {
 func initTestRepo(t *testing.T) string {
 	t.Helper()
 	bareDir := t.TempDir()
+	t.Cleanup(func() {
+		filepath.Walk(bareDir, func(path string, _ os.FileInfo, err error) error {
+			if err == nil {
+				os.Chmod(path, 0700)
+			}
+			return nil
+		})
+	})
 	dir := t.TempDir()
 	gitEnv := append(os.Environ(),
 		"GIT_CONFIG_GLOBAL=/dev/null",

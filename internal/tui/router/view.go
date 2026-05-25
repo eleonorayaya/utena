@@ -15,4 +15,5 @@ const (
 	WorkspaceCloneFormView
 	PRListView
 	SessionDetailView
+	AddWorkspaceFormView
 )

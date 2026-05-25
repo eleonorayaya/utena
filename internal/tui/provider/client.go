@@ -609,6 +609,43 @@ func (c *client) deleteTodo(id uint) tea.Cmd {
 	}
 }
 
+func (c *client) addWorkspaceToSession(sessionID uint, spec SessionWorkspaceSpec) tea.Cmd {
+	return func() tea.Msg {
+		item := map[string]any{"workspace_id": spec.WorkspaceID}
+		if spec.Branch != "" {
+			item["branch"] = spec.Branch
+		}
+		if spec.BaseBranch != "" {
+			item["base_branch"] = spec.BaseBranch
+		}
+		jsonBody, err := json.Marshal(item)
+		if err != nil {
+			return ErrMsg{err}
+		}
+
+		res, err := c.httpClient.Post(
+			fmt.Sprintf("%s/sessions/%d/workspaces", c.baseURL, sessionID),
+			"application/json",
+			bytes.NewReader(jsonBody),
+		)
+		if err != nil {
+			log.Printf("[ERROR] add workspace to session %d: %v", sessionID, err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusAccepted {
+			return parseAPIError(res, "add workspace to session")
+		}
+
+		var resp struct {
+			ID uint `json:"id"`
+		}
+		json.NewDecoder(res.Body).Decode(&resp)
+		return workspaceAddedToSessionMsg{sessionID: resp.ID}
+	}
+}
+
 func (c *client) getSession(id uint) tea.Cmd {
 	return func() tea.Msg {
 		res, err := c.httpClient.Get(fmt.Sprintf("%s/sessions/%d", c.baseURL, id))

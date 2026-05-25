@@ -76,6 +76,10 @@ func (s *GitService) Fetch(ctx context.Context, repoPath string, branch string) 
 	return s.cli.fetch(ctx, repoPath, branch)
 }
 
+func (s *GitService) PushSetUpstream(ctx context.Context, repoPath string, branchName string) error {
+	return s.cli.pushSetUpstream(ctx, repoPath, branchName)
+}
+
 func (s *GitService) SetupWorktreeAt(ctx context.Context, repoPath string, branchName string, baseBranch string, branchID uint, repoID uint, destPath string) (bool, string, error) {
 	creatingNew := baseBranch != ""
 

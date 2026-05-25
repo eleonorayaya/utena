@@ -63,6 +63,10 @@ func ArchiveSession(id uint) tea.Cmd {
 	return func() tea.Msg { return archiveSessionIntentMsg{id: id} }
 }
 
+func AddWorkspaceToSession(sessionID uint, spec SessionWorkspaceSpec) tea.Cmd {
+	return func() tea.Msg { return addWorkspaceToSessionIntentMsg{sessionID: sessionID, spec: spec} }
+}
+
 type fetchSessionsIntentMsg struct{}
 type requestSessionsStateMsg struct{}
 
@@ -122,6 +126,19 @@ type sessionPolledMsg struct {
 
 type pollSessionIntentMsg struct {
 	id uint
+}
+
+type addWorkspaceToSessionIntentMsg struct {
+	sessionID uint
+	spec      SessionWorkspaceSpec
+}
+
+type workspaceAddedToSessionMsg struct {
+	sessionID uint
+}
+
+type WorkspaceAddedToSessionMsg struct {
+	SessionID uint
 }
 
 type SessionPolledMsg struct {
@@ -219,6 +236,16 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, func() tea.Msg {
 			return SessionPolledMsg{Session: msg.session}
 		}
+
+	case addWorkspaceToSessionIntentMsg:
+		return p, p.client.addWorkspaceToSession(msg.sessionID, msg.spec)
+
+	case workspaceAddedToSessionMsg:
+		id := msg.sessionID
+		return p, tea.Batch(
+			p.client.fetchSessions(),
+			func() tea.Msg { return WorkspaceAddedToSessionMsg{SessionID: id} },
+		)
 	}
 
 	return p, nil
