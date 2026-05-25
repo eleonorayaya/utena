@@ -174,6 +174,14 @@ func (s *gitCLI) checkoutWorktree(ctx context.Context, repoPath string, branch s
 	return worktreePath, nil
 }
 
+func (s *gitCLI) pushSetUpstream(ctx context.Context, repoPath string, branchName string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "push", "--set-upstream", "origin", branchName)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git push --set-upstream failed: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
+
 func (s *gitCLI) currentBranch(ctx context.Context, repoPath string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "branch", "--show-current")
 	output, err := cmd.Output()
