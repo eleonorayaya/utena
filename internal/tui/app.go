@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/tui/addworkspaceform"
 	"github.com/eleonorayaya/utena/internal/tui/debug"
 	"github.com/eleonorayaya/utena/internal/tui/prlist"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
@@ -62,6 +63,7 @@ func NewApp(logPath, port string, initialView router.View, opts ...AppOption) Ap
 		router.WorkspaceDetailView:    &router.ViewAdapter[workspacedetail.Model]{Model: workspacedetail.New()},
 		router.WorkspaceCloneFormView: &router.ViewAdapter[workspacecloneform.Model]{Model: workspacecloneform.New()},
 		router.PRListView:             &router.ViewAdapter[prlist.Model]{Model: prlist.New()},
+		router.AddWorkspaceFormView:   &router.ViewAdapter[addworkspaceform.Model]{Model: addworkspaceform.New()},
 	}
 
 	return App{
