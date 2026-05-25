@@ -234,6 +234,26 @@ type assignedSlot struct {
 	branchName string
 }
 
+type worktreeSetupResult struct {
+	swt          *SessionWorktree
+	wt           *git.Worktree
+	ws           *workspace.Workspace
+	branch       *git.Branch
+	worktreePath string
+	created      bool
+	warning      string
+}
+
+func freeSubdir(base string, used map[string]struct{}) string {
+	sub := base
+	for suffix := 2; ; suffix++ {
+		if _, taken := used[sub]; !taken {
+			return sub
+		}
+		sub = fmt.Sprintf("%s-%d", base, suffix)
+	}
+}
+
 func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionInput) (*Session, error) {
 	if len(input.Workspaces) == 0 {
 		return nil, common.NewInvalidRequest("workspaces is required")
@@ -309,15 +329,7 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		if base == "" {
 			base = fmt.Sprintf("workspace-%d", sl.ws.ID)
 		}
-		sub := base
-		suffix := 2
-		for {
-			if _, taken := used[sub]; !taken {
-				break
-			}
-			sub = fmt.Sprintf("%s-%d", base, suffix)
-			suffix++
-		}
+		sub := freeSubdir(base, used)
 		used[sub] = struct{}{}
 		branchName := sl.spec.Branch
 		if branchName == "" {
@@ -432,6 +444,195 @@ func (s *SessionService) eagerCreateWorktree(ctx context.Context, sessionID uint
 	return nil
 }
 
+func (s *SessionService) AddWorkspace(ctx context.Context, sessionID uint, spec WorkspaceBranchSpec) (*Session, error) {
+	sess, err := s.store.GetByID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	if sess.Status == StatusDeleted || sess.Status == StatusArchived {
+		return nil, common.NewInvalidRequest("cannot add workspace to deleted or archived session")
+	}
+
+	ws, err := s.workspaceService.GetWorkspace(ctx, spec.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if !ws.IsGitRepo {
+		return nil, common.NewInvalidRequest(fmt.Sprintf("workspace %q is not a git repository", ws.Name))
+	}
+
+	repoID, err := s.resolveRepoID(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+	used := make(map[string]struct{}, len(sess.Worktrees))
+	for i := range sess.Worktrees {
+		wt := sess.Worktrees[i].Worktree
+		if wt == nil {
+			continue
+		}
+		if wt.RepoID == repoID {
+			return nil, common.NewConflict(fmt.Sprintf("workspace %q is already in this session", ws.Name))
+		}
+		if wt.Path != "" {
+			used[filepath.Base(wt.Path)] = struct{}{}
+		}
+	}
+	base := SanitizeSessionName(ws.Name)
+	if base == "" {
+		base = fmt.Sprintf("workspace-%d", ws.ID)
+	}
+	destPath := filepath.Join(sess.SessionRoot, freeSubdir(base, used))
+
+	branchName := spec.Branch
+	if branchName == "" {
+		branchName = s.branchPrefix + sess.Name
+	}
+
+	position := len(sess.Worktrees)
+	if err := s.eagerCreateWorktree(ctx, sess.ID, ws, branchName, destPath, position); err != nil {
+		return nil, fmt.Errorf("eager create worktree: %w", err)
+	}
+
+	if err := s.workspaceService.Touch(ctx, ws.ID); err != nil {
+		slog.WarnContext(ctx, "failed to touch workspace last-used timestamp", "workspace", ws.ID, "error", err)
+	}
+
+	go s.runAddWorkspace(sess.ID, spec)
+
+	return s.store.GetByID(sess.ID)
+}
+
+func (s *SessionService) runAddWorkspace(sessionID uint, spec WorkspaceBranchSpec) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.setupTimeout)
+	defer cancel()
+
+	sess, err := s.store.GetByID(sessionID)
+	if err != nil {
+		slog.Error("runAddWorkspace: failed to load session", "id", sessionID, "error", err)
+		return
+	}
+
+	ctx = slogctx.Append(ctx,
+		"session", sess.ID,
+		"session_root", sess.SessionRoot,
+		"workspace_count", len(sess.Worktrees),
+	)
+
+	markBroken := func(stage string, err error) {
+		msg := fmt.Sprintf("%s failed: %v", stage, err)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			msg = fmt.Sprintf("%s timed out after %s", stage, s.setupTimeout)
+		}
+		if updateErr := s.markSessionBroken(sess, msg); updateErr != nil {
+			slog.ErrorContext(ctx, "failed to persist broken status", "stage", stage, "error", updateErr)
+		}
+	}
+
+	if len(sess.Worktrees) == 0 {
+		markBroken("find new worktree", fmt.Errorf("session %d has no worktrees", sess.ID))
+		return
+	}
+	newSwt := &sess.Worktrees[len(sess.Worktrees)-1]
+
+	ws := newSwt.Workspace
+	if ws == nil {
+		markBroken("workspace lookup", fmt.Errorf("worktree %d has no workspace", newSwt.WorktreeID))
+		return
+	}
+
+	var setupWarnings []string
+	result, err := s.setupSingleWorktree(ctx, sess, newSwt, ws, spec)
+	if err != nil {
+		markBroken("worktree setup", err)
+		return
+	}
+	if result.warning != "" {
+		setupWarnings = append(setupWarnings, fmt.Sprintf("%s: %s", ws.Name, result.warning))
+	}
+
+	if result.created {
+		branchName := ""
+		if result.branch != nil {
+			branchName = result.branch.Name
+		}
+		env := []string{
+			envSessionRoot + "=" + sess.SessionRoot,
+			envSessionName + "=" + sess.Name,
+			envBranch + "=" + branchName,
+			envWorktreePath + "=" + result.worktreePath,
+			envWorkspaceName + "=" + ws.Name,
+			envWorkspacePath + "=" + ws.Path,
+		}
+		wsScript := filepath.Join(ws.Path, ".utena", worktreeSetupName)
+		if err := traceOp(ctx, "worktree-setup script", func() error {
+			return s.runScript(ctx, wsScript, result.worktreePath, env)
+		}, "script", wsScript, "ws", ws.Name); err != nil {
+			slog.WarnContext(ctx, "workspace worktree-setup script failed", "ws", ws.Name, "error", err)
+			setupWarnings = append(setupWarnings, fmt.Sprintf("%s: %s", ws.Name, err.Error()))
+		}
+
+		globalEnv := []string{
+			envSessionRoot + "=" + sess.SessionRoot,
+			envSessionName + "=" + sess.Name,
+			envBranch + "=" + branchName,
+		}
+		globalScript := filepath.Join(s.configDir, worktreeSetupName)
+		if err := traceOp(ctx, "global worktree-setup script", func() error {
+			return s.runScript(ctx, globalScript, sess.SessionRoot, globalEnv)
+		}, "script", globalScript); err != nil {
+			slog.WarnContext(ctx, "global worktree-setup script failed", "error", err)
+			setupWarnings = append(setupWarnings, fmt.Sprintf("global: %s", err.Error()))
+		}
+	}
+
+	setupWarnings = append(setupWarnings, s.applyClaudeSettings(ctx, sess)...)
+
+	sess.Status = StatusActive
+	if len(setupWarnings) == 0 {
+		sess.StatusError = ""
+	} else {
+		sess.StatusError = strings.Join(setupWarnings, "; ")
+	}
+	if err := s.store.Update(sess); err != nil {
+		markBroken("persist active status", err)
+		return
+	}
+}
+
+func (s *SessionService) applyClaudeSettings(ctx context.Context, sess *Session) []string {
+	var warnings []string
+	workspacePaths := make([]string, 0, len(sess.Worktrees))
+	checkouts := make([]claudesettings.SessionCheckout, 0, len(sess.Worktrees))
+	for i := range sess.Worktrees {
+		swt := &sess.Worktrees[i]
+		wt := swt.Worktree
+		if wt == nil || wt.Path == "" {
+			continue
+		}
+		ws := swt.Workspace
+		if ws == nil {
+			slog.WarnContext(ctx, "claude settings: workspace not populated", "worktree", wt.ID)
+			continue
+		}
+		workspacePaths = append(workspacePaths, ws.Path)
+		checkouts = append(checkouts, claudesettings.SessionCheckout{
+			Subdir:        filepath.Base(wt.Path),
+			WorkspaceName: ws.Name,
+		})
+	}
+	if err := claudesettings.EnsureSessionRoot(sess.SessionRoot, workspacePaths); err != nil {
+		slog.WarnContext(ctx, "ensure session-root claude settings failed", "error", err)
+		warnings = append(warnings, fmt.Sprintf("claude-settings: %s", err.Error()))
+	}
+	if err := claudesettings.EnsureMultiSessionGuide(sess.SessionRoot, checkouts); err != nil {
+		slog.WarnContext(ctx, "ensure session CLAUDE.md failed", "error", err)
+		warnings = append(warnings, fmt.Sprintf("claude-guide: %s", err.Error()))
+	}
+	return warnings
+}
+
 func (s *SessionService) resolveWorktreeWorkspace(ctx context.Context, wt *git.Worktree, cache map[uint]*workspace.Workspace) (*workspace.Workspace, error) {
 	if wt == nil {
 		return nil, fmt.Errorf("worktree is nil")
@@ -448,6 +649,65 @@ func (s *SessionService) resolveWorktreeWorkspace(ctx context.Context, wt *git.W
 	}
 	cache[wt.RepoID] = ws
 	return ws, nil
+}
+
+func (s *SessionService) setupSingleWorktree(ctx context.Context, sess *Session, swt *SessionWorktree, ws *workspace.Workspace, spec WorkspaceBranchSpec) (worktreeSetupResult, error) {
+	wt := swt.Worktree
+	if wt == nil {
+		return worktreeSetupResult{}, fmt.Errorf("session worktree %d has nil worktree ref", swt.ID)
+	}
+
+	baseBranchName := spec.BaseBranch
+	branchName := spec.Branch
+	finalBranchName := branchName
+	if baseBranchName != "" {
+		finalBranchName = s.branchPrefix + sess.Name
+	}
+	if finalBranchName == "" && wt.Branch != nil {
+		finalBranchName = wt.Branch.Name
+	}
+
+	var warning string
+	if err := s.setupBranch(ctx, ws, branchName, baseBranchName); err != nil {
+		var w SetupWarning
+		if !errors.As(err, &w) {
+			return worktreeSetupResult{}, fmt.Errorf("branch setup: %w", err)
+		}
+		warning = w.Message
+	}
+
+	repoID, err := s.resolveRepoID(ctx, ws)
+	if err != nil {
+		return worktreeSetupResult{}, fmt.Errorf("repo lookup: %w", err)
+	}
+
+	branch, err := tracedOp(ctx, "find-or-create-branch", func() (*git.Branch, error) {
+		return s.gitService.FindOrCreateBranch(ctx, finalBranchName, repoID)
+	}, "name", finalBranchName, "ws", ws.Name)
+	if err != nil {
+		return worktreeSetupResult{}, fmt.Errorf("find-or-create-branch: %w", err)
+	}
+
+	var (
+		created bool
+		wtPath  string
+	)
+	if err := traceOp(ctx, "git worktree add", func() error {
+		var e error
+		created, wtPath, e = s.gitService.SetupWorktreeAt(ctx, ws.Path, finalBranchName, baseBranchName, branch.ID, repoID, wt.Path)
+		return e
+	}, "branch", finalBranchName, "ws", ws.Name); err != nil {
+		return worktreeSetupResult{}, fmt.Errorf("worktree setup: %w", err)
+	}
+
+	if refreshed, err := s.gitService.GetWorktree(wt.ID); err == nil {
+		*wt = *refreshed
+	}
+	if wt.Path == "" {
+		wt.Path = wtPath
+	}
+
+	return worktreeSetupResult{swt: swt, wt: wt, ws: ws, branch: branch, worktreePath: wt.Path, created: created, warning: warning}, nil
 }
 
 func (s *SessionService) runSetup(sessionID uint, tmuxName string, specs []WorkspaceBranchSpec) {
@@ -476,15 +736,7 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, specs []Works
 		slog.InfoContext(ctx, "session setup: done", "status", sess.Status, "duration_ms", time.Since(setupStart).Milliseconds())
 	}()
 
-	type slotResult struct {
-		swt          *SessionWorktree
-		wt           *git.Worktree
-		ws           *workspace.Workspace
-		branch       *git.Branch
-		worktreePath string
-		created      bool
-	}
-	var done []slotResult
+	var done []worktreeSetupResult
 	var setupWarnings []string
 	wsCache := make(map[uint]*workspace.Workspace)
 
@@ -522,63 +774,15 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, specs []Works
 			markBroken("workspace lookup", err)
 			return
 		}
-
-		spec := specByWS[ws.ID]
-		baseBranchName := spec.BaseBranch
-		branchName := spec.Branch
-		finalBranchName := branchName
-		if baseBranchName != "" {
-			finalBranchName = s.branchPrefix + sess.Name
-		}
-		if finalBranchName == "" && wt.Branch != nil {
-			finalBranchName = wt.Branch.Name
-		}
-
-		if err := s.setupBranch(ctx, ws, branchName, baseBranchName); err != nil {
-			var w SetupWarning
-			if errors.As(err, &w) {
-				setupWarnings = append(setupWarnings, fmt.Sprintf("%s: %s", ws.Name, w.Message))
-			} else {
-				markBroken("branch setup", err)
-				return
-			}
-		}
-
-		repoID, err := s.resolveRepoID(ctx, ws)
+		result, err := s.setupSingleWorktree(ctx, sess, swt, ws, specByWS[ws.ID])
 		if err != nil {
-			markBroken("repo lookup", err)
-			return
-		}
-
-		branch, err := tracedOp(ctx, "find-or-create-branch", func() (*git.Branch, error) {
-			return s.gitService.FindOrCreateBranch(ctx, finalBranchName, repoID)
-		}, "name", finalBranchName, "ws", ws.Name)
-		if err != nil {
-			markBroken("find-or-create-branch", err)
-			return
-		}
-
-		var (
-			created bool
-			wtPath  string
-		)
-		if err := traceOp(ctx, "git worktree add", func() error {
-			var e error
-			created, wtPath, e = s.gitService.SetupWorktreeAt(ctx, ws.Path, finalBranchName, baseBranchName, branch.ID, repoID, wt.Path)
-			return e
-		}, "branch", finalBranchName, "ws", ws.Name); err != nil {
 			markBroken("worktree setup", err)
 			return
 		}
-
-		if refreshed, err := s.gitService.GetWorktree(wt.ID); err == nil {
-			*wt = *refreshed
+		if result.warning != "" {
+			setupWarnings = append(setupWarnings, fmt.Sprintf("%s: %s", ws.Name, result.warning))
 		}
-		if wt.Path == "" {
-			wt.Path = wtPath
-		}
-
-		done = append(done, slotResult{swt: swt, wt: wt, ws: ws, branch: branch, worktreePath: wt.Path, created: created})
+		done = append(done, result)
 	}
 
 	for _, r := range done {
@@ -632,23 +836,7 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, specs []Works
 		}
 	}
 
-	workspacePaths := make([]string, 0, len(done))
-	checkouts := make([]claudesettings.SessionCheckout, 0, len(done))
-	for _, r := range done {
-		workspacePaths = append(workspacePaths, r.ws.Path)
-		checkouts = append(checkouts, claudesettings.SessionCheckout{
-			Subdir:        filepath.Base(r.worktreePath),
-			WorkspaceName: r.ws.Name,
-		})
-	}
-	if err := claudesettings.EnsureSessionRoot(sess.SessionRoot, workspacePaths); err != nil {
-		slog.WarnContext(ctx, "ensure session-root claude settings failed", "error", err)
-		setupWarnings = append(setupWarnings, fmt.Sprintf("claude-settings: %s", err.Error()))
-	}
-	if err := claudesettings.EnsureMultiSessionGuide(sess.SessionRoot, checkouts); err != nil {
-		slog.WarnContext(ctx, "ensure session CLAUDE.md failed", "error", err)
-		setupWarnings = append(setupWarnings, fmt.Sprintf("claude-guide: %s", err.Error()))
-	}
+	setupWarnings = append(setupWarnings, s.applyClaudeSettings(ctx, sess)...)
 
 	if err := s.setupTmux(ctx, sess, tmuxName, sess.SessionRoot); err != nil {
 		markBroken("tmux setup", err)

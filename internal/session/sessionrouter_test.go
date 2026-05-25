@@ -288,6 +288,70 @@ func TestSessionRouter_GetSessionByID_ShowsCreatingStatus(t *testing.T) {
 	require.Equal(t, StatusCreating, response.Status)
 }
 
+func TestSessionRouter_AddWorkspace_RejectsNoWorkspaceID(t *testing.T) {
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	session := &Session{Name: "session-1", Status: StatusActive, LastUsedAt: time.Now()}
+	addTestSession(t, sessionStore, swStore, session, ws1ID)
+
+	body := []byte(`{"branch":"main"}`)
+	req := httptest.NewRequest("POST", fmt.Sprintf("/%d/workspaces", session.ID), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSessionRouter_AddWorkspace_RejectsBothBranchFields(t *testing.T) {
+	router, sessionStore, _, _, ws1ID, ws2ID := setupSessionRouter(t)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	session := &Session{Name: "session-1", Status: StatusActive, LastUsedAt: time.Now()}
+	addTestSession(t, sessionStore, swStore, session, ws1ID)
+
+	body := []byte(fmt.Sprintf(`{"workspace_id":%d,"branch":"main","base_branch":"main"}`, ws2ID))
+	req := httptest.NewRequest("POST", fmt.Sprintf("/%d/workspaces", session.ID), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSessionRouter_AddWorkspace_SessionNotFound(t *testing.T) {
+	router, _, _, _, _, ws2ID := setupSessionRouter(t)
+
+	body := []byte(fmt.Sprintf(`{"workspace_id":%d,"branch":"main"}`, ws2ID))
+	req := httptest.NewRequest("POST", "/99999/workspaces", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestSessionRouter_AddWorkspace_DeletedSession(t *testing.T) {
+	router, sessionStore, _, _, ws1ID, ws2ID := setupSessionRouter(t)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	session := &Session{Name: "deleted-session", Status: StatusDeleted, LastUsedAt: time.Now()}
+	addTestSession(t, sessionStore, swStore, session, ws1ID)
+
+	body := []byte(fmt.Sprintf(`{"workspace_id":%d,"branch":"main"}`, ws2ID))
+	req := httptest.NewRequest("POST", fmt.Sprintf("/%d/workspaces", session.ID), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 func TestSessionRouter_GetSessionByID_ShowsBrokenStatusError(t *testing.T) {
 	router, sessionStore, _, _, _, _ := setupSessionRouter(t)
 
