@@ -2,6 +2,7 @@ package prlist
 
 import (
 	"os/exec"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -17,6 +18,7 @@ type Model struct {
 	list        list.Model
 	workspaceID uint
 	prs         []git.PullRequest
+	height      int
 }
 
 func New() Model {
@@ -46,6 +48,7 @@ func (m *Model) rebuildItems() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.height = msg.Height
 		m.list.SetWidth(msg.Width)
 		m.list.SetHeight(msg.Height)
 		return m, nil
@@ -101,6 +104,18 @@ func openURL(url string) tea.Cmd {
 	}
 }
 
+func padToHeight(s string, h int) string {
+	if h <= 0 {
+		return s
+	}
+	n := strings.Count(s, "\n")
+	if n >= h {
+		return s
+	}
+	return s + strings.Repeat("\n", h-n)
+}
+
 func (m Model) View() string {
-	return m.list.View()
+	v := strings.TrimRight(m.list.View(), "\n")
+	return padToHeight(v, m.height-1)
 }

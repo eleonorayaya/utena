@@ -18,7 +18,7 @@ func New(title string) Model {
 	if title == "" {
 		title = "Select branch"
 	}
-	return Model{list: ulist.New(title)}
+	return Model{list: ulist.NewWithDelegate(title, compactBranchDelegate{})}
 }
 
 func (m *Model) SetSize(width, height int) {

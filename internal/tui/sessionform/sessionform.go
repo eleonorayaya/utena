@@ -20,9 +20,25 @@ import (
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
-func errStyle() lipgloss.Style    { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
-func promptStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
-func pathStyle() lipgloss.Style   { return lipgloss.NewStyle().Foreground(theme.Current.Path) }
+func padToHeight(s string, h int) string {
+	if h <= 0 {
+		return s
+	}
+	n := strings.Count(s, "\n")
+	if n >= h {
+		return s
+	}
+	return s + strings.Repeat("\n", h-n)
+}
+
+func errStyle() lipgloss.Style     { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
+func pathStyle() lipgloss.Style    { return lipgloss.NewStyle().Foreground(theme.Current.Path) }
+func formTitleStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true).Foreground(theme.Current.TextEmphasis) }
+func formRuleStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant) }
+func formSectionStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true) }
+func formLabelStyle() lipgloss.Style   { return lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Width(14) }
+func formKeyStyle() lipgloss.Style     { return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true) }
+func formHintStyle() lipgloss.Style    { return lipgloss.NewStyle().Foreground(theme.Current.Text) }
 
 type step int
 
@@ -370,9 +386,9 @@ func (m *Model) initManualBranchInput() {
 func (m Model) View() string {
 	switch m.activeStep {
 	case filePickerStep:
-		return m.filePicker.View()
+		return padToHeight(strings.TrimRight(m.filePicker.View(), "\n"), m.height-1)
 	case branchPickerStep:
-		return m.branchPicker.View()
+		return padToHeight(strings.TrimRight(m.branchPicker.View(), "\n"), m.height-1)
 	case branchManualInputStep:
 		var b strings.Builder
 		ws := m.currentWorkspace()
@@ -384,30 +400,48 @@ func (m Model) View() string {
 		if m.manualBranchErr != "" {
 			b.WriteString("\n" + errStyle().Render(m.manualBranchErr))
 		}
-		return b.String()
+		return padToHeight(b.String(), m.height-1)
 	case branchModeStep:
 		var b strings.Builder
-		b.WriteString(promptStyle().Render("Branches picked:") + "\n")
-		for i, ws := range m.selectedWorkspaces {
-			fmt.Fprintf(&b, "  %s · %s\n", ws.Name, pathStyle().Render(m.pickedBranches[i]))
+		ruleW := m.width
+		if ruleW < 1 {
+			ruleW = 40
 		}
-		b.WriteString("\n  n  New branch per workspace (from the picked branches)\n")
-		b.WriteString("  e  Use existing branches\n\n")
-		b.WriteString("  esc: back")
-		return b.String()
+		b.WriteString(formTitleStyle().Render("New Session"))
+		b.WriteString("\n")
+		b.WriteString(formRuleStyle().Render(strings.Repeat("─", ruleW)))
+		b.WriteString("\n\n")
+		b.WriteString(formSectionStyle().Render("⎇ Branches") + "\n")
+		for i, ws := range m.selectedWorkspaces {
+			b.WriteString(formLabelStyle().Render(ws.Name) + pathStyle().Render(m.pickedBranches[i]) + "\n")
+		}
+		b.WriteString("\n" + formSectionStyle().Render("Mode") + "\n")
+		b.WriteString(formKeyStyle().Render("n") + "  " + formHintStyle().Render("create new branch from picked") + "\n")
+		b.WriteString(formKeyStyle().Render("e") + "  " + formHintStyle().Render("use existing branches as-is") + "\n")
+		b.WriteString(formKeyStyle().Render("esc") + "  " + formHintStyle().Render("back") + "\n")
+		return padToHeight(b.String(), m.height-1)
 	case nameInputStep:
 		var b strings.Builder
-		b.WriteString(promptStyle().Render("Workspaces:") + "\n")
-		for i, ws := range m.selectedWorkspaces {
-			fmt.Fprintf(&b, "  %s · %s\n", ws.Name, pathStyle().Render(m.pickedBranches[i]))
+		ruleW := m.width
+		if ruleW < 1 {
+			ruleW = 40
 		}
-		b.WriteString("\n" + m.nameInput.View())
+		b.WriteString(formTitleStyle().Render("New Session"))
+		b.WriteString("\n")
+		b.WriteString(formRuleStyle().Render(strings.Repeat("─", ruleW)))
+		b.WriteString("\n\n")
+		b.WriteString(formSectionStyle().Render("⎇ Branches") + "\n")
+		for i, ws := range m.selectedWorkspaces {
+			b.WriteString(formLabelStyle().Render(ws.Name) + pathStyle().Render(m.pickedBranches[i]) + "\n")
+		}
+		b.WriteString("\n")
+		b.WriteString(m.nameInput.View())
 		if m.nameErr != "" {
 			b.WriteString("\n" + errStyle().Render(m.nameErr))
 		}
-		return b.String()
+		return padToHeight(b.String(), m.height-1)
 	default:
-		return m.workspacePicker.View()
+		return padToHeight(strings.TrimRight(m.workspacePicker.View(), "\n"), m.height-1)
 	}
 }
 

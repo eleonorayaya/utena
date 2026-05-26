@@ -27,6 +27,25 @@ func valueStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(theme.Current.Text)
 }
 
+func ruleStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant)
+}
+
+func sectionStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true)
+}
+
+func padToHeight(s string, h int) string {
+	if h <= 0 {
+		return s
+	}
+	n := strings.Count(s, "\n")
+	if n >= h {
+		return s
+	}
+	return s + strings.Repeat("\n", h-n)
+}
+
 type Model struct {
 	workspace *workspace.Workspace
 	actionErr string
@@ -108,34 +127,46 @@ func (m Model) View() string {
 	ws := m.workspace
 
 	b.WriteString(titleStyle().Render(ws.Name))
+	b.WriteString("\n")
+
+	ruleWidth := m.width
+	if ruleWidth < 1 {
+		ruleWidth = 40
+	}
+	b.WriteString(ruleStyle().Render(strings.Repeat("─", ruleWidth)))
 	b.WriteString("\n\n")
 
-	b.WriteString(labelStyle().Render("Path") + valueStyle().Render(ws.Path) + "\n")
-
-	if ws.IsGitRepo {
-		repoName := "linked"
-		if ws.Repo != nil {
-			repoName = ws.Repo.FullName
-		}
-		b.WriteString(labelStyle().Render("Repository") + valueStyle().Render(repoName) + "\n")
-
-		bareStatus := "no  (press m to migrate)"
-		if ws.IsBare {
-			bareStatus = "yes"
-		}
-		b.WriteString(labelStyle().Render("Bare") + valueStyle().Render(bareStatus) + "\n")
-	} else {
-		b.WriteString(labelStyle().Render("Repository") + valueStyle().Render("not a git repo") + "\n")
-	}
+	pathStyle := lipgloss.NewStyle().Foreground(theme.Current.Path)
+	b.WriteString(labelStyle().Render("Path") + pathStyle.Render(ws.Path) + "\n")
 
 	if !ws.LastUsedAt.IsZero() {
 		b.WriteString(labelStyle().Render("Last used") + valueStyle().Render(common.TimeAgo(ws.LastUsedAt)) + "\n")
 	}
 
-	if m.actionErr != "" {
-		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(theme.Current.Error).Render("Error: "+m.actionErr) + "\n")
+	if ws.IsGitRepo {
+		b.WriteString("\n" + sectionStyle().Render("⎇ Repository") + "\n")
+		repoName := "linked"
+		if ws.Repo != nil {
+			repoName = ws.Repo.FullName
+		}
+		b.WriteString(labelStyle().Render("Name") + valueStyle().Render(repoName) + "\n")
+
+		bareStatus := "no"
+		if ws.IsBare {
+			bareStatus = "yes"
+		}
+		b.WriteString(labelStyle().Render("Bare") + valueStyle().Render(bareStatus) + "\n")
+		if !ws.IsBare {
+			b.WriteString(labelStyle().Render("") + lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("press m to migrate to bare") + "\n")
+		}
+	} else {
+		b.WriteString("\n" + sectionStyle().Render("⎇ Repository") + "\n")
+		b.WriteString(labelStyle().Render("") + lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("not a git repository") + "\n")
 	}
 
-	return b.String()
+	if m.actionErr != "" {
+		b.WriteString("\n" + lipgloss.NewStyle().Foreground(theme.Current.Error).Render("[!] "+m.actionErr) + "\n")
+	}
+
+	return padToHeight(b.String(), m.height-1)
 }

@@ -352,7 +352,7 @@ func (m Model) renderRow(s session.Session, selected bool, width int) string {
 
 	var timePart string
 	if !s.LastUsedAt.IsZero() {
-		timePart = " " + common.TimeAgo(s.LastUsedAt)
+		timePart = " " + common.TimeAgo(s.LastUsedAt) + " "
 	}
 	timePartW := lipgloss.Width(timePart)
 
@@ -461,11 +461,11 @@ func (m Model) View() string {
 		return listStr
 	}
 
-	panelW := m.width - listW - 1
-	divStyle := lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant)
+	panelW := m.width - listW - 2
+	divStyle := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
 	divLines := make([]string, m.height)
 	for i := range divLines {
-		divLines[i] = divStyle.Render("│")
+		divLines[i] = divStyle.Render("│ ")
 	}
 	divider := strings.Join(divLines, "\n")
 

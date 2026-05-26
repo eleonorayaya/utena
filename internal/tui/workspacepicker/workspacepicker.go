@@ -22,7 +22,7 @@ type Model struct {
 
 func New(title string, sortActiveFirst bool) Model {
 	return Model{
-		list:            ulist.New(title),
+		list:            ulist.NewWithDelegate(title, compactPickerDelegate{}),
 		sortActiveFirst: sortActiveFirst,
 		selected:        make(map[uint]struct{}),
 	}

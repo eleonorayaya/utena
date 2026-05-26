@@ -2,6 +2,7 @@ package workspacelist
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -19,10 +20,11 @@ type Model struct {
 	workspaces      []workspace.Workspace
 	pendingDeleteID uint
 	showHidden      bool
+	height          int
 }
 
 func New() Model {
-	return Model{list: ulist.New("Workspaces")}
+	return Model{list: ulist.NewWithDelegate("Workspaces", compactDelegate{})}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
@@ -51,6 +53,7 @@ func (m *Model) rebuildItems() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.height = msg.Height
 		m.list.SetWidth(msg.Width)
 		m.list.SetHeight(msg.Height)
 		return m, nil
@@ -130,6 +133,18 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
+func padToHeight(s string, h int) string {
+	if h <= 0 {
+		return s
+	}
+	n := strings.Count(s, "\n")
+	if n >= h {
+		return s
+	}
+	return s + strings.Repeat("\n", h-n)
+}
+
 func (m Model) View() string {
-	return m.list.View()
+	v := strings.TrimRight(m.list.View(), "\n")
+	return padToHeight(v, m.height-1)
 }

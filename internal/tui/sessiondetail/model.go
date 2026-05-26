@@ -109,7 +109,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.sess = &s
 		m.prs = nil
 		m.pendingDeleteID = 0
-		if !s.IsMulti() && len(s.Worktrees) > 0 && s.Worktrees[0].Workspace != nil {
+		if len(s.Worktrees) > 0 && s.Worktrees[0].Workspace != nil {
 			return m, provider.FetchPRs(s.Worktrees[0].Workspace.ID, "")
 		}
 		return m, nil
@@ -199,6 +199,17 @@ func RenderPanel(s *session.Session, prs []git.PullRequest, width, height int) s
 	return m.View()
 }
 
+func padToHeight(s string, h int) string {
+	if h <= 0 {
+		return s
+	}
+	n := strings.Count(s, "\n")
+	if n >= h {
+		return s
+	}
+	return s + strings.Repeat("\n", h-n)
+}
+
 func (m Model) View() string {
 	if m.sess == nil {
 		return "No session selected"
@@ -224,14 +235,35 @@ func (m Model) View() string {
 	b.WriteString(ruleStyle().Render(strings.Repeat("─", ruleWidth)))
 	b.WriteString("\n\n")
 
-	b.WriteString(labelStyle().Render("Workspace") + valueStyle().Render(s.WorkspaceDisplay()) + "\n")
+	b.WriteString(sectionStyle().Render("⎇ Workspace") + "\n")
+	if len(s.Worktrees) > 0 {
+		for i := range s.Worktrees {
+			label := "workspace"
+			if s.Worktrees[i].Workspace != nil {
+				label = s.Worktrees[i].Workspace.Name
+			}
+			wt := s.Worktrees[i].Worktree
+			if wt != nil && wt.Branch != nil {
+				b.WriteString(labelStyle().Render(label) + valueStyle().Render(wt.Branch.Name) + "\n")
+			} else {
+				b.WriteString(labelStyle().Render(label) + lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("—") + "\n")
+			}
+		}
+	} else {
+		b.WriteString(labelStyle().Render("") + valueStyle().Render(s.WorkspaceDisplay()) + "\n")
+	}
 	if s.SessionRoot != "" {
 		pathStyle := lipgloss.NewStyle().Foreground(theme.Current.Path)
 		b.WriteString(labelStyle().Render("Root") + pathStyle.Render(s.SessionRoot) + "\n")
 	}
+	for _, pr := range m.prs {
+		stateStyle := lipgloss.NewStyle().Foreground(prStateColor(pr.State))
+		prStr := fmt.Sprintf("#%d %s ", pr.Number, pr.Title) + stateStyle.Render("["+string(pr.State)+"]")
+		b.WriteString(labelStyle().Render("PR") + prStr + "\n")
+	}
 
 	if s.TmuxSession != nil {
-		b.WriteString("\n" + sectionStyle().Render("Tmux") + "\n")
+		b.WriteString("\n" + sectionStyle().Render("$ Tmux") + "\n")
 		b.WriteString(labelStyle().Render("Session") + valueStyle().Render(s.TmuxSession.Name) + "\n")
 		if s.TmuxSession.StartDir != "" {
 			pathStyle := lipgloss.NewStyle().Foreground(theme.Current.Path)
@@ -239,37 +271,8 @@ func (m Model) View() string {
 		}
 	}
 
-	if len(s.Worktrees) > 0 {
-		hasBranch := false
-		for i := range s.Worktrees {
-			if s.Worktrees[i].Worktree != nil && s.Worktrees[i].Worktree.Branch != nil {
-				hasBranch = true
-				break
-			}
-		}
-		if hasBranch {
-			b.WriteString("\n" + sectionStyle().Render("Git") + "\n")
-			for i := range s.Worktrees {
-				wt := s.Worktrees[i].Worktree
-				if wt == nil || wt.Branch == nil {
-					continue
-				}
-				val := wt.Branch.Name
-				if s.IsMulti() && s.Worktrees[i].Workspace != nil {
-					val = s.Worktrees[i].Workspace.Name + " · " + val
-				}
-				b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(val) + "\n")
-			}
-			for _, pr := range m.prs {
-				stateStyle := lipgloss.NewStyle().Foreground(prStateColor(pr.State))
-				prStr := fmt.Sprintf("#%d %s ", pr.Number, pr.Title) + stateStyle.Render("["+string(pr.State)+"]")
-				b.WriteString(labelStyle().Render("PR") + prStr + "\n")
-			}
-		}
-	}
-
 	if len(s.ClaudeSessions) > 0 {
-		b.WriteString("\n" + sectionStyle().Render("Claude") + "\n")
+		b.WriteString("\n" + sectionStyle().Render("◆ Claude") + "\n")
 		for _, cs := range s.ClaudeSessions {
 			b.WriteString(labelStyle().Render("Status") + valueStyle().Render(string(cs.Status)) + "\n")
 		}
@@ -286,11 +289,11 @@ func (m Model) View() string {
 		}
 	}
 	if len(actionErrors) > 0 {
-		b.WriteString("\n" + sectionStyle().Render("Actions") + "\n")
+		b.WriteString("\n" + sectionStyle().Render("⚠ Actions") + "\n")
 		for _, e := range actionErrors {
 			b.WriteString(warningStyle().Render(e) + "\n")
 		}
 	}
 
-	return b.String()
+	return padToHeight(b.String(), m.height-1)
 }

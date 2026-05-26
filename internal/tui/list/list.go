@@ -8,10 +8,16 @@ import (
 )
 
 func applySharedStyles(l *bubblelist.Model) {
+	l.Styles.TitleBar = l.Styles.TitleBar.
+		Background(lipgloss.NoColor{}).
+		PaddingLeft(0).
+		PaddingTop(0).
+		PaddingBottom(1)
 	l.Styles.Title = l.Styles.Title.
 		Foreground(theme.Current.Primary).
 		Background(lipgloss.NoColor{}).
 		Bold(true)
+	l.SetShowStatusBar(false)
 }
 
 func New(title string) bubblelist.Model {
