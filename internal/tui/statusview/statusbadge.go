@@ -51,11 +51,20 @@ func (b StatusBadge) View() string {
 	if style == nil {
 		return ""
 	}
-	return (*style).Background(b.bg()).Render(text)
+	rowBg := b.bg()
+	if _, isNoColor := rowBg.(lipgloss.NoColor); !isNoColor {
+		*style = (*style).Background(rowBg)
+	}
+	return (*style).Render(text)
 }
 
 func (b StatusBadge) Width() int {
 	return lipgloss.Width(b.View())
+}
+
+func (b StatusBadge) WithSelected(selected bool) StatusBadge {
+	b.selected = selected
+	return b
 }
 
 func (b StatusBadge) parts() (*lipgloss.Style, string) {
@@ -67,13 +76,19 @@ func (b StatusBadge) parts() (*lipgloss.Style, string) {
 			Background(theme.Current.PrimaryVariant)
 		return &s, " ! "
 	case claude.StatusWorking:
-		s := lipgloss.NewStyle().Foreground(theme.Current.Secondary)
+		s := lipgloss.NewStyle().
+			Foreground(theme.Current.TextOnPrimary).
+			Background(theme.Current.AccentLavender)
 		return &s, " ~ "
 	case claude.StatusReadyForReview:
-		s := lipgloss.NewStyle().Foreground(theme.Current.AccentMint)
+		s := lipgloss.NewStyle().
+			Foreground(theme.Current.TextOnPrimary).
+			Background(theme.Current.AccentMint)
 		return &s, " ✓ "
 	case claude.StatusDone:
-		s := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
+		s := lipgloss.NewStyle().
+			Foreground(theme.Current.TextMuted).
+			Background(theme.Current.SurfaceVariant)
 		return &s, " ✓ "
 	default:
 		return nil, ""

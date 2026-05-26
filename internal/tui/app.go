@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/tui/addworkspaceform"
 	"github.com/eleonorayaya/utena/internal/tui/debug"
 	"github.com/eleonorayaya/utena/internal/tui/prlist"
@@ -21,6 +22,9 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/workspacedetail"
 	"github.com/eleonorayaya/utena/internal/tui/workspacelist"
 )
+
+const padX = 2
+const padY = 1
 
 type App struct {
 	provider   provider.Provider
@@ -109,7 +113,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a App) OnWindowSizeMsg(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	a.width = msg.Width
 	a.height = msg.Height
-	adjusted := tea.WindowSizeMsg{Width: msg.Width, Height: msg.Height - a.help.HeightCost()}
+	adjusted := tea.WindowSizeMsg{
+		Width:  msg.Width - padX*2,
+		Height: msg.Height - padY*2 - a.help.HeightCost(),
+	}
 	var cmd tea.Cmd
 	a.router, cmd = a.router.Update(adjusted)
 	return a, cmd
@@ -122,7 +129,7 @@ func (a App) View() string {
 	if helpView != "" {
 		content += "\n" + helpView
 	}
-	return content
+	return lipgloss.NewStyle().Padding(padY, padX).Render(content)
 }
 
 func (a App) keys() help.KeyMap {

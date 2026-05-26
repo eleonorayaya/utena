@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/session"
@@ -37,6 +38,7 @@ func Start(sessionID uint) tea.Cmd {
 type Model struct {
 	sessionID uint
 	session   *session.Session
+	spinner   spinner.Model
 	done      bool
 	err       error
 	warning   string
@@ -45,7 +47,10 @@ type Model struct {
 }
 
 func New() Model {
-	return Model{}
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(theme.Current.Primary)
+	return Model{spinner: sp}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
@@ -53,7 +58,7 @@ func (m Model) Init() (Model, tea.Cmd) {
 	m.done = false
 	m.err = nil
 	m.warning = ""
-	return m, nil
+	return m, m.spinner.Tick
 }
 
 func (m *Model) SetSize(width, height int) {
@@ -83,7 +88,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.done = false
 		m.err = nil
 		m.warning = ""
-		return m, tea.Batch(provider.PollSession(m.sessionID), tick())
+		return m, tea.Batch(provider.PollSession(m.sessionID), tick(), m.spinner.Tick)
+
+	case spinner.TickMsg:
+		if !m.done {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 
 	case tickMsg:
 		if m.done || m.sessionID == 0 {
@@ -164,10 +177,10 @@ func (m Model) View() string {
 	b.WriteString("\n\n")
 
 	if m.session == nil {
-		b.WriteString(pendingStyle().Render("  Loading..."))
+		b.WriteString(m.spinner.View() + pendingStyle().Render(" Loading..."))
 		b.WriteString("\n")
 	} else if m.session.Status == session.StatusCreating {
-		b.WriteString(pendingStyle().Render("  Setting up..."))
+		b.WriteString(m.spinner.View() + pendingStyle().Render(" Setting up..."))
 		b.WriteString("\n")
 	}
 

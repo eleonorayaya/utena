@@ -34,7 +34,49 @@ func warningStyle() lipgloss.Style {
 }
 
 func sectionStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Bold(true)
+	return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true)
+}
+
+func ruleStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant)
+}
+
+func statusColor(status session.SessionStatus) lipgloss.Color {
+	switch status {
+	case session.StatusActive:
+		return theme.Current.StatusReady
+	case session.StatusCreating:
+		return theme.Current.StatusActive
+	case session.StatusBroken:
+		return theme.Current.Error
+	case session.StatusPending:
+		return theme.Current.StatusPending
+	default:
+		return theme.Current.TextMuted
+	}
+}
+
+func statusPill(status session.SessionStatus) string {
+	s := lipgloss.NewStyle().
+		Foreground(theme.Current.TextOnPrimary).
+		Background(statusColor(status)).
+		Bold(true)
+	return s.Render(" " + string(status) + " ")
+}
+
+func prStateColor(state git.PRState) lipgloss.Color {
+	switch state {
+	case git.PRStateOpen:
+		return theme.Current.StatusReady
+	case git.PRStateDraft:
+		return theme.Current.TextMuted
+	case git.PRStateClosed:
+		return theme.Current.Error
+	case git.PRStateMerged:
+		return theme.Current.Tertiary
+	default:
+		return theme.Current.TextMuted
+	}
 }
 
 type Model struct {
@@ -68,7 +110,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.sess = &s
 		m.prs = nil
 		m.pendingDeleteID = 0
-		if !s.IsMulti() && len(s.Worktrees) > 0 && s.Worktrees[0].Workspace != nil {
+		if len(s.Worktrees) > 0 && s.Worktrees[0].Workspace != nil {
 			return m, provider.FetchPRs(s.Worktrees[0].Workspace.ID, "")
 		}
 		return m, nil
@@ -161,6 +203,25 @@ func filterPRsByBranch(prs []git.PullRequest, branch *git.Branch) []git.PullRequ
 	return out
 }
 
+func RenderPanel(s *session.Session, prs []git.PullRequest, width, height int) string {
+	if s == nil {
+		return ""
+	}
+	m := Model{sess: s, prs: prs, width: width, height: height}
+	return m.View()
+}
+
+func padToHeight(s string, h int) string {
+	if h <= 0 {
+		return s
+	}
+	n := strings.Count(s, "\n")
+	if n >= h {
+		return s
+	}
+	return s + strings.Repeat("\n", h-n)
+}
+
 func (m Model) View() string {
 	if m.sess == nil {
 		return "No session selected"
@@ -169,53 +230,61 @@ func (m Model) View() string {
 	var b strings.Builder
 	s := m.sess
 
-	b.WriteString(titleStyle().Render(s.Name))
+	name := titleStyle().Render(s.Name)
+	pill := statusPill(s.Status)
+	if m.width > 0 {
+		gap := max(m.width-lipgloss.Width(name)-lipgloss.Width(pill), 1)
+		b.WriteString(name + strings.Repeat(" ", gap) + pill)
+	} else {
+		b.WriteString(name + "  " + pill)
+	}
+	b.WriteString("\n")
+
+	ruleWidth := m.width
+	if ruleWidth < 1 {
+		ruleWidth = 40
+	}
+	b.WriteString(ruleStyle().Render(strings.Repeat("─", ruleWidth)))
 	b.WriteString("\n\n")
 
-	b.WriteString(labelStyle().Render("Status") + valueStyle().Render(string(s.Status)) + "\n")
-
-	b.WriteString(labelStyle().Render("Workspace") + valueStyle().Render(s.WorkspaceDisplay()) + "\n")
+	b.WriteString(sectionStyle().Render("⎇ Workspace") + "\n")
+	if len(s.Worktrees) > 0 {
+		for i := range s.Worktrees {
+			label := "workspace"
+			if s.Worktrees[i].Workspace != nil {
+				label = s.Worktrees[i].Workspace.Name
+			}
+			wt := s.Worktrees[i].Worktree
+			if wt != nil && wt.Branch != nil {
+				b.WriteString(labelStyle().Render(label) + valueStyle().Render(wt.Branch.Name) + "\n")
+			} else {
+				b.WriteString(labelStyle().Render(label) + lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("—") + "\n")
+			}
+		}
+	} else {
+		b.WriteString(labelStyle().Render("") + valueStyle().Render(s.WorkspaceDisplay()) + "\n")
+	}
 	if s.SessionRoot != "" {
-		b.WriteString(labelStyle().Render("Root") + valueStyle().Render(s.SessionRoot) + "\n")
+		pathStyle := lipgloss.NewStyle().Foreground(theme.Current.Path)
+		b.WriteString(labelStyle().Render("Root") + pathStyle.Render(s.SessionRoot) + "\n")
+	}
+	for _, pr := range m.prs {
+		stateStyle := lipgloss.NewStyle().Foreground(prStateColor(pr.State))
+		prStr := fmt.Sprintf("#%d %s ", pr.Number, pr.Title) + stateStyle.Render("["+string(pr.State)+"]")
+		b.WriteString(labelStyle().Render("PR") + prStr + "\n")
 	}
 
 	if s.TmuxSession != nil {
-		b.WriteString("\n" + sectionStyle().Render("Tmux") + "\n")
+		b.WriteString("\n" + sectionStyle().Render("$ Tmux") + "\n")
 		b.WriteString(labelStyle().Render("Session") + valueStyle().Render(s.TmuxSession.Name) + "\n")
 		if s.TmuxSession.StartDir != "" {
-			b.WriteString(labelStyle().Render("Dir") + valueStyle().Render(s.TmuxSession.StartDir) + "\n")
-		}
-	}
-
-	if len(s.Worktrees) > 0 {
-		hasBranch := false
-		for i := range s.Worktrees {
-			if s.Worktrees[i].Worktree != nil && s.Worktrees[i].Worktree.Branch != nil {
-				hasBranch = true
-				break
-			}
-		}
-		if hasBranch {
-			b.WriteString("\n" + sectionStyle().Render("Git") + "\n")
-			for i := range s.Worktrees {
-				wt := s.Worktrees[i].Worktree
-				if wt == nil || wt.Branch == nil {
-					continue
-				}
-				val := wt.Branch.Name
-				if s.IsMulti() && s.Worktrees[i].Workspace != nil {
-					val = s.Worktrees[i].Workspace.Name + " · " + val
-				}
-				b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(val) + "\n")
-			}
-			for _, pr := range m.prs {
-				b.WriteString(labelStyle().Render("PR") + valueStyle().Render(fmt.Sprintf("#%d %s (%s)", pr.Number, pr.Title, pr.State)) + "\n")
-			}
+			pathStyle := lipgloss.NewStyle().Foreground(theme.Current.Path)
+			b.WriteString(labelStyle().Render("Dir") + pathStyle.Render(s.TmuxSession.StartDir) + "\n")
 		}
 	}
 
 	if len(s.ClaudeSessions) > 0 {
-		b.WriteString("\n" + sectionStyle().Render("Claude") + "\n")
+		b.WriteString("\n" + sectionStyle().Render("◆ Claude") + "\n")
 		for _, cs := range s.ClaudeSessions {
 			b.WriteString(labelStyle().Render("Status") + valueStyle().Render(string(cs.Status)) + "\n")
 		}
@@ -232,11 +301,11 @@ func (m Model) View() string {
 		}
 	}
 	if len(actionErrors) > 0 {
-		b.WriteString("\n" + sectionStyle().Render("Actions") + "\n")
+		b.WriteString("\n" + sectionStyle().Render("⚠ Actions") + "\n")
 		for _, e := range actionErrors {
 			b.WriteString(warningStyle().Render(e) + "\n")
 		}
 	}
 
-	return b.String()
+	return padToHeight(b.String(), m.height-1)
 }

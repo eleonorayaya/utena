@@ -10,11 +10,11 @@ type routerKeyMap struct {
 }
 
 func (k routerKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Debug}
+	return nil
 }
 
 func (k routerKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Debug}}
+	return nil
 }
 
 var routerKeys = routerKeyMap{
