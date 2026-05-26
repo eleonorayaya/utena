@@ -192,6 +192,30 @@ func (c *SessionController) ArchiveSession(w http.ResponseWriter, r *http.Reques
 	common.RenderResponse(w, r, NewSessionResponse(session))
 }
 
+func (c *SessionController) AddWorkspace(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	data := &AddWorkspaceRequest{}
+	if err := render.Bind(r, data); err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	session, err := c.service.AddWorkspace(ctx, id, data.WorkspaceBranchSpec)
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	render.Status(r, http.StatusAccepted)
+	common.RenderResponse(w, r, NewSessionResponse(session))
+}
+
 func (c *SessionController) DismissSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id, err := parseUintParam(r, "id")

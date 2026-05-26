@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tui/addworkspaceform"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
@@ -172,6 +173,17 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, tea.Sequence(
 			router.NavigateTo(router.SessionProgressView),
 			sessionprogress.Start(id),
+		)
+
+	case key.Matches(msg, keys.AddWorkspace):
+		s := m.sess.Status
+		if s == session.StatusDeleted || s == session.StatusArchived || s == session.StatusCreating {
+			return m, nil
+		}
+		id := m.sess.ID
+		return m, tea.Sequence(
+			router.NavigateTo(router.AddWorkspaceFormView),
+			addworkspaceform.Start(id),
 		)
 	}
 

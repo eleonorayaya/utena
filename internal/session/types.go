@@ -78,6 +78,20 @@ func (c *CreateSessionRequest) Bind(r *http.Request) error {
 	return nil
 }
 
+type AddWorkspaceRequest struct {
+	WorkspaceBranchSpec
+}
+
+func (r *AddWorkspaceRequest) Bind(_ *http.Request) error {
+	if r.WorkspaceID == 0 {
+		return errors.New("workspace_id is required")
+	}
+	if (r.Branch != "") == (r.BaseBranch != "") {
+		return errors.New("exactly one of branch or base_branch is required")
+	}
+	return nil
+}
+
 type UpdateSessionRequest struct {
 	*Session
 }
