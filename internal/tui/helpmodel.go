@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
 type helpModel struct {
@@ -12,8 +13,15 @@ type helpModel struct {
 }
 
 func newHelpModel(visible bool) helpModel {
+	h := help.New()
+	h.Styles.ShortKey = h.Styles.ShortKey.Foreground(theme.Current.Primary)
+	h.Styles.ShortDesc = h.Styles.ShortDesc.Foreground(theme.Current.Text)
+	h.Styles.ShortSeparator = h.Styles.ShortSeparator.Foreground(theme.Current.TextMuted)
+	h.Styles.FullKey = h.Styles.FullKey.Foreground(theme.Current.Primary)
+	h.Styles.FullDesc = h.Styles.FullDesc.Foreground(theme.Current.Text)
+	h.Styles.FullSeparator = h.Styles.FullSeparator.Foreground(theme.Current.TextMuted)
 	return helpModel{
-		inner:   help.New(),
+		inner:   h,
 		visible: visible,
 	}
 }

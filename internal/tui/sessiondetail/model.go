@@ -33,7 +33,49 @@ func warningStyle() lipgloss.Style {
 }
 
 func sectionStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Bold(true)
+	return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true)
+}
+
+func ruleStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant)
+}
+
+func statusColor(status session.SessionStatus) lipgloss.Color {
+	switch status {
+	case session.StatusActive:
+		return theme.Current.StatusReady
+	case session.StatusCreating:
+		return theme.Current.StatusActive
+	case session.StatusBroken:
+		return theme.Current.Error
+	case session.StatusPending:
+		return theme.Current.StatusPending
+	default:
+		return theme.Current.TextMuted
+	}
+}
+
+func statusPill(status session.SessionStatus) string {
+	s := lipgloss.NewStyle().
+		Foreground(theme.Current.TextOnPrimary).
+		Background(statusColor(status)).
+		Bold(true)
+	return s.Render(" " + string(status) + " ")
+}
+
+func prStateColor(state git.PRState) lipgloss.Color {
+	switch state {
+	case git.PRStateOpen:
+		return theme.Current.StatusReady
+	case git.PRStateDraft:
+		return theme.Current.TextMuted
+	case git.PRStateClosed:
+		return theme.Current.Error
+	case git.PRStateMerged:
+		return theme.Current.Tertiary
+	default:
+		return theme.Current.TextMuted
+	}
 }
 
 type Model struct {
@@ -149,6 +191,14 @@ func filterPRsByBranch(prs []git.PullRequest, branch *git.Branch) []git.PullRequ
 	return out
 }
 
+func RenderPanel(s *session.Session, prs []git.PullRequest, width, height int) string {
+	if s == nil {
+		return ""
+	}
+	m := Model{sess: s, prs: prs, width: width, height: height}
+	return m.View()
+}
+
 func (m Model) View() string {
 	if m.sess == nil {
 		return "No session selected"
@@ -157,21 +207,35 @@ func (m Model) View() string {
 	var b strings.Builder
 	s := m.sess
 
-	b.WriteString(titleStyle().Render(s.Name))
-	b.WriteString("\n\n")
+	name := titleStyle().Render(s.Name)
+	pill := statusPill(s.Status)
+	if m.width > 0 {
+		gap := max(m.width-lipgloss.Width(name)-lipgloss.Width(pill), 1)
+		b.WriteString(name + strings.Repeat(" ", gap) + pill)
+	} else {
+		b.WriteString(name + "  " + pill)
+	}
+	b.WriteString("\n")
 
-	b.WriteString(labelStyle().Render("Status") + valueStyle().Render(string(s.Status)) + "\n")
+	ruleWidth := m.width
+	if ruleWidth < 1 {
+		ruleWidth = 40
+	}
+	b.WriteString(ruleStyle().Render(strings.Repeat("─", ruleWidth)))
+	b.WriteString("\n\n")
 
 	b.WriteString(labelStyle().Render("Workspace") + valueStyle().Render(s.WorkspaceDisplay()) + "\n")
 	if s.SessionRoot != "" {
-		b.WriteString(labelStyle().Render("Root") + valueStyle().Render(s.SessionRoot) + "\n")
+		pathStyle := lipgloss.NewStyle().Foreground(theme.Current.Path)
+		b.WriteString(labelStyle().Render("Root") + pathStyle.Render(s.SessionRoot) + "\n")
 	}
 
 	if s.TmuxSession != nil {
 		b.WriteString("\n" + sectionStyle().Render("Tmux") + "\n")
 		b.WriteString(labelStyle().Render("Session") + valueStyle().Render(s.TmuxSession.Name) + "\n")
 		if s.TmuxSession.StartDir != "" {
-			b.WriteString(labelStyle().Render("Dir") + valueStyle().Render(s.TmuxSession.StartDir) + "\n")
+			pathStyle := lipgloss.NewStyle().Foreground(theme.Current.Path)
+			b.WriteString(labelStyle().Render("Dir") + pathStyle.Render(s.TmuxSession.StartDir) + "\n")
 		}
 	}
 
@@ -197,7 +261,9 @@ func (m Model) View() string {
 				b.WriteString(labelStyle().Render("Branch") + valueStyle().Render(val) + "\n")
 			}
 			for _, pr := range m.prs {
-				b.WriteString(labelStyle().Render("PR") + valueStyle().Render(fmt.Sprintf("#%d %s (%s)", pr.Number, pr.Title, pr.State)) + "\n")
+				stateStyle := lipgloss.NewStyle().Foreground(prStateColor(pr.State))
+				prStr := fmt.Sprintf("#%d %s ", pr.Number, pr.Title) + stateStyle.Render("["+string(pr.State)+"]")
+				b.WriteString(labelStyle().Render("PR") + prStr + "\n")
 			}
 		}
 	}
