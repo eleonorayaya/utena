@@ -22,8 +22,8 @@ func (i workspaceItem) FilterValue() string { return i.workspace.Name }
 
 type compactDelegate struct{}
 
-func (d compactDelegate) Height() int                               { return 1 }
-func (d compactDelegate) Spacing() int                             { return 0 }
+func (d compactDelegate) Height() int                             { return 1 }
+func (d compactDelegate) Spacing() int                            { return 0 }
 func (d compactDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
 func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {

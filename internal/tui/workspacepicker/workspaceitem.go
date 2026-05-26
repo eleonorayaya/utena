@@ -35,8 +35,8 @@ func AbbreviatePath(path string) string {
 
 type compactPickerDelegate struct{}
 
-func (d compactPickerDelegate) Height() int                               { return 1 }
-func (d compactPickerDelegate) Spacing() int                             { return 0 }
+func (d compactPickerDelegate) Height() int                             { return 1 }
+func (d compactPickerDelegate) Spacing() int                            { return 0 }
 func (d compactPickerDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
 func (d compactPickerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {

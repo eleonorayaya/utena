@@ -31,14 +31,24 @@ func padToHeight(s string, h int) string {
 	return s + strings.Repeat("\n", h-n)
 }
 
-func errStyle() lipgloss.Style     { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
-func pathStyle() lipgloss.Style    { return lipgloss.NewStyle().Foreground(theme.Current.Path) }
-func formTitleStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true).Foreground(theme.Current.TextEmphasis) }
-func formRuleStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant) }
-func formSectionStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true) }
-func formLabelStyle() lipgloss.Style   { return lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Width(14) }
-func formKeyStyle() lipgloss.Style     { return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true) }
-func formHintStyle() lipgloss.Style    { return lipgloss.NewStyle().Foreground(theme.Current.Text) }
+func errStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
+func pathStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Path) }
+func formTitleStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(theme.Current.TextEmphasis)
+}
+func formRuleStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant)
+}
+func formSectionStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true)
+}
+func formLabelStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Width(14)
+}
+func formKeyStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true)
+}
+func formHintStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Text) }
 
 type step int
 

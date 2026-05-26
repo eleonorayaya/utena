@@ -26,8 +26,8 @@ func (i branchItem) FilterValue() string { return i.name }
 
 type compactBranchDelegate struct{}
 
-func (d compactBranchDelegate) Height() int                               { return 1 }
-func (d compactBranchDelegate) Spacing() int                             { return 0 }
+func (d compactBranchDelegate) Height() int                             { return 1 }
+func (d compactBranchDelegate) Spacing() int                            { return 0 }
 func (d compactBranchDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
 func (d compactBranchDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
