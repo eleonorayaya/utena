@@ -70,6 +70,7 @@ type SessionService struct {
 	sessionWorktreeStore *SessionWorktreeStore
 	dismissedPRStore     *DismissedPRStore
 	sessionActionStore   *SessionActionStore
+	setupStepStore       *SessionSetupStepStore
 	workspaceService     *workspace.WorkspaceService
 	gitService           *git.GitService
 	tmuxService          *utmux.TmuxService
@@ -80,12 +81,13 @@ type SessionService struct {
 	setupTimeout         time.Duration
 }
 
-func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
+func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, setupStepStore *SessionSetupStepStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
 	return &SessionService{
 		store:                store,
 		sessionWorktreeStore: sessionWorktreeStore,
 		dismissedPRStore:     dismissedPRStore,
 		sessionActionStore:   sessionActionStore,
+		setupStepStore:       setupStepStore,
 		workspaceService:     workspaceService,
 		gitService:           gitService,
 		tmuxService:          tmuxService,
@@ -395,6 +397,12 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		if err := s.workspaceService.Touch(ctx, a.ws.ID); err != nil {
 			slog.WarnContext(ctx, "failed to touch workspace last-used timestamp", "workspace", a.ws.ID, "error", err)
 		}
+	}
+
+	stepWS := assignedToStepWorkspaces(assigned)
+	defs := buildSetupSteps(stepWS, s.loadWorkspaceConfigs(stepWS))
+	if _, err := s.persistSetupSteps(sess.ID, defs); err != nil {
+		slog.WarnContext(ctx, "failed to pre-create setup steps", "session", sess.ID, "error", err)
 	}
 
 	go s.runSetup(sess.ID, tmuxName, input.Workspaces)
@@ -745,10 +753,6 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, specs []Works
 		slog.InfoContext(ctx, "session setup: done", "status", sess.Status, "duration_ms", time.Since(setupStart).Milliseconds())
 	}()
 
-	var done []worktreeSetupResult
-	var setupWarnings []string
-	wsCache := make(map[uint]*workspace.Workspace)
-
 	markBroken := func(stage string, err error) {
 		msg := fmt.Sprintf("%s failed: %v", stage, err)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -759,18 +763,15 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, specs []Works
 		}
 	}
 
-	if sess.SessionRoot != "" {
-		if err := os.MkdirAll(sess.SessionRoot, 0o755); err != nil {
-			markBroken("ensure session root", err)
-			return
-		}
-	}
-
 	if len(sess.Worktrees) == 0 {
 		markBroken("missing worktrees", fmt.Errorf("session %d has no SessionWorktree rows", sess.ID))
 		return
 	}
 
+	wsCache := make(map[uint]*workspace.Workspace)
+	orderedWS := make([]stepWorkspace, 0, len(sess.Worktrees))
+	wsByID := make(map[uint]*workspace.Workspace, len(sess.Worktrees))
+	swtByID := make(map[uint]*SessionWorktree, len(sess.Worktrees))
 	for i := range sess.Worktrees {
 		swt := &sess.Worktrees[i]
 		wt := swt.Worktree
@@ -783,80 +784,48 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, specs []Works
 			markBroken("workspace lookup", err)
 			return
 		}
-		result, err := s.setupSingleWorktree(ctx, sess, swt, ws, specByWS[ws.ID])
-		if err != nil {
-			markBroken("worktree setup", err)
-			return
-		}
-		if result.warning != "" {
-			setupWarnings = append(setupWarnings, fmt.Sprintf("%s: %s", ws.Name, result.warning))
-		}
-		done = append(done, result)
+		orderedWS = append(orderedWS, stepWorkspace{ID: ws.ID, Name: ws.Name, Path: ws.Path})
+		wsByID[ws.ID] = ws
+		swtByID[ws.ID] = swt
 	}
 
-	for _, r := range done {
-		if !r.created {
-			continue
-		}
-		branchName := ""
-		if r.branch != nil {
-			branchName = r.branch.Name
-		}
-		env := []string{
-			envSessionRoot + "=" + sess.SessionRoot,
-			envSessionName + "=" + sess.Name,
-			envBranch + "=" + branchName,
-			envWorktreePath + "=" + r.worktreePath,
-			envWorkspaceName + "=" + r.ws.Name,
-			envWorkspacePath + "=" + r.ws.Path,
-		}
-		wsScript := filepath.Join(r.ws.Path, ".utena", worktreeSetupName)
-		if err := traceOp(ctx, "worktree-setup script", func() error {
-			return s.runScript(ctx, wsScript, r.worktreePath, env)
-		}, "script", wsScript, "ws", r.ws.Name); err != nil {
-			slog.WarnContext(ctx, "workspace worktree-setup script failed", "ws", r.ws.Name, "error", err)
-			setupWarnings = append(setupWarnings, fmt.Sprintf("%s: %s", r.ws.Name, err.Error()))
-		}
+	configs := s.loadWorkspaceConfigs(orderedWS)
+	defs := buildSetupSteps(orderedWS, configs)
+	steps := s.ensureSetupSteps(sess.ID, defs)
+
+	execSteps := make([]execStep, len(defs))
+	for i := range defs {
+		execSteps[i] = execStep{def: defs[i], db: steps[i]}
 	}
 
-	anyCreated := false
-	for _, r := range done {
-		if r.created {
-			anyCreated = true
-			break
-		}
+	executor := &setupExecution{
+		svc:       s,
+		sess:      sess,
+		tmuxName:  tmuxName,
+		execSteps: execSteps,
+		orderedWS: orderedWS,
+		specByWS:  specByWS,
+		wsByID:    wsByID,
+		swtByID:   swtByID,
+		updater:   &stepUpdater{store: s.setupStepStore},
+		results:   make(map[uint]*worktreeSetupResult, len(orderedWS)),
 	}
-	if anyCreated {
-		globalBranch := ""
-		if len(done) > 0 && done[0].branch != nil {
-			globalBranch = done[0].branch.Name
-		}
-		globalEnv := []string{
-			envSessionRoot + "=" + sess.SessionRoot,
-			envSessionName + "=" + sess.Name,
-			envBranch + "=" + globalBranch,
-		}
-		globalScript := filepath.Join(s.configDir, worktreeSetupName)
-		if err := traceOp(ctx, "global worktree-setup script", func() error {
-			return s.runScript(ctx, globalScript, sess.SessionRoot, globalEnv)
-		}, "script", globalScript); err != nil {
-			slog.WarnContext(ctx, "global worktree-setup script failed", "error", err)
-			setupWarnings = append(setupWarnings, fmt.Sprintf("global: %s", err.Error()))
-		}
+	executor.run(ctx)
+
+	if executor.broken {
+		markBroken(executor.brokenStage, executor.brokenErr)
+		return
 	}
-
-	setupWarnings = append(setupWarnings, s.applyClaudeSettings(ctx, sess)...)
-
-	if err := s.setupTmux(ctx, sess, tmuxName, sess.SessionRoot); err != nil {
-		markBroken("tmux setup", err)
+	if ctx.Err() != nil {
+		markBroken("setup", ctx.Err())
 		return
 	}
 
 	sess.Status = StatusActive
-	if len(setupWarnings) == 0 {
+	if len(executor.warnings) == 0 {
 		sess.StatusError = ""
 	} else {
-		sess.StatusError = strings.Join(setupWarnings, "; ")
+		sess.StatusError = strings.Join(executor.warnings, "; ")
 	}
 	if err := s.store.Update(sess); err != nil {
 		markBroken("persist active status", err)

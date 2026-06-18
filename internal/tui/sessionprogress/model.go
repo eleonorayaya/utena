@@ -24,6 +24,9 @@ func failedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.
 func warningStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(theme.Current.AccentLavender)
 }
+func doneStyle() lipgloss.Style    { return lipgloss.NewStyle().Foreground(theme.Current.StatusReady) }
+func runningStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Primary) }
+func dimStyle() lipgloss.Style     { return lipgloss.NewStyle().Foreground(theme.Current.TextMuted) }
 
 type tickMsg time.Time
 
@@ -180,8 +183,12 @@ func (m Model) View() string {
 		b.WriteString(m.spinner.View() + pendingStyle().Render(" Loading..."))
 		b.WriteString("\n")
 	} else if m.session.Status == session.StatusCreating {
-		b.WriteString(m.spinner.View() + pendingStyle().Render(" Setting up..."))
-		b.WriteString("\n")
+		if len(m.session.SetupSteps) == 0 {
+			b.WriteString(m.spinner.View() + pendingStyle().Render(" Setting up..."))
+			b.WriteString("\n")
+		} else {
+			b.WriteString(m.renderSteps())
+		}
 	}
 
 	if m.warning != "" {
@@ -198,5 +205,28 @@ func (m Model) View() string {
 		b.WriteString("\n")
 	}
 
+	return b.String()
+}
+
+func (m Model) renderSteps() string {
+	var b strings.Builder
+	for i := range m.session.SetupSteps {
+		step := m.session.SetupSteps[i]
+		switch step.Status {
+		case session.SetupStepRunning:
+			b.WriteString(runningStyle().Render(m.spinner.View() + " " + step.Label))
+		case session.SetupStepDone:
+			b.WriteString(doneStyle().Render("  ✓ " + step.Label))
+		case session.SetupStepFailed:
+			b.WriteString(failedStyle().Render("  ✗ " + step.Label))
+			if step.ErrorMsg != "" {
+				b.WriteString("\n")
+				b.WriteString(failedStyle().Render("    " + step.ErrorMsg))
+			}
+		default:
+			b.WriteString(dimStyle().Render("  ○ " + step.Label))
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
 }

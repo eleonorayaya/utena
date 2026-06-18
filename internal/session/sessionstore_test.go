@@ -19,7 +19,7 @@ import (
 )
 
 func setupTestDB(t *testing.T) db.Database {
-	return testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &SessionWorktree{}, &claude.ClaudeSession{}, &SessionAction{})
+	return testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &SessionWorktree{}, &claude.ClaudeSession{}, &SessionAction{}, &SessionSetupStep{})
 }
 
 func setupSessionStore(t *testing.T) (*SessionStore, uint, uint) {
@@ -367,7 +367,7 @@ func TestSessionStore_OnAppEnd(t *testing.T) {
 
 func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *utmux.TmuxSession) {
 	t.Helper()
-	database := testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &SessionWorktree{}, &claude.ClaudeSession{}, &SessionAction{})
+	database := testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &SessionWorktree{}, &claude.ClaudeSession{}, &SessionAction{}, &SessionSetupStep{})
 
 	repo := &git.Repo{Path: "/tmp/utena", FullName: "eleonorayaya/utena"}
 	database.Create(repo)

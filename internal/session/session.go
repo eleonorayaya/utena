@@ -42,6 +42,7 @@ type Session struct {
 	SessionRoot    string                 `json:"session_root,omitempty" gorm:"index"`
 	ClaudeSessions []claude.ClaudeSession `json:"claude_sessions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	SessionActions []SessionAction        `json:"session_actions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	SetupSteps     []SessionSetupStep     `json:"setup_steps,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	Worktrees      []SessionWorktree      `json:"worktrees,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	TmuxSessionID  *uint                  `json:"tmux_session_id,omitempty" gorm:"uniqueIndex"`
 	StatusError    string                 `json:"status_error,omitempty"`
