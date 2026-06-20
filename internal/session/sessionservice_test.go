@@ -47,7 +47,7 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
 	configDir := t.TempDir()
 	sessionsRoot := t.TempDir()
-	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir, sessionsRoot)
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", configDir, sessionsRoot)
 	return service, sessionStore, workspaceStore, mock, ws1.ID, ws2.ID
 }
 
@@ -541,7 +541,7 @@ func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir st
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir, t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", configDir, t.TempDir())
 	return service, sessionStore, mock, wsGit.ID, database, gitService
 }
 
@@ -783,7 +783,7 @@ func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	swtStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, swtStore, NewDismissedPRStore(database), NewSessionActionStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	service := NewSessionService(sessionStore, swtStore, NewDismissedPRStore(database), NewSessionActionStore(database), NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
 
 	ts := &utmux.TmuxSession{Name: "utena-session-1", StartDir: "/tmp/utena", Status: utmux.TmuxStatusActive}
 	require.NoError(t, database.Create(ts).Error)
@@ -1072,7 +1072,7 @@ func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionSe
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", configDir, t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", configDir, t.TempDir())
 	return service, sessionStore, mock, wsGit.ID, repoPath
 }
 

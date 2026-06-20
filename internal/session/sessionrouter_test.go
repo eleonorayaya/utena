@@ -37,7 +37,7 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 

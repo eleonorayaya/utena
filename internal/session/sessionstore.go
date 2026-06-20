@@ -26,6 +26,9 @@ func (s *SessionStore) loaded() *gorm.DB {
 		Joins("TmuxSession").
 		Preload("ClaudeSessions").
 		Preload("SessionActions").
+		Preload("SetupSteps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("session_setup_steps.position ASC")
+		}).
 		Preload("Worktrees", func(db *gorm.DB) *gorm.DB {
 			return db.Order("session_worktrees.position ASC")
 		}).
