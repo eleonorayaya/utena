@@ -203,6 +203,16 @@ func (s *SessionStore) Delete(id uint) error {
 	return s.db.Delete(&Session{}, "id = ?", id).Error
 }
 
+// HardDelete physically removes the session row (bypassing GORM soft delete) so
+// the database's ON DELETE CASCADE constraints fire, cleaning up join rows,
+// claude sessions, actions, and setup steps.
+func (s *SessionStore) HardDelete(id uint) error {
+	if id == 0 {
+		return errors.New("session ID cannot be zero")
+	}
+	return s.db.Where("id = ?", id).Unscoped().Delete(&Session{}).Error
+}
+
 func (s *SessionStore) GetByWorkspaceAndName(workspaceID uint, name string, excludeStatuses ...SessionStatus) (*Session, error) {
 	var session Session
 	q := s.db.Where("name = ? AND id IN (?)", name, s.sessionsForWorkspace(workspaceID))

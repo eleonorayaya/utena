@@ -377,6 +377,10 @@ func (s *GitService) DeleteWorktreesByRepoID(repoID uint) error {
 	return s.worktreeStore.DeleteByRepoID(repoID)
 }
 
+func (s *GitService) DeleteWorktree(id uint) error {
+	return s.worktreeStore.Delete(id)
+}
+
 func (s *GitService) IsHealthy(ctx context.Context, branch *Branch, repoPath string) bool {
 	wt, err := s.worktreeStore.GetByBranchID(branch.ID)
 	if errors.Is(err, ErrWorktreeNotFound) {

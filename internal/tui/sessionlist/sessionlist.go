@@ -27,6 +27,7 @@ type Model struct {
 	cursor          int
 	offset          int
 	showBroken      bool
+	showArchived    bool
 	pendingDeleteID uint
 	pendingRepairID uint
 	statusMsg       string
@@ -98,6 +99,9 @@ func (m *Model) rebuildFiltered() {
 			continue
 		}
 		if s.Status == session.StatusBroken && !m.showBroken {
+			continue
+		}
+		if s.Status == session.StatusArchived && !m.showArchived {
 			continue
 		}
 		m.filtered = append(m.filtered, s)
@@ -248,6 +252,11 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.rebuildFiltered()
 		return m, nil, true
 
+	case key.Matches(msg, keys.ToggleArchived):
+		m.showArchived = !m.showArchived
+		m.rebuildFiltered()
+		return m, nil, true
+
 	case key.Matches(msg, keys.New):
 		return m, router.NavigateTo(router.SessionFormView), true
 
@@ -302,16 +311,23 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			m.statusMsg = "cannot close attached session"
 			return m, nil, true
 		}
+		// Pending sessions hold no real resources; dismiss them outright.
+		if sel.Status == session.StatusPending {
+			return m, provider.DismissSession(sel.ID), true
+		}
 		if m.pendingDeleteID == sel.ID {
 			m.pendingDeleteID = 0
-			return m, provider.DeleteSession(sel.ID, sel.IsCreating()), true
+			switch {
+			case sel.CanDelete():
+				return m, provider.DeleteSession(sel.ID, false), true
+			case sel.IsCreating():
+				return m, provider.DeleteSession(sel.ID, true), true
+			default:
+				return m, provider.ArchiveSession(sel.ID), true
+			}
 		}
 		m.pendingDeleteID = sel.ID
-		if sel.IsCreating() {
-			m.statusMsg = forceDeleteMessage(sessionDisplayName(*sel))
-			return m, nil, true
-		}
-		m.statusMsg = fmt.Sprintf("press d again to close %s", sessionDisplayName(*sel))
+		m.statusMsg = m.closeConfirmMessage(*sel)
 		return m, nil, true
 	}
 
@@ -343,6 +359,21 @@ func sessionDisplayName(s session.Session) string {
 
 func forceDeleteMessage(name string) string {
 	return fmt.Sprintf("session is still creating — press d again to force delete %s", name)
+}
+
+// closeConfirmMessage prompts the appropriate destructive action for the
+// session's state: archive for a live session, delete for an already-archived
+// one, force-delete for a stuck creating session.
+func (m Model) closeConfirmMessage(s session.Session) string {
+	name := sessionDisplayName(s)
+	switch {
+	case s.CanDelete():
+		return fmt.Sprintf("press d again to delete %s (removes worktrees)", name)
+	case s.IsCreating():
+		return forceDeleteMessage(name)
+	default:
+		return fmt.Sprintf("press d again to archive %s", name)
+	}
 }
 
 func (m Model) renderRow(s session.Session, selected bool, width int) string {

@@ -144,10 +144,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, provider.ActivateSession(m.sess.ID)
 
 	case key.Matches(msg, keys.Archive):
-		archivable := m.sess.Status == session.StatusActive ||
-			m.sess.Status == session.StatusInactive ||
-			m.sess.Status == session.StatusCompleted
-		if !archivable {
+		if !m.sess.CanArchive() {
 			return m, nil
 		}
 		return m, tea.Batch(
@@ -156,6 +153,11 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		)
 
 	case key.Matches(msg, keys.Delete):
+		// Only archived sessions can be deleted; creating sessions keep the
+		// force escape hatch.
+		if !m.sess.CanDelete() && !m.sess.IsCreating() {
+			return m, nil
+		}
 		if pendingID == m.sess.ID {
 			return m, tea.Batch(
 				provider.DeleteSession(m.sess.ID, m.sess.IsCreating()),

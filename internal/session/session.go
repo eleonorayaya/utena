@@ -16,6 +16,7 @@ import (
 var ErrSessionAlreadyExists = common.NewConflict("session already exists")
 var ErrSessionNotFound = common.NewNotFound("session not found")
 var ErrSessionAttached = common.NewInvalidRequest("cannot delete attached session")
+var ErrSessionNotArchived = common.NewInvalidRequest("only archived sessions can be deleted")
 var ErrSessionNotBroken = common.NewInvalidRequest("session is not broken")
 var ErrCannotActivate = common.NewInvalidRequest("cannot activate session in current state")
 
@@ -60,6 +61,19 @@ type SessionWorktree struct {
 
 func (s *Session) IsCreating() bool {
 	return s.Status == StatusCreating
+}
+
+// CanArchive reports whether the session is in a state that can be archived:
+// any live or finished session, including broken ones.
+func (s *Session) CanArchive() bool {
+	return s.Status == StatusActive || s.Status == StatusInactive ||
+		s.Status == StatusCompleted || s.Status == StatusBroken
+}
+
+// CanDelete reports whether the session may be deleted outright. Only archived
+// sessions qualify; creating sessions have a separate force escape hatch.
+func (s *Session) CanDelete() bool {
+	return s.Status == StatusArchived
 }
 
 func (s *Session) IsMulti() bool {

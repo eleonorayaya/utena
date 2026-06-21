@@ -122,7 +122,6 @@ func (s *SessionService) markLegacyLayoutSessionsBroken(sessions []Session) {
 	if s.sessionsRoot == "" {
 		return
 	}
-	prefix := s.sessionsRoot + string(filepath.Separator)
 	for i := range sessions {
 		sess := &sessions[i]
 		if sess.Status == StatusDeleted || sess.Status == StatusArchived || sess.Status == StatusBroken {
@@ -131,7 +130,7 @@ func (s *SessionService) markLegacyLayoutSessionsBroken(sessions []Session) {
 		if sess.SessionRoot == "" {
 			continue
 		}
-		if strings.HasPrefix(sess.SessionRoot, prefix) {
+		if s.sessionRootWithinRoot(sess.SessionRoot) {
 			continue
 		}
 		if err := s.markSessionBroken(sess, "session uses legacy layout — please recreate"); err != nil {
@@ -1136,12 +1135,38 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 		return ErrSessionAttached
 	}
 
-	if session.Status == StatusCreating && !force {
-		return common.NewInvalidRequest("cannot delete session while it is being created")
+	if !force {
+		if session.IsCreating() {
+			return common.NewInvalidRequest("cannot delete session while it is being created")
+		}
+		if !session.CanDelete() {
+			return ErrSessionNotArchived
+		}
 	}
 
-	s.cleanupSessionBranches(ctx, session, deleteBranch)
+	s.cleanupSessionResources(ctx, session, deleteBranch)
 
+	if err := s.store.HardDelete(id); err != nil {
+		return err
+	}
+
+	for i := range session.Worktrees {
+		wt := session.Worktrees[i].Worktree
+		if wt == nil {
+			continue
+		}
+		if err := s.gitService.DeleteWorktree(wt.ID); err != nil {
+			slog.Warn("failed to delete worktree record", "worktree", wt.ID, "error", err)
+		}
+	}
+
+	return nil
+}
+
+// cleanupSessionResources tears down every on-disk and tmux resource a session
+// owns, continuing past individual failures so a single stuck resource doesn't
+// strand the rest of the cleanup.
+func (s *SessionService) cleanupSessionResources(ctx context.Context, session *Session, deleteBranch bool) {
 	if session.TmuxSessionID != nil {
 		if err := s.tmuxService.KillSession(*session.TmuxSessionID); err != nil {
 			slog.Warn("failed to kill tmux session", "error", err)
@@ -1149,9 +1174,52 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 		session.TmuxSessionID = nil
 	}
 
-	session.Status = StatusDeleted
+	wsCache := make(map[uint]*workspace.Workspace)
+	for i := range session.Worktrees {
+		wt := session.Worktrees[i].Worktree
+		if wt == nil {
+			continue
+		}
+		ws, err := s.resolveWorktreeWorkspace(ctx, wt, wsCache)
+		if err != nil {
+			slog.Warn("cleanup: failed to resolve workspace", "worktree", wt.ID, "error", err)
+			continue
+		}
+		if wt.Path != "" {
+			if err := s.gitService.RemoveWorktree(ctx, ws.Path, wt.Path); err != nil {
+				slog.Warn("failed to remove worktree dir", "worktree", wt.ID, "error", err)
+			}
+		}
+		if wt.Branch != nil {
+			if err := s.gitService.CleanupBranch(ctx, wt.Branch, ws.Path, deleteBranch); err != nil {
+				slog.Warn("failed to cleanup branch", "workspace_id", ws.ID, "error", err)
+			}
+		}
+	}
 
-	return s.store.Update(session)
+	s.removeSessionRoot(session)
+}
+
+// removeSessionRoot deletes the session's container directory, but only when it
+// is safely nested under the configured sessions root, to avoid touching
+// arbitrary paths recorded on legacy sessions.
+func (s *SessionService) removeSessionRoot(session *Session) {
+	if !s.sessionRootWithinRoot(session.SessionRoot) {
+		return
+	}
+	if err := os.RemoveAll(session.SessionRoot); err != nil {
+		slog.Warn("failed to remove session root dir", "path", session.SessionRoot, "error", err)
+	}
+}
+
+// sessionRootWithinRoot reports whether sessionRoot is nested under the
+// configured sessions root, the invariant that distinguishes container-layout
+// sessions from legacy ones with arbitrary paths.
+func (s *SessionService) sessionRootWithinRoot(sessionRoot string) bool {
+	if s.sessionsRoot == "" || sessionRoot == "" {
+		return false
+	}
+	return strings.HasPrefix(sessionRoot, s.sessionsRoot+string(filepath.Separator))
 }
 
 // DetachWorktreesByRepoID drops join rows first so the worktree delete
@@ -1165,24 +1233,6 @@ func (s *SessionService) DetachWorktreesByRepoID(ctx context.Context, repoID uin
 		return fmt.Errorf("failed to delete worktrees for repo %d: %w", repoID, err)
 	}
 	return nil
-}
-
-func (s *SessionService) cleanupSessionBranches(ctx context.Context, session *Session, deleteBranch bool) {
-	wsCache := make(map[uint]*workspace.Workspace)
-	for i := range session.Worktrees {
-		wt := session.Worktrees[i].Worktree
-		if wt == nil || wt.Branch == nil {
-			continue
-		}
-		ws, err := s.resolveWorktreeWorkspace(ctx, wt, wsCache)
-		if err != nil {
-			slog.Warn("cleanup: failed to resolve workspace", "worktree", wt.ID, "error", err)
-			continue
-		}
-		if err := s.gitService.CleanupBranch(ctx, wt.Branch, ws.Path, deleteBranch); err != nil {
-			slog.Warn("failed to cleanup branch", "workspace_id", ws.ID, "error", err)
-		}
-	}
 }
 
 func (s *SessionService) nameFromBranch(branchName string) string {
@@ -1311,7 +1361,7 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 	if err != nil {
 		return nil, err
 	}
-	if sess.Status != StatusActive && sess.Status != StatusInactive && sess.Status != StatusCompleted {
+	if !sess.CanArchive() {
 		return nil, fmt.Errorf("cannot archive session in status %s", sess.Status)
 	}
 
