@@ -223,16 +223,30 @@ func (s *WorkspaceStore) AddWorkspace(path string) (*Workspace, error) {
 		return nil, err
 	}
 
+	if err := s.appendWorkspacePath(path); err != nil {
+		return nil, err
+	}
+
+	return ws, nil
+}
+
+// appendWorkspacePath records a workspace path in config.json so it is
+// rediscovered on restart. Safe to call for an already-recorded path.
+func (s *WorkspaceStore) appendWorkspacePath(path string) error {
 	cfg, err := s.loadConfig()
 	if err != nil {
 		cfg = &config{}
 	}
+	for _, p := range cfg.Workspaces {
+		if p == path {
+			return nil
+		}
+	}
 	cfg.Workspaces = append(cfg.Workspaces, path)
 	if err := s.saveConfig(cfg); err != nil {
-		return nil, fmt.Errorf("failed to save config: %w", err)
+		return fmt.Errorf("failed to save config: %w", err)
 	}
-
-	return ws, nil
+	return nil
 }
 
 func (s *WorkspaceStore) AddWorkspaceRoot(path string) ([]Workspace, error) {

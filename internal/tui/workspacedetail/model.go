@@ -107,7 +107,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			prlist.Select(m.workspace.ID),
 		)
 	case key.Matches(msg, keys.Migrate):
-		if m.workspace == nil || !m.workspace.IsGitRepo || m.workspace.IsBare {
+		if m.workspace == nil || !m.workspace.IsGitRepo || m.workspace.IsBare || m.workspace.IsBusy() {
 			return m, nil
 		}
 		m.actionErr = ""
@@ -162,6 +162,22 @@ func (m Model) View() string {
 	} else {
 		b.WriteString("\n" + sectionStyle().Render("⎇ Repository") + "\n")
 		b.WriteString(labelStyle().Render("") + lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("not a git repository") + "\n")
+	}
+
+	if ws.IsBusy() {
+		muted := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
+		label := "Cloning…"
+		if ws.Status == workspace.StatusMigrating {
+			label = "Migrating to bare… this can take a while for large repos."
+		}
+		b.WriteString("\n" + muted.Render(label) + "\n")
+		if ws.Progress != "" {
+			b.WriteString(muted.Render(ws.Progress) + "\n")
+		}
+	}
+
+	if ws.Status == workspace.StatusFailed && ws.StatusError != "" {
+		b.WriteString("\n" + lipgloss.NewStyle().Foreground(theme.Current.Error).Render("[!] "+ws.StatusError) + "\n")
 	}
 
 	if m.actionErr != "" {

@@ -411,27 +411,26 @@ func (c *client) deleteWorkspace(id uint) tea.Cmd {
 
 func (c *client) migrateWorkspaceToBare(id uint) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/workspaces/%d/migrate-bare", c.baseURL, id), nil)
 		if err != nil {
-			return ErrMsg{err}
+			return workspaceMigrateStartedMsg{err: err}
 		}
 
-		httpClient := &http.Client{}
-		res, err := httpClient.Do(req)
+		res, err := c.httpClient.Do(req)
 		if err != nil {
 			log.Printf("[ERROR] migrate workspace %d to bare: %v", id, err)
-			return ErrMsg{err}
+			return workspaceMigrateStartedMsg{err: err}
 		}
 		defer res.Body.Close()
 
-		if res.StatusCode != http.StatusNoContent {
-			return parseAPIError(res, "migrate workspace to bare")
+		if res.StatusCode != http.StatusAccepted {
+			apiErr := parseAPIError(res, "migrate workspace to bare")
+			return workspaceMigrateStartedMsg{err: apiErr.Err}
 		}
-
-		return workspaceMigratedToBareMsg{}
+		return workspaceMigrateStartedMsg{}
 	}
 }
 
@@ -499,7 +498,7 @@ func (c *client) cloneWorkspace(cloneURL, rootPath, dirName string) tea.Cmd {
 			return workspaceClonedMsg{err: err}
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/workspaces/clone", bytes.NewReader(jsonBody))
@@ -508,8 +507,7 @@ func (c *client) cloneWorkspace(cloneURL, rootPath, dirName string) tea.Cmd {
 		}
 		req.Header.Set("Content-Type", "application/json")
 
-		httpClient := &http.Client{}
-		res, err := httpClient.Do(req)
+		res, err := c.httpClient.Do(req)
 		if err != nil {
 			log.Printf("[ERROR] clone workspace %q: %v", cloneURL, err)
 			return workspaceClonedMsg{err: err}
@@ -521,14 +519,11 @@ func (c *client) cloneWorkspace(cloneURL, rootPath, dirName string) tea.Cmd {
 			return workspaceClonedMsg{err: apiErr.Err}
 		}
 
-		var resp workspace.WorkspaceResponse
-		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+		var ws workspace.Workspace
+		if err := json.NewDecoder(res.Body).Decode(&ws); err != nil {
 			return workspaceClonedMsg{err: err}
 		}
-		if resp.Workspace == nil {
-			return workspaceClonedMsg{err: fmt.Errorf("clone workspace: empty response")}
-		}
-		return workspaceClonedMsg{workspace: *resp.Workspace}
+		return workspaceClonedMsg{workspace: ws}
 	}
 }
 

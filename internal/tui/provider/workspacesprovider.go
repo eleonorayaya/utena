@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -74,6 +76,9 @@ func AddWorkspace(path string, asRoot bool) tea.Cmd {
 	return func() tea.Msg { return addWorkspaceIntentMsg{path: path, asRoot: asRoot} }
 }
 
+// WorkspaceClonedMsg reports that a clone was accepted (the workspace row now
+// exists in the "cloning" state) or rejected. Live progress and completion are
+// observed via the workspace's Status/Progress in WorkspacesStateUpdatedMsg.
 type WorkspaceClonedMsg struct {
 	Workspace workspace.Workspace
 	Err       error
@@ -142,12 +147,16 @@ type cloneWorkspaceIntentMsg struct {
 	dirName  string
 }
 
-type fetchWorkspaceRootsIntentMsg struct{}
-
 type workspaceClonedMsg struct {
 	workspace workspace.Workspace
 	err       error
 }
+
+type workspaceMigrateStartedMsg struct {
+	err error
+}
+
+type fetchWorkspaceRootsIntentMsg struct{}
 
 type workspaceRootsMsg struct {
 	roots []string
@@ -175,7 +184,6 @@ type branchesLoadedMsg struct {
 type workspaceDeletedMsg struct{}
 type workspaceHiddenToggledMsg struct{}
 type workspaceAddedMsg struct{}
-type workspaceMigratedToBareMsg struct{}
 
 type migrateWorkspaceToBareIntentMsg struct {
 	id uint
@@ -186,10 +194,26 @@ type workspacesProvider struct {
 	workspaces        []workspace.Workspace
 	branches          []string
 	activeWorkspaceID uint
+	polling           bool
+}
+
+type pollWorkspacesTickMsg struct{}
+
+func pollWorkspacesTick() tea.Cmd {
+	return tea.Tick(700*time.Millisecond, func(time.Time) tea.Msg { return pollWorkspacesTickMsg{} })
 }
 
 func newWorkspacesProvider(c *client) workspacesProvider {
 	return workspacesProvider{client: c}
+}
+
+func anyWorkspaceBusy(workspaces []workspace.Workspace) bool {
+	for i := range workspaces {
+		if workspaces[i].IsBusy() {
+			return true
+		}
+	}
+	return false
 }
 
 func (p workspacesProvider) emitState() tea.Cmd {
@@ -207,7 +231,23 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspacesLoadedMsg:
 		p.workspaces = msg.workspaces
-		return p, p.emitState()
+		cmds := []tea.Cmd{p.emitState()}
+		busy := anyWorkspaceBusy(p.workspaces)
+		switch {
+		case busy && !p.polling:
+			// Start the single poll chain; the tick re-arms itself while busy.
+			p.polling = true
+			cmds = append(cmds, pollWorkspacesTick())
+		case !busy:
+			p.polling = false
+		}
+		return p, tea.Batch(cmds...)
+
+	case pollWorkspacesTickMsg:
+		if !p.polling {
+			return p, nil
+		}
+		return p, tea.Batch(p.client.fetchWorkspaces(), pollWorkspacesTick())
 
 	case fetchWorkspacesIntentMsg:
 		return p, p.client.fetchWorkspaces()
@@ -276,7 +316,12 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 	case migrateWorkspaceToBareIntentMsg:
 		return p, p.client.migrateWorkspaceToBare(msg.id)
 
-	case workspaceMigratedToBareMsg:
+	case workspaceMigrateStartedMsg:
+		if msg.err != nil {
+			err := msg.err
+			return p, func() tea.Msg { return ErrMsg{err} }
+		}
+		// The workspace is now "migrating"; the busy-poll picks up progress.
 		return p, p.client.fetchWorkspaces()
 
 	case cloneWorkspaceIntentMsg:
@@ -285,15 +330,13 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 	case workspaceClonedMsg:
 		ws := msg.workspace
 		err := msg.err
-		var refetch tea.Cmd
-		if err == nil {
-			refetch = p.client.fetchWorkspaces()
-		}
 		emit := func() tea.Msg { return WorkspaceClonedMsg{Workspace: ws, Err: err} }
-		if refetch == nil {
+		if err != nil {
 			return p, emit
 		}
-		return p, tea.Batch(emit, refetch)
+		// The new "cloning" workspace exists; refresh so the list shows it and
+		// the busy-poll starts tracking progress.
+		return p, tea.Batch(emit, p.client.fetchWorkspaces())
 
 	case fetchWorkspaceRootsIntentMsg:
 		return p, p.client.fetchWorkspaceRoots()

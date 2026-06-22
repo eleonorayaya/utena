@@ -331,8 +331,12 @@ func TestGitCLI_CloneBareWorkspace_HappyPath(t *testing.T) {
 	target := filepath.Join(parent, "cloned")
 
 	svc := newGitCLI()
-	err := svc.cloneBareWorkspace(context.Background(), source, target)
+	var progress []string
+	err := svc.cloneBareWorkspace(context.Background(), source, target, func(line string) {
+		progress = append(progress, line)
+	})
 	require.NoError(t, err)
+	require.NotEmpty(t, progress, "expected git clone progress to be streamed")
 
 	gitInfo, err := os.Stat(filepath.Join(target, ".git"))
 	require.NoError(t, err)
@@ -362,7 +366,7 @@ func TestGitCLI_CloneBareWorkspace_CreatesParents(t *testing.T) {
 	target := filepath.Join(parent, "nested", "dirs", "cloned")
 
 	svc := newGitCLI()
-	err := svc.cloneBareWorkspace(context.Background(), source, target)
+	err := svc.cloneBareWorkspace(context.Background(), source, target, nil)
 	require.NoError(t, err)
 
 	require.True(t, isBareWorkspace(target))
@@ -377,7 +381,7 @@ func TestGitCLI_CloneBareWorkspace_RejectsNonEmptyTarget(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(target, "stray"), []byte("x"), 0644))
 
 	svc := newGitCLI()
-	err := svc.cloneBareWorkspace(context.Background(), source, target)
+	err := svc.cloneBareWorkspace(context.Background(), source, target, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not empty")
 
@@ -387,7 +391,7 @@ func TestGitCLI_CloneBareWorkspace_RejectsNonEmptyTarget(t *testing.T) {
 
 func TestGitCLI_CloneBareWorkspace_RejectsEmptyURL(t *testing.T) {
 	svc := newGitCLI()
-	err := svc.cloneBareWorkspace(context.Background(), "", filepath.Join(t.TempDir(), "target"))
+	err := svc.cloneBareWorkspace(context.Background(), "", filepath.Join(t.TempDir(), "target"), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "required")
 }
@@ -397,7 +401,7 @@ func TestGitCLI_CloneBareWorkspace_CleansUpOnCloneFailure(t *testing.T) {
 	target := filepath.Join(parent, "cloned")
 
 	svc := newGitCLI()
-	err := svc.cloneBareWorkspace(context.Background(), filepath.Join(parent, "does-not-exist"), target)
+	err := svc.cloneBareWorkspace(context.Background(), filepath.Join(parent, "does-not-exist"), target, nil)
 	require.Error(t, err)
 
 	_, statErr := os.Stat(target)

@@ -35,6 +35,32 @@ func TestWorkspaceService_OnAppStart(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestWorkspaceService_OnAppStart_FailsInterruptedWorkspaces(t *testing.T) {
+	service, store := setupWorkspaceService(t)
+
+	cloning := &Workspace{Name: "c", Path: "/p/c", Status: StatusCloning}
+	migrating := &Workspace{Name: "m", Path: "/p/m", Status: StatusMigrating}
+	ready := &Workspace{Name: "r", Path: "/p/r", Status: StatusReady}
+	require.NoError(t, store.Add(cloning))
+	require.NoError(t, store.Add(migrating))
+	require.NoError(t, store.Add(ready))
+
+	require.NoError(t, service.OnAppStart(context.Background()))
+
+	got, err := store.GetByID(cloning.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusFailed, got.Status)
+	require.NotEmpty(t, got.StatusError)
+
+	got, err = store.GetByID(migrating.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusFailed, got.Status)
+
+	got, err = store.GetByID(ready.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusReady, got.Status, "ready workspaces are untouched")
+}
+
 func TestWorkspaceService_OnAppEnd(t *testing.T) {
 	service, _ := setupWorkspaceService(t)
 	ctx := context.Background()
@@ -288,51 +314,72 @@ func setupServiceWithGitAndRoots(t *testing.T, rootCount int) (*WorkspaceService
 	return service, roots
 }
 
-func TestWorkspaceService_CloneAndAddFromURL_HappyPath(t *testing.T) {
+func waitWorkspaceStatus(t *testing.T, svc *WorkspaceService, id uint, want WorkspaceStatus) *Workspace {
+	t.Helper()
+	var ws *Workspace
+	require.Eventually(t, func() bool {
+		w, err := svc.GetWorkspace(context.Background(), id)
+		if err != nil {
+			return false
+		}
+		ws = w
+		return w.Status == want
+	}, 30*time.Second, 20*time.Millisecond)
+	return ws
+}
+
+func TestWorkspaceService_StartClone_HappyPath(t *testing.T) {
 	service, rootDir := setupServiceWithGitAndRoot(t)
 	source := initTestRepo(t)
 
-	ws, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+	ws, err := service.StartClone(context.Background(), CloneFromURLRequest{
 		CloneURL: source,
 		DirName:  "imported",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, ws)
 	require.Equal(t, filepath.Join(rootDir, "imported"), ws.Path)
-	require.True(t, ws.IsBare)
-	require.True(t, ws.IsGitRepo)
+	require.Equal(t, StatusCloning, ws.Status)
 
-	bareInfo, err := os.Stat(filepath.Join(ws.Path, ".bare"))
+	done := waitWorkspaceStatus(t, service, ws.ID, StatusReady)
+	require.True(t, done.IsBare)
+	require.True(t, done.IsGitRepo)
+
+	bareInfo, err := os.Stat(filepath.Join(done.Path, ".bare"))
 	require.NoError(t, err)
 	require.True(t, bareInfo.IsDir())
 }
 
-func TestWorkspaceService_CloneAndAddFromURL_DerivesDirNameFromURL(t *testing.T) {
+func TestWorkspaceService_StartClone_FailureLeavesFailedWorkspace(t *testing.T) {
 	service, rootDir := setupServiceWithGitAndRoot(t)
 
-	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+	ws, err := service.StartClone(context.Background(), CloneFromURLRequest{
 		CloneURL: "git@github.com:foo/bar.git",
 	})
-	require.Error(t, err, "expected clone to fail with unreachable remote so we can verify path derivation")
+	require.NoError(t, err, "validation passes; the unreachable remote fails asynchronously")
+	require.Equal(t, "bar", ws.Name, "dir name derived from URL")
+
+	failed := waitWorkspaceStatus(t, service, ws.ID, StatusFailed)
+	require.NotEmpty(t, failed.StatusError)
 
 	_, statErr := os.Stat(filepath.Join(rootDir, "bar"))
-	require.True(t, os.IsNotExist(statErr), "failed clone should clean up the derived target dir")
+	require.True(t, os.IsNotExist(statErr), "failed clone should clean up the partial target dir")
 }
 
-func TestWorkspaceService_CloneAndAddFromURL_RejectsEmptyURL(t *testing.T) {
+func TestWorkspaceService_StartClone_RejectsEmptyURL(t *testing.T) {
 	service, _ := setupServiceWithGitAndRoot(t)
-	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{})
+	_, err := service.StartClone(context.Background(), CloneFromURLRequest{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "clone_url is required")
 }
 
-func TestWorkspaceService_CloneAndAddFromURL_RejectsTargetExists(t *testing.T) {
+func TestWorkspaceService_StartClone_RejectsTargetExists(t *testing.T) {
 	service, rootDir := setupServiceWithGitAndRoot(t)
 	existing := filepath.Join(rootDir, "imported")
 	require.NoError(t, os.MkdirAll(existing, 0755))
 
 	source := initTestRepo(t)
-	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+	_, err := service.StartClone(context.Background(), CloneFromURLRequest{
 		CloneURL: source,
 		DirName:  "imported",
 	})
@@ -340,37 +387,38 @@ func TestWorkspaceService_CloneAndAddFromURL_RejectsTargetExists(t *testing.T) {
 	require.Contains(t, err.Error(), "already exists")
 }
 
-func TestWorkspaceService_CloneAndAddFromURL_NoConfiguredRoots(t *testing.T) {
+func TestWorkspaceService_StartClone_NoConfiguredRoots(t *testing.T) {
 	service, _ := setupServiceWithGitAndRoots(t, 0)
 	source := initTestRepo(t)
 
-	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{CloneURL: source, DirName: "x"})
+	_, err := service.StartClone(context.Background(), CloneFromURLRequest{CloneURL: source, DirName: "x"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no workspace roots configured")
 }
 
-func TestWorkspaceService_CloneAndAddFromURL_MultipleRootsRequiresExplicit(t *testing.T) {
+func TestWorkspaceService_StartClone_MultipleRootsRequiresExplicit(t *testing.T) {
 	service, roots := setupServiceWithGitAndRoots(t, 2)
 	source := initTestRepo(t)
 
-	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{CloneURL: source, DirName: "x"})
+	_, err := service.StartClone(context.Background(), CloneFromURLRequest{CloneURL: source, DirName: "x"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "multiple workspace roots")
 
-	ws, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+	ws, err := service.StartClone(context.Background(), CloneFromURLRequest{
 		CloneURL: source,
 		RootPath: roots[1],
 		DirName:  "x",
 	})
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(roots[1], "x"), ws.Path)
+	waitWorkspaceStatus(t, service, ws.ID, StatusReady)
 }
 
-func TestWorkspaceService_CloneAndAddFromURL_RejectsUnknownRoot(t *testing.T) {
+func TestWorkspaceService_StartClone_RejectsUnknownRoot(t *testing.T) {
 	service, _ := setupServiceWithGitAndRoot(t)
 	source := initTestRepo(t)
 
-	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+	_, err := service.StartClone(context.Background(), CloneFromURLRequest{
 		CloneURL: source,
 		RootPath: "/nope",
 		DirName:  "x",
@@ -379,11 +427,11 @@ func TestWorkspaceService_CloneAndAddFromURL_RejectsUnknownRoot(t *testing.T) {
 	require.Contains(t, err.Error(), "not a configured workspace root")
 }
 
-func TestWorkspaceService_CloneAndAddFromURL_RejectsPathSeparatorInDirName(t *testing.T) {
+func TestWorkspaceService_StartClone_RejectsPathSeparatorInDirName(t *testing.T) {
 	service, _ := setupServiceWithGitAndRoot(t)
 	source := initTestRepo(t)
 
-	_, err := service.CloneAndAddFromURL(context.Background(), CloneFromURLRequest{
+	_, err := service.StartClone(context.Background(), CloneFromURLRequest{
 		CloneURL: source,
 		DirName:  "weird/name",
 	})

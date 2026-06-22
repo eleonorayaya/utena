@@ -57,5 +57,20 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	path := workspacepicker.AbbreviatePath(i.workspace.Path)
 	pathStyle := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
 
-	fmt.Fprint(w, cursor+nameStyle.Render(name)+"  "+pathStyle.Render(path))
+	fmt.Fprint(w, cursor+nameStyle.Render(name)+"  "+pathStyle.Render(path)+statusSuffix(i.workspace))
+}
+
+func statusSuffix(ws workspace.Workspace) string {
+	switch ws.Status {
+	case workspace.StatusCloning, workspace.StatusMigrating:
+		label := string(ws.Status)
+		if ws.Progress != "" {
+			label += ": " + ws.Progress
+		}
+		return "  " + lipgloss.NewStyle().Foreground(theme.Current.StatusActive).Render("· "+label)
+	case workspace.StatusFailed:
+		return "  " + lipgloss.NewStyle().Foreground(theme.Current.Error).Render("· failed")
+	default:
+		return ""
+	}
 }

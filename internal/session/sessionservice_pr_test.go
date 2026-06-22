@@ -485,7 +485,7 @@ func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
 	database := setupTestDB(t)
 	ctx := context.Background()
 	gitService := git.NewGitService(database)
-	require.NoError(t, gitService.MigrateToBare(ctx, repoPath))
+	require.NoError(t, gitService.MigrateToBare(ctx, repoPath, nil))
 
 	repo := &git.Repo{Path: repoPath, FullName: "test/repo"}
 	require.NoError(t, database.Create(repo).Error)
