@@ -28,6 +28,14 @@ func makeBrokenSession() session.Session {
 	}
 }
 
+func makeArchivedSession() session.Session {
+	return session.Session{
+		Model:  gorm.Model{ID: 3},
+		Name:   "archived",
+		Status: session.StatusArchived,
+	}
+}
+
 func TestSessionDetail_SelectMsg_LoadsSession(t *testing.T) {
 	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
 	require.NotNil(t, m.sess)
@@ -56,26 +64,33 @@ func TestSessionDetail_Archive_ArchivesAndGoesBack(t *testing.T) {
 	assert.NotNil(t, cmd)
 }
 
-func TestSessionDetail_Archive_SkipsWhenBroken(t *testing.T) {
+func TestSessionDetail_Archive_ArchivesWhenBroken(t *testing.T) {
 	m, _ := New().Update(SelectMsg{Session: makeBrokenSession()})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
-	assert.Nil(t, cmd)
+	assert.NotNil(t, cmd)
 }
 
-func TestSessionDetail_Delete_RequiresDoublePress(t *testing.T) {
+func TestSessionDetail_Delete_SkipsWhenActive(t *testing.T) {
 	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
 	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	assert.Nil(t, cmd)
-	assert.Equal(t, uint(1), m2.pendingDeleteID)
+	assert.Equal(t, uint(0), m2.pendingDeleteID)
+}
+
+func TestSessionDetail_Delete_RequiresDoublePress(t *testing.T) {
+	m, _ := New().Update(SelectMsg{Session: makeArchivedSession()})
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	assert.Nil(t, cmd)
+	assert.Equal(t, uint(3), m2.pendingDeleteID)
 
 	_, cmd2 := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	assert.NotNil(t, cmd2)
 }
 
 func TestSessionDetail_Delete_ResetsByInterveningKey(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
+	m, _ := New().Update(SelectMsg{Session: makeArchivedSession()})
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	assert.Equal(t, uint(1), m2.pendingDeleteID)
+	assert.Equal(t, uint(3), m2.pendingDeleteID)
 
 	m3, _ := m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	assert.Equal(t, uint(0), m3.pendingDeleteID)

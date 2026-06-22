@@ -63,6 +63,10 @@ func ArchiveSession(id uint) tea.Cmd {
 	return func() tea.Msg { return archiveSessionIntentMsg{id: id} }
 }
 
+func DismissSession(id uint) tea.Cmd {
+	return func() tea.Msg { return dismissSessionIntentMsg{id: id} }
+}
+
 func AddWorkspaceToSession(sessionID uint, spec SessionWorkspaceSpec) tea.Cmd {
 	return func() tea.Msg { return addWorkspaceToSessionIntentMsg{sessionID: sessionID, spec: spec} }
 }
@@ -93,6 +97,10 @@ type archiveSessionIntentMsg struct {
 	id uint
 }
 
+type dismissSessionIntentMsg struct {
+	id uint
+}
+
 type setActiveWorkspaceMsg struct {
 	workspaceID uint
 }
@@ -119,6 +127,8 @@ type sessionDeletedMsg struct {
 }
 
 type sessionArchivedMsg struct{ id uint }
+
+type sessionDismissedMsg struct{ id uint }
 
 type sessionPolledMsg struct {
 	session session.Session
@@ -227,6 +237,12 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, p.client.archiveSession(msg.id)
 
 	case sessionArchivedMsg:
+		return p, p.client.fetchSessions()
+
+	case dismissSessionIntentMsg:
+		return p, p.client.dismissSession(msg.id)
+
+	case sessionDismissedMsg:
 		return p, p.client.fetchSessions()
 
 	case pollSessionIntentMsg:

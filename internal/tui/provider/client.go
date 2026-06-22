@@ -365,6 +365,28 @@ func (c *client) archiveSession(id uint) tea.Cmd {
 	}
 }
 
+func (c *client) dismissSession(id uint) tea.Cmd {
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/sessions/%d/dismiss", c.baseURL, id), nil)
+		if err != nil {
+			return ErrMsg{err}
+		}
+
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] dismiss session %d: %v", id, err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			return parseAPIError(res, "dismiss session")
+		}
+
+		return sessionDismissedMsg{id: id}
+	}
+}
+
 func (c *client) deleteWorkspace(id uint) tea.Cmd {
 	return func() tea.Msg {
 		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/workspaces/%d", c.baseURL, id), nil)

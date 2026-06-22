@@ -200,7 +200,7 @@ func TestSessionRouter_DeleteSession(t *testing.T) {
 
 	session := &Session{
 		Name:       "session-1",
-		Status:     StatusActive,
+		Status:     StatusArchived,
 		LastUsedAt: time.Now(),
 	}
 	addTestSession(t, sessionStore, swStore, session, ws1ID)
@@ -212,9 +212,9 @@ func TestSessionRouter_DeleteSession(t *testing.T) {
 
 	require.Equal(t, http.StatusNoContent, w.Code)
 
-	retrieved, err := sessionStore.GetByID(session.ID)
-	require.NoError(t, err)
-	require.Equal(t, StatusDeleted, retrieved.Status)
+	_, err := sessionStore.GetByID(session.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
 }
 
 func TestSessionRouter_RepairSession_NotFound(t *testing.T) {

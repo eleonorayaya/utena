@@ -337,43 +337,81 @@ func TestSessionService_UpdateSession(t *testing.T) {
 	require.True(t, retrieved.IsAttached)
 }
 
-func TestSessionService_DeleteSession_PreservesWorktreeDirOnDisk(t *testing.T) {
+func TestSessionService_DeleteSession_RemovesWorktreeDirOnDisk(t *testing.T) {
 	repoPath := initTestRepo(t)
 	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
-	session := &Session{Name: "keep-me"}
+	session := &Session{Name: "drop-me"}
 	ctx := context.Background()
 	require.NoError(t, createSessionLegacy(ctx, service, session, wsGitID, "", "main"))
 	waitForStatus(t, sessionStore, session.ID, StatusActive, 5*time.Second)
 
-	worktreePath := filepath.Join(service.sessionsRoot, "keep-me", "git-repo")
+	sessionRoot := filepath.Join(service.sessionsRoot, "drop-me")
+	worktreePath := filepath.Join(sessionRoot, "git-repo")
 	info, err := os.Stat(worktreePath)
 	require.NoError(t, err)
 	require.True(t, info.IsDir())
 
+	archived, err := service.ArchiveSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusArchived, archived.Status)
+
 	require.NoError(t, service.DeleteSession(ctx, session.ID, true, false))
 
-	info, err = os.Stat(worktreePath)
-	require.NoError(t, err, "worktree dir must survive DeleteSession")
-	require.True(t, info.IsDir())
+	_, err = os.Stat(worktreePath)
+	require.True(t, os.IsNotExist(err), "worktree dir must be removed by DeleteSession")
+	_, err = os.Stat(sessionRoot)
+	require.True(t, os.IsNotExist(err), "session root dir must be removed by DeleteSession")
 }
 
-func TestSessionService_DeleteSession(t *testing.T) {
+func TestSessionService_DeleteSession_HardDeletesArchived(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+	swt := swtStoreFor(service)
 
 	session := &Session{
 		Name:       "session-1",
+		Status:     StatusArchived,
+		LastUsedAt: time.Now(),
+	}
+	addTestSession(t, sessionStore, swt, session, ws1ID)
+
+	rows, err := swt.ListBySessionID(session.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, rows)
+	wtID := rows[0].WorktreeID
+
+	ctx := context.Background()
+	require.NoError(t, service.DeleteSession(ctx, session.ID, true, false))
+
+	_, err = sessionStore.GetByID(session.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+
+	remaining, err := swt.ListBySessionID(session.ID)
+	require.NoError(t, err)
+	require.Empty(t, remaining, "session_worktree join rows must be cleaned up")
+
+	_, err = service.gitService.GetWorktree(wtID)
+	require.Error(t, err, "worktree record must be cleaned up")
+}
+
+func TestSessionService_DeleteSession_RejectsNonArchived(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+
+	session := &Session{
+		Name:       "still-active",
 		Status:     StatusActive,
 		LastUsedAt: time.Now(),
 	}
 	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	ctx := context.Background()
-	require.NoError(t, service.DeleteSession(ctx, session.ID, true, false))
+	err := service.DeleteSession(ctx, session.ID, true, false)
+	require.ErrorIs(t, err, ErrSessionNotArchived)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusDeleted, retrieved.Status)
+	require.Equal(t, StatusActive, retrieved.Status)
 }
 
 func TestSessionService_DeleteSession_NotFound(t *testing.T) {
@@ -415,9 +453,40 @@ func TestSessionService_DeleteSession_Creating_Force(t *testing.T) {
 	err := service.DeleteSession(ctx, sess.ID, true, true)
 	require.NoError(t, err)
 
-	retrieved, err := sessionStore.GetByID(sess.ID)
+	_, err = sessionStore.GetByID(sess.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}
+
+func TestSessionService_ArchiveSession_AllowsBroken(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+
+	sess := &Session{
+		Name:       "broken-session",
+		Status:     StatusBroken,
+		LastUsedAt: time.Now(),
+	}
+	addTestSession(t, sessionStore, swtStoreFor(service), sess, ws1ID)
+
+	ctx := context.Background()
+	archived, err := service.ArchiveSession(ctx, sess.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusDeleted, retrieved.Status)
+	require.Equal(t, StatusArchived, archived.Status)
+}
+
+func TestSessionService_ArchiveSession_RejectsCreating(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+
+	sess := &Session{
+		Name:       "creating-session",
+		Status:     StatusCreating,
+		LastUsedAt: time.Now(),
+	}
+	addTestSession(t, sessionStore, swtStoreFor(service), sess, ws1ID)
+
+	ctx := context.Background()
+	_, err := service.ArchiveSession(ctx, sess.ID)
+	require.Error(t, err)
 }
 
 func TestSessionService_DetachWorktreesByRepoID(t *testing.T) {
