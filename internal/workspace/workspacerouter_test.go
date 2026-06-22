@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/git"
@@ -497,14 +498,28 @@ func TestWorkspaceRouter_CloneWorkspace_HappyPath(t *testing.T) {
 
 	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
 
-	var resp WorkspaceResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Equal(t, filepath.Join(root, "imported"), resp.Path)
-	require.True(t, resp.IsBare)
+	var created WorkspaceResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+	require.Equal(t, filepath.Join(root, "imported"), created.Path)
+	require.Equal(t, StatusCloning, created.Status)
+
+	require.Eventually(t, func() bool {
+		sreq := httptest.NewRequest("GET", fmt.Sprintf("/%d", created.ID), nil)
+		sw := httptest.NewRecorder()
+		router.Routes().ServeHTTP(sw, sreq)
+		if sw.Code != http.StatusOK {
+			return false
+		}
+		var ws WorkspaceResponse
+		require.NoError(t, json.Unmarshal(sw.Body.Bytes(), &ws))
+		require.NotEqual(t, StatusFailed, ws.Status, "clone failed: %s", ws.StatusError)
+		return ws.Status == StatusReady
+	}, 30*time.Second, 25*time.Millisecond)
 
 	persisted, err := store.GetByPath(filepath.Join(root, "imported"))
 	require.NoError(t, err)
 	require.True(t, persisted.IsGitRepo)
+	require.True(t, persisted.IsBare)
 }
 
 func TestWorkspaceRouter_CloneWorkspace_MissingURL(t *testing.T) {

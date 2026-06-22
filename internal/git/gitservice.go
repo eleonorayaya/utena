@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
@@ -254,12 +255,12 @@ func (s *GitService) PruneWorktrees(ctx context.Context, repoPath string) error 
 	return s.cli.pruneWorktrees(ctx, repoPath)
 }
 
-func (s *GitService) MigrateToBare(ctx context.Context, workspacePath string) error {
-	return s.cli.migrateToBare(ctx, workspacePath)
+func (s *GitService) MigrateToBare(ctx context.Context, workspacePath string, onProgress func(string)) error {
+	return s.cli.migrateToBare(ctx, workspacePath, onProgress)
 }
 
-func (s *GitService) CloneBareWorkspace(ctx context.Context, remoteURL, workspacePath string) error {
-	return s.cli.cloneBareWorkspace(ctx, remoteURL, workspacePath)
+func (s *GitService) CloneBareWorkspace(ctx context.Context, remoteURL, workspacePath string, onProgress func(string)) error {
+	return s.cli.cloneBareWorkspace(ctx, remoteURL, workspacePath, onProgress)
 }
 
 func (s *GitService) ParseRepoFullName(remoteURL string) (owner string, repo string, err error) {
@@ -617,6 +618,9 @@ func ghPRToPullRequest(ghPR *github.PullRequest, repoID uint, branchID uint, cur
 }
 
 func (s *GitService) SyncBranches(ctx context.Context, repoID uint, repoPath string) error {
+	if _, err := os.Stat(repoPath); err != nil {
+		return fmt.Errorf("repo path unavailable, skipping branch sync: %s: %w", repoPath, err)
+	}
 	branches := s.branchStore.ListByRepo(repoID)
 	for i := range branches {
 		if err := s.SyncBranch(ctx, &branches[i], repoPath); err != nil {

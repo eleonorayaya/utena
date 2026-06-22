@@ -105,6 +105,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.errMsg = msg.Err.Error()
 			return m, nil
 		}
+		// The workspace now exists in the "cloning" state; the list view shows
+		// its progress. Return there.
 		return m, router.Back()
 
 	case tea.KeyMsg:
@@ -115,12 +117,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if key.Matches(msg, keys.Back) {
+		return m, router.Back()
+	}
 	if m.cloning {
 		return m, nil
 	}
 	switch {
-	case key.Matches(msg, keys.Back):
-		return m, router.Back()
 	case key.Matches(msg, keys.Submit):
 		return m.submit()
 	case key.Matches(msg, keys.NextField), key.Matches(msg, keys.PrevField):
@@ -211,7 +214,7 @@ func (m Model) View() string {
 
 	if m.cloning {
 		b.WriteString("\n\n")
-		b.WriteString(pendingStyle().Render("Cloning… this can take a while for large repos."))
+		b.WriteString(pendingStyle().Render("Starting clone…"))
 	}
 
 	if m.errMsg != "" {

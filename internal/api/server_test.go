@@ -347,13 +347,40 @@ func TestDaemon_RepairSession_AfterTmuxFailure(t *testing.T) {
 	require.True(t, mock.HasSessionByName("repair-me"))
 }
 
+func startMigrateAndWait(t *testing.T, router http.Handler, wsID uint) {
+	t.Helper()
+	req := httptest.NewRequest("POST", fmt.Sprintf("/workspaces/%d/migrate-bare", wsID), nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusAccepted, w.Code, "body: %s", w.Body.String())
+
+	var started struct {
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &started))
+	require.Equal(t, "migrating", started.Status)
+
+	require.Eventually(t, func() bool {
+		sreq := httptest.NewRequest("GET", fmt.Sprintf("/workspaces/%d", wsID), nil)
+		sw := httptest.NewRecorder()
+		router.ServeHTTP(sw, sreq)
+		if sw.Code != http.StatusOK {
+			return false
+		}
+		var status struct {
+			Status      string `json:"status"`
+			StatusError string `json:"status_error"`
+		}
+		require.NoError(t, json.Unmarshal(sw.Body.Bytes(), &status))
+		require.NotEqual(t, "failed", status.Status, "migration failed: %s", status.StatusError)
+		return status.Status == "ready"
+	}, 30*time.Second, 25*time.Millisecond)
+}
+
 func TestDaemon_MigrateToBare_BootstrapsClaudeSettings(t *testing.T) {
 	app, router, _, ws1ID, _ := setupTestRouter(t)
 
-	req := httptest.NewRequest("POST", fmt.Sprintf("/workspaces/%d/migrate-bare", ws1ID), nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	require.Equal(t, http.StatusNoContent, w.Code, "body: %s", w.Body.String())
+	startMigrateAndWait(t, router, ws1ID)
 
 	ws, err := app.Workspace.Store.GetByID(ws1ID)
 	require.NoError(t, err)
@@ -372,10 +399,7 @@ func TestDaemon_MigrateToBare_DetachesLinkedSessions(t *testing.T) {
 	createResp := createSessionViaAPI(t, router, body)
 	waitForSessionStatus(t, router, createResp.ID, session.StatusActive, 5*time.Second)
 
-	req := httptest.NewRequest("POST", fmt.Sprintf("/workspaces/%d/migrate-bare", ws1ID), nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	require.Equal(t, http.StatusNoContent, w.Code, "body: %s", w.Body.String())
+	startMigrateAndWait(t, router, ws1ID)
 
 	sess, err := app.Session.Store.GetByID(createResp.ID)
 	require.NoError(t, err)

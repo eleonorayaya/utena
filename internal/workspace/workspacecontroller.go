@@ -104,11 +104,7 @@ func (c *WorkspaceController) CloneWorkspace(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	ws, err := c.service.CloneAndAddFromURL(ctx, CloneFromURLRequest{
-		CloneURL: req.CloneURL,
-		RootPath: req.RootPath,
-		DirName:  req.DirName,
-	})
+	ws, err := c.service.StartClone(ctx, CloneFromURLRequest(req))
 	if err != nil {
 		renderServiceError(w, r, "clone workspace failed", err)
 		return

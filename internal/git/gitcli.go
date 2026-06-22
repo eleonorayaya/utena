@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
+	"time"
 )
 
 type gitCLI struct{}
@@ -282,7 +285,7 @@ func (s *gitCLI) remoteURL(ctx context.Context, repoPath string) (string, error)
 	return strings.TrimSpace(string(output)), nil
 }
 
-func (s *gitCLI) migrateToBare(ctx context.Context, workspacePath string) error {
+func (s *gitCLI) migrateToBare(ctx context.Context, workspacePath string, onProgress func(string)) error {
 	backupPath := workspacePath + "-backup"
 
 	if _, err := os.Stat(backupPath); err == nil {
@@ -308,7 +311,7 @@ func (s *gitCLI) migrateToBare(ctx context.Context, workspacePath string) error 
 		return fmt.Errorf("failed to create workspace directory (backup at %s): %w", backupPath, err)
 	}
 
-	if err := s.runBareClone(ctx, remoteURL, workspacePath); err != nil {
+	if err := s.runBareClone(ctx, remoteURL, workspacePath, onProgress); err != nil {
 		return fmt.Errorf("%w (backup at %s)", err, backupPath)
 	}
 
@@ -323,7 +326,7 @@ func (s *gitCLI) migrateToBare(ctx context.Context, workspacePath string) error 
 	return nil
 }
 
-func (s *gitCLI) cloneBareWorkspace(ctx context.Context, remoteURL, workspacePath string) error {
+func (s *gitCLI) cloneBareWorkspace(ctx context.Context, remoteURL, workspacePath string, onProgress func(string)) error {
 	remoteURL = strings.TrimSpace(remoteURL)
 	if remoteURL == "" {
 		return fmt.Errorf("remote URL is required")
@@ -348,7 +351,7 @@ func (s *gitCLI) cloneBareWorkspace(ctx context.Context, remoteURL, workspacePat
 		return fmt.Errorf("failed to create workspace directory %s: %w", workspacePath, err)
 	}
 
-	if err := s.runBareClone(ctx, remoteURL, workspacePath); err != nil {
+	if err := s.runBareClone(ctx, remoteURL, workspacePath, onProgress); err != nil {
 		_ = os.RemoveAll(workspacePath)
 		return err
 	}
@@ -366,13 +369,59 @@ func (s *gitCLI) cloneBareWorkspace(ctx context.Context, remoteURL, workspacePat
 	return nil
 }
 
-func (s *gitCLI) runBareClone(ctx context.Context, remoteURL, workspacePath string) error {
+func (s *gitCLI) runBareClone(ctx context.Context, remoteURL, workspacePath string, onProgress func(string)) error {
 	barePath := filepath.Join(workspacePath, ".bare")
-	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", remoteURL, barePath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git clone --bare failed: %s: %w", strings.TrimSpace(string(output)), err)
+	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", "--progress", remoteURL, barePath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 10 * time.Second
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("git clone --bare failed: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("git clone --bare failed: %w", err)
+	}
+
+	var lastLine string
+	scanner := bufio.NewScanner(stderr)
+	scanner.Split(progressSplit)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		lastLine = line
+		if onProgress != nil {
+			onProgress(line)
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
+		if lastLine != "" {
+			return fmt.Errorf("git clone --bare failed: %s: %w", lastLine, err)
+		}
+		return fmt.Errorf("git clone --bare failed: %w", err)
 	}
 	return nil
+}
+
+func progressSplit(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	for i, b := range data {
+		if b == '\n' || b == '\r' {
+			return i + 1, data[:i], nil
+		}
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 func writeBareMarker(workspacePath string) error {

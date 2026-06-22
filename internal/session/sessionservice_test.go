@@ -1124,7 +1124,7 @@ func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionSe
 	database := setupTestDB(t)
 	gitService := git.NewGitService(database)
 	ctx := context.Background()
-	require.NoError(t, gitService.MigrateToBare(ctx, repoPath))
+	require.NoError(t, gitService.MigrateToBare(ctx, repoPath, nil))
 
 	bus := eventbus.NewEventBus()
 	sessionStore := NewSessionStore(database)
