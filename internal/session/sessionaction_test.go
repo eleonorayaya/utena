@@ -95,7 +95,7 @@ func TestExecuteSessionActions_Claude_SpawnsWindow(t *testing.T) {
 	require.Len(t, spawner.calls, 1)
 	require.Equal(t, "my-session", spawner.calls[0].sessionName)
 	require.Equal(t, "/workspace", spawner.calls[0].startDir)
-	require.Equal(t, `claude "/review"`, spawner.calls[0].command)
+	require.Equal(t, `claude --permission-mode auto "/review"`, spawner.calls[0].command)
 
 	actions, _ := store.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate)
 	require.Empty(t, actions[0].Error)
