@@ -1055,10 +1055,13 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 
 	s.ensureSessionWorktrees(ctx, session)
 
-	if session.TmuxSession == nil {
+	tmuxName := SanitizeTmuxName(session.Name)
+	if session.TmuxSessionID != nil && session.TmuxSession != nil && session.TmuxSession.Name != "" {
+		tmuxName = session.TmuxSession.Name
+	}
+	if tmuxName == "" {
 		return nil, fmt.Errorf("session has no tmux record; please repair")
 	}
-	tmuxName := session.TmuxSession.Name
 
 	if !s.tmuxService.HasSession(tmuxName) {
 		startDir := session.SessionRoot
@@ -1080,6 +1083,7 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 			}
 		}
 		session.TmuxSessionID = &ts.ID
+		session.TmuxSession = ts
 		session.Status = StatusActive
 		session.StatusError = ""
 	}
