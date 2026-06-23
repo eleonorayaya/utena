@@ -22,7 +22,7 @@ func executeSessionActions(actions []SessionAction, spawner WindowSpawner, store
 			if err = json.Unmarshal([]byte(action.Options), &opts); err != nil {
 				err = fmt.Errorf("invalid claude options: %w", err)
 			} else {
-				err = spawner.SpawnWindow(tmuxName, startDir, fmt.Sprintf("claude %q", opts.Prompt))
+				err = spawner.SpawnWindow(tmuxName, startDir, fmt.Sprintf("claude --permission-mode auto %q", opts.Prompt))
 			}
 		default:
 			slog.Warn("unknown session action type, skipping", "type", action.Type)
