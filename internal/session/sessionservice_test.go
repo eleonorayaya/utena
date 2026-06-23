@@ -820,6 +820,38 @@ func TestSessionService_ActivateSession_RecreatesMissingTmux(t *testing.T) {
 	require.True(t, tmux.HasSessionByName("utena-session-1"))
 }
 
+func TestSessionService_ActivateSession_ReactivatesArchived(t *testing.T) {
+	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
+
+	session := &Session{
+		Name:       "session-1",
+		Status:     StatusActive,
+		LastUsedAt: time.Now(),
+	}
+	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
+	tmuxName := SanitizeTmuxName(session.Name)
+	tmuxRecord, err := service.tmuxService.RegisterPending(tmuxName, "/tmp/utena", nil)
+	require.NoError(t, err)
+	session.TmuxSessionID = &tmuxRecord.ID
+	require.NoError(t, sessionStore.Update(session))
+	tmux.Sessions[tmuxName] = true
+
+	ctx := context.Background()
+	archived, err := service.ArchiveSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusArchived, archived.Status)
+	require.Nil(t, archived.TmuxSessionID, "archive should release the tmux record claim")
+	require.False(t, tmux.HasSessionByName(tmuxName), "archive should kill the tmux session")
+
+	result, err := service.ActivateSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusActive, result.Status)
+	require.True(t, result.IsAttached)
+	require.True(t, tmux.HasSessionByName(tmuxName), "reactivation should recreate the tmux session")
+	require.NotNil(t, result.TmuxSession)
+	require.Equal(t, tmuxName, result.TmuxSession.Name, "response must carry the recreated tmux name for switch-client")
+}
+
 func TestSessionService_RefreshSession_DetectsMissingTmux(t *testing.T) {
 	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
 
