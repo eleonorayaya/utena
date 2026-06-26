@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -243,4 +244,70 @@ func TestSessionService_RepairSession_StepsReset(t *testing.T) {
 	for _, s := range after {
 		require.Equal(t, SetupStepDone, s.Status, "step %q should be done after repair", s.Label)
 	}
+}
+
+// initBareWorkspaceWithPrePushHook builds a bare-workspace layout (.bare dir + .git
+// marker, the same layout cloneBareWorkspace produces) with an origin and a pre-push
+// hook that runs a work-tree-only command. Pushing the new branch from the workspace
+// root (a bare repo, no work tree) makes that hook fail with "this operation must be
+// run in a work tree"; pushing from the worktree succeeds. Returns the workspace path.
+func initBareWorkspaceWithPrePushHook(t *testing.T) string {
+	t.Helper()
+	gitEnv := append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	run := func(dir string, args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		cmd.Env = gitEnv
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "command %v failed: %s", args, string(out))
+	}
+
+	origin := t.TempDir()
+	run(origin, "git", "init", "--bare", "-b", "main")
+
+	seed := t.TempDir()
+	run(seed, "git", "init", "-b", "main")
+	run(seed, "git", "config", "user.email", "test@test.com")
+	run(seed, "git", "config", "user.name", "Test")
+	run(seed, "git", "config", "commit.gpgsign", "false")
+	run(seed, "git", "remote", "add", "origin", origin)
+	run(seed, "git", "commit", "--allow-empty", "-m", "init")
+	run(seed, "git", "push", "-u", "origin", "HEAD")
+
+	ws := t.TempDir()
+	run(ws, "git", "clone", "--bare", origin, ".bare")
+	require.NoError(t, os.WriteFile(filepath.Join(ws, ".git"), []byte("gitdir: ./.bare\n"), 0o644))
+	run(ws, "git", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	// Force repo-local hooks so a developer's global core.hooksPath can't suppress the hook.
+	hooksDir := filepath.Join(ws, ".bare", "hooks")
+	run(ws, "git", "config", "core.hooksPath", hooksDir)
+	run(ws, "git", "fetch", "origin")
+
+	hook := filepath.Join(hooksDir, "pre-push")
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\ngit status --porcelain >/dev/null\n"), 0o755))
+	return ws
+}
+
+func TestSessionService_SetupWorktree_PushesUpstreamFromWorktree(t *testing.T) {
+	wsPath := initBareWorkspaceWithPrePushHook(t)
+	service, sessionStore, _, wsGitID, database, _ := setupWorktreeSessionServiceFull(t, wsPath, t.TempDir())
+	require.NoError(t, database.Exec("UPDATE workspaces SET is_bare = 1 WHERE id = ?", wsGitID).Error)
+
+	sess, err := service.CreateSession(context.Background(), CreateSessionInput{
+		Name:       "bare-upstream",
+		Workspaces: []WorkspaceBranchSpec{{WorkspaceID: wsGitID, BaseBranch: "main"}},
+	})
+	require.NoError(t, err)
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+
+	final, err := sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.NotContains(t, final.StatusError, "upstream not set",
+		"push --set-upstream must run from the worktree, not the bare workspace root")
+
+	// The new branch should now exist on origin.
+	cmd := exec.Command("git", "-C", wsPath, "ls-remote", "--heads", "origin", "refs/heads/eqt/bare-upstream")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "ls-remote failed: %s", string(out))
+	require.Contains(t, string(out), "eqt/bare-upstream", "expected branch pushed to origin")
 }
