@@ -708,7 +708,7 @@ func (s *SessionService) setupSingleWorktree(ctx context.Context, sess *Session,
 	}
 
 	if created && baseBranchName != "" {
-		if pushErr := s.gitService.PushSetUpstream(ctx, ws.Path, finalBranchName); pushErr != nil {
+		if pushErr := s.gitService.PushSetUpstream(ctx, wtPath, finalBranchName); pushErr != nil {
 			slog.WarnContext(ctx, "push --set-upstream failed", "branch", finalBranchName, "error", pushErr)
 			if warning == "" {
 				warning = fmt.Sprintf("upstream not set: %v", pushErr)
