@@ -22,19 +22,19 @@ import (
 const splitThreshold = 90
 
 type Model struct {
-	sessions        []session.Session
-	filtered        []session.Session
-	cursor          int
-	offset          int
-	showBroken      bool
-	showArchived    bool
-	pendingDeleteID uint
-	pendingRepairID uint
-	statusMsg       string
-	prs             []git.PullRequest
-	lastPRSessionID uint
-	width           int
-	height          int
+	sessions         []session.Session
+	filtered         []session.Session
+	cursor           int
+	offset           int
+	showHidden       bool
+	pendingArchiveID uint
+	pendingDeleteID  uint
+	pendingRepairID  uint
+	statusMsg        string
+	prs              []git.PullRequest
+	lastPRSessionID  uint
+	width            int
+	height           int
 }
 
 func New() Model {
@@ -98,10 +98,7 @@ func (m *Model) rebuildFiltered() {
 		if s.Status == session.StatusDeleted {
 			continue
 		}
-		if s.Status == session.StatusBroken && !m.showBroken {
-			continue
-		}
-		if s.Status == session.StatusArchived && !m.showArchived {
+		if (s.Status == session.StatusBroken || s.Status == session.StatusArchived) && !m.showHidden {
 			continue
 		}
 		m.filtered = append(m.filtered, s)
@@ -152,6 +149,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.rebuildFiltered()
 		newSel := m.selectedSession()
 		if prevSel == nil || newSel == nil || prevSel.ID != newSel.ID {
+			m.pendingArchiveID = 0
 			m.pendingDeleteID = 0
 			m.pendingRepairID = 0
 			m.statusMsg = ""
@@ -197,7 +195,10 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 
 	isNav := key.Matches(msg, keys.Up) || key.Matches(msg, keys.Down)
-	if !key.Matches(msg, keys.Close) && !isNav {
+	if !key.Matches(msg, keys.Archive) && !isNav {
+		m.pendingArchiveID = 0
+	}
+	if !key.Matches(msg, keys.Delete) && !isNav {
 		m.pendingDeleteID = 0
 	}
 	if !key.Matches(msg, keys.Select) && !isNav {
@@ -217,6 +218,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			m.clampOffset()
 		}
 		if sel := m.selectedSession(); sel != nil && sel.ID != prevID {
+			m.pendingArchiveID = 0
 			m.pendingDeleteID = 0
 			m.pendingRepairID = 0
 			m.statusMsg = ""
@@ -230,6 +232,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			m.clampOffset()
 		}
 		if sel := m.selectedSession(); sel != nil && sel.ID != prevID {
+			m.pendingArchiveID = 0
 			m.pendingDeleteID = 0
 			m.pendingRepairID = 0
 			m.statusMsg = ""
@@ -247,13 +250,8 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			sessiondetail.Select(*sel),
 		), true
 
-	case key.Matches(msg, keys.ToggleBroken):
-		m.showBroken = !m.showBroken
-		m.rebuildFiltered()
-		return m, nil, true
-
-	case key.Matches(msg, keys.ToggleArchived):
-		m.showArchived = !m.showArchived
+	case key.Matches(msg, keys.ToggleHidden):
+		m.showHidden = !m.showHidden
 		m.rebuildFiltered()
 		return m, nil, true
 
@@ -302,13 +300,34 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, provider.ActivateSession(sel.ID), true
 		}
 
-	case key.Matches(msg, keys.Close):
+	case key.Matches(msg, keys.Archive):
 		sel := m.selectedSession()
 		if sel == nil {
 			return m, nil, false
 		}
 		if sel.IsAttached {
-			m.statusMsg = "cannot close attached session"
+			m.statusMsg = "cannot archive attached session"
+			return m, nil, true
+		}
+		if sel.Status == session.StatusArchived {
+			m.statusMsg = "already archived"
+			return m, nil, true
+		}
+		if m.pendingArchiveID == sel.ID {
+			m.pendingArchiveID = 0
+			return m, provider.ArchiveSession(sel.ID), true
+		}
+		m.pendingArchiveID = sel.ID
+		m.statusMsg = fmt.Sprintf("press a again to archive %s", sessionDisplayName(*sel))
+		return m, nil, true
+
+	case key.Matches(msg, keys.Delete):
+		sel := m.selectedSession()
+		if sel == nil {
+			return m, nil, false
+		}
+		if sel.IsAttached {
+			m.statusMsg = "cannot delete attached session"
 			return m, nil, true
 		}
 		// Pending sessions hold no real resources; dismiss them outright.
@@ -317,17 +336,10 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 		if m.pendingDeleteID == sel.ID {
 			m.pendingDeleteID = 0
-			switch {
-			case sel.CanDelete():
-				return m, provider.DeleteSession(sel.ID, false), true
-			case sel.IsCreating():
-				return m, provider.DeleteSession(sel.ID, true), true
-			default:
-				return m, provider.ArchiveSession(sel.ID), true
-			}
+			return m, provider.DeleteSession(sel.ID, true), true
 		}
 		m.pendingDeleteID = sel.ID
-		m.statusMsg = m.closeConfirmMessage(*sel)
+		m.statusMsg = fmt.Sprintf("press d again to delete %s (removes worktrees)", sessionDisplayName(*sel))
 		return m, nil, true
 	}
 
@@ -355,25 +367,6 @@ func sessionDisplayName(s session.Session) string {
 		return s.TmuxSession.Name
 	}
 	return fmt.Sprintf("%d", s.ID)
-}
-
-func forceDeleteMessage(name string) string {
-	return fmt.Sprintf("session is still creating — press d again to force delete %s", name)
-}
-
-// closeConfirmMessage prompts the appropriate destructive action for the
-// session's state: archive for a live session, delete for an already-archived
-// one, force-delete for a stuck creating session.
-func (m Model) closeConfirmMessage(s session.Session) string {
-	name := sessionDisplayName(s)
-	switch {
-	case s.CanDelete():
-		return fmt.Sprintf("press d again to delete %s (removes worktrees)", name)
-	case s.IsCreating():
-		return forceDeleteMessage(name)
-	default:
-		return fmt.Sprintf("press d again to archive %s", name)
-	}
 }
 
 func (m Model) renderRow(s session.Session, selected bool, width int) string {
