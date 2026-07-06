@@ -2,6 +2,7 @@ package sessionlist
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -74,6 +75,27 @@ func (m Model) selectedSession() *session.Session {
 	return &s
 }
 
+func (m *Model) confirmTwoPress(pending *uint, id uint, action tea.Cmd, prompt string) tea.Cmd {
+	if *pending == id {
+		*pending = 0
+		return action
+	}
+	*pending = id
+	m.statusMsg = prompt
+	return nil
+}
+
+func (m *Model) clearPending() {
+	m.pendingArchiveID = 0
+	m.pendingDeleteID = 0
+	m.pendingRepairID = 0
+	m.statusMsg = ""
+}
+
+func isHidden(s session.Session) bool {
+	return s.Status == session.StatusBroken || s.Status == session.StatusArchived
+}
+
 func (m *Model) clampOffset() {
 	bh := m.bodyHeight()
 	if m.cursor < m.offset {
@@ -98,11 +120,14 @@ func (m *Model) rebuildFiltered() {
 		if s.Status == session.StatusDeleted {
 			continue
 		}
-		if (s.Status == session.StatusBroken || s.Status == session.StatusArchived) && !m.showHidden {
+		if isHidden(s) && !m.showHidden {
 			continue
 		}
 		m.filtered = append(m.filtered, s)
 	}
+	sort.SliceStable(m.filtered, func(i, j int) bool {
+		return !isHidden(m.filtered[i]) && isHidden(m.filtered[j])
+	})
 
 	if selectedID != 0 {
 		for i, s := range m.filtered {
@@ -149,10 +174,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.rebuildFiltered()
 		newSel := m.selectedSession()
 		if prevSel == nil || newSel == nil || prevSel.ID != newSel.ID {
-			m.pendingArchiveID = 0
-			m.pendingDeleteID = 0
-			m.pendingRepairID = 0
-			m.statusMsg = ""
+			m.clearPending()
 		}
 		return m, m.maybeFetchPRs()
 	case provider.PRsStateUpdatedMsg:
@@ -218,10 +240,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			m.clampOffset()
 		}
 		if sel := m.selectedSession(); sel != nil && sel.ID != prevID {
-			m.pendingArchiveID = 0
-			m.pendingDeleteID = 0
-			m.pendingRepairID = 0
-			m.statusMsg = ""
+			m.clearPending()
 			return m, m.maybeFetchPRs(), true
 		}
 		return m, nil, true
@@ -232,10 +251,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			m.clampOffset()
 		}
 		if sel := m.selectedSession(); sel != nil && sel.ID != prevID {
-			m.pendingArchiveID = 0
-			m.pendingDeleteID = 0
-			m.pendingRepairID = 0
-			m.statusMsg = ""
+			m.clearPending()
 			return m, m.maybeFetchPRs(), true
 		}
 		return m, nil, true
@@ -313,13 +329,9 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			m.statusMsg = "already archived"
 			return m, nil, true
 		}
-		if m.pendingArchiveID == sel.ID {
-			m.pendingArchiveID = 0
-			return m, provider.ArchiveSession(sel.ID), true
-		}
-		m.pendingArchiveID = sel.ID
-		m.statusMsg = fmt.Sprintf("press a again to archive %s", sessionDisplayName(*sel))
-		return m, nil, true
+		cmd := m.confirmTwoPress(&m.pendingArchiveID, sel.ID, provider.ArchiveSession(sel.ID),
+			fmt.Sprintf("press a again to archive %s", sessionDisplayName(*sel)))
+		return m, cmd, true
 
 	case key.Matches(msg, keys.Delete):
 		sel := m.selectedSession()
@@ -334,13 +346,9 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		if sel.Status == session.StatusPending {
 			return m, provider.DismissSession(sel.ID), true
 		}
-		if m.pendingDeleteID == sel.ID {
-			m.pendingDeleteID = 0
-			return m, provider.DeleteSession(sel.ID, true), true
-		}
-		m.pendingDeleteID = sel.ID
-		m.statusMsg = fmt.Sprintf("press d again to delete %s (removes worktrees)", sessionDisplayName(*sel))
-		return m, nil, true
+		cmd := m.confirmTwoPress(&m.pendingDeleteID, sel.ID, provider.DeleteSession(sel.ID, true),
+			fmt.Sprintf("press d again to delete %s (removes worktrees)", sessionDisplayName(*sel)))
+		return m, cmd, true
 	}
 
 	return m, nil, false
@@ -390,14 +398,7 @@ func (m Model) renderRow(s session.Session, selected bool, width int) string {
 	const cursorW = 2
 	nameW := max(width-cursorW-wsPartW-timePartW-badgeW, 1)
 
-	name := sessionDisplayName(s)
-	if lipgloss.Width(name) > nameW {
-		runes := []rune(name)
-		for lipgloss.Width(string(runes)) > nameW-1 && len(runes) > 0 {
-			runes = runes[:len(runes)-1]
-		}
-		name = string(runes) + "…"
-	}
+	name := truncateWidth(sessionDisplayName(s), nameW)
 	namePad := strings.Repeat(" ", max(nameW-lipgloss.Width(name), 0))
 
 	var cursorStr string
@@ -426,15 +427,8 @@ func (m Model) renderRow(s session.Session, selected bool, width int) string {
 
 	var wsStr string
 	if showWS {
-		ws := s.WorkspaceDisplay()
 		const wsTextW = 18
-		if lipgloss.Width(ws) > wsTextW {
-			runes := []rune(ws)
-			for lipgloss.Width(string(runes)) > wsTextW-1 && len(runes) > 0 {
-				runes = runes[:len(runes)-1]
-			}
-			ws = string(runes) + "…"
-		}
+		ws := truncateWidth(s.WorkspaceDisplay(), wsTextW)
 		wsPad := strings.Repeat(" ", max(wsTextW-lipgloss.Width(ws), 0))
 		wsStr = lipgloss.NewStyle().Foreground(theme.Current.Tertiary).Render(" " + ws + wsPad)
 	}
@@ -466,12 +460,28 @@ func (m Model) renderList(width int) string {
 		idx := i + m.offset
 		selected := idx == m.cursor
 		b.WriteString(m.renderRow(s, selected, width))
-		b.WriteString("\n")
+		if i < len(visible)-1 {
+			b.WriteString("\n")
+		}
 	}
 
-	b.WriteString(lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render(m.statusMsg))
-
 	return b.String()
+}
+
+func (m Model) renderFooter() string {
+	msg := truncateWidth(m.statusMsg, m.width)
+	return lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render(msg)
+}
+
+func truncateWidth(s string, width int) string {
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	runes := []rune(s)
+	for lipgloss.Width(string(runes)) > width-1 && len(runes) > 0 {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
 }
 
 func (m Model) View() string {
@@ -480,21 +490,24 @@ func (m Model) View() string {
 		listW = m.listWidth()
 	}
 	listStr := m.renderList(listW)
+	footer := m.renderFooter()
 
 	if !m.isSplit() {
-		return listStr
+		return listStr + "\n" + footer
 	}
 
+	bodyH := m.height - 1
 	panelW := m.width - listW - 2
 	divStyle := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
-	divLines := make([]string, m.height)
+	divLines := make([]string, bodyH)
 	for i := range divLines {
 		divLines[i] = divStyle.Render("│ ")
 	}
 	divider := strings.Join(divLines, "\n")
 
 	sel := m.selectedSession()
-	panelStr := sessiondetail.RenderPanel(sel, m.prs, panelW, m.height)
+	panelStr := sessiondetail.RenderPanel(sel, m.prs, panelW, bodyH)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, listStr, divider, panelStr)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, listStr, divider, panelStr)
+	return body + "\n" + footer
 }

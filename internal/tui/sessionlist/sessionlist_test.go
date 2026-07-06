@@ -136,6 +136,24 @@ func TestSessionList_FiltersArchivedByDefault(t *testing.T) {
 	assert.Equal(t, "live", m.filtered[0].Name)
 }
 
+func TestSessionList_SortsHiddenAfterActive(t *testing.T) {
+	m := New()
+	m.showHidden = true
+	m.sessions = []session.Session{
+		{Model: gorm.Model{ID: 1}, Name: "old", Status: session.StatusArchived},
+		{Model: gorm.Model{ID: 2}, Name: "live", Status: session.StatusActive},
+		{Model: gorm.Model{ID: 3}, Name: "bad", Status: session.StatusBroken},
+		{Model: gorm.Model{ID: 4}, Name: "live2", Status: session.StatusActive},
+	}
+	m.rebuildFiltered()
+
+	var names []string
+	for _, s := range m.filtered {
+		names = append(names, s.Name)
+	}
+	assert.Equal(t, []string{"live", "live2", "old", "bad"}, names)
+}
+
 func TestSessionList_ToggleHidden_RevealsArchivedAndBroken(t *testing.T) {
 	m := New()
 	m.sessions = []session.Session{
