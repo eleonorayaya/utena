@@ -21,6 +21,10 @@ func pressD(m Model) (Model, tea.Cmd, bool) {
 	return m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 }
 
+func pressA(m Model) (Model, tea.Cmd, bool) {
+	return m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+}
+
 func TestSessionList_InfoKey_NavigatesToDetail(t *testing.T) {
 	m := New()
 	m.filtered = []session.Session{
@@ -31,46 +35,59 @@ func TestSessionList_InfoKey_NavigatesToDetail(t *testing.T) {
 	assert.NotNil(t, cmd)
 }
 
-func TestSessionList_Delete_Creating_FirstPress_ShowsForceMessage(t *testing.T) {
-	m := New()
-	m.filtered = []session.Session{
-		{Model: gorm.Model{ID: 1}, Name: "stuck", Status: session.StatusCreating},
-	}
-
-	result, cmd, handled := m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	assert.True(t, handled)
-	assert.Nil(t, cmd)
-	assert.Equal(t, uint(1), result.pendingDeleteID)
-	assert.Contains(t, result.statusMsg, "force delete stuck")
-}
-
-func TestSessionList_Delete_Creating_SecondPress_ForceDeletes(t *testing.T) {
-	m := New()
-	m.filtered = []session.Session{
-		{Model: gorm.Model{ID: 1}, Name: "stuck", Status: session.StatusCreating},
-	}
-	m.pendingDeleteID = 1
-
-	result, cmd, handled := m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	assert.True(t, handled)
-	assert.NotNil(t, cmd)
-	assert.Equal(t, uint(0), result.pendingDeleteID)
-}
-
-func TestSessionList_Delete_Active_FirstPress_ShowsArchiveMessage(t *testing.T) {
+func TestSessionList_Archive_Active_FirstPress_ShowsArchiveMessage(t *testing.T) {
 	m := New()
 	m.filtered = []session.Session{
 		{Model: gorm.Model{ID: 1}, Name: "live", Status: session.StatusActive},
 	}
 
-	result, cmd, handled := pressD(m)
+	result, cmd, handled := pressA(m)
 	assert.True(t, handled)
 	assert.Nil(t, cmd)
-	assert.Equal(t, uint(1), result.pendingDeleteID)
+	assert.Equal(t, uint(1), result.pendingArchiveID)
 	assert.Contains(t, result.statusMsg, "archive live")
 }
 
-func TestSessionList_Delete_Active_SecondPress_Archives(t *testing.T) {
+func TestSessionList_Archive_Active_SecondPress_Archives(t *testing.T) {
+	m := New()
+	m.filtered = []session.Session{
+		{Model: gorm.Model{ID: 1}, Name: "live", Status: session.StatusActive},
+	}
+	m.pendingArchiveID = 1
+
+	result, cmd, handled := pressA(m)
+	assert.True(t, handled)
+	assert.Equal(t, "provider.archiveSessionIntentMsg", msgTypeName(cmd))
+	assert.Equal(t, uint(0), result.pendingArchiveID)
+}
+
+func TestSessionList_Archive_AlreadyArchived_NoOp(t *testing.T) {
+	m := New()
+	m.filtered = []session.Session{
+		{Model: gorm.Model{ID: 1}, Name: "old", Status: session.StatusArchived},
+	}
+
+	result, cmd, handled := pressA(m)
+	assert.True(t, handled)
+	assert.Nil(t, cmd)
+	assert.Equal(t, uint(0), result.pendingArchiveID)
+	assert.Contains(t, result.statusMsg, "already archived")
+}
+
+func TestSessionList_Delete_Active_FirstPress_ShowsDeleteMessage(t *testing.T) {
+	m := New()
+	m.filtered = []session.Session{
+		{Model: gorm.Model{ID: 1}, Name: "live", Status: session.StatusActive},
+	}
+
+	result, cmd, handled := pressD(m)
+	assert.True(t, handled)
+	assert.Nil(t, cmd)
+	assert.Equal(t, uint(1), result.pendingDeleteID)
+	assert.Contains(t, result.statusMsg, "delete live")
+}
+
+func TestSessionList_Delete_Active_SecondPress_ForceDeletes(t *testing.T) {
 	m := New()
 	m.filtered = []session.Session{
 		{Model: gorm.Model{ID: 1}, Name: "live", Status: session.StatusActive},
@@ -79,33 +96,21 @@ func TestSessionList_Delete_Active_SecondPress_Archives(t *testing.T) {
 
 	result, cmd, handled := pressD(m)
 	assert.True(t, handled)
-	assert.Equal(t, "provider.archiveSessionIntentMsg", msgTypeName(cmd))
+	assert.Equal(t, "provider.deleteSessionIntentMsg", msgTypeName(cmd))
 	assert.Equal(t, uint(0), result.pendingDeleteID)
 }
 
-func TestSessionList_Delete_Archived_FirstPress_ShowsDeleteMessage(t *testing.T) {
+func TestSessionList_Delete_Attached_Blocked(t *testing.T) {
 	m := New()
 	m.filtered = []session.Session{
-		{Model: gorm.Model{ID: 1}, Name: "old", Status: session.StatusArchived},
+		{Model: gorm.Model{ID: 1}, Name: "live", Status: session.StatusActive, IsAttached: true},
 	}
 
 	result, cmd, handled := pressD(m)
 	assert.True(t, handled)
 	assert.Nil(t, cmd)
-	assert.Equal(t, uint(1), result.pendingDeleteID)
-	assert.Contains(t, result.statusMsg, "delete old")
-}
-
-func TestSessionList_Delete_Archived_SecondPress_Deletes(t *testing.T) {
-	m := New()
-	m.filtered = []session.Session{
-		{Model: gorm.Model{ID: 1}, Name: "old", Status: session.StatusArchived},
-	}
-	m.pendingDeleteID = 1
-
-	_, cmd, handled := pressD(m)
-	assert.True(t, handled)
-	assert.Equal(t, "provider.deleteSessionIntentMsg", msgTypeName(cmd))
+	assert.Equal(t, uint(0), result.pendingDeleteID)
+	assert.Contains(t, result.statusMsg, "cannot delete attached")
 }
 
 func TestSessionList_Pending_Dismisses(t *testing.T) {
@@ -131,16 +136,35 @@ func TestSessionList_FiltersArchivedByDefault(t *testing.T) {
 	assert.Equal(t, "live", m.filtered[0].Name)
 }
 
-func TestSessionList_ToggleArchived_RevealsArchived(t *testing.T) {
+func TestSessionList_SortsHiddenAfterActive(t *testing.T) {
+	m := New()
+	m.showHidden = true
+	m.sessions = []session.Session{
+		{Model: gorm.Model{ID: 1}, Name: "old", Status: session.StatusArchived},
+		{Model: gorm.Model{ID: 2}, Name: "live", Status: session.StatusActive},
+		{Model: gorm.Model{ID: 3}, Name: "bad", Status: session.StatusBroken},
+		{Model: gorm.Model{ID: 4}, Name: "live2", Status: session.StatusActive},
+	}
+	m.rebuildFiltered()
+
+	var names []string
+	for _, s := range m.filtered {
+		names = append(names, s.Name)
+	}
+	assert.Equal(t, []string{"live", "live2", "old", "bad"}, names)
+}
+
+func TestSessionList_ToggleHidden_RevealsArchivedAndBroken(t *testing.T) {
 	m := New()
 	m.sessions = []session.Session{
 		{Model: gorm.Model{ID: 1}, Name: "live", Status: session.StatusActive},
 		{Model: gorm.Model{ID: 2}, Name: "old", Status: session.StatusArchived},
+		{Model: gorm.Model{ID: 3}, Name: "bad", Status: session.StatusBroken},
 	}
 	m.rebuildFiltered()
 
-	result, _, handled := m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	result, _, handled := m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(".")})
 	assert.True(t, handled)
-	assert.True(t, result.showArchived)
-	assert.Len(t, result.filtered, 2)
+	assert.True(t, result.showHidden)
+	assert.Len(t, result.filtered, 3)
 }
