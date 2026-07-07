@@ -10,12 +10,12 @@ tasks:
   build:
     sources:
       - 'internal/**/*.go'
-      - 'cmd/tui/main.go'
+      - 'cmd/tui/*.go'
     vars:
       LDFLAGS: >-
         -X main.defaultPort={{.UTENA_PORT | default "3333"}}
     cmds:
-      - go build -ldflags '{{.LDFLAGS}}' -o out/tui cmd/tui/main.go
+      - go build -ldflags '{{.LDFLAGS}}' -o out/tui ./cmd/tui
   install:
     deps:
       - build

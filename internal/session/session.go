@@ -80,6 +80,22 @@ func (s *Session) IsMulti() bool {
 	return len(s.Worktrees) > 1
 }
 
+// IsHidden reports whether the session is normally hidden from the default
+// session list: broken or archived sessions.
+func (s *Session) IsHidden() bool {
+	return s.Status == StatusBroken || s.Status == StatusArchived
+}
+
+// ListVisible reports whether the session should appear in a session listing.
+// Deleted sessions are never listed; hidden (broken/archived) sessions are
+// listed only when includeHidden is set.
+func (s *Session) ListVisible(includeHidden bool) bool {
+	if s.Status == StatusDeleted {
+		return false
+	}
+	return includeHidden || !s.IsHidden()
+}
+
 // WorkspaceDisplay returns the human-readable label naming the workspace(s)
 // this session involves: a single workspace name, "N workspaces · a, b, ..."
 // for multi (truncating beyond three names), or "no workspace".
