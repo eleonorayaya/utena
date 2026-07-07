@@ -92,10 +92,6 @@ func (m *Model) clearPending() {
 	m.statusMsg = ""
 }
 
-func isHidden(s session.Session) bool {
-	return s.Status == session.StatusBroken || s.Status == session.StatusArchived
-}
-
 func (m *Model) clampOffset() {
 	bh := m.bodyHeight()
 	if m.cursor < m.offset {
@@ -117,16 +113,12 @@ func (m *Model) rebuildFiltered() {
 
 	m.filtered = nil
 	for _, s := range m.sessions {
-		if s.Status == session.StatusDeleted {
-			continue
+		if s.ListVisible(m.showHidden) {
+			m.filtered = append(m.filtered, s)
 		}
-		if isHidden(s) && !m.showHidden {
-			continue
-		}
-		m.filtered = append(m.filtered, s)
 	}
 	sort.SliceStable(m.filtered, func(i, j int) bool {
-		return !isHidden(m.filtered[i]) && isHidden(m.filtered[j])
+		return !m.filtered[i].IsHidden() && m.filtered[j].IsHidden()
 	})
 
 	if selectedID != 0 {

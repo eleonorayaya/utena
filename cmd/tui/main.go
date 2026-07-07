@@ -34,6 +34,7 @@ func main() {
 	rootCmd.AddCommand(todosCmd())
 	rootCmd.AddCommand(newTaskCmd())
 	rootCmd.AddCommand(statusCmd())
+	rootCmd.AddCommand(sessionsCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
