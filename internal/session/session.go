@@ -63,6 +63,11 @@ func (s *Session) IsCreating() bool {
 	return s.Status == StatusCreating
 }
 
+// AttentionStatus rolls up the session's Claude statuses into a single value.
+func (s *Session) AttentionStatus() claude.ClaudeSessionStatus {
+	return claude.AggregateStatus(s.ClaudeSessions)
+}
+
 // CanArchive reports whether the session is in a state that can be archived:
 // any live or finished session, including broken ones.
 func (s *Session) CanArchive() bool {
@@ -94,6 +99,14 @@ func (s *Session) ListVisible(includeHidden bool) bool {
 		return false
 	}
 	return includeHidden || !s.IsHidden()
+}
+
+// DisplayLabel returns the session's name, or its workspace label if unnamed.
+func (s *Session) DisplayLabel() string {
+	if s.Name != "" {
+		return s.Name
+	}
+	return s.WorkspaceDisplay()
 }
 
 // WorkspaceDisplay returns the human-readable label naming the workspace(s)

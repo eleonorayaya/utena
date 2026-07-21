@@ -56,11 +56,24 @@ func filterSessions(sessions []session.Session, all bool) []session.Session {
 }
 
 func fetchSessions(port string) ([]session.Session, error) {
+	resp, err := fetchSessionListResponse(port, 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("could not reach utena daemon at http://localhost:%s/sessions (is it running?): %w", port, err)
+	}
+
+	sessions := make([]session.Session, len(resp.Sessions))
+	for i, sr := range resp.Sessions {
+		sessions[i] = *sr.Session
+	}
+	return sessions, nil
+}
+
+func fetchSessionListResponse(port string, timeout time.Duration) (*session.SessionListResponse, error) {
 	url := fmt.Sprintf("http://localhost:%s/sessions", port)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: timeout}
 	res, err := client.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("could not reach utena daemon at %s (is it running?): %w", url, err)
+		return nil, err
 	}
 	defer res.Body.Close()
 
@@ -72,10 +85,5 @@ func fetchSessions(port string) ([]session.Session, error) {
 	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
 		return nil, err
 	}
-
-	sessions := make([]session.Session, len(resp.Sessions))
-	for i, sr := range resp.Sessions {
-		sessions[i] = *sr.Session
-	}
-	return sessions, nil
+	return &resp, nil
 }

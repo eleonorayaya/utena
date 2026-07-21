@@ -4,14 +4,20 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/eleonorayaya/utena/internal/claude"
 )
 
 type SessionResponse struct {
 	*Session
+	AttentionStatus claude.ClaudeSessionStatus `json:"attention_status,omitempty"`
 }
 
 func NewSessionResponse(session *Session) *SessionResponse {
-	return &SessionResponse{Session: session}
+	return &SessionResponse{
+		Session:         session,
+		AttentionStatus: session.AttentionStatus(),
+	}
 }
 
 func (sr *SessionResponse) Render(w http.ResponseWriter, r *http.Request) error {
