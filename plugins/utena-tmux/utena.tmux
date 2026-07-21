@@ -4,7 +4,10 @@ plugin_dir=${TMUX_PLUGIN_MANAGER_PATH:-$HOME/.config/tmux/plugins}
 plugin_path="$plugin_dir/utena-tmux"
 script_dir="$plugin_path/scripts"
 
-tmux set -g status off
+tmux set -g status on
+tmux set -g status-interval 1
+tmux set -g status-left-length 200
+tmux set -g status-left "#(utena status-line)"
 tmux set -g focus-events on
 
 tmux set-hook -g session-created "run-shell '${script_dir}/hook.sh session-created \"#{hook_session_name}\"'"

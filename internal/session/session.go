@@ -63,6 +63,13 @@ func (s *Session) IsCreating() bool {
 	return s.Status == StatusCreating
 }
 
+// AttentionStatus reports whether this session needs the user's attention.
+// It currently rolls up the session's Claude statuses; it exists as a distinct
+// method so future attention logic beyond a plain Claude rollup has a home.
+func (s *Session) AttentionStatus() claude.ClaudeSessionStatus {
+	return claude.AggregateStatus(s.ClaudeSessions)
+}
+
 // CanArchive reports whether the session is in a state that can be archived:
 // any live or finished session, including broken ones.
 func (s *Session) CanArchive() bool {
