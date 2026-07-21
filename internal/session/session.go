@@ -63,9 +63,7 @@ func (s *Session) IsCreating() bool {
 	return s.Status == StatusCreating
 }
 
-// AttentionStatus reports whether this session needs the user's attention.
-// It currently rolls up the session's Claude statuses; it exists as a distinct
-// method so future attention logic beyond a plain Claude rollup has a home.
+// AttentionStatus rolls up the session's Claude statuses into a single value.
 func (s *Session) AttentionStatus() claude.ClaudeSessionStatus {
 	return claude.AggregateStatus(s.ClaudeSessions)
 }
@@ -101,6 +99,14 @@ func (s *Session) ListVisible(includeHidden bool) bool {
 		return false
 	}
 	return includeHidden || !s.IsHidden()
+}
+
+// DisplayLabel returns the session's name, or its workspace label if unnamed.
+func (s *Session) DisplayLabel() string {
+	if s.Name != "" {
+		return s.Name
+	}
+	return s.WorkspaceDisplay()
 }
 
 // WorkspaceDisplay returns the human-readable label naming the workspace(s)

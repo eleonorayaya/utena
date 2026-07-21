@@ -1,17 +1,13 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/eleonorayaya/utena/internal/claude"
-	"github.com/eleonorayaya/utena/internal/session"
 )
 
 func statusLineCmd() *cobra.Command {
@@ -20,7 +16,7 @@ func statusLineCmd() *cobra.Command {
 		Short:        "Print a one-line tmux status-bar segment for sessions waiting on you",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			port := resolveStatusLinePort(cmd)
+			port, _ := cmd.Root().Flags().GetString("port")
 			rows, err := fetchStatusLineRows(port)
 			if err != nil {
 				return nil
@@ -32,37 +28,14 @@ func statusLineCmd() *cobra.Command {
 	return cmd
 }
 
-func resolveStatusLinePort(cmd *cobra.Command) string {
-	if cmd.Root().Flags().Changed("port") {
-		port, _ := cmd.Root().Flags().GetString("port")
-		return port
-	}
-	if envPort := os.Getenv("UTENA_PORT"); envPort != "" {
-		return envPort
-	}
-	return defaultPort
-}
-
 type barRow struct {
 	Name      string
 	Attention claude.ClaudeSessionStatus
 }
 
 func fetchStatusLineRows(port string) ([]barRow, error) {
-	url := fmt.Sprintf("http://localhost:%s/sessions", port)
-	client := &http.Client{Timeout: 1500 * time.Millisecond}
-	res, err := client.Get(url)
+	resp, err := fetchSessionListResponse(port, 1500*time.Millisecond)
 	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch sessions: unexpected status %d", res.StatusCode)
-	}
-
-	var resp session.SessionListResponse
-	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
 		return nil, err
 	}
 
@@ -71,16 +44,9 @@ func fetchStatusLineRows(port string) ([]barRow, error) {
 		if sr.Session == nil || !sr.ListVisible(false) {
 			continue
 		}
-		rows = append(rows, barRow{Name: sessionDisplayLabel(*sr.Session), Attention: sr.AttentionStatus})
+		rows = append(rows, barRow{Name: sr.DisplayLabel(), Attention: sr.AttentionStatus})
 	}
 	return rows, nil
-}
-
-func sessionDisplayLabel(s session.Session) string {
-	if s.Name != "" {
-		return s.Name
-	}
-	return s.WorkspaceDisplay()
 }
 
 func formatStatusLine(rows []barRow) string {
