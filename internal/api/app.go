@@ -11,6 +11,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/jobs"
+	"github.com/eleonorayaya/utena/internal/monitor"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/todo"
@@ -29,6 +30,7 @@ type App struct {
 	Claude    *claude.ClaudeModule
 	Todo      *todo.TodoModule
 	Jobs      *jobs.JobsModule
+	Monitor   *monitor.MonitorModule
 }
 
 func NewApp(cfg Config) (*App, error) {
@@ -75,6 +77,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxMod
 		Claude:    claude.NewClaudeModule(database),
 		Todo:      todo.NewTodoModule(workspaceModule, database),
 		Jobs:      jobsModule,
+		Monitor:   monitor.NewMonitorModule(bus, sessionModule.Service),
 	}
 
 	database.RegisterModels(app.collectModels()...)
@@ -150,5 +153,6 @@ func (a *App) modules() []moduleEntry {
 		{"session", "/sessions", a.Session},
 		{"todo", "/todos", a.Todo},
 		{"jobs", "/jobs", a.Jobs},
+		{"monitor", "/monitor", a.Monitor},
 	}
 }

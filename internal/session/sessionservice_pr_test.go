@@ -23,6 +23,7 @@ import (
 
 type prTestEnv struct {
 	service          *SessionService
+	bus              eventbus.EventBus
 	sessionStore     *SessionStore
 	swtStore         *SessionWorktreeStore
 	dismissedPRStore *DismissedPRStore
@@ -104,6 +105,7 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 
 	return &prTestEnv{
 		service:          service,
+		bus:              bus,
 		sessionStore:     sessionStore,
 		swtStore:         sessionWorktreeStore,
 		dismissedPRStore: dismissedPRStore,

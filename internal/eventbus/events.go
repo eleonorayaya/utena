@@ -8,6 +8,8 @@ const (
 	TmuxClientDetached       = "tmux.client_detached"
 
 	SessionActivated = "session.activated"
+
+	SessionNotification = "monitor.session_notification"
 )
 
 type TmuxHookEvent struct {
@@ -16,4 +18,10 @@ type TmuxHookEvent struct {
 
 type SessionActivatedEvent struct {
 	SessionName string
+}
+
+type SessionNotificationEvent struct {
+	SessionID uint
+	Type      string
+	Data      any
 }

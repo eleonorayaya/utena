@@ -51,6 +51,29 @@ r.Post("/{id}/action", sr.controller.DoSomething)
 
 See `docs/backend-patterns.md` Pattern 7 for the full event bus pattern including when to use it, how to define events, publish, and subscribe.
 
+## Adding a Session Event for Claude's Monitor
+
+Each Claude session runs `utena monitor $UTENA_SESSION_ID` as a plugin monitor (`plugins/utena-claude/monitors/monitors.json`), which holds a websocket to `GET /monitor/ws?session_id=<id>`. Every text frame becomes one notification in that Claude session.
+
+The monitor module is transport only — it holds no domain state and depends on no other domain. To feed a new kind of event to Claude, publish from the service that owns the data:
+
+```go
+s.eventBus.Publish(ctx, eventbus.Event{
+    Type: eventbus.SessionNotification,
+    Data: eventbus.SessionNotificationEvent{
+        SessionID: sess.ID,
+        Type:      "build_failed",
+        Data:      buildFailedPayload{...},
+    },
+})
+```
+
+`MonitorService` marshals it to `{"type":..., "session_id":..., "data":...}` and fans it out to the websockets watching that session. Only publish on an actual change — every event is a message in Claude's context.
+
+On connect, the monitor asks `SnapshotProvider` (implemented by `SessionService.SessionSnapshot`) for the session's current state so a session that starts after a change is not left with silence. Add the same event type there when the current state matters at connect time.
+
+See: `internal/monitor/`, `internal/session/sessionservice.go` (`notifyPRUpdated`, `SessionSnapshot`)
+
 ## Adding a New Module
 
 ### 1. Create Module Structure

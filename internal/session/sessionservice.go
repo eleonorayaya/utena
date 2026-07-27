@@ -1569,7 +1569,68 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 		s.maybeCompleteSession(ctx, pr)
 	}
 
+	s.notifyPRUpdated(ctx, data)
+
 	return nil
+}
+
+func (s *SessionService) notifyPRUpdated(ctx context.Context, data git.PRUpdatedEvent) {
+	sess, err := s.store.GetByBranchID(*data.PullRequest.HeadBranchID)
+	if err != nil {
+		return
+	}
+
+	event := eventbus.Event{
+		Type: eventbus.SessionNotification,
+		Data: eventbus.SessionNotificationEvent{
+			SessionID: sess.ID,
+			Type:      notificationTypePullRequest,
+			Data:      s.newPRNotification(data.PullRequest, data.Previous),
+		},
+	}
+	if err := s.eventBus.Publish(ctx, event); err != nil {
+		slog.Warn("failed to publish session notification", "session", sess.ID, "pr", data.PullRequest.Number, "error", err)
+	}
+}
+
+func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []eventbus.SessionNotificationEvent {
+	sess, err := s.store.GetByID(sessionID)
+	if err != nil {
+		return nil
+	}
+
+	var out []eventbus.SessionNotificationEvent
+	for _, branchID := range s.sessionBranchIDs(sess) {
+		for _, pr := range s.gitService.GetPRsForBranch(branchID) {
+			if pr.State != git.PRStateOpen && pr.State != git.PRStateDraft {
+				continue
+			}
+			out = append(out, eventbus.SessionNotificationEvent{
+				SessionID: sessionID,
+				Type:      notificationTypePullRequest,
+				Data:      s.newPRNotification(&pr, nil),
+			})
+		}
+	}
+	return out
+}
+
+func (s *SessionService) newPRNotification(pr *git.PullRequest, previous *git.PullRequest) prNotification {
+	n := prNotification{
+		Number: pr.Number,
+		Title:  pr.Title,
+		State:  string(pr.State),
+		URL:    pr.HTMLURL,
+	}
+	if previous != nil && previous.State != pr.State {
+		n.PreviousState = string(previous.State)
+	}
+	if pr.HeadBranchID != nil {
+		if branch, err := s.gitService.GetBranch(*pr.HeadBranchID); err == nil {
+			n.Branch = branch.Name
+		}
+	}
+	return n
 }
 
 func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git.PRUpdatedEvent) {
