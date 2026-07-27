@@ -1,7 +1,7 @@
 {
   "name": "utena-claude",
-  "description": "Claude Code integration hooks for Utena: reports session status to the Utena daemon",
-  "version": "1.0.0",
+  "description": "Utena integration for Claude Code: reports session status to the daemon and streams session events (PR status changes) back to Claude",
+  "version": "1.1.0",
   "hooks": {
     "SessionStart": [
       {

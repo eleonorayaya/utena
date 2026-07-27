@@ -10,7 +10,7 @@
     {
       "name": "utena-claude",
       "source": "./plugins/utena-claude",
-      "description": "Claude Code integration hooks for Utena: reports session status (working, needs attention, completed) to the Utena daemon"
+      "description": "Utena integration for Claude Code: reports session status (working, needs attention, completed) to the daemon and streams session events (PR status changes) back to Claude via a background monitor"
     }
   ]
 }
