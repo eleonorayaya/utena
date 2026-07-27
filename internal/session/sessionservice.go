@@ -1561,35 +1561,36 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 	newlyAssigned := pr.IsAssignedToMe && pr.State == git.PRStateOpen && (isNew || !data.Previous.IsAssignedToMe)
 	newlyMerged := pr.State == git.PRStateMerged && (isNew || data.Previous.State != git.PRStateMerged)
 
-	if newlyAssigned {
+	sess, _ := s.store.GetByBranchID(*pr.HeadBranchID)
+
+	if newlyAssigned && sess == nil {
 		s.maybeCreatePendingSession(ctx, data)
+		sess, _ = s.store.GetByBranchID(*pr.HeadBranchID)
+	}
+	if sess == nil {
+		return nil
 	}
 
 	if newlyMerged {
-		s.maybeCompleteSession(ctx, pr)
+		s.maybeCompleteSession(sess, pr)
 	}
 
-	s.notifyPRUpdated(ctx, data)
+	s.notifyPRUpdated(ctx, sess, pr, data.Previous)
 
 	return nil
 }
 
-func (s *SessionService) notifyPRUpdated(ctx context.Context, data git.PRUpdatedEvent) {
-	sess, err := s.store.GetByBranchID(*data.PullRequest.HeadBranchID)
-	if err != nil {
-		return
-	}
-
+func (s *SessionService) notifyPRUpdated(ctx context.Context, sess *Session, pr *git.PullRequest, previous *git.PullRequest) {
 	event := eventbus.Event{
 		Type: eventbus.SessionNotification,
 		Data: eventbus.SessionNotificationEvent{
 			SessionID: sess.ID,
 			Type:      notificationTypePullRequest,
-			Data:      s.newPRNotification(data.PullRequest, data.Previous),
+			Data:      newPRNotification(pr, previous, sessionBranchName(sess, *pr.HeadBranchID)),
 		},
 	}
 	if err := s.eventBus.Publish(ctx, event); err != nil {
-		slog.Warn("failed to publish session notification", "session", sess.ID, "pr", data.PullRequest.Number, "error", err)
+		slog.Warn("failed to publish session notification", "session", sess.ID, "pr", pr.Number, "error", err)
 	}
 }
 
@@ -1601,6 +1602,7 @@ func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []
 
 	var out []eventbus.SessionNotificationEvent
 	for _, branchID := range s.sessionBranchIDs(sess) {
+		branch := sessionBranchName(sess, branchID)
 		for _, pr := range s.gitService.GetPRsForBranch(branchID) {
 			if pr.State != git.PRStateOpen && pr.State != git.PRStateDraft {
 				continue
@@ -1608,38 +1610,39 @@ func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []
 			out = append(out, eventbus.SessionNotificationEvent{
 				SessionID: sessionID,
 				Type:      notificationTypePullRequest,
-				Data:      s.newPRNotification(&pr, nil),
+				Data:      newPRNotification(&pr, nil, branch),
 			})
 		}
 	}
 	return out
 }
 
-func (s *SessionService) newPRNotification(pr *git.PullRequest, previous *git.PullRequest) prNotification {
+func sessionBranchName(sess *Session, branchID uint) string {
+	for i := range sess.Worktrees {
+		wt := sess.Worktrees[i].Worktree
+		if wt != nil && wt.BranchID == branchID && wt.Branch != nil {
+			return wt.Branch.Name
+		}
+	}
+	return ""
+}
+
+func newPRNotification(pr *git.PullRequest, previous *git.PullRequest, branch string) prNotification {
 	n := prNotification{
 		Number: pr.Number,
 		Title:  pr.Title,
 		State:  string(pr.State),
+		Branch: branch,
 		URL:    pr.HTMLURL,
 	}
 	if previous != nil && previous.State != pr.State {
 		n.PreviousState = string(previous.State)
-	}
-	if pr.HeadBranchID != nil {
-		if branch, err := s.gitService.GetBranch(*pr.HeadBranchID); err == nil {
-			n.Branch = branch.Name
-		}
 	}
 	return n
 }
 
 func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git.PRUpdatedEvent) {
 	pr := data.PullRequest
-
-	_, err := s.store.GetByBranchID(*pr.HeadBranchID)
-	if err == nil {
-		return
-	}
 
 	if s.dismissedPRStore != nil && s.dismissedPRStore.IsDismissed(pr.ID) {
 		return
@@ -1676,12 +1679,7 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 	slog.Info("activating session for assigned PR", "pr", pr.Number, "session", sess.ID, "branch", branch.Name)
 }
 
-func (s *SessionService) maybeCompleteSession(_ context.Context, pr *git.PullRequest) {
-	sess, err := s.store.GetByBranchID(*pr.HeadBranchID)
-	if err != nil {
-		return
-	}
-
+func (s *SessionService) maybeCompleteSession(sess *Session, pr *git.PullRequest) {
 	if sess.Status == StatusDeleted || sess.Status == StatusArchived || sess.Status == StatusCompleted {
 		return
 	}

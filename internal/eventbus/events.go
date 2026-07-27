@@ -9,7 +9,7 @@ const (
 
 	SessionActivated = "session.activated"
 
-	SessionNotification = "monitor.session_notification"
+	SessionNotification = "session.notification"
 )
 
 type TmuxHookEvent struct {
@@ -21,7 +21,7 @@ type SessionActivatedEvent struct {
 }
 
 type SessionNotificationEvent struct {
-	SessionID uint
-	Type      string
-	Data      any
+	SessionID uint   `json:"session_id"`
+	Type      string `json:"type"`
+	Data      any    `json:"data,omitempty"`
 }

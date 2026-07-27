@@ -26,9 +26,6 @@ func (c *MonitorController) Watch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := c.service.attach(uint(sessionID))
-	defer c.service.detach(client)
-
 	sock, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		slog.Warn("failed to accept monitor websocket", "session", sessionID, "error", err)
@@ -39,22 +36,8 @@ func (c *MonitorController) Watch(w http.ResponseWriter, r *http.Request) {
 	ctx := sock.CloseRead(r.Context())
 	slog.Info("monitor client connected", "session", sessionID)
 
-	for _, msg := range c.service.snapshot(ctx, uint(sessionID)) {
-		if err := sock.Write(ctx, websocket.MessageText, msg); err != nil {
-			return
-		}
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			slog.Info("monitor client disconnected", "session", sessionID)
-			return
-		case msg := <-client.send:
-			if err := sock.Write(ctx, websocket.MessageText, msg); err != nil {
-				slog.Info("monitor client write failed", "session", sessionID, "error", err)
-				return
-			}
-		}
-	}
+	err = c.service.Stream(ctx, uint(sessionID), func(msg []byte) error {
+		return sock.Write(ctx, websocket.MessageText, msg)
+	})
+	slog.Info("monitor client disconnected", "session", sessionID, "reason", err)
 }

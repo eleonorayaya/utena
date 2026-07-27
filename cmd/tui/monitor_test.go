@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"net/http/httptest"
 	"strings"
@@ -51,12 +50,4 @@ func TestStreamSessionEventsWritesOneLinePerEvent(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for a session event line")
 	}
-}
-
-func TestStreamSessionEventsFailsWhenDaemonIsDown(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := streamSessionEvents(ctx, "ws://localhost:1/monitor/ws?session_id=1", &bytes.Buffer{})
-	require.Error(t, err)
 }

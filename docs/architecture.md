@@ -23,6 +23,8 @@ workspace (no dependencies)
 session (depends on: workspace, eventbus)
     ↓
 tmux (depends on: session, eventbus)
+    ↓
+monitor (depends on: session, eventbus)
 ```
 
 **Key principle**: Dependencies flow downward. Lower modules never depend on higher modules directly. When a lower module needs to notify a higher one, it publishes an event.

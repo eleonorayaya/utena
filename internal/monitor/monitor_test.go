@@ -22,11 +22,11 @@ func (f *fakeSnapshots) SessionSnapshot(_ context.Context, sessionID uint) []eve
 	return f.events
 }
 
-func setup(t *testing.T, snapshots SnapshotProvider) (*eventbus.InMemoryEventBus, string) {
+func setup(t *testing.T, snapshots ...eventbus.SessionNotificationEvent) (*eventbus.InMemoryEventBus, string) {
 	t.Helper()
 
 	bus := eventbus.NewEventBus()
-	module := NewMonitorModule(bus, snapshots)
+	module := NewMonitorModule(bus, &fakeSnapshots{events: snapshots})
 	require.NoError(t, module.OnAppStart(context.Background()))
 
 	server := httptest.NewServer(module.Routes())
@@ -35,20 +35,22 @@ func setup(t *testing.T, snapshots SnapshotProvider) (*eventbus.InMemoryEventBus
 	return bus, "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
 }
 
-func readMessage(t *testing.T, ctx context.Context, sock *websocket.Conn) notification {
+func readMessage(t *testing.T, ctx context.Context, sock *websocket.Conn) eventbus.SessionNotificationEvent {
 	t.Helper()
 
 	kind, data, err := sock.Read(ctx)
 	require.NoError(t, err)
 	require.Equal(t, websocket.MessageText, kind)
 
-	var got notification
+	var got eventbus.SessionNotificationEvent
 	require.NoError(t, json.Unmarshal(data, &got))
 	return got
 }
 
 func TestWatchBroadcastsSessionNotifications(t *testing.T) {
-	bus, wsURL := setup(t, nil)
+	// the snapshot is sent once the client is registered, so reading it first
+	// removes the race between the handshake completing and the subscription
+	bus, wsURL := setup(t, eventbus.SessionNotificationEvent{SessionID: 7, Type: "connected"})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -56,6 +58,7 @@ func TestWatchBroadcastsSessionNotifications(t *testing.T) {
 	sock, _, err := websocket.Dial(ctx, wsURL+"?session_id=7", nil)
 	require.NoError(t, err)
 	defer func() { _ = sock.CloseNow() }()
+	require.Equal(t, "connected", readMessage(t, ctx, sock).Type)
 
 	require.NoError(t, bus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionNotification,
@@ -73,12 +76,11 @@ func TestWatchBroadcastsSessionNotifications(t *testing.T) {
 }
 
 func TestWatchSendsSnapshotOnConnect(t *testing.T) {
-	snapshots := &fakeSnapshots{events: []eventbus.SessionNotificationEvent{{
+	_, wsURL := setup(t, eventbus.SessionNotificationEvent{
 		SessionID: 3,
 		Type:      "pull_request",
 		Data:      map[string]any{"number": 1},
-	}}}
-	_, wsURL := setup(t, snapshots)
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -93,7 +95,7 @@ func TestWatchSendsSnapshotOnConnect(t *testing.T) {
 }
 
 func TestWatchIgnoresOtherSessions(t *testing.T) {
-	bus, wsURL := setup(t, nil)
+	bus, wsURL := setup(t, eventbus.SessionNotificationEvent{SessionID: 1, Type: "connected"})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -101,6 +103,7 @@ func TestWatchIgnoresOtherSessions(t *testing.T) {
 	sock, _, err := websocket.Dial(ctx, wsURL+"?session_id=1", nil)
 	require.NoError(t, err)
 	defer func() { _ = sock.CloseNow() }()
+	require.Equal(t, "connected", readMessage(t, ctx, sock).Type)
 
 	require.NoError(t, bus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionNotification,
@@ -114,7 +117,7 @@ func TestWatchIgnoresOtherSessions(t *testing.T) {
 }
 
 func TestWatchRequiresSessionID(t *testing.T) {
-	_, wsURL := setup(t, nil)
+	_, wsURL := setup(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func collectNotifications(env *prTestEnv) *[]eventbus.SessionNotificationEvent {
+func collectNotifications(env *prTestEnv) func() []eventbus.SessionNotificationEvent {
 	var got []eventbus.SessionNotificationEvent
 	env.bus.Subscribe(eventbus.SessionNotification, func(_ context.Context, event eventbus.Event) error {
 		if data, ok := event.Data.(eventbus.SessionNotificationEvent); ok {
@@ -18,7 +18,7 @@ func collectNotifications(env *prTestEnv) *[]eventbus.SessionNotificationEvent {
 		}
 		return nil
 	})
-	return &got
+	return func() []eventbus.SessionNotificationEvent { return got }
 }
 
 func TestHandlePRUpdated_PublishesSessionNotification(t *testing.T) {
@@ -47,8 +47,8 @@ func TestHandlePRUpdated_PublishesSessionNotification(t *testing.T) {
 	}
 	require.NoError(t, env.service.handlePRUpdated(ctx, event))
 
-	require.Len(t, *got, 1)
-	notification := (*got)[0]
+	require.Len(t, got(), 1)
+	notification := got()[0]
 	require.Equal(t, sess.ID, notification.SessionID)
 	require.Equal(t, notificationTypePullRequest, notification.Type)
 	require.Equal(t, prNotification{
@@ -77,7 +77,7 @@ func TestHandlePRUpdated_NoSessionForBranch_PublishesNothing(t *testing.T) {
 	}
 	require.NoError(t, env.service.handlePRUpdated(ctx, event))
 
-	require.Empty(t, *got)
+	require.Empty(t, got())
 }
 
 func TestSessionSnapshot_ReturnsSessionPRs(t *testing.T) {
