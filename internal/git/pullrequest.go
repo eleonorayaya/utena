@@ -41,6 +41,22 @@ type PullRequest struct {
 	ChecksState         ChecksState `json:"checks_state,omitempty"`
 }
 
+// activityColumns are maintained only by SyncPRActivity. The PR sync rebuilds
+// a PullRequest from the GitHub payload and would otherwise blank them.
+func activityColumns() []string {
+	return []string{
+		"activity_baselined",
+		"last_review_id",
+		"last_review_comment_id",
+		"checks_head_sha",
+		"checks_state",
+	}
+}
+
+func (s PRState) IsOpen() bool {
+	return s == PRStateOpen || s == PRStateDraft
+}
+
 type ChecksState string
 
 const (

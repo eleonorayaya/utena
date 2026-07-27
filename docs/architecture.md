@@ -18,14 +18,17 @@ Utena consists of three main components:
 ### Module Dependencies
 
 ```
-workspace (no dependencies)
+git (no dependencies)
+workspace (depends on: git)
     ↓
-session (depends on: workspace, eventbus)
+session (depends on: workspace, git, tmux, eventbus)
     ↓
-tmux (depends on: session, eventbus)
+tmux (depends on: eventbus)
     ↓
 monitor (depends on: session, eventbus)
 ```
+
+`git` sits at the bottom: it never imports another domain, and everything above may call it directly. It notifies upward with `git.EventPRUpdated` on the event bus.
 
 **Key principle**: Dependencies flow downward. Lower modules never depend on higher modules directly. When a lower module needs to notify a higher one, it publishes an event.
 

@@ -8,10 +8,13 @@ import (
 	"github.com/google/go-github/v72/github"
 )
 
+// Monitor notification types for the PR domain. The payload structs below are
+// the wire shapes Claude sees, so their json tags are a public contract.
 const (
-	ActivityReview        = "pull_request_review"
-	ActivityReviewComment = "pull_request_review_comment"
-	ActivityChecks        = "ci_checks"
+	NotificationPullRequest   = "pull_request"
+	NotificationReview        = "pull_request_review"
+	NotificationReviewComment = "pull_request_review_comment"
+	NotificationChecks        = "ci_checks"
 )
 
 const bodyLimit = 600
@@ -19,6 +22,31 @@ const bodyLimit = 600
 type PRActivity struct {
 	Type string
 	Data any
+}
+
+type PRNotification struct {
+	Number        int    `json:"number"`
+	Title         string `json:"title"`
+	State         string `json:"state"`
+	PreviousState string `json:"previous_state,omitempty"`
+	Branch        string `json:"branch,omitempty"`
+	Checks        string `json:"checks,omitempty"`
+	URL           string `json:"url"`
+}
+
+func NewPRNotification(pr *PullRequest, previous *PullRequest, branch string) PRNotification {
+	n := PRNotification{
+		Number: pr.Number,
+		Title:  pr.Title,
+		State:  string(pr.State),
+		Branch: branch,
+		Checks: string(pr.ChecksState),
+		URL:    pr.HTMLURL,
+	}
+	if previous != nil && previous.State != pr.State {
+		n.PreviousState = string(previous.State)
+	}
+	return n
 }
 
 type ReviewActivity struct {
@@ -64,14 +92,14 @@ func (s *GitService) SyncPRActivity(ctx context.Context, pr *PullRequest) ([]PRA
 		return nil, err
 	}
 
-	activity := make([]PRActivity, 0)
+	var activity []PRActivity
 	updated := false
 
 	reviews, err := s.githubClient.ListPRReviews(ctx, owner, name, pr.Number)
 	if err != nil {
 		return nil, err
 	}
-	if events, watermark := s.newReviews(pr, reviews); watermark > pr.LastReviewID || !pr.ActivityBaselined {
+	if events, watermark := s.newReviews(pr, reviews); watermark > pr.LastReviewID {
 		activity = append(activity, events...)
 		pr.LastReviewID = watermark
 		updated = true
@@ -81,7 +109,7 @@ func (s *GitService) SyncPRActivity(ctx context.Context, pr *PullRequest) ([]PRA
 	if err != nil {
 		return nil, err
 	}
-	if events, watermark := s.newReviewComments(pr, comments); watermark > pr.LastReviewCommentID || !pr.ActivityBaselined {
+	if events, watermark := s.newReviewComments(pr, comments); watermark > pr.LastReviewCommentID {
 		activity = append(activity, events...)
 		pr.LastReviewCommentID = watermark
 		updated = true
@@ -128,7 +156,7 @@ func (s *GitService) newReviews(pr *PullRequest, reviews []*github.PullRequestRe
 		if s.ignoredAuthor(author, review.GetUser().GetType()) {
 			continue
 		}
-		out = append(out, PRActivity{Type: ActivityReview, Data: ReviewActivity{
+		out = append(out, PRActivity{Type: NotificationReview, Data: ReviewActivity{
 			Number: pr.Number,
 			Title:  pr.Title,
 			State:  strings.ToLower(review.GetState()),
@@ -154,7 +182,7 @@ func (s *GitService) newReviewComments(pr *PullRequest, comments []*github.PullR
 		if s.ignoredAuthor(author, comment.GetUser().GetType()) {
 			continue
 		}
-		out = append(out, PRActivity{Type: ActivityReviewComment, Data: ReviewCommentActivity{
+		out = append(out, PRActivity{Type: NotificationReviewComment, Data: ReviewCommentActivity{
 			Number: pr.Number,
 			Title:  pr.Title,
 			Author: author,
@@ -164,7 +192,8 @@ func (s *GitService) newReviewComments(pr *PullRequest, comments []*github.PullR
 			URL:    comment.GetHTMLURL(),
 		}})
 	}
-	// the API gave us newest first, so flip to reading order
+	// ListPRReviewComments sorts newest first (ListReviews has no sort
+	// option), so flip to reading order
 	slices.Reverse(out)
 	return out, watermark
 }
@@ -173,11 +202,6 @@ func (s *GitService) newReviewComments(pr *PullRequest, comments []*github.PullR
 // event worth sending: the first failure while a run is still in flight, and
 // the rollup once every run has finished. A new head commit resets silently.
 func checksTransition(pr *PullRequest, runs []*github.CheckRun) (*PRActivity, ChecksState) {
-	if len(runs) == 0 {
-		return nil, ChecksStatePending
-	}
-
-	state := ChecksStatePassed
 	var failed []string
 	complete := true
 	for _, run := range runs {
@@ -191,34 +215,32 @@ func checksTransition(pr *PullRequest, runs []*github.CheckRun) (*PRActivity, Ch
 			failed = append(failed, run.GetName())
 		}
 	}
+
+	state := ChecksStatePending
 	switch {
 	case len(failed) > 0 && complete:
 		state = ChecksStateFailed
 	case len(failed) > 0:
 		state = ChecksStateFailing
-	case !complete:
-		state = ChecksStatePending
+	case complete && len(runs) > 0:
+		state = ChecksStatePassed
 	}
 
-	sameCommit := pr.ChecksHeadSHA == pr.HeadSHA
-	if sameCommit && state == pr.ChecksState {
-		return nil, state
+	previous := pr.ChecksState
+	if pr.ChecksHeadSHA != pr.HeadSHA {
+		previous = "" // a new head commit invalidates the old rollup
 	}
-	if state == ChecksStatePending {
-		return nil, state
-	}
-	// first sight of this PR only records a baseline, so adopting a batch of
-	// PRs does not fire a rollup for each one at once. The connect snapshot
-	// carries the current state instead.
-	if pr.ChecksHeadSHA == "" {
-		return nil, state
-	}
-	// a run that fails and finishes within one poll only needs the rollup
-	if state == ChecksStateFailing && sameCommit && pr.ChecksState.terminal() {
+	// Stay quiet while runs are in flight, on the first sight of a PR (the
+	// connect snapshot carries current state, so adopting a batch of PRs does
+	// not fire a rollup for each), on a repeat of what we already reported,
+	// and when a run fails and finishes inside one poll — that needs only the
+	// rollup.
+	if state == ChecksStatePending || state == previous || pr.ChecksHeadSHA == "" ||
+		(state == ChecksStateFailing && previous.terminal()) {
 		return nil, state
 	}
 
-	return &PRActivity{Type: ActivityChecks, Data: ChecksActivity{
+	return &PRActivity{Type: NotificationChecks, Data: ChecksActivity{
 		Number: pr.Number,
 		Title:  pr.Title,
 		State:  string(state),
@@ -228,13 +250,8 @@ func checksTransition(pr *PullRequest, runs []*github.CheckRun) (*PRActivity, Ch
 }
 
 func (s *GitService) ignoredAuthor(login, userType string) bool {
-	if login == "" {
-		return true
-	}
-	if login == s.currentUser {
-		return true
-	}
-	return userType == "Bot" || strings.HasSuffix(login, "[bot]")
+	return login == "" || login == s.currentUser ||
+		userType == "Bot" || strings.HasSuffix(login, "[bot]")
 }
 
 func truncate(body string) string {

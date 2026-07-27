@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func activityEnv(t *testing.T, client *mockGitHubClient) (*GitService, *PullRequest) {
+func activityEnv(t *testing.T, client *MockGitHubClient) (*GitService, *PullRequest) {
 	t.Helper()
 
 	database := testdb.New(t, &Repo{}, &Branch{}, &Worktree{}, &PullRequest{})
@@ -43,9 +43,9 @@ func checkRun(name, status, conclusion string) *github.CheckRun {
 }
 
 func TestSyncPRActivity_FirstSyncOnlyBaselines(t *testing.T) {
-	client := &mockGitHubClient{
-		reviews:        []*github.PullRequestReview{review(10, "someone", "User", "APPROVED")},
-		reviewComments: []*github.PullRequestComment{{ID: github.Ptr(int64(5)), User: &github.User{Login: github.Ptr("someone")}}},
+	client := &MockGitHubClient{
+		Reviews:        []*github.PullRequestReview{review(10, "someone", "User", "APPROVED")},
+		ReviewComments: []*github.PullRequestComment{{ID: github.Ptr(int64(5)), User: &github.User{Login: github.Ptr("someone")}}},
 	}
 	service, pr := activityEnv(t, client)
 
@@ -59,7 +59,7 @@ func TestSyncPRActivity_FirstSyncOnlyBaselines(t *testing.T) {
 }
 
 func TestSyncPRActivity_FirstReviewOnAPRThatHadNone(t *testing.T) {
-	client := &mockGitHubClient{}
+	client := &MockGitHubClient{}
 	service, pr := activityEnv(t, client)
 
 	_, err := service.SyncPRActivity(context.Background(), pr)
@@ -67,17 +67,17 @@ func TestSyncPRActivity_FirstReviewOnAPRThatHadNone(t *testing.T) {
 	require.True(t, pr.ActivityBaselined)
 	require.Zero(t, pr.LastReviewID, "nothing to watermark yet")
 
-	client.reviews = []*github.PullRequestReview{review(500, "someone", "User", "CHANGES_REQUESTED")}
+	client.Reviews = []*github.PullRequestReview{review(500, "someone", "User", "CHANGES_REQUESTED")}
 	activity, err := service.SyncPRActivity(context.Background(), pr)
 	require.NoError(t, err)
 
 	require.Len(t, activity, 1, "the first review on a PR must not be mistaken for a baseline")
-	require.Equal(t, ActivityReview, activity[0].Type)
+	require.Equal(t, NotificationReview, activity[0].Type)
 	require.Equal(t, int64(500), pr.LastReviewID)
 }
 
 func TestSyncPRActivity_NewReview(t *testing.T) {
-	client := &mockGitHubClient{reviews: []*github.PullRequestReview{review(10, "someone", "User", "APPROVED")}}
+	client := &MockGitHubClient{Reviews: []*github.PullRequestReview{review(10, "someone", "User", "APPROVED")}}
 	service, pr := activityEnv(t, client)
 	pr.ActivityBaselined = true
 	pr.LastReviewID = 9
@@ -86,7 +86,7 @@ func TestSyncPRActivity_NewReview(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, activity, 1)
-	require.Equal(t, ActivityReview, activity[0].Type)
+	require.Equal(t, NotificationReview, activity[0].Type)
 	require.Equal(t, ReviewActivity{
 		Number: 7,
 		Title:  "Test PR",
@@ -98,7 +98,7 @@ func TestSyncPRActivity_NewReview(t *testing.T) {
 }
 
 func TestSyncPRActivity_SkipsBotsAndSelf(t *testing.T) {
-	client := &mockGitHubClient{reviews: []*github.PullRequestReview{
+	client := &MockGitHubClient{Reviews: []*github.PullRequestReview{
 		review(10, "coverage-bot", "Bot", "COMMENTED"),
 		review(11, "dependabot[bot]", "User", "COMMENTED"),
 		review(12, "eleonorayaya", "User", "APPROVED"),
@@ -115,7 +115,7 @@ func TestSyncPRActivity_SkipsBotsAndSelf(t *testing.T) {
 }
 
 func TestSyncPRActivity_NewReviewComment(t *testing.T) {
-	client := &mockGitHubClient{reviewComments: []*github.PullRequestComment{{
+	client := &MockGitHubClient{ReviewComments: []*github.PullRequestComment{{
 		ID:      github.Ptr(int64(20)),
 		Path:    github.Ptr("internal/monitor/monitorservice.go"),
 		Line:    github.Ptr(42),
@@ -131,7 +131,7 @@ func TestSyncPRActivity_NewReviewComment(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, activity, 1)
-	require.Equal(t, ActivityReviewComment, activity[0].Type)
+	require.Equal(t, NotificationReviewComment, activity[0].Type)
 	require.Equal(t, ReviewCommentActivity{
 		Number: 7,
 		Title:  "Test PR",
@@ -218,7 +218,7 @@ func TestChecksTransitions(t *testing.T) {
 				return
 			}
 			require.NotNil(t, event)
-			require.Equal(t, ActivityChecks, event.Type)
+			require.Equal(t, NotificationChecks, event.Type)
 			data := event.Data.(ChecksActivity)
 			require.Equal(t, string(tc.wantState), data.State)
 			require.Equal(t, tc.wantFailed, data.Failed)
@@ -227,9 +227,9 @@ func TestChecksTransitions(t *testing.T) {
 }
 
 func TestSyncPRActivity_PersistsWatermarks(t *testing.T) {
-	client := &mockGitHubClient{
-		reviews:   []*github.PullRequestReview{review(10, "someone", "User", "APPROVED")},
-		checkRuns: []*github.CheckRun{checkRun("lint", "completed", "success")},
+	client := &MockGitHubClient{
+		Reviews:   []*github.PullRequestReview{review(10, "someone", "User", "APPROVED")},
+		CheckRuns: []*github.CheckRun{checkRun("lint", "completed", "success")},
 	}
 	service, pr := activityEnv(t, client)
 

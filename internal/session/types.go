@@ -40,18 +40,6 @@ func (slr *SessionListResponse) Render(w http.ResponseWriter, r *http.Request) e
 	return nil
 }
 
-const notificationTypePullRequest = "pull_request"
-
-type prNotification struct {
-	Number        int    `json:"number"`
-	Title         string `json:"title"`
-	State         string `json:"state"`
-	PreviousState string `json:"previous_state,omitempty"`
-	Branch        string `json:"branch,omitempty"`
-	Checks        string `json:"checks,omitempty"`
-	URL           string `json:"url"`
-}
-
 type WorkspaceBranchSpec struct {
 	WorkspaceID uint   `json:"workspace_id"`
 	Branch      string `json:"branch,omitempty"`

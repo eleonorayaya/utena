@@ -87,10 +87,12 @@ Reviews and comments authored by the daemon's own GitHub user, or by bots, are d
 
 `SessionService.SyncPRActivity` (job `session.pr_activity`, 60s) is the driver, not the git module: only PRs whose head branch belongs to a live session are worth polling, and session is the module that knows which those are. Each PR costs up to three GitHub calls per tick, so keep that scoping if you add a source.
 
-`GitService.SyncPRActivity` owns the GitHub calls and the change detection. Watermarks live on the `PullRequest` row (`LastReviewID`, `LastReviewCommentID`, `ChecksHeadSHA`, `ChecksState`), so a daemon restart does not replay old activity. Two rules worth preserving:
+`GitService.SyncPRActivity` owns the GitHub calls and the change detection. Watermarks live on the `PullRequest` row (`ActivityBaselined`, `LastReviewID`, `LastReviewCommentID`, `ChecksHeadSHA`, `ChecksState`), so a daemon restart does not replay old activity. Two rules worth preserving:
 
-- The first sync of a PR records a baseline and emits nothing for reviews and comments — otherwise adopting a PR would dump its whole history into Claude's context. Check state is a rollup rather than a history, so it does report once on first sight.
-- `syncGitHubPR` overwrites every PR column, so it explicitly carries the watermarks over. A new column that only the activity sync maintains needs the same treatment.
+- The first sync of a PR records a baseline and emits nothing — otherwise adopting a PR would dump its history into Claude's context, and a fleet of already-green PRs would each fire a rollup at once. `ActivityBaselined` is a separate flag rather than "watermark == 0", because a PR with no reviews yet also has 0 and would lose its *first* review.
+- `syncGitHubPR` rebuilds a PR from the GitHub payload and writes every other column, so it passes `activityColumns()` to `PRStore.Update` to leave these alone. A new activity column goes in that list.
+
+The wire shapes for all four PR event types live together in `internal/git/practivity.go` (`NotificationPullRequest` and friends, `PRNotification`, `ReviewActivity`, `ReviewCommentActivity`, `ChecksActivity`). Session decides *who* gets an event; git decides what one looks like.
 
 See: `internal/monitor/`, `internal/git/practivity.go`, `internal/session/sessionservice.go` (`notifyPRUpdated`, `SyncPRActivity`, `SessionSnapshot`)
 

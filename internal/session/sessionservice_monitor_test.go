@@ -51,8 +51,8 @@ func TestHandlePRUpdated_PublishesSessionNotification(t *testing.T) {
 	require.Len(t, got(), 1)
 	notification := got()[0]
 	require.Equal(t, sess.ID, notification.SessionID)
-	require.Equal(t, notificationTypePullRequest, notification.Type)
-	require.Equal(t, prNotification{
+	require.Equal(t, git.NotificationPullRequest, notification.Type)
+	require.Equal(t, git.PRNotification{
 		Number:        42,
 		Title:         "Test PR",
 		State:         "closed",
@@ -81,38 +81,8 @@ func TestHandlePRUpdated_NoSessionForBranch_PublishesNothing(t *testing.T) {
 	require.Empty(t, got())
 }
 
-type fakeGitHub struct {
-	reviews []*github.PullRequestReview
-}
-
-func (f *fakeGitHub) ListRepoPRs(context.Context, string, string) ([]*github.PullRequest, error) {
-	return nil, nil
-}
-
-func (f *fakeGitHub) GetPR(context.Context, string, string, int) (*github.PullRequest, error) {
-	return nil, nil
-}
-
-func (f *fakeGitHub) GetPRDiff(context.Context, string, string, int) (string, error) {
-	return "", nil
-}
-
-func (f *fakeGitHub) GetCurrentUser(context.Context) (string, error) { return "eleonorayaya", nil }
-
-func (f *fakeGitHub) ListPRReviews(context.Context, string, string, int) ([]*github.PullRequestReview, error) {
-	return f.reviews, nil
-}
-
-func (f *fakeGitHub) ListPRReviewComments(context.Context, string, string, int) ([]*github.PullRequestComment, error) {
-	return nil, nil
-}
-
-func (f *fakeGitHub) ListCheckRuns(context.Context, string, string, string) ([]*github.CheckRun, error) {
-	return nil, nil
-}
-
 func TestSyncPRActivity_FansOutToEverySessionOnTheBranch(t *testing.T) {
-	client := &fakeGitHub{reviews: []*github.PullRequestReview{{
+	client := &git.MockGitHubClient{Reviews: []*github.PullRequestReview{{
 		ID:    github.Ptr(int64(101)),
 		State: github.Ptr("CHANGES_REQUESTED"),
 		Body:  github.Ptr("please fix"),
@@ -148,7 +118,7 @@ func TestSyncPRActivity_FansOutToEverySessionOnTheBranch(t *testing.T) {
 	sessionIDs := []uint{got()[0].SessionID, got()[1].SessionID}
 	require.NotEqual(t, sessionIDs[0], sessionIDs[1])
 	for _, n := range got() {
-		require.Equal(t, git.ActivityReview, n.Type)
+		require.Equal(t, git.NotificationReview, n.Type)
 	}
 }
 
@@ -173,8 +143,8 @@ func TestSessionSnapshot_ReturnsSessionPRs(t *testing.T) {
 
 	require.Len(t, snapshot, 1)
 	require.Equal(t, sess.ID, snapshot[0].SessionID)
-	require.Equal(t, notificationTypePullRequest, snapshot[0].Type)
-	require.Equal(t, prNotification{
+	require.Equal(t, git.NotificationPullRequest, snapshot[0].Type)
+	require.Equal(t, git.PRNotification{
 		Number: 7,
 		Title:  "Snapshot PR",
 		State:  "open",
@@ -203,7 +173,7 @@ func TestSessionSnapshot_SkipsClosedAndMergedPRs(t *testing.T) {
 	snapshot := env.service.SessionSnapshot(ctx, sess.ID)
 
 	require.Len(t, snapshot, 1)
-	require.Equal(t, "draft", snapshot[0].Data.(prNotification).State)
+	require.Equal(t, "draft", snapshot[0].Data.(git.PRNotification).State)
 }
 
 func TestSessionSnapshot_UnknownSession(t *testing.T) {

@@ -1581,8 +1581,8 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 }
 
 func (s *SessionService) notifyPRUpdated(ctx context.Context, sess *Session, pr *git.PullRequest, previous *git.PullRequest) {
-	data := newPRNotification(pr, previous, sessionBranchName(sess, *pr.HeadBranchID))
-	s.publishNotification(ctx, sess.ID, notificationTypePullRequest, data)
+	data := git.NewPRNotification(pr, previous, sessionBranchName(sess, *pr.HeadBranchID))
+	s.publishNotification(ctx, sess.ID, git.NotificationPullRequest, data)
 }
 
 func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []eventbus.SessionNotificationEvent {
@@ -1595,13 +1595,13 @@ func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []
 	for _, branchID := range s.sessionBranchIDs(sess) {
 		branch := sessionBranchName(sess, branchID)
 		for _, pr := range s.gitService.GetPRsForBranch(branchID) {
-			if pr.State != git.PRStateOpen && pr.State != git.PRStateDraft {
+			if !pr.State.IsOpen() {
 				continue
 			}
 			out = append(out, eventbus.SessionNotificationEvent{
 				SessionID: sessionID,
-				Type:      notificationTypePullRequest,
-				Data:      newPRNotification(&pr, nil, branch),
+				Type:      git.NotificationPullRequest,
+				Data:      git.NewPRNotification(&pr, nil, branch),
 			})
 		}
 	}
@@ -1618,9 +1618,8 @@ func (s *SessionService) SyncPRActivity(ctx context.Context) error {
 	}
 
 	// several sessions can sit on one branch, and detecting activity consumes
-	// the PR's watermark, so sync each PR once and fan the result out
+	// the PR's watermark, so walk each branch once and fan the result out
 	order := make([]uint, 0, len(sessions))
-	prs := make(map[uint]*git.PullRequest)
 	watchers := make(map[uint][]uint)
 	for i := range sessions {
 		sess := &sessions[i]
@@ -1628,32 +1627,30 @@ func (s *SessionService) SyncPRActivity(ctx context.Context) error {
 			continue
 		}
 		for _, branchID := range s.sessionBranchIDs(sess) {
-			for _, pr := range s.gitService.GetPRsForBranch(branchID) {
-				if pr.State != git.PRStateOpen && pr.State != git.PRStateDraft {
-					continue
-				}
-				if _, seen := prs[pr.ID]; !seen {
-					prs[pr.ID] = &pr
-					order = append(order, pr.ID)
-				}
-				watchers[pr.ID] = append(watchers[pr.ID], sess.ID)
+			if _, seen := watchers[branchID]; !seen {
+				order = append(order, branchID)
 			}
+			watchers[branchID] = append(watchers[branchID], sess.ID)
 		}
 	}
 
-	for _, prID := range order {
-		pr := prs[prID]
-		activity, err := s.gitService.SyncPRActivity(ctx, pr)
-		if errors.Is(err, git.ErrNoGitHubClient) {
-			return err
-		}
-		if err != nil {
-			slog.Warn("failed to sync PR activity", "pr", pr.Number, "error", err)
-			continue
-		}
-		for _, item := range activity {
-			for _, sessionID := range watchers[prID] {
-				s.publishNotification(ctx, sessionID, item.Type, item.Data)
+	for _, branchID := range order {
+		for _, pr := range s.gitService.GetPRsForBranch(branchID) {
+			if !pr.State.IsOpen() {
+				continue
+			}
+			activity, err := s.gitService.SyncPRActivity(ctx, &pr)
+			if errors.Is(err, git.ErrNoGitHubClient) {
+				return err
+			}
+			if err != nil {
+				slog.Warn("failed to sync PR activity", "pr", pr.Number, "error", err)
+				continue
+			}
+			for _, item := range activity {
+				for _, sessionID := range watchers[branchID] {
+					s.publishNotification(ctx, sessionID, item.Type, item.Data)
+				}
 			}
 		}
 	}
@@ -1682,21 +1679,6 @@ func sessionBranchName(sess *Session, branchID uint) string {
 		}
 	}
 	return ""
-}
-
-func newPRNotification(pr *git.PullRequest, previous *git.PullRequest, branch string) prNotification {
-	n := prNotification{
-		Number: pr.Number,
-		Title:  pr.Title,
-		State:  string(pr.State),
-		Branch: branch,
-		Checks: string(pr.ChecksState),
-		URL:    pr.HTMLURL,
-	}
-	if previous != nil && previous.State != pr.State {
-		n.PreviousState = string(previous.State)
-	}
-	return n
 }
 
 func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git.PRUpdatedEvent) {
