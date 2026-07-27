@@ -36,6 +36,7 @@ func main() {
 	rootCmd.AddCommand(statusCmd())
 	rootCmd.AddCommand(sessionsCmd())
 	rootCmd.AddCommand(statusLineCmd())
+	rootCmd.AddCommand(monitorCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

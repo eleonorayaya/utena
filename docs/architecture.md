@@ -23,6 +23,8 @@ workspace (no dependencies)
 session (depends on: workspace, eventbus)
     ↓
 tmux (depends on: session, eventbus)
+    ↓
+monitor (depends on: session, eventbus)
 ```
 
 **Key principle**: Dependencies flow downward. Lower modules never depend on higher modules directly. When a lower module needs to notify a higher one, it publishes an event.
@@ -67,6 +69,20 @@ Flow:
 4. Tmux session becomes active
 
 See: `internal/session/sessionservice.go`, `internal/tmux/tmuxservice.go`
+
+### Daemon → Claude (Session Events)
+
+At session start, the `utena-claude` plugin's monitor runs `utena monitor $UTENA_SESSION_ID`, which opens a websocket to `GET /monitor/ws?session_id=<id>` and echoes each frame to stdout. The daemon pushes one JSON text frame per event; Claude receives each stdout line as a notification.
+
+Plugin monitors only accept a shell `command`, not the Monitor tool's `ws` input — hence the thin client. It retries every 5s, so it survives a daemon restart.
+
+Flow:
+1. A service notices a change it wants Claude to know about (e.g. `SessionService.handlePRUpdated` sees a PR state change)
+2. It publishes `eventbus.SessionNotification` with the session ID
+3. `MonitorService` marshals the event and fans it out to that session's sockets
+4. On connect, `MonitorService` first sends a snapshot of current state from `SessionService.SessionSnapshot`
+
+See: `internal/monitor/`, `cmd/tui/monitor.go`, `plugins/utena-claude/monitors/monitors.json`, `docs/adding-features.md`
 
 ### TUI → Daemon
 

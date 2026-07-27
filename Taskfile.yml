@@ -23,6 +23,9 @@ tasks:
       - '**/*.go'
     cmds:
       - go test ./...
+  go:tidy:
+    cmds:
+      - go mod tidy
   go:lint:
     sources:
       - '**/*.go'
@@ -39,6 +42,9 @@ tasks:
   lint:
     cmds:
       - task: go:lint
+  tidy:
+    cmds:
+      - task: go:tidy
   tmux:install:
     cmds:
       - mkdir -p ~/.config/tmux/plugins/utena-tmux

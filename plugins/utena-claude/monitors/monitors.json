@@ -1,0 +1,7 @@
+[
+  {
+    "name": "utena-session-events",
+    "description": "Utena session events: pull request status changes for this session",
+    "command": "utena monitor ${UTENA_SESSION_ID}"
+  }
+]
