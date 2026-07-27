@@ -32,4 +32,24 @@ type PullRequest struct {
 	IsAssignedToMe bool    `json:"is_assigned_to_me"`
 	HTMLURL        string  `json:"html_url"`
 	AuthorLogin    string  `json:"author_login"`
+
+	HeadSHA             string      `json:"head_sha,omitempty"`
+	ActivityBaselined   bool        `json:"-"`
+	LastReviewID        int64       `json:"-"`
+	LastReviewCommentID int64       `json:"-"`
+	ChecksHeadSHA       string      `json:"-"`
+	ChecksState         ChecksState `json:"checks_state,omitempty"`
+}
+
+type ChecksState string
+
+const (
+	ChecksStatePending ChecksState = "pending"
+	ChecksStateFailing ChecksState = "failing"
+	ChecksStatePassed  ChecksState = "passed"
+	ChecksStateFailed  ChecksState = "failed"
+)
+
+func (c ChecksState) terminal() bool {
+	return c == ChecksStatePassed || c == ChecksStateFailed
 }

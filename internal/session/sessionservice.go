@@ -1581,17 +1581,8 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 }
 
 func (s *SessionService) notifyPRUpdated(ctx context.Context, sess *Session, pr *git.PullRequest, previous *git.PullRequest) {
-	event := eventbus.Event{
-		Type: eventbus.SessionNotification,
-		Data: eventbus.SessionNotificationEvent{
-			SessionID: sess.ID,
-			Type:      notificationTypePullRequest,
-			Data:      newPRNotification(pr, previous, sessionBranchName(sess, *pr.HeadBranchID)),
-		},
-	}
-	if err := s.eventBus.Publish(ctx, event); err != nil {
-		slog.Warn("failed to publish session notification", "session", sess.ID, "pr", pr.Number, "error", err)
-	}
+	data := newPRNotification(pr, previous, sessionBranchName(sess, *pr.HeadBranchID))
+	s.publishNotification(ctx, sess.ID, notificationTypePullRequest, data)
 }
 
 func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []eventbus.SessionNotificationEvent {
@@ -1617,6 +1608,72 @@ func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []
 	return out
 }
 
+// SyncPRActivity polls reviews, review comments and CI checks for the PRs of
+// live sessions and pushes whatever is new to that session's monitor. Only
+// session PRs are polled — a PR with no session has nowhere to deliver.
+func (s *SessionService) SyncPRActivity(ctx context.Context) error {
+	sessions, err := s.store.List()
+	if err != nil {
+		return err
+	}
+
+	// several sessions can sit on one branch, and detecting activity consumes
+	// the PR's watermark, so sync each PR once and fan the result out
+	order := make([]uint, 0, len(sessions))
+	prs := make(map[uint]*git.PullRequest)
+	watchers := make(map[uint][]uint)
+	for i := range sessions {
+		sess := &sessions[i]
+		if !sess.watchesPRActivity() {
+			continue
+		}
+		for _, branchID := range s.sessionBranchIDs(sess) {
+			for _, pr := range s.gitService.GetPRsForBranch(branchID) {
+				if pr.State != git.PRStateOpen && pr.State != git.PRStateDraft {
+					continue
+				}
+				if _, seen := prs[pr.ID]; !seen {
+					prs[pr.ID] = &pr
+					order = append(order, pr.ID)
+				}
+				watchers[pr.ID] = append(watchers[pr.ID], sess.ID)
+			}
+		}
+	}
+
+	for _, prID := range order {
+		pr := prs[prID]
+		activity, err := s.gitService.SyncPRActivity(ctx, pr)
+		if errors.Is(err, git.ErrNoGitHubClient) {
+			return err
+		}
+		if err != nil {
+			slog.Warn("failed to sync PR activity", "pr", pr.Number, "error", err)
+			continue
+		}
+		for _, item := range activity {
+			for _, sessionID := range watchers[prID] {
+				s.publishNotification(ctx, sessionID, item.Type, item.Data)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *SessionService) publishNotification(ctx context.Context, sessionID uint, notificationType string, data any) {
+	event := eventbus.Event{
+		Type: eventbus.SessionNotification,
+		Data: eventbus.SessionNotificationEvent{
+			SessionID: sessionID,
+			Type:      notificationType,
+			Data:      data,
+		},
+	}
+	if err := s.eventBus.Publish(ctx, event); err != nil {
+		slog.Warn("failed to publish session notification", "session", sessionID, "type", notificationType, "error", err)
+	}
+}
+
 func sessionBranchName(sess *Session, branchID uint) string {
 	for i := range sess.Worktrees {
 		wt := sess.Worktrees[i].Worktree
@@ -1633,6 +1690,7 @@ func newPRNotification(pr *git.PullRequest, previous *git.PullRequest, branch st
 		Title:  pr.Title,
 		State:  string(pr.State),
 		Branch: branch,
+		Checks: string(pr.ChecksState),
 		URL:    pr.HTMLURL,
 	}
 	if previous != nil && previous.State != pr.State {

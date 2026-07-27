@@ -72,7 +72,27 @@ s.eventBus.Publish(ctx, eventbus.Event{
 
 On connect, the monitor asks `SnapshotProvider` (implemented by `SessionService.SessionSnapshot`) for the session's current state so a session that starts after a change is not left with silence. Add the same event type there when the current state matters at connect time.
 
-See: `internal/monitor/`, `internal/session/sessionservice.go` (`notifyPRUpdated`, `SessionSnapshot`)
+### Current event types
+
+| Type | Fires when |
+|---|---|
+| `pull_request` | PR state, title or assignment changes (`git.prs` job, 30s). Also sent on connect for the session's open PRs |
+| `pull_request_review` | Someone submits a review — `state` is `approved` / `changes_requested` / `commented` |
+| `pull_request_review_comment` | Someone leaves an inline comment, with `path` and `line` |
+| `ci_checks` | `failing` the first time a check fails, then `passed` / `failed` once every run completes, with the failed check names |
+
+Reviews and comments authored by the daemon's own GitHub user, or by bots, are dropped.
+
+### Polling activity without burning the API budget
+
+`SessionService.SyncPRActivity` (job `session.pr_activity`, 60s) is the driver, not the git module: only PRs whose head branch belongs to a live session are worth polling, and session is the module that knows which those are. Each PR costs up to three GitHub calls per tick, so keep that scoping if you add a source.
+
+`GitService.SyncPRActivity` owns the GitHub calls and the change detection. Watermarks live on the `PullRequest` row (`LastReviewID`, `LastReviewCommentID`, `ChecksHeadSHA`, `ChecksState`), so a daemon restart does not replay old activity. Two rules worth preserving:
+
+- The first sync of a PR records a baseline and emits nothing for reviews and comments — otherwise adopting a PR would dump its whole history into Claude's context. Check state is a rollup rather than a history, so it does report once on first sight.
+- `syncGitHubPR` overwrites every PR column, so it explicitly carries the watermarks over. A new column that only the activity sync maintains needs the same treatment.
+
+See: `internal/monitor/`, `internal/git/practivity.go`, `internal/session/sessionservice.go` (`notifyPRUpdated`, `SyncPRActivity`, `SessionSnapshot`)
 
 ## Adding a New Module
 

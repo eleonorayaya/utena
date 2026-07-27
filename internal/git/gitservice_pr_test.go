@@ -13,11 +13,35 @@ import (
 )
 
 type mockGitHubClient struct {
-	repoPRs     []*github.PullRequest
-	prByNumber  map[int]*github.PullRequest
-	diffContent string
-	currentUser string
-	err         error
+	repoPRs        []*github.PullRequest
+	prByNumber     map[int]*github.PullRequest
+	diffContent    string
+	currentUser    string
+	reviews        []*github.PullRequestReview
+	reviewComments []*github.PullRequestComment
+	checkRuns      []*github.CheckRun
+	err            error
+}
+
+func (m *mockGitHubClient) ListPRReviews(ctx context.Context, owner, repo string, number int) ([]*github.PullRequestReview, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.reviews, nil
+}
+
+func (m *mockGitHubClient) ListPRReviewComments(ctx context.Context, owner, repo string, number int) ([]*github.PullRequestComment, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.reviewComments, nil
+}
+
+func (m *mockGitHubClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) ([]*github.CheckRun, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.checkRuns, nil
 }
 
 func (m *mockGitHubClient) ListRepoPRs(ctx context.Context, owner, repo string) ([]*github.PullRequest, error) {

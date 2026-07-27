@@ -116,7 +116,18 @@ func (t *completedCleanupTask) Run(ctx context.Context) error {
 	return nil
 }
 
+type prActivityTask struct {
+	service *SessionService
+}
+
+func (t *prActivityTask) Name() string            { return "session.pr_activity" }
+func (t *prActivityTask) Interval() time.Duration { return time.Minute }
+func (t *prActivityTask) Run(ctx context.Context) error {
+	return t.service.SyncPRActivity(ctx)
+}
+
 func (m *SessionModule) RegisterJobs(svc *jobs.JobService) {
 	svc.Register(&reconcileSyncTask{service: m.Service})
 	svc.Register(&completedCleanupTask{service: m.Service})
+	svc.Register(&prActivityTask{service: m.Service})
 }

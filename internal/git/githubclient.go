@@ -15,6 +15,9 @@ type GitHubClient interface {
 	GetPR(ctx context.Context, owner, repo string, number int) (*github.PullRequest, error)
 	GetPRDiff(ctx context.Context, owner, repo string, number int) (string, error)
 	GetCurrentUser(ctx context.Context) (string, error)
+	ListPRReviews(ctx context.Context, owner, repo string, number int) ([]*github.PullRequestReview, error)
+	ListPRReviewComments(ctx context.Context, owner, repo string, number int) ([]*github.PullRequestComment, error)
+	ListCheckRuns(ctx context.Context, owner, repo, ref string) ([]*github.CheckRun, error)
 }
 
 var getEnv = os.Getenv
@@ -74,6 +77,39 @@ func (c *githubSDKClient) GetPRDiff(ctx context.Context, owner, repo string, num
 		return "", err
 	}
 	return diff, nil
+}
+
+// ponytail: one page each, newest first where the API allows it. A PR with
+// more than 100 reviews would drop the oldest unseen ones; paginate if that
+// ever happens.
+func (c *githubSDKClient) ListPRReviews(ctx context.Context, owner, repo string, number int) ([]*github.PullRequestReview, error) {
+	reviews, _, err := c.client.PullRequests.ListReviews(ctx, owner, repo, number, &github.ListOptions{PerPage: 100})
+	if err != nil {
+		return nil, err
+	}
+	return reviews, nil
+}
+
+func (c *githubSDKClient) ListPRReviewComments(ctx context.Context, owner, repo string, number int) ([]*github.PullRequestComment, error) {
+	comments, _, err := c.client.PullRequests.ListComments(ctx, owner, repo, number, &github.PullRequestListCommentsOptions{
+		Sort:        "created",
+		Direction:   "desc",
+		ListOptions: github.ListOptions{PerPage: 100},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return comments, nil
+}
+
+func (c *githubSDKClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) ([]*github.CheckRun, error) {
+	result, _, err := c.client.Checks.ListCheckRunsForRef(ctx, owner, repo, ref, &github.ListCheckRunsOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.CheckRuns, nil
 }
 
 func (c *githubSDKClient) GetCurrentUser(ctx context.Context) (string, error) {

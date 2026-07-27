@@ -51,7 +51,7 @@ func (env *prTestEnv) attachBranchWorktree(t *testing.T, sessionID uint, branchI
 	return wt
 }
 
-func setupPRTestEnv(t *testing.T) *prTestEnv {
+func setupPRTestEnv(t *testing.T, gitOpts ...git.GitServiceOption) *prTestEnv {
 	t.Helper()
 
 	database := testdb.New(t,
@@ -73,7 +73,7 @@ func setupPRTestEnv(t *testing.T) *prTestEnv {
 	sessionStore := NewSessionStore(database)
 	dismissedPRStore := NewDismissedPRStore(database)
 	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
-	gitService := git.NewGitService(database)
+	gitService := git.NewGitService(database, gitOpts...)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 
 	repoPath := initTestRepo(t)

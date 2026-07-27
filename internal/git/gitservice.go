@@ -528,6 +528,12 @@ func (s *GitService) syncGitHubPR(ctx context.Context, ghPR *github.PullRequest,
 		previous = &PullRequest{}
 		*previous = *existing
 		pr.Model = existing.Model
+		// the PR sync overwrites every column, so carry the activity
+		// watermarks that only SyncPRActivity maintains
+		pr.LastReviewID = existing.LastReviewID
+		pr.LastReviewCommentID = existing.LastReviewCommentID
+		pr.ChecksHeadSHA = existing.ChecksHeadSHA
+		pr.ChecksState = existing.ChecksState
 		if err := s.prStore.Update(pr); err != nil {
 			return fmt.Errorf("failed to update PR #%d: %w", ghPR.GetNumber(), err)
 		}
@@ -609,6 +615,7 @@ func ghPRToPullRequest(ghPR *github.PullRequest, repoID uint, branchID uint, cur
 		RepoID:         repoID,
 		Number:         ghPR.GetNumber(),
 		HeadBranchID:   &branchID,
+		HeadSHA:        ghPR.GetHead().GetSHA(),
 		Title:          ghPR.GetTitle(),
 		State:          state,
 		IsAssignedToMe: assigned,

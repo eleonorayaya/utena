@@ -48,6 +48,7 @@ type prNotification struct {
 	State         string `json:"state"`
 	PreviousState string `json:"previous_state,omitempty"`
 	Branch        string `json:"branch,omitempty"`
+	Checks        string `json:"checks,omitempty"`
 	URL           string `json:"url"`
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
+	"github.com/google/go-github/v72/github"
 	"github.com/stretchr/testify/require"
 )
 
@@ -78,6 +79,77 @@ func TestHandlePRUpdated_NoSessionForBranch_PublishesNothing(t *testing.T) {
 	require.NoError(t, env.service.handlePRUpdated(ctx, event))
 
 	require.Empty(t, got())
+}
+
+type fakeGitHub struct {
+	reviews []*github.PullRequestReview
+}
+
+func (f *fakeGitHub) ListRepoPRs(context.Context, string, string) ([]*github.PullRequest, error) {
+	return nil, nil
+}
+
+func (f *fakeGitHub) GetPR(context.Context, string, string, int) (*github.PullRequest, error) {
+	return nil, nil
+}
+
+func (f *fakeGitHub) GetPRDiff(context.Context, string, string, int) (string, error) {
+	return "", nil
+}
+
+func (f *fakeGitHub) GetCurrentUser(context.Context) (string, error) { return "eleonorayaya", nil }
+
+func (f *fakeGitHub) ListPRReviews(context.Context, string, string, int) ([]*github.PullRequestReview, error) {
+	return f.reviews, nil
+}
+
+func (f *fakeGitHub) ListPRReviewComments(context.Context, string, string, int) ([]*github.PullRequestComment, error) {
+	return nil, nil
+}
+
+func (f *fakeGitHub) ListCheckRuns(context.Context, string, string, string) ([]*github.CheckRun, error) {
+	return nil, nil
+}
+
+func TestSyncPRActivity_FansOutToEverySessionOnTheBranch(t *testing.T) {
+	client := &fakeGitHub{reviews: []*github.PullRequestReview{{
+		ID:    github.Ptr(int64(101)),
+		State: github.Ptr("CHANGES_REQUESTED"),
+		Body:  github.Ptr("please fix"),
+		User:  &github.User{Login: github.Ptr("reviewer"), Type: github.Ptr("User")},
+	}}}
+	env := setupPRTestEnv(t, git.WithGitHubClient(client))
+	got := collectNotifications(env)
+
+	// worktrees.branch_id is unique, so two sessions share a branch by sharing
+	// the worktree row
+	branchID := env.branch.ID
+	first := &Session{Name: "first", Status: StatusActive, LastUsedAt: time.Now()}
+	require.NoError(t, env.sessionStore.Add(first))
+	worktree := env.attachBranchWorktree(t, first.ID, branchID, 0)
+
+	second := &Session{Name: "second", Status: StatusActive, LastUsedAt: time.Now()}
+	require.NoError(t, env.sessionStore.Add(second))
+	require.NoError(t, env.swtStore.Add(&SessionWorktree{SessionID: second.ID, WorktreeID: worktree.ID}))
+	require.NoError(t, env.database.Create(&git.PullRequest{
+		RepoID:            env.repo.ID,
+		Number:            9,
+		HeadBranchID:      &branchID,
+		State:             git.PRStateOpen,
+		HeadSHA:           "sha1",
+		ActivityBaselined: true,
+		LastReviewID:      100,
+	}).Error)
+
+	require.NoError(t, env.service.SyncPRActivity(context.Background()))
+
+	// the fake client returns one review newer than the watermark
+	require.Len(t, got(), 2, "both sessions on the branch must be notified")
+	sessionIDs := []uint{got()[0].SessionID, got()[1].SessionID}
+	require.NotEqual(t, sessionIDs[0], sessionIDs[1])
+	for _, n := range got() {
+		require.Equal(t, git.ActivityReview, n.Type)
+	}
 }
 
 func TestSessionSnapshot_ReturnsSessionPRs(t *testing.T) {
