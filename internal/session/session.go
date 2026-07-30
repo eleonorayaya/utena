@@ -50,6 +50,15 @@ type Session struct {
 	TmuxSession    *utmux.TmuxSession     `json:"tmux_session,omitempty" gorm:"foreignKey:TmuxSessionID"`
 }
 
+func (s *Session) watchesPRActivity() bool {
+	switch s.Status {
+	case StatusDeleted, StatusArchived, StatusCompleted, StatusPending, StatusCreating:
+		return false
+	default:
+		return true
+	}
+}
+
 type SessionWorktree struct {
 	gorm.Model
 	SessionID  uint                 `json:"session_id" gorm:"uniqueIndex:idx_session_worktree;index;not null"`

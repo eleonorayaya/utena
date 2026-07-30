@@ -93,7 +93,7 @@ func (s *PRStore) Upsert(pr *PullRequest) error {
 	return s.db.Save(pr).Error
 }
 
-func (s *PRStore) Update(pr *PullRequest) error {
+func (s *PRStore) Update(pr *PullRequest, omitColumns ...string) error {
 	if pr == nil {
 		return errors.New("pull request cannot be nil")
 	}
@@ -109,7 +109,11 @@ func (s *PRStore) Update(pr *PullRequest) error {
 		return err
 	}
 
-	if err := s.db.Save(pr).Error; err != nil {
+	writer := s.db.Save
+	if len(omitColumns) > 0 {
+		writer = s.db.Omit(omitColumns...).Save
+	}
+	if err := writer(pr).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return common.WrapConflict(
 				fmt.Sprintf("pull request #%d is already tracked for this repo", pr.Number),

@@ -42,7 +42,7 @@ func TestGitModule_OnAppStart_SetsCurrentUser(t *testing.T) {
 
 	bus := &mockEventBus{}
 	module := NewGitModule(database, bus)
-	module.Service.githubClient = &mockGitHubClient{currentUser: "testuser"}
+	module.Service.githubClient = &MockGitHubClient{CurrentUser: "testuser"}
 
 	require.NoError(t, module.OnAppStart(context.Background()))
 	assert.Equal(t, "testuser", module.Service.currentUser)

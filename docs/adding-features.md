@@ -72,7 +72,29 @@ s.eventBus.Publish(ctx, eventbus.Event{
 
 On connect, the monitor asks `SnapshotProvider` (implemented by `SessionService.SessionSnapshot`) for the session's current state so a session that starts after a change is not left with silence. Add the same event type there when the current state matters at connect time.
 
-See: `internal/monitor/`, `internal/session/sessionservice.go` (`notifyPRUpdated`, `SessionSnapshot`)
+### Current event types
+
+| Type | Fires when |
+|---|---|
+| `pull_request` | PR state, title or assignment changes (`git.prs` job, 30s). Also sent on connect for the session's open PRs |
+| `pull_request_review` | Someone submits a review — `state` is `approved` / `changes_requested` / `commented` |
+| `pull_request_review_comment` | Someone leaves an inline comment, with `path` and `line` |
+| `ci_checks` | `failing` the first time a check fails, then `passed` / `failed` once every run completes, with the failed check names |
+
+Reviews and comments authored by the daemon's own GitHub user, or by bots, are dropped.
+
+### Polling activity without burning the API budget
+
+`SessionService.SyncPRActivity` (job `session.pr_activity`, 60s) is the driver, not the git module: only PRs whose head branch belongs to a live session are worth polling, and session is the module that knows which those are. Each PR costs up to three GitHub calls per tick, so keep that scoping if you add a source.
+
+`GitService.SyncPRActivity` owns the GitHub calls and the change detection. Watermarks live on the `PullRequest` row (`ActivityBaselined`, `LastReviewID`, `LastReviewCommentID`, `ChecksHeadSHA`, `ChecksState`), so a daemon restart does not replay old activity. Two rules worth preserving:
+
+- The first sync of a PR records a baseline and emits nothing — otherwise adopting a PR would dump its history into Claude's context, and a fleet of already-green PRs would each fire a rollup at once. `ActivityBaselined` is a separate flag rather than "watermark == 0", because a PR with no reviews yet also has 0 and would lose its *first* review.
+- `syncGitHubPR` rebuilds a PR from the GitHub payload and writes every other column, so it passes `activityColumns()` to `PRStore.Update` to leave these alone. A new activity column goes in that list.
+
+The wire shapes for all four PR event types live together in `internal/git/practivity.go` (`NotificationPullRequest` and friends, `PRNotification`, `ReviewActivity`, `ReviewCommentActivity`, `ChecksActivity`). Session decides *who* gets an event; git decides what one looks like.
+
+See: `internal/monitor/`, `internal/git/practivity.go`, `internal/session/sessionservice.go` (`notifyPRUpdated`, `SyncPRActivity`, `SessionSnapshot`)
 
 ## Adding a New Module
 

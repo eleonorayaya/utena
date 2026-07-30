@@ -1581,17 +1581,8 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 }
 
 func (s *SessionService) notifyPRUpdated(ctx context.Context, sess *Session, pr *git.PullRequest, previous *git.PullRequest) {
-	event := eventbus.Event{
-		Type: eventbus.SessionNotification,
-		Data: eventbus.SessionNotificationEvent{
-			SessionID: sess.ID,
-			Type:      notificationTypePullRequest,
-			Data:      newPRNotification(pr, previous, sessionBranchName(sess, *pr.HeadBranchID)),
-		},
-	}
-	if err := s.eventBus.Publish(ctx, event); err != nil {
-		slog.Warn("failed to publish session notification", "session", sess.ID, "pr", pr.Number, "error", err)
-	}
+	data := git.NewPRNotification(pr, previous, sessionBranchName(sess, *pr.HeadBranchID))
+	s.publishNotification(ctx, sess.ID, git.NotificationPullRequest, data)
 }
 
 func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []eventbus.SessionNotificationEvent {
@@ -1604,17 +1595,80 @@ func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []
 	for _, branchID := range s.sessionBranchIDs(sess) {
 		branch := sessionBranchName(sess, branchID)
 		for _, pr := range s.gitService.GetPRsForBranch(branchID) {
-			if pr.State != git.PRStateOpen && pr.State != git.PRStateDraft {
+			if !pr.State.IsOpen() {
 				continue
 			}
 			out = append(out, eventbus.SessionNotificationEvent{
 				SessionID: sessionID,
-				Type:      notificationTypePullRequest,
-				Data:      newPRNotification(&pr, nil, branch),
+				Type:      git.NotificationPullRequest,
+				Data:      git.NewPRNotification(&pr, nil, branch),
 			})
 		}
 	}
 	return out
+}
+
+// SyncPRActivity polls reviews, review comments and CI checks for the PRs of
+// live sessions and pushes whatever is new to that session's monitor. Only
+// session PRs are polled — a PR with no session has nowhere to deliver.
+func (s *SessionService) SyncPRActivity(ctx context.Context) error {
+	sessions, err := s.store.List()
+	if err != nil {
+		return err
+	}
+
+	// several sessions can sit on one branch, and detecting activity consumes
+	// the PR's watermark, so walk each branch once and fan the result out
+	order := make([]uint, 0, len(sessions))
+	watchers := make(map[uint][]uint)
+	for i := range sessions {
+		sess := &sessions[i]
+		if !sess.watchesPRActivity() {
+			continue
+		}
+		for _, branchID := range s.sessionBranchIDs(sess) {
+			if _, seen := watchers[branchID]; !seen {
+				order = append(order, branchID)
+			}
+			watchers[branchID] = append(watchers[branchID], sess.ID)
+		}
+	}
+
+	for _, branchID := range order {
+		for _, pr := range s.gitService.GetPRsForBranch(branchID) {
+			if !pr.State.IsOpen() {
+				continue
+			}
+			activity, err := s.gitService.SyncPRActivity(ctx, &pr)
+			if errors.Is(err, git.ErrNoGitHubClient) {
+				return err
+			}
+			if err != nil {
+				slog.Warn("failed to sync PR activity", "pr", pr.Number, "error", err)
+				continue
+			}
+			for _, item := range activity {
+				for _, sessionID := range watchers[branchID] {
+					s.publishNotification(ctx, sessionID, item.Type, item.Data)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (s *SessionService) publishNotification(ctx context.Context, sessionID uint, notificationType string, data any) {
+	event := eventbus.Event{
+		Type: eventbus.SessionNotification,
+		Data: eventbus.SessionNotificationEvent{
+			SessionID: sessionID,
+			Type:      notificationType,
+			Data:      data,
+		},
+	}
+	if err := s.eventBus.Publish(ctx, event); err != nil {
+		slog.Warn("failed to publish session notification", "session", sessionID, "type", notificationType, "error", err)
+	}
 }
 
 func sessionBranchName(sess *Session, branchID uint) string {
@@ -1625,20 +1679,6 @@ func sessionBranchName(sess *Session, branchID uint) string {
 		}
 	}
 	return ""
-}
-
-func newPRNotification(pr *git.PullRequest, previous *git.PullRequest, branch string) prNotification {
-	n := prNotification{
-		Number: pr.Number,
-		Title:  pr.Title,
-		State:  string(pr.State),
-		Branch: branch,
-		URL:    pr.HTMLURL,
-	}
-	if previous != nil && previous.State != pr.State {
-		n.PreviousState = string(previous.State)
-	}
-	return n
 }
 
 func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git.PRUpdatedEvent) {
