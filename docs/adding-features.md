@@ -81,7 +81,7 @@ On connect, the monitor asks `SnapshotProvider` (implemented by `SessionService.
 | `pull_request_review_comment` | Someone leaves an inline comment, with `path` and `line` |
 | `ci_checks` | `failing` the first time a check fails, then `passed` / `failed` once every run completes, with the failed check names |
 
-Reviews and comments authored by the daemon's own GitHub user, or by bots, are dropped.
+Reviews and comments authored by the daemon's own GitHub user are dropped — you just wrote them. Bots are kept: review bots like `gusto-fresh-eyes` do most of the reviewing, and filtering them silently swallowed the majority of real feedback. If a genuinely noisy bot shows up, add a denylist then rather than blanket-filtering by account type.
 
 ### Polling activity without burning the API budget
 

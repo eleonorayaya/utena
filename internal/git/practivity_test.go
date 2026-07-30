@@ -97,11 +97,11 @@ func TestSyncPRActivity_NewReview(t *testing.T) {
 	require.Equal(t, int64(10), pr.LastReviewID)
 }
 
-func TestSyncPRActivity_SkipsBotsAndSelf(t *testing.T) {
+func TestSyncPRActivity_SkipsOwnActivityButKeepsBots(t *testing.T) {
 	client := &MockGitHubClient{Reviews: []*github.PullRequestReview{
-		review(10, "coverage-bot", "Bot", "COMMENTED"),
-		review(11, "dependabot[bot]", "User", "COMMENTED"),
-		review(12, "eleonorayaya", "User", "APPROVED"),
+		// review bots do most of the reviewing, so their feedback is wanted
+		review(10, "gusto-fresh-eyes[bot]", "Bot", "COMMENTED"),
+		review(11, "eleonorayaya", "User", "APPROVED"),
 	}}
 	service, pr := activityEnv(t, client)
 	pr.ActivityBaselined = true
@@ -110,8 +110,9 @@ func TestSyncPRActivity_SkipsBotsAndSelf(t *testing.T) {
 	activity, err := service.SyncPRActivity(context.Background(), pr)
 	require.NoError(t, err)
 
-	require.Empty(t, activity)
-	require.Equal(t, int64(12), pr.LastReviewID, "watermark must still advance past filtered activity")
+	require.Len(t, activity, 1)
+	require.Equal(t, "gusto-fresh-eyes[bot]", activity[0].Data.(ReviewActivity).Author)
+	require.Equal(t, int64(11), pr.LastReviewID, "watermark must still advance past our own activity")
 }
 
 func TestSyncPRActivity_NewReviewComment(t *testing.T) {

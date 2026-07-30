@@ -153,7 +153,7 @@ func (s *GitService) newReviews(pr *PullRequest, reviews []*github.PullRequestRe
 			continue
 		}
 		author := review.GetUser().GetLogin()
-		if s.ignoredAuthor(author, review.GetUser().GetType()) {
+		if s.ignoredAuthor(author) {
 			continue
 		}
 		out = append(out, PRActivity{Type: NotificationReview, Data: ReviewActivity{
@@ -179,7 +179,7 @@ func (s *GitService) newReviewComments(pr *PullRequest, comments []*github.PullR
 			continue
 		}
 		author := comment.GetUser().GetLogin()
-		if s.ignoredAuthor(author, comment.GetUser().GetType()) {
+		if s.ignoredAuthor(author) {
 			continue
 		}
 		out = append(out, PRActivity{Type: NotificationReviewComment, Data: ReviewCommentActivity{
@@ -249,9 +249,11 @@ func checksTransition(pr *PullRequest, runs []*github.CheckRun) (*PRActivity, Ch
 	}}, state
 }
 
-func (s *GitService) ignoredAuthor(login, userType string) bool {
-	return login == "" || login == s.currentUser ||
-		userType == "Bot" || strings.HasSuffix(login, "[bot]")
+// ignoredAuthor drops only our own activity. Bots are kept: the review bots
+// are the ones doing most of the reviewing, and their comments are as
+// actionable as a human's.
+func (s *GitService) ignoredAuthor(login string) bool {
+	return login == "" || login == s.currentUser
 }
 
 func truncate(body string) string {
