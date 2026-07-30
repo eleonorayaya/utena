@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,7 +38,7 @@ func monitorCmd() *cobra.Command {
 			for ctx.Err() == nil {
 				if err := streamSessionEvents(ctx, url, os.Stdout); err != nil && ctx.Err() == nil {
 					// ponytail: stdout lines are events, so retry noise goes to stderr only
-					fmt.Fprintf(os.Stderr, "utena monitor: %v, retrying in %s\n", err, monitorRetryDelay)
+					fmt.Fprintf(os.Stderr, "utena monitor: %s, reconnecting in %s\n", describeDisconnect(err), monitorRetryDelay)
 				}
 				select {
 				case <-ctx.Done():
@@ -46,6 +48,16 @@ func monitorCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// describeDisconnect keeps the expected case — the daemon restarting, which
+// drops the socket without a close handshake — from reading like a failure.
+func describeDisconnect(err error) string {
+	if errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) ||
+		websocket.CloseStatus(err) != -1 || strings.Contains(err.Error(), "connection refused") {
+		return "daemon connection closed (daemon restarting?)"
+	}
+	return err.Error()
 }
 
 func streamSessionEvents(ctx context.Context, url string, out io.Writer) error {
