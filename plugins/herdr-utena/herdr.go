@@ -142,6 +142,103 @@ func (h *herdrClient) listWorkspaces() (map[string]wsInfo, error) {
 	return byID, nil
 }
 
+type snapshotPane struct {
+	PaneID      string `json:"pane_id"`
+	WorkspaceID string `json:"workspace_id"`
+	TabID       string `json:"tab_id"`
+	Cwd         string `json:"cwd"`
+	Focused     bool   `json:"focused"`
+}
+
+type snapshotLayout struct {
+	WorkspaceID string `json:"workspace_id"`
+	TabID       string `json:"tab_id"`
+	Panes       []struct {
+		PaneID string `json:"pane_id"`
+		Rect   struct {
+			X int `json:"x"`
+			Y int `json:"y"`
+		} `json:"rect"`
+	} `json:"panes"`
+}
+
+type snapshot struct {
+	FocusedWorkspaceID string           `json:"focused_workspace_id"`
+	FocusedTabID       string           `json:"focused_tab_id"`
+	Panes              []snapshotPane   `json:"panes"`
+	Layouts            []snapshotLayout `json:"layouts"`
+}
+
+func (h *herdrClient) snapshot() (*snapshot, error) {
+	raw, err := h.socketRequest("session.snapshot", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Snapshot snapshot `json:"snapshot"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse snapshot: %w", err)
+	}
+	return &out.Snapshot, nil
+}
+
+func (s *snapshot) leftmostPane(tabID string) string {
+	best, bestX := "", 1<<30
+	for _, l := range s.Layouts {
+		if l.TabID != tabID {
+			continue
+		}
+		for _, p := range l.Panes {
+			if p.Rect.X < bestX {
+				best, bestX = p.PaneID, p.Rect.X
+			}
+		}
+	}
+	return best
+}
+
+func (h *herdrClient) focusPane(id string) error {
+	return h.socketCall("pane.focus", map[string]any{"pane_id": id})
+}
+
+func (h *herdrClient) swapPanes(source, target string) error {
+	return h.socketCall("pane.swap", map[string]any{
+		"source_pane_id": source,
+		"target_pane_id": target,
+	})
+}
+
+func (h *herdrClient) openPluginPane(pluginID, entrypoint, targetPane, direction string) (string, error) {
+	params := map[string]any{
+		"plugin_id":  pluginID,
+		"entrypoint": entrypoint,
+		"placement":  "split",
+		"focus":      true,
+	}
+	if targetPane != "" {
+		params["target_pane_id"] = targetPane
+	}
+	if direction != "" {
+		params["direction"] = direction
+	}
+	raw, err := h.socketRequest("plugin.pane.open", params)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		PluginPane struct {
+			Pane struct {
+				PaneID string `json:"pane_id"`
+			} `json:"pane"`
+		} `json:"plugin_pane"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", fmt.Errorf("parse plugin pane open: %w", err)
+	}
+	return out.PluginPane.Pane.PaneID, nil
+}
+
 func (h *herdrClient) subscribe(types []string) (<-chan string, error) {
 	path, err := socketPath()
 	if err != nil {

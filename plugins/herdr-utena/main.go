@@ -103,14 +103,50 @@ func runNew(args []string) error {
 	return nil
 }
 
+const pluginID = "eleonorayaya.herdr-utena"
+
 func runOpenSidebar() error {
 	h := newHerdrClient()
-	_, err := h.run("plugin", "pane", "open",
-		"--plugin", "eleonorayaya.herdr-utena",
-		"--entrypoint", "sidebar",
-		"--placement", "split",
-		"--direction", "right")
-	return err
+	snap, err := h.snapshot()
+	if err != nil {
+		return err
+	}
+
+	root, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve plugin root: %w", err)
+	}
+	root = filepath.Dir(filepath.Dir(root))
+
+	for _, p := range snap.Panes {
+		if p.WorkspaceID == snap.FocusedWorkspaceID && sameDir(p.Cwd, root) {
+			return h.focusPane(p.PaneID)
+		}
+	}
+
+	leftmost := snap.leftmostPane(snap.FocusedTabID)
+	pane, err := h.openPluginPane(pluginID, "sidebar", leftmost, "right")
+	if err != nil {
+		return err
+	}
+	if leftmost != "" && pane != "" {
+		if err := h.swapPanes(pane, leftmost); err != nil {
+			return fmt.Errorf("move sidebar to the left: %w", err)
+		}
+	}
+	return nil
+}
+
+func sameDir(a, b string) bool {
+	ra, err := filepath.EvalSymlinks(a)
+	if err != nil {
+		ra = a
+	}
+	rb, err := filepath.EvalSymlinks(b)
+	if err != nil {
+		rb = b
+	}
+	return ra == rb
 }
 
 func runSidebar() error {
