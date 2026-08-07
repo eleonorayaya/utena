@@ -1,0 +1,19 @@
+id = "eleonorayaya.herdr-utena"
+name = "herdr-utena"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Multi-repo sessions for herdr: group N git worktrees under one session root with a generated CLAUDE.md and merged Claude sandbox settings."
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["sh", "scripts/build.sh"]
+
+[[actions]]
+id = "ping"
+title = "herdr-utena: ping"
+command = ["./bin/herdr-utena", "ping"]
+
+[[actions]]
+id = "list"
+title = "herdr-utena: list sessions"
+command = ["./bin/herdr-utena", "list"]
