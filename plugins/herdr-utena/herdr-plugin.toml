@@ -9,6 +9,17 @@ platforms = ["linux", "macos"]
 command = ["sh", "scripts/build.sh"]
 
 [[actions]]
+id = "sessions"
+title = "herdr-utena: sessions"
+command = ["./bin/herdr-utena", "open-sidebar"]
+
+[[panes]]
+id = "sidebar"
+title = "sessions"
+placement = "split"
+command = ["./bin/herdr-utena", "sidebar"]
+
+[[actions]]
 id = "ping"
 title = "herdr-utena: ping"
 command = ["./bin/herdr-utena", "ping"]

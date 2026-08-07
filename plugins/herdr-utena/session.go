@@ -93,6 +93,61 @@ func addWorktree(repo, path, branch string) error {
 	return err
 }
 
+func archiveSession(h *herdrClient, name string) error {
+	state, err := loadState()
+	if err != nil {
+		return err
+	}
+	sess, ok := state.find(name)
+	if !ok {
+		return fmt.Errorf("session %q not found", name)
+	}
+	for _, c := range sess.Checkouts {
+		if c.WorkspaceID != "" {
+			_ = h.closeWorkspace(c.WorkspaceID)
+		}
+	}
+	if sess.WorkspaceID != "" {
+		_ = h.closeWorkspace(sess.WorkspaceID)
+	}
+	sess.Status = statusArchived
+	sess.LastUsedAt = time.Now()
+	return saveState(state)
+}
+
+func deleteSession(h *herdrClient, name string) error {
+	state, err := loadState()
+	if err != nil {
+		return err
+	}
+	sess, ok := state.find(name)
+	if !ok {
+		return fmt.Errorf("session %q not found", name)
+	}
+	for _, c := range sess.Checkouts {
+		if c.WorkspaceID != "" {
+			_ = h.closeWorkspace(c.WorkspaceID)
+		}
+		if _, err := git(c.Repo, "worktree", "remove", c.Path, "--force"); err != nil {
+			return fmt.Errorf("remove worktree %s: %w", c.Label, err)
+		}
+	}
+	if sess.WorkspaceID != "" {
+		_ = h.closeWorkspace(sess.WorkspaceID)
+	}
+	if err := os.RemoveAll(sess.Root); err != nil {
+		return fmt.Errorf("remove session root: %w", err)
+	}
+	kept := state.Sessions[:0]
+	for _, s := range state.Sessions {
+		if s.Name != name {
+			kept = append(kept, s)
+		}
+	}
+	state.Sessions = kept
+	return saveState(state)
+}
+
 type createInput struct {
 	Name   string
 	Branch string

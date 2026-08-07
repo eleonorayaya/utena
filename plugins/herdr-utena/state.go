@@ -38,7 +38,7 @@ type State struct {
 }
 
 func stateDir() (string, error) {
-	if dir := os.Getenv("HERDR_PLUGIN_STATE_DIR"); dir != "" {
+	if dir := os.Getenv("HERDR_UTENA_STATE_DIR"); dir != "" {
 		return dir, nil
 	}
 	home, err := os.UserHomeDir()

@@ -4,7 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
 type repoList []string
@@ -30,6 +35,14 @@ func main() {
 		err = runNew(os.Args[2:])
 	case "list":
 		err = runList()
+	case "sidebar":
+		err = runSidebar()
+	case "open-sidebar":
+		err = runOpenSidebar()
+	case "archive":
+		err = runOneArg(os.Args[2:], "archive", archiveSession)
+	case "delete":
+		err = runOneArg(os.Args[2:], "delete", deleteSession)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -87,6 +100,43 @@ func runNew(args []string) error {
 		fmt.Printf("  %-20s %s (%s)\n", c.Label, c.Branch, c.WorkspaceID)
 	}
 	fmt.Printf("  %-20s %s\n", "session workspace", sess.WorkspaceID)
+	return nil
+}
+
+func runOpenSidebar() error {
+	h := newHerdrClient()
+	_, err := h.run("plugin", "pane", "open",
+		"--plugin", "eleonorayaya.herdr-utena",
+		"--entrypoint", "sidebar",
+		"--placement", "split",
+		"--direction", "right")
+	return err
+}
+
+func runSidebar() error {
+	if path, err := utenaThemePath(); err == nil {
+		_ = theme.Load(path)
+	}
+	_, err := tea.NewProgram(newSidebar(newHerdrClient()), tea.WithAltScreen()).Run()
+	return err
+}
+
+func utenaThemePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "utena", "theme.json"), nil
+}
+
+func runOneArg(args []string, verb string, fn func(*herdrClient, string) error) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: herdr-utena %s <session-name>", verb)
+	}
+	if err := fn(newHerdrClient(), args[0]); err != nil {
+		return err
+	}
+	fmt.Printf("%sd %s\n", verb, args[0])
 	return nil
 }
 

@@ -72,42 +72,135 @@ func socketPath() (string, error) {
 	return filepath.Join(home, ".config", "herdr", "herdr.sock"), nil
 }
 
-func (h *herdrClient) socketCall(method string, params map[string]any) error {
+func (h *herdrClient) socketRequest(method string, params map[string]any) (json.RawMessage, error) {
 	path, err := socketPath()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	conn, err := net.Dial("unix", path)
 	if err != nil {
-		return fmt.Errorf("connect to herdr socket: %w", err)
+		return nil, fmt.Errorf("connect to herdr socket: %w", err)
 	}
 	defer conn.Close()
 
 	req, err := json.Marshal(map[string]any{"id": "herdr-utena", "method": method, "params": params})
 	if err != nil {
-		return fmt.Errorf("marshal %s: %w", method, err)
+		return nil, fmt.Errorf("marshal %s: %w", method, err)
 	}
 	if _, err := conn.Write(append(req, '\n')); err != nil {
-		return fmt.Errorf("send %s: %w", method, err)
+		return nil, fmt.Errorf("send %s: %w", method, err)
 	}
 
 	line, err := bufio.NewReader(conn).ReadBytes('\n')
 	if err != nil {
-		return fmt.Errorf("read %s response: %w", method, err)
+		return nil, fmt.Errorf("read %s response: %w", method, err)
 	}
 	var resp struct {
-		Error *struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(line, &resp); err != nil {
-		return fmt.Errorf("parse %s response: %w", method, err)
+		return nil, fmt.Errorf("parse %s response: %w", method, err)
 	}
 	if resp.Error != nil {
-		return fmt.Errorf("%s: %s: %s", method, resp.Error.Code, resp.Error.Message)
+		return nil, fmt.Errorf("%s: %s: %s", method, resp.Error.Code, resp.Error.Message)
 	}
-	return nil
+	return resp.Result, nil
+}
+
+func (h *herdrClient) socketCall(method string, params map[string]any) error {
+	_, err := h.socketRequest(method, params)
+	return err
+}
+
+type wsInfo struct {
+	ID          string `json:"workspace_id"`
+	Label       string `json:"label"`
+	AgentStatus string `json:"agent_status"`
+	Focused     bool   `json:"focused"`
+	PaneCount   int    `json:"pane_count"`
+}
+
+func (h *herdrClient) listWorkspaces() (map[string]wsInfo, error) {
+	raw, err := h.socketRequest("workspace.list", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Workspaces []wsInfo `json:"workspaces"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse workspace list: %w", err)
+	}
+	byID := make(map[string]wsInfo, len(out.Workspaces))
+	for _, w := range out.Workspaces {
+		byID[w.ID] = w
+	}
+	return byID, nil
+}
+
+func (h *herdrClient) subscribe(types []string) (<-chan string, error) {
+	path, err := socketPath()
+	if err != nil {
+		return nil, err
+	}
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		return nil, fmt.Errorf("connect to herdr socket: %w", err)
+	}
+
+	subs := make([]map[string]string, 0, len(types))
+	for _, t := range types {
+		subs = append(subs, map[string]string{"type": t})
+	}
+	req, err := json.Marshal(map[string]any{
+		"id":     "herdr-utena-events",
+		"method": "events.subscribe",
+		"params": map[string]any{"subscriptions": subs},
+	})
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("marshal subscribe: %w", err)
+	}
+	if _, err := conn.Write(append(req, '\n')); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("send subscribe: %w", err)
+	}
+
+	out := make(chan string, 16)
+	go func() {
+		defer conn.Close()
+		defer close(out)
+		r := bufio.NewReader(conn)
+		for {
+			line, err := r.ReadBytes('\n')
+			if err != nil {
+				return
+			}
+			var ev struct {
+				Event string `json:"event"`
+			}
+			if json.Unmarshal(line, &ev) != nil || ev.Event == "" {
+				continue
+			}
+			select {
+			case out <- ev.Event:
+			default:
+			}
+		}
+	}()
+	return out, nil
+}
+
+func (h *herdrClient) focusWorkspace(id string) error {
+	return h.socketCall("workspace.focus", map[string]any{"workspace_id": id})
+}
+
+func (h *herdrClient) closeWorkspace(id string) error {
+	return h.socketCall("workspace.close", map[string]any{"workspace_id": id})
 }
 
 func (h *herdrClient) tagSession(workspaceID, session string) error {
