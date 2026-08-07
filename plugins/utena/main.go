@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"text/tabwriter"
 
@@ -31,6 +32,12 @@ func main() {
 	switch os.Args[1] {
 	case "ping":
 		err = runPing()
+	case "doctor":
+		err = runDoctor()
+	case "pick":
+		err = runPick()
+	case "open-pick":
+		err = runOpenPick()
 	case "new":
 		err = runNew(os.Args[2:])
 	case "list":
@@ -52,13 +59,13 @@ func main() {
 	}
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "herdr-utena: %v\n", err)
+		fmt.Fprintf(os.Stderr, "utena: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `herdr-utena — multi-repo sessions for herdr
+	fmt.Fprint(os.Stderr, `utena — multi-repo sessions for herdr
 
   ping                                     check the herdr connection
   new -branch B -repo P [-repo P] [-name N]  create a multi-repo session
@@ -103,7 +110,7 @@ func runNew(args []string) error {
 	return nil
 }
 
-const pluginID = "eleonorayaya.herdr-utena"
+const pluginID = "eleonorayaya.utena"
 
 func runOpenSidebar() error {
 	h := newHerdrClient()
@@ -149,6 +156,16 @@ func sameDir(a, b string) bool {
 	return ra == rb
 }
 
+func runOpenPick() error {
+	h := newHerdrClient()
+	_ = h.socketCall("popup.close", map[string]any{})
+	_, err := h.socketRequest("plugin.pane.open", map[string]any{
+		"plugin_id": pluginID, "entrypoint": "picker",
+		"placement": "popup", "focus": true,
+	})
+	return err
+}
+
 func runSidebar() error {
 	if path, err := utenaThemePath(); err == nil {
 		_ = theme.Load(path)
@@ -167,7 +184,7 @@ func utenaThemePath() (string, error) {
 
 func runOneArg(args []string, verb string, fn func(*herdrClient, string) error) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: herdr-utena %s <session-name>", verb)
+		return fmt.Errorf("usage: utena %s <session-name>", verb)
 	}
 	if err := fn(newHerdrClient(), args[0]); err != nil {
 		return err
@@ -177,18 +194,55 @@ func runOneArg(args []string, verb string, fn func(*herdrClient, string) error) 
 }
 
 func runList() error {
-	state, err := loadState()
+	sessions, _, err := loadSessions(newHerdrClient())
 	if err != nil {
 		return err
 	}
-	if len(state.Sessions) == 0 {
+	if len(sessions) == 0 {
 		fmt.Println("no sessions")
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATUS\tREPOS\tROOT")
-	for _, s := range state.Sessions {
-		fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", s.Name, s.Status, len(s.Checkouts), s.Root)
+	fmt.Fprintln(w, "NAME\tSTATE\tREPOS\tROOT")
+	for _, s := range sessions {
+		state := "inactive"
+		switch {
+		case s.Archived:
+			state = "archived"
+		case s.Active():
+			state = "active"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", s.Name, state, len(s.Checkouts), s.Root)
 	}
 	return w.Flush()
+}
+
+func runDoctor() error {
+	home, herr := os.UserHomeDir()
+	fmt.Printf("HOME env        = %q\n", os.Getenv("HOME"))
+	fmt.Printf("UserHomeDir()   = %q (err=%v)\n", home, herr)
+	fmt.Printf("PATH            = %q\n", os.Getenv("PATH"))
+	if _, err := exec.LookPath("git"); err != nil {
+		fmt.Printf("git on PATH     = NOT FOUND (%v)\n", err)
+	} else {
+		fmt.Printf("git on PATH     = ok\n")
+	}
+	roots := sessionRoots()
+	fmt.Printf("sessionRoots()  = %v\n", roots)
+	for _, r := range roots {
+		entries, err := os.ReadDir(r)
+		if err != nil {
+			fmt.Printf("  %s -> ERROR %v\n", r, err)
+			continue
+		}
+		n := 0
+		for _, e := range entries {
+			if e.IsDir() && isSessionRoot(filepath.Join(r, e.Name())) {
+				n++
+			}
+		}
+		fmt.Printf("  %s -> %d entries, %d sessions\n", r, len(entries), n)
+	}
+	fmt.Printf("scanSessions()  = %d\n", len(scanSessions()))
+	return nil
 }

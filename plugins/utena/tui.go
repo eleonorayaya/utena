@@ -2,10 +2,8 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -22,41 +20,47 @@ type rowKind int
 const (
 	rowSession rowKind = iota
 	rowCheckout
+	rowHeading
+	rowWorkspace
 )
 
 type row struct {
-	kind     rowKind
-	session  *Session
-	checkout *Checkout
-	status   string
-	branch   string
-	dirty    int
-	last     bool
+	kind      rowKind
+	heading   string
+	workspace *liveWorkspace
+	session   *Session
+	checkout  *Checkout
+	status    string
+	branch    string
+	dirty     int
+	last      bool
 }
 
 type keyMap struct {
-	Up      key.Binding
-	Down    key.Binding
-	Focus   key.Binding
-	Archive key.Binding
-	Delete  key.Binding
-	New     key.Binding
-	Refresh key.Binding
-	Help    key.Binding
-	Quit    key.Binding
+	Up             key.Binding
+	Down           key.Binding
+	Focus          key.Binding
+	Archive        key.Binding
+	Delete         key.Binding
+	New            key.Binding
+	ToggleArchived key.Binding
+	Refresh        key.Binding
+	Help           key.Binding
+	Quit           key.Binding
 }
 
 func newKeyMap() keyMap {
 	return keyMap{
-		Up:      key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k/↑", "up")),
-		Down:    key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j/↓", "down")),
-		Focus:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "focus")),
-		Archive: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archive")),
-		Delete:  key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
-		New:     key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
-		Refresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-		Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-		Quit:    key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
+		Up:             key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k/↑", "up")),
+		Down:           key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j/↓", "down")),
+		Focus:          key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "focus")),
+		Archive:        key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archive")),
+		Delete:         key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+		New:            key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
+		ToggleArchived: key.NewBinding(key.WithKeys("."), key.WithHelp(".", "archived")),
+		Refresh:        key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
+		Help:           key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		Quit:           key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
 	}
 }
 
@@ -68,6 +72,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Focus},
 		{k.New, k.Archive, k.Delete},
+		{k.ToggleArchived},
 		{k.Refresh},
 		{k.Help, k.Quit},
 	}
@@ -88,11 +93,12 @@ type sidebar struct {
 	events  <-chan string
 	live    bool
 
-	mode        mode
-	createKeys  createKeyMap
-	repos       []repoChoice
-	repoCursor  int
-	branchInput textinput.Model
+	showArchived bool
+	mode         mode
+	createKeys   createKeyMap
+	repos        []repoChoice
+	repoCursor   int
+	branchInput  textinput.Model
 }
 
 type reloadedMsg struct {
@@ -156,81 +162,47 @@ func startStream(h *herdrClient) tea.Cmd {
 
 func (m sidebar) reload() tea.Cmd {
 	h := m.herdr
+	showArchived := m.showArchived
 	return func() tea.Msg {
-		state, err := loadState()
-		if err != nil {
-			return reloadedMsg{err: err}
-		}
-		live, err := h.listWorkspaces()
+		sessions, ungrouped, err := loadSessions(h)
 		if err != nil {
 			return reloadedMsg{err: err}
 		}
 		var rows []row
-		for i := range state.Sessions {
-			s := &state.Sessions[i]
-			if s.Status == statusArchived {
+		archivedHidden := 0
+		for i := range sessions {
+			s := &sessions[i]
+			if s.Archived && !showArchived {
+				archivedHidden++
 				continue
 			}
-			rows = append(rows, row{kind: rowSession, session: s, status: live[s.WorkspaceID].AgentStatus})
+			rows = append(rows, row{kind: rowSession, session: s, status: s.AgentStatus})
 			for j := range s.Checkouts {
 				c := &s.Checkouts[j]
-				br, dirty := checkoutState(c.Path)
 				rows = append(rows, row{
 					kind:     rowCheckout,
 					session:  s,
 					checkout: c,
-					status:   live[c.WorkspaceID].AgentStatus,
-					branch:   br,
-					dirty:    dirty,
+					status:   c.AgentStatus,
+					branch:   c.Branch,
+					dirty:    c.Dirty,
 					last:     j == len(s.Checkouts)-1,
 				})
 			}
 		}
+		if archivedHidden > 0 {
+			rows = append(rows, row{kind: rowHeading,
+				heading: fmt.Sprintf("%d archived · press . to show", archivedHidden)})
+		}
+		if len(ungrouped) > 0 {
+			rows = append(rows, row{kind: rowHeading, heading: "other workspaces"})
+			for i := range ungrouped {
+				w := ungrouped[i]
+				rows = append(rows, row{kind: rowWorkspace, workspace: &w, status: w.AgentStatus})
+			}
+		}
 		return reloadedMsg{rows: rows}
 	}
-}
-
-type gitSnapshot struct {
-	branch string
-	dirty  int
-	at     time.Time
-}
-
-var (
-	gitCacheMu  sync.Mutex
-	gitCache    = map[string]gitSnapshot{}
-	gitCacheTTL = 5 * time.Second
-)
-
-func checkoutState(path string) (string, int) {
-	gitCacheMu.Lock()
-	if snap, ok := gitCache[path]; ok && time.Since(snap.at) < gitCacheTTL {
-		gitCacheMu.Unlock()
-		return snap.branch, snap.dirty
-	}
-	gitCacheMu.Unlock()
-
-	branch, dirty := readCheckoutState(path)
-
-	gitCacheMu.Lock()
-	gitCache[path] = gitSnapshot{branch: branch, dirty: dirty, at: time.Now()}
-	gitCacheMu.Unlock()
-	return branch, dirty
-}
-
-func readCheckoutState(path string) (string, int) {
-	if _, err := os.Stat(path); err != nil {
-		return "missing", 0
-	}
-	branch, err := git(path, "branch", "--show-current")
-	if err != nil {
-		return "?", 0
-	}
-	out, err := git(path, "status", "--porcelain")
-	if err != nil || strings.TrimSpace(out) == "" {
-		return branch, 0
-	}
-	return branch, len(strings.Split(strings.TrimSpace(out), "\n"))
 }
 
 func (m sidebar) Init() tea.Cmd {
@@ -273,6 +245,15 @@ func (m sidebar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clamp()
 		return m, nil
 
+	case activatedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = ""
+			return m, nil
+		}
+		m.status = ""
+		return m, m.reload()
+
 	case createdMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -311,19 +292,34 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.help.ShowAll = !m.help.ShowAll
 
 	case key.Matches(msg, m.keys.Up):
-		if m.cursor > 0 {
-			m.cursor--
-			m.clamp()
+		for i := m.cursor - 1; i >= 0; i-- {
+			if m.rows[i].kind != rowHeading {
+				m.cursor = i
+				m.clamp()
+				break
+			}
 		}
 
 	case key.Matches(msg, m.keys.Down):
-		if m.cursor < len(m.rows)-1 {
-			m.cursor++
-			m.clamp()
+		for i := m.cursor + 1; i < len(m.rows); i++ {
+			if m.rows[i].kind != rowHeading {
+				m.cursor = i
+				m.clamp()
+				break
+			}
 		}
 
 	case key.Matches(msg, m.keys.New):
 		return m.startCreate(), nil
+
+	case key.Matches(msg, m.keys.ToggleArchived):
+		m.showArchived = !m.showArchived
+		if m.showArchived {
+			m.status = "showing archived"
+		} else {
+			m.status = ""
+		}
+		return m, m.reload()
 
 	case key.Matches(msg, m.keys.Refresh):
 		m.status = "refreshing…"
@@ -334,9 +330,24 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			break
 		}
+		if r.kind == rowWorkspace {
+			if err := m.herdr.focusWorkspace(r.workspace.ID); err != nil {
+				m.err = err
+				break
+			}
+			return m, tea.Quit
+		}
+		if r.session != nil && !r.session.Active() {
+			name := r.session.Name
+			m.status = "opening " + name + "…"
+			return m, m.activateCmd(name)
+		}
 		id := r.session.WorkspaceID
 		if r.kind == rowCheckout {
 			id = r.checkout.WorkspaceID
+		}
+		if id == "" {
+			break
 		}
 		if err := m.herdr.focusWorkspace(id); err != nil {
 			m.err = err
@@ -458,7 +469,7 @@ func (m sidebar) View() string {
 
 	if len(m.rows) == 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).Padding(1, 1).
-			Render("no sessions\n\nherdr-utena new -branch <b> -repo <path> …") + "\n")
+			Render("no sessions\n\nutena new -branch <b> -repo <path> …") + "\n")
 	}
 
 	body := m.bodyHeight()
@@ -480,8 +491,25 @@ func (m sidebar) renderRow(r row, selected bool) string {
 
 	var line string
 	switch r.kind {
+	case rowHeading:
+		return lipgloss.NewStyle().Width(m.width).Padding(0, 1).
+			Foreground(t.TextMuted).Render(r.heading)
+
+	case rowWorkspace:
+		line = fmt.Sprintf("%s %s",
+			lipgloss.NewStyle().Foreground(gc).Render(glyph),
+			lipgloss.NewStyle().Foreground(t.Text).Render(r.workspace.Label))
+
 	case rowSession:
-		name := lipgloss.NewStyle().Foreground(t.TextEmphasis).Bold(true).Render(r.session.Name)
+		nameStyle := lipgloss.NewStyle().Foreground(t.TextEmphasis).Bold(true)
+		if !r.session.Active() {
+			nameStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
+		}
+		label := r.session.Name
+		if r.session.Archived {
+			label = "⌁ " + label
+		}
+		name := nameStyle.Render(label)
 		count := lipgloss.NewStyle().Foreground(t.TextMuted).
 			Render(fmt.Sprintf(" (%d)", len(r.session.Checkouts)))
 		line = fmt.Sprintf("%s %s%s", lipgloss.NewStyle().Foreground(gc).Render(glyph), name, count)

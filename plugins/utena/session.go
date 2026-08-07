@@ -33,7 +33,7 @@ func sanitizeName(name string) string {
 }
 
 func repoRoots() []string {
-	if raw := os.Getenv("HERDR_UTENA_REPO_ROOTS"); raw != "" {
+	if raw := os.Getenv("UTENA_REPO_ROOTS"); raw != "" {
 		return filepath.SplitList(raw)
 	}
 	home, err := os.UserHomeDir()
@@ -71,7 +71,7 @@ func discoverRepos() []string {
 }
 
 func sessionsRoot() (string, error) {
-	if root := os.Getenv("HERDR_UTENA_SESSIONS_ROOT"); root != "" {
+	if root := os.Getenv("UTENA_SESSIONS_ROOT"); root != "" {
 		return root, nil
 	}
 	home, err := os.UserHomeDir()
@@ -132,59 +132,126 @@ func addWorktree(repo, path, branch string) error {
 	return err
 }
 
-func archiveSession(h *herdrClient, name string) error {
-	state, err := loadState()
+func findSession(name string) (Session, bool) {
+	for _, s := range scanSessions() {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return Session{}, false
+}
+
+func registerSession(h *herdrClient, s Session) (Session, error) {
+	for i := range s.Checkouts {
+		c := &s.Checkouts[i]
+		if c.WorkspaceID != "" {
+			continue
+		}
+		id, err := h.createWorkspace(c.Path, c.Label)
+		if err != nil {
+			return s, fmt.Errorf("register workspace for %s: %w", c.Label, err)
+		}
+		c.WorkspaceID = id
+	}
+	if s.WorkspaceID == "" {
+		id, err := h.createWorkspace(s.Root, s.Name)
+		if err != nil {
+			return s, fmt.Errorf("create session workspace: %w", err)
+		}
+		s.WorkspaceID = id
+	}
+
+	group := []string{s.WorkspaceID}
+	for _, c := range s.Checkouts {
+		group = append(group, c.WorkspaceID)
+	}
+	for _, id := range group {
+		if err := h.tagSession(id, s.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: tag %s: %v\n", id, err)
+		}
+	}
+	if err := h.groupWorkspaces(group); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: group workspaces: %v\n", err)
+	}
+	return s, nil
+}
+
+func activateSession(h *herdrClient, name string) error {
+	sessions, _, err := loadSessions(h)
 	if err != nil {
 		return err
 	}
-	sess, ok := state.find(name)
-	if !ok {
-		return fmt.Errorf("session %q not found", name)
+	for _, s := range sessions {
+		if s.Name != name {
+			continue
+		}
+		if _, err := registerSession(h, s); err != nil {
+			return err
+		}
+		return setArchived(s.Root, false)
 	}
-	for _, c := range sess.Checkouts {
-		if c.WorkspaceID != "" {
-			_ = h.closeWorkspace(c.WorkspaceID)
+	return fmt.Errorf("session %q not found", name)
+}
+
+func archiveSession(h *herdrClient, name string) error {
+	sessions, _, err := loadSessions(h)
+	if err != nil {
+		return err
+	}
+	for _, s := range sessions {
+		if s.Name != name {
+			continue
+		}
+		for _, c := range s.Checkouts {
+			if c.WorkspaceID != "" {
+				_ = h.closeWorkspace(c.WorkspaceID)
+			}
+		}
+		if s.WorkspaceID != "" {
+			_ = h.closeWorkspace(s.WorkspaceID)
+		}
+		return setArchived(s.Root, true)
+	}
+	return fmt.Errorf("session %q not found", name)
+}
+
+func unarchiveSession(h *herdrClient, name string) error {
+	for _, s := range scanSessions() {
+		if s.Name == name {
+			return setArchived(s.Root, false)
 		}
 	}
-	if sess.WorkspaceID != "" {
-		_ = h.closeWorkspace(sess.WorkspaceID)
-	}
-	sess.Status = statusArchived
-	sess.LastUsedAt = time.Now()
-	return saveState(state)
+	return fmt.Errorf("session %q not found", name)
 }
 
 func deleteSession(h *herdrClient, name string) error {
-	state, err := loadState()
+	sessions, _, err := loadSessions(h)
 	if err != nil {
 		return err
 	}
-	sess, ok := state.find(name)
-	if !ok {
-		return fmt.Errorf("session %q not found", name)
-	}
-	for _, c := range sess.Checkouts {
-		if c.WorkspaceID != "" {
-			_ = h.closeWorkspace(c.WorkspaceID)
-		}
-		if _, err := git(c.Repo, "worktree", "remove", c.Path, "--force"); err != nil {
-			return fmt.Errorf("remove worktree %s: %w", c.Label, err)
-		}
-	}
-	if sess.WorkspaceID != "" {
-		_ = h.closeWorkspace(sess.WorkspaceID)
-	}
-	if err := os.RemoveAll(sess.Root); err != nil {
-		return fmt.Errorf("remove session root: %w", err)
-	}
-	kept := state.Sessions[:0]
-	for _, s := range state.Sessions {
+	for _, s := range sessions {
 		if s.Name != name {
-			kept = append(kept, s)
+			continue
 		}
+		for _, c := range s.Checkouts {
+			if c.WorkspaceID != "" {
+				_ = h.closeWorkspace(c.WorkspaceID)
+			}
+			if c.Repo != "" {
+				if _, err := git(c.Repo, "worktree", "remove", c.Path, "--force"); err != nil {
+					return fmt.Errorf("remove worktree %s: %w", c.Label, err)
+				}
+			}
+		}
+		if s.WorkspaceID != "" {
+			_ = h.closeWorkspace(s.WorkspaceID)
+		}
+		if err := os.RemoveAll(s.Root); err != nil {
+			return fmt.Errorf("remove session root: %w", err)
+		}
+		return nil
 	}
-	state.Sessions = kept
-	return saveState(state)
+	return fmt.Errorf("session %q not found", name)
 }
 
 type createInput struct {
@@ -198,12 +265,15 @@ func createSession(h *herdrClient, in createInput) (*Session, error) {
 		return nil, fmt.Errorf("branch is required")
 	}
 	if len(in.Repos) == 0 {
-		return nil, fmt.Errorf("at least one -repo is required")
+		return nil, fmt.Errorf("at least one repo is required")
 	}
 
 	name := sanitizeName(in.Name)
 	if in.Name == "" {
 		name = sanitizeName(in.Branch)
+	}
+	if _, exists := findSession(name); exists {
+		return nil, fmt.Errorf("session %q already exists", name)
 	}
 
 	root, err := sessionsRoot()
@@ -211,27 +281,11 @@ func createSession(h *herdrClient, in createInput) (*Session, error) {
 		return nil, err
 	}
 	sessionRoot := filepath.Join(root, name)
-
-	state, err := loadState()
-	if err != nil {
-		return nil, err
-	}
-	if existing, ok := state.find(name); ok && existing.Status != statusArchived {
-		return nil, fmt.Errorf("session %q already exists at %s", name, existing.Root)
-	}
-
 	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("create session root: %w", err)
 	}
 
-	sess := Session{
-		Name:       name,
-		Root:       sessionRoot,
-		Status:     statusActive,
-		CreatedAt:  time.Now(),
-		LastUsedAt: time.Now(),
-	}
-
+	sess := Session{Name: name, Root: sessionRoot}
 	repoPaths := make([]string, 0, len(in.Repos))
 	guide := make([]claudesettings.SessionCheckout, 0, len(in.Repos))
 
@@ -243,27 +297,15 @@ func createSession(h *herdrClient, in createInput) (*Session, error) {
 		if _, err := git(abs, "rev-parse", "--git-dir"); err != nil {
 			return nil, fmt.Errorf("%s is not a git repository: %w", abs, err)
 		}
-
 		label := filepath.Base(abs)
 		checkout := filepath.Join(sessionRoot, label)
-
 		if err := addWorktree(abs, checkout, in.Branch); err != nil {
 			return nil, fmt.Errorf("worktree for %s: %w", label, err)
 		}
-
-		wsID, err := h.createWorkspace(checkout, label)
-		if err != nil {
-			return nil, fmt.Errorf("register workspace for %s: %w", label, err)
-		}
-
 		repoPaths = append(repoPaths, abs)
 		guide = append(guide, claudesettings.SessionCheckout{Subdir: label, WorkspaceName: label})
 		sess.Checkouts = append(sess.Checkouts, Checkout{
-			Repo:        abs,
-			Label:       label,
-			Path:        checkout,
-			Branch:      in.Branch,
-			WorkspaceID: wsID,
+			Repo: abs, Label: label, Path: checkout, Branch: in.Branch,
 		})
 	}
 
@@ -273,28 +315,14 @@ func createSession(h *herdrClient, in createInput) (*Session, error) {
 	if err := claudesettings.EnsureMultiSessionGuide(sessionRoot, guide); err != nil {
 		return nil, fmt.Errorf("session guide: %w", err)
 	}
+	if err := writeManifest(sessionRoot, manifest{
+		Name: name, CreatedAt: time.Now(), Repos: repoPaths,
+	}); err != nil {
+		return nil, err
+	}
 
-	wsID, err := h.createWorkspace(sessionRoot, name)
+	sess, err = registerSession(h, sess)
 	if err != nil {
-		return nil, fmt.Errorf("create session workspace: %w", err)
-	}
-	sess.WorkspaceID = wsID
-
-	group := []string{wsID}
-	for _, c := range sess.Checkouts {
-		group = append(group, c.WorkspaceID)
-	}
-	for _, id := range group {
-		if err := h.tagSession(id, name); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: tag %s: %v\n", id, err)
-		}
-	}
-	if err := h.groupWorkspaces(group); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: group workspaces: %v\n", err)
-	}
-
-	state.upsert(sess)
-	if err := saveState(state); err != nil {
 		return nil, err
 	}
 	return &sess, nil

@@ -9,13 +9,13 @@ import (
 )
 
 func demoSidebar() sidebar {
-	s1 := Session{Name: "eqt-checkout-flow", Status: statusActive, WorkspaceID: "w1M",
+	s1 := Session{Name: "eqt-checkout-flow", WorkspaceID: "w1M",
 		Checkouts: []Checkout{
 			{Label: "api", Branch: "eqt/checkout-flow", WorkspaceID: "w1H"},
 			{Label: "web", Branch: "eqt/checkout-flow", WorkspaceID: "w1J"},
 			{Label: "svc", Branch: "eqt/checkout-flow", WorkspaceID: "w1K"},
 		}}
-	s2 := Session{Name: "eqt-monitor-fix", Status: statusActive, WorkspaceID: "w20",
+	s2 := Session{Name: "eqt-monitor-fix", WorkspaceID: "w20",
 		Checkouts: []Checkout{{Label: "utena", Branch: "eqt/monitor-fix", WorkspaceID: "w21"}}}
 
 	m := newSidebar(nil)
@@ -124,5 +124,45 @@ func TestSpaceTogglesRepoSelection(t *testing.T) {
 	m = next.(sidebar)
 	if len(m.selectedRepos()) != 0 {
 		t.Errorf("space should deselect, got %v", m.selectedRepos())
+	}
+}
+
+func TestBuildPickRows(t *testing.T) {
+	sessions := []Session{
+		{Name: "alpha", WorkspaceID: "w1", Checkouts: []Checkout{
+			{Label: "api", Branch: "eqt/x", WorkspaceID: "w2"}}},
+		{Name: "zzz-archived", Archived: true},
+		{Name: "beta"},
+	}
+	ung := []liveWorkspace{{ID: "w9", Label: "scratch"}}
+	rows := buildPickRows(sessions, ung)
+
+	var keys []string
+	for _, r := range rows {
+		keys = append(keys, r.key)
+	}
+	joined := strings.Join(keys, "\n")
+	for _, want := range []string{"session\talpha", "workspace\tw2\talpha", "session\tbeta", "workspace\tw9\t"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing row %q in:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "zzz-archived") {
+		t.Error("archived sessions should not be offered in the picker")
+	}
+	if !strings.Contains(rows[0].display, "●") {
+		t.Errorf("active session should be marked, got %q", rows[0].display)
+	}
+}
+
+func TestArchivedHiddenFromSidebar(t *testing.T) {
+	m := demoSidebar()
+	m.rows[0].session.Archived = true
+	if m.showArchived {
+		t.Fatal("archived should be hidden by default")
+	}
+	out := m.View()
+	if !strings.Contains(out, "⌁") {
+		t.Errorf("archived session should render with a marker when shown:\n%s", out)
 	}
 }

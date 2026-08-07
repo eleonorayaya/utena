@@ -83,7 +83,7 @@ func (h *herdrClient) socketRequest(method string, params map[string]any) (json.
 	}
 	defer conn.Close()
 
-	req, err := json.Marshal(map[string]any{"id": "herdr-utena", "method": method, "params": params})
+	req, err := json.Marshal(map[string]any{"id": "utena", "method": method, "params": params})
 	if err != nil {
 		return nil, fmt.Errorf("marshal %s: %w", method, err)
 	}
@@ -254,7 +254,7 @@ func (h *herdrClient) subscribe(types []string) (<-chan string, error) {
 		subs = append(subs, map[string]string{"type": t})
 	}
 	req, err := json.Marshal(map[string]any{
-		"id":     "herdr-utena-events",
+		"id":     "utena-events",
 		"method": "events.subscribe",
 		"params": map[string]any{"subscriptions": subs},
 	})
@@ -303,7 +303,7 @@ func (h *herdrClient) closeWorkspace(id string) error {
 func (h *herdrClient) tagSession(workspaceID, session string) error {
 	return h.socketCall("workspace.report_metadata", map[string]any{
 		"workspace_id": workspaceID,
-		"source":       "herdr-utena",
+		"source":       "utena",
 		"tokens":       map[string]string{"session": session},
 	})
 }

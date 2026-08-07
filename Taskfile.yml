@@ -51,7 +51,7 @@ tasks:
       - cp -r plugins/utena-tmux/ ~/.config/tmux/plugins/utena-tmux/
 
   plugin:build:
-    dir: plugins/herdr-utena
+    dir: plugins/utena
     sources:
       - '**/*.go'
     cmds:

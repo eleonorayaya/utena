@@ -44,6 +44,13 @@ func newCreateKeyMap() createKeyMap {
 	}
 }
 
+type activatedMsg struct{ err error }
+
+func (m sidebar) activateCmd(name string) tea.Cmd {
+	h := m.herdr
+	return func() tea.Msg { return activatedMsg{err: activateSession(h, name)} }
+}
+
 type createdMsg struct {
 	name string
 	err  error
