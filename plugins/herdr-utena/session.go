@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,6 +30,44 @@ func sanitizeName(name string) string {
 		return "session"
 	}
 	return s
+}
+
+func repoRoots() []string {
+	if raw := os.Getenv("HERDR_UTENA_REPO_ROOTS"); raw != "" {
+		return filepath.SplitList(raw)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return []string{filepath.Join(home, "workspace")}
+}
+
+func discoverRepos() []string {
+	var out []string
+	seen := map[string]struct{}{}
+	for _, root := range repoRoots() {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			path := filepath.Join(root, e.Name())
+			if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
+				continue
+			}
+			if _, dup := seen[path]; dup {
+				continue
+			}
+			seen[path] = struct{}{}
+			out = append(out, path)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func sessionsRoot() (string, error) {

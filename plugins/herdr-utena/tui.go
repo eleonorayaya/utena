@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -39,6 +40,7 @@ type keyMap struct {
 	Focus   key.Binding
 	Archive key.Binding
 	Delete  key.Binding
+	New     key.Binding
 	Refresh key.Binding
 	Help    key.Binding
 	Quit    key.Binding
@@ -51,6 +53,7 @@ func newKeyMap() keyMap {
 		Focus:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "focus")),
 		Archive: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archive")),
 		Delete:  key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+		New:     key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
 		Refresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:    key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
@@ -58,13 +61,14 @@ func newKeyMap() keyMap {
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Focus, k.Archive, k.Delete, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Focus, k.New, k.Archive, k.Delete, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Focus},
-		{k.Archive, k.Delete, k.Refresh},
+		{k.New, k.Archive, k.Delete},
+		{k.Refresh},
 		{k.Help, k.Quit},
 	}
 }
@@ -83,6 +87,12 @@ type sidebar struct {
 	err     error
 	events  <-chan string
 	live    bool
+
+	mode        mode
+	createKeys  createKeyMap
+	repos       []repoChoice
+	repoCursor  int
+	branchInput textinput.Model
 }
 
 type reloadedMsg struct {
@@ -105,7 +115,8 @@ func keyPress(s string) tea.KeyMsg {
 }
 
 func newSidebar(h *herdrClient) sidebar {
-	return sidebar{herdr: h, keys: newKeyMap(), help: help.New(), width: 48, height: 24}
+	return sidebar{herdr: h, keys: newKeyMap(), createKeys: newCreateKeyMap(),
+		help: help.New(), width: 48, height: 24}
 }
 
 var subscribedEvents = []string{
@@ -262,8 +273,27 @@ func (m sidebar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clamp()
 		return m, nil
 
+	case createdMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = ""
+			return m, nil
+		}
+		m.status = "created " + msg.name
+		return m, m.reload()
+
 	case tea.KeyMsg:
+		switch m.mode {
+		case modePickRepos:
+			return m.updatePickRepos(msg)
+		case modeBranch:
+			return m.updateBranch(msg)
+		}
 		return m.onKey(msg)
+	}
+
+	if m.mode == modeBranch {
+		return m.updateBranch(msg)
 	}
 	return m, nil
 }
@@ -291,6 +321,9 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 			m.clamp()
 		}
+
+	case key.Matches(msg, m.keys.New):
+		return m.startCreate(), nil
 
 	case key.Matches(msg, m.keys.Refresh):
 		m.status = "refreshing…"
@@ -406,6 +439,12 @@ func statusGlyph(s string) (string, lipgloss.Color) {
 }
 
 func (m sidebar) View() string {
+	switch m.mode {
+	case modePickRepos:
+		return m.viewPickRepos()
+	case modeBranch:
+		return m.viewBranch()
+	}
 	t := theme.Current
 	var b strings.Builder
 

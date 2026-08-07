@@ -3,6 +3,9 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func demoSidebar() sidebar {
@@ -72,5 +75,54 @@ func TestArchiveRequiresTwoPresses(t *testing.T) {
 	m = next.(sidebar)
 	if m.pending != "" {
 		t.Errorf("navigating should clear the pending confirmation, got %q", m.pending)
+	}
+}
+
+func TestPickReposView(t *testing.T) {
+	m := demoSidebar()
+	m.mode = modePickRepos
+	m.repos = []repoChoice{
+		{path: "/home/e/workspace/api", selected: true},
+		{path: "/home/e/workspace/web"},
+		{path: "/home/e/workspace/svc", selected: true},
+	}
+	out := m.View()
+	t.Logf("repo picker:\n%s", out)
+	for _, want := range []string{"select repos", "api", "web", "svc", "2 selected", "space toggle"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestBranchView(t *testing.T) {
+	m := demoSidebar()
+	m.repos = []repoChoice{{path: "/home/e/workspace/api", selected: true}}
+	m.mode = modeBranch
+	m.branchInput = textinput.New()
+	m.branchInput.Prompt = "branch: "
+	m.branchInput.SetValue("eqt/my-feature")
+	out := m.View()
+	t.Logf("branch input:\n%s", out)
+	for _, want := range []string{"new session", "api", "branch:", "eqt/my-feature", "enter create"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestSpaceTogglesRepoSelection(t *testing.T) {
+	m := demoSidebar()
+	m.mode = modePickRepos
+	m.repos = []repoChoice{{path: "/a"}, {path: "/b"}}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	m = next.(sidebar)
+	if len(m.selectedRepos()) != 1 || m.selectedRepos()[0] != "/a" {
+		t.Errorf("space should select the cursor row, got %v", m.selectedRepos())
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	m = next.(sidebar)
+	if len(m.selectedRepos()) != 0 {
+		t.Errorf("space should deselect, got %v", m.selectedRepos())
 	}
 }
