@@ -163,6 +163,13 @@ resolved `HERDR_PLUGIN_STATE_DIR` differently and read different files, and the 
 reported zero sessions while 27 existed on disk. Both are duplicate-source-of-truth
 failures.
 
+**Deleting is two-phase.** `d` marks `deleted: true` with a `deleted_at` stamp in the
+manifest, closes the session's workspaces, and touches nothing else. Deleted sessions are
+never listed, with or without the `.` toggle, matching utena's `ListVisible`. A reaper —
+run from `herdr-routines`, **not yet built** — does the destructive part later: `git
+worktree remove` per checkout and removal of the session root, presumably after a grace
+period measured from `deleted_at`. Until it exists, deleted sessions accumulate on disk.
+
 **Archiving is persisted, not derived.** "No live workspaces" cannot mean archived, because
 every session looks like that after a herdr restart. `archived: true` lives in the manifest;
 the sidebar hides those behind a `.` toggle.

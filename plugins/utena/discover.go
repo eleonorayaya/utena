@@ -22,6 +22,8 @@ type manifest struct {
 	CreatedAt  time.Time `json:"created_at"`
 	LastUsedAt time.Time `json:"last_used_at,omitempty"`
 	Archived   bool      `json:"archived,omitempty"`
+	Deleted    bool      `json:"deleted,omitempty"`
+	DeletedAt  time.Time `json:"deleted_at,omitempty"`
 	Repos      []string  `json:"repos"`
 }
 
@@ -194,6 +196,9 @@ func scanSessions() []Session {
 			}
 			seen[dir] = struct{}{}
 			m, _ := readManifest(dir)
+			if m.Deleted {
+				continue
+			}
 			used := m.LastUsedAt
 			if used.IsZero() {
 				used = m.CreatedAt
@@ -307,6 +312,19 @@ func loadSessions(h *herdrClient) ([]Session, []liveWorkspace, error) {
 		}
 	}
 	return sessions, ungrouped, nil
+}
+
+// markDeleted flags a session for removal without touching the filesystem.
+// A reaper run from cron does the destructive part later, which is why the
+// timestamp is recorded here.
+func markDeleted(sessionRoot string) error {
+	m, ok := readManifest(sessionRoot)
+	if !ok {
+		m = manifest{Name: filepath.Base(sessionRoot), CreatedAt: time.Now()}
+	}
+	m.Deleted = true
+	m.DeletedAt = time.Now()
+	return writeManifest(sessionRoot, m)
 }
 
 func setArchived(sessionRoot string, archived bool) error {

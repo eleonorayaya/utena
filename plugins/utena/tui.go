@@ -486,7 +486,7 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		name := r.session.Name
 		if m.pending != "delete:"+name {
 			m.pending = "delete:" + name
-			m.status = fmt.Sprintf("press d again to DELETE %s (worktrees removed)", name)
+			m.status = fmt.Sprintf("press d again to delete %s", name)
 			break
 		}
 		m.pending = ""
@@ -494,7 +494,7 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = err
 			break
 		}
-		m.status = "deleted " + name
+		m.status = "deleted " + name + " · worktrees removed later"
 		return m, m.reload()
 	}
 	return m, m.dirtyForCursor()

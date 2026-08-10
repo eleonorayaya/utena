@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/charmbracelet/bubbles/key"
 	"sort"
 	"strings"
@@ -409,5 +412,59 @@ func TestSessionMatchesOnItsRepoNames(t *testing.T) {
 	r := m.rows[m.visible[0]]
 	if r.kind != rowSession || r.session.Name != "alpha" {
 		t.Errorf("filtering a repo name should select its session, got %+v", r)
+	}
+}
+
+func TestDeletedSessionsAreNeverListed(t *testing.T) {
+	root := t.TempDir()
+	mk := func(name string, m manifest) string {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		m.Name = name
+		if err := writeManifest(dir, m); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	mk("live", manifest{})
+	mk("put-away", manifest{Archived: true})
+	mk("gone", manifest{Deleted: true, DeletedAt: time.Now()})
+
+	t.Setenv("UTENA_SESSION_ROOTS", root)
+	names := map[string]bool{}
+	for _, s := range scanSessions() {
+		names[s.Name] = true
+	}
+	if !names["live"] || !names["put-away"] {
+		t.Errorf("live and archived sessions should still be scanned, got %v", names)
+	}
+	if names["gone"] {
+		t.Error("deleted sessions must never be listed, even with hidden shown")
+	}
+}
+
+func TestMarkDeletedLeavesTheFilesystemAlone(t *testing.T) {
+	dir := t.TempDir()
+	checkout := filepath.Join(dir, "api")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeManifest(dir, manifest{Name: "s", Repos: []string{"/somewhere"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := markDeleted(dir); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := readManifest(dir)
+	if !ok || !m.Deleted {
+		t.Fatalf("manifest should record the delete, got %+v", m)
+	}
+	if m.DeletedAt.IsZero() {
+		t.Error("deleted_at must be stamped so a reaper can apply a grace period")
+	}
+	if _, err := os.Stat(checkout); err != nil {
+		t.Errorf("the checkout must survive a soft delete: %v", err)
 	}
 }

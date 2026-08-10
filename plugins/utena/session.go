@@ -259,19 +259,11 @@ func deleteSession(h *herdrClient, name string) error {
 			if c.WorkspaceID != "" {
 				_ = h.closeWorkspace(c.WorkspaceID)
 			}
-			if c.Repo != "" {
-				if _, err := git(c.Repo, "worktree", "remove", c.Path, "--force"); err != nil {
-					return fmt.Errorf("remove worktree %s: %w", c.Label, err)
-				}
-			}
 		}
 		if s.WorkspaceID != "" {
 			_ = h.closeWorkspace(s.WorkspaceID)
 		}
-		if err := os.RemoveAll(s.Root); err != nil {
-			return fmt.Errorf("remove session root: %w", err)
-		}
-		return nil
+		return markDeleted(s.Root)
 	}
 	return fmt.Errorf("session %q not found", name)
 }
