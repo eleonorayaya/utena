@@ -33,9 +33,10 @@ func demoSidebar() sidebar {
 		{kind: rowCheckout, session: &s2, checkout: &s2.Checkouts[0], status: "done", branch: "eqt/monitor-fix", last: true},
 	}
 	m.applyVisible()
-	for _, r := range m.rows {
+	for i, r := range m.rows {
 		if r.kind == rowSession {
 			m.expanded[r.session.Name] = true
+			m.rows[i].expanded = true
 		}
 	}
 	m.applyVisible()
@@ -47,13 +48,16 @@ func TestSidebarView(t *testing.T) {
 	out := m.View()
 	t.Logf("rendered sidebar:\n%s", out)
 
-	for _, want := range []string{"sessions", "eqt-checkout-flow", "api", "web", "svc", "└─", "├─", "●3"} {
+	for _, want := range []string{"eqt-checkout-flow", "api", "web", "svc", "└─", "├─", "●3"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q\n%s", want, out)
 		}
 	}
 	if lines := strings.Count(out, "\n"); lines < 6 {
 		t.Errorf("expected at least 6 rendered lines, got %d\n%s", lines, out)
+	}
+	if strings.Contains(out, "(3)") {
+		t.Errorf("per-session checkout counts should be gone:\n%s", out)
 	}
 }
 

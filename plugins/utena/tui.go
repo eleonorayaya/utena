@@ -262,10 +262,6 @@ func (m sidebar) reload() tea.Cmd {
 				})
 			}
 		}
-		if archivedHidden > 0 && !showArchived {
-			rows = append(rows, row{kind: rowHeading,
-				heading: fmt.Sprintf("%d hidden · press . to show", archivedHidden)})
-		}
 		if len(ungrouped) > 0 {
 			rows = append(rows, row{kind: rowHeading, heading: "other workspaces"})
 			for i := range ungrouped {
@@ -619,7 +615,7 @@ func (m *sidebar) clamp() {
 }
 
 func (m sidebar) bodyHeight() int {
-	h := m.height - 3
+	h := m.height - 1
 	if h < 1 {
 		return 1
 	}
@@ -650,10 +646,6 @@ func (m sidebar) View() string {
 	}
 	t := theme.Current
 	var b strings.Builder
-
-	title := headerStyle(m.width).Render(
-		fmt.Sprintf("sessions  %d", len(m.visible)))
-	b.WriteString(title + "\n")
 
 	if m.err != nil {
 		b.WriteString(lipgloss.NewStyle().Foreground(t.Error).Render("error: "+m.err.Error()) + "\n")
@@ -719,8 +711,6 @@ func rowLine(r row, dirty map[string]int) string {
 		case r.session.Active():
 			nameStyle = lipgloss.NewStyle().Foreground(t.TextEmphasis).Bold(true)
 		}
-		count := lipgloss.NewStyle().Foreground(t.TextMuted).
-			Render(fmt.Sprintf(" (%d)", len(r.session.Checkouts)))
 		chevron := " "
 		if len(r.session.Checkouts) > 0 {
 			chevron = "▸"
@@ -728,9 +718,9 @@ func rowLine(r row, dirty map[string]int) string {
 				chevron = "▾"
 			}
 		}
-		return fmt.Sprintf("%s %s %s%s",
+		return fmt.Sprintf("%s %s %s",
 			lipgloss.NewStyle().Foreground(t.TextMuted).Render(chevron),
-			lipgloss.NewStyle().Foreground(gc).Render(glyph), nameStyle.Render(label), count)
+			lipgloss.NewStyle().Foreground(gc).Render(glyph), nameStyle.Render(label))
 
 	case rowCheckout:
 		tree := "├─"
