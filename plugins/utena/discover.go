@@ -81,6 +81,9 @@ func sessionRoots() []string {
 	if raw := os.Getenv("UTENA_SESSION_ROOTS"); raw != "" {
 		return filepath.SplitList(raw)
 	}
+	if roots := loadConfig().SessionRoots; len(roots) > 0 {
+		return roots
+	}
 	root, err := sessionsRoot()
 	if err != nil {
 		return nil

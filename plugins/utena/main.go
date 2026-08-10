@@ -250,5 +250,13 @@ func runDoctor() error {
 		fmt.Printf("  %s -> %d entries, %d sessions\n", r, len(entries), n)
 	}
 	fmt.Printf("scanSessions()  = %d\n", len(scanSessions()))
+
+	fmt.Printf("config          = %s\n", configPath())
+	fmt.Printf("repoRoots()     = %v\n", repoRoots())
+	repos := discoverRepos()
+	fmt.Printf("discoverRepos() = %d\n", len(repos))
+	for _, r := range repos {
+		fmt.Printf("  %s\n", r)
+	}
 	return nil
 }

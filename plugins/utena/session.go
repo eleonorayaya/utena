@@ -36,6 +36,9 @@ func repoRoots() []string {
 	if raw := os.Getenv("UTENA_REPO_ROOTS"); raw != "" {
 		return filepath.SplitList(raw)
 	}
+	if roots := loadConfig().RepoRoots; len(roots) > 0 {
+		return roots
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -43,9 +46,24 @@ func repoRoots() []string {
 	return []string{filepath.Join(home, "workspace")}
 }
 
+func isGitRepo(path string) bool {
+	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(path, ".bare"))
+	return err == nil
+}
+
 func discoverRepos() []string {
 	var out []string
 	seen := map[string]struct{}{}
+	for _, path := range loadConfig().Repos {
+		if _, dup := seen[path]; dup || !isGitRepo(path) {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
 	for _, root := range repoRoots() {
 		entries, err := os.ReadDir(root)
 		if err != nil {
@@ -56,7 +74,7 @@ func discoverRepos() []string {
 				continue
 			}
 			path := filepath.Join(root, e.Name())
-			if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
+			if !isGitRepo(path) {
 				continue
 			}
 			if _, dup := seen[path]; dup {
@@ -73,6 +91,9 @@ func discoverRepos() []string {
 func sessionsRoot() (string, error) {
 	if root := os.Getenv("UTENA_SESSIONS_ROOT"); root != "" {
 		return root, nil
+	}
+	if roots := loadConfig().SessionRoots; len(roots) > 0 {
+		return roots[0], nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

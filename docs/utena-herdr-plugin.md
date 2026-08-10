@@ -293,6 +293,44 @@ branch from one detection pass, or the second session silently loses its notific
 5. **Event injection** — activity sync + `agent prompt` formatting.
 6. **Delete** — daemon, HTTP API, SQLite, gotmux, tmux plugin, `utena-claude`, monitor.
 
+### The daemon is not part of this design
+
+Nothing in the plugin reads or writes `utena.db`, and nothing should. The daemon
+keeps running during the migration only because it has not been switched off yet;
+treat it as absent when designing.
+
+One exception, deferred to phase 6: a **single reconciliation pass** before the daemon
+is deleted, to carry across anything that changed in the DB while both were running.
+Today that means `archived` and `last_used_at` per session, matched on the latest
+`sessions` row per name. It has been run once already — 21 archived sessions and their
+timestamps — but must be repeated at cutover, because the daemon is still writing.
+
+Everything else in the DB is superseded: `pull_requests` and `branches` are refetched
+by the poll action (the cold-start guards re-baseline the watermarks), and
+`workspaces`/`repos` are replaced by config-driven discovery.
+
+## Configuration
+
+User configuration lives in the herdr-managed plugin config directory, per herdr
+convention (`herdr plugin config-dir eleonorayaya.utena`):
+
+```json
+{
+  "session_roots": ["~/utena-sessions"],
+  "repo_roots":    ["~/workspace"],
+  "repos":         ["~/utena", "~/.dotfiles", "~/claude-plugins"]
+}
+```
+
+`repo_roots` are scanned one level deep for checkouts; `repos` names individual
+repositories that do not sit under a root. Both accept the bare layout, where a
+repository has `.bare` and no `.git`. Environment variables (`UTENA_SESSION_ROOTS`,
+`UTENA_REPO_ROOTS`, `UTENA_SESSIONS_ROOT`) override the file, which is what the tests
+use; the file exists because a plugin pane inherits herdr's environment, not a shell's.
+
+JSON rather than TOML only to avoid a dependency — the plugin's sole non-charm import
+is `sahilm/fuzzy`.
+
 ## Verification
 
 - **Session creation:** run `new-session` against two scratch repos; assert N+1 workspaces
