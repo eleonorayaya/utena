@@ -141,9 +141,13 @@ func worktreeAt(repo, path string) bool {
 	return false
 }
 
-func addWorktree(repo, path, branch string) error {
+func addWorktree(repo, path, branch, base string) error {
 	if worktreeAt(repo, path) {
 		return nil
+	}
+	if base != "" && !branchExists(repo, branch) {
+		_, err := git(repo, "worktree", "add", "-b", branch, path, base)
+		return err
 	}
 	if branchExists(repo, branch) {
 		_, err := git(repo, "worktree", "add", path, branch)
@@ -151,6 +155,66 @@ func addWorktree(repo, path, branch string) error {
 	}
 	_, err := git(repo, "worktree", "add", "-b", branch, path)
 	return err
+}
+
+func localBranches(repo string) []string {
+	out, err := git(repo, "for-each-ref", "--sort=-committerdate",
+		"--format=%(refname:short)", "refs/heads")
+	if err != nil || strings.TrimSpace(out) == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimSpace(out), "\n")
+}
+
+func remoteBranches(repo string) []string {
+	out, err := git(repo, "for-each-ref", "--sort=-committerdate",
+		"--format=%(refname:short)", "refs/remotes")
+	if err != nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var names []string
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasSuffix(l, "/HEAD") {
+			continue
+		}
+		if _, remote, ok := strings.Cut(l, "/"); ok {
+			if _, dup := seen[remote]; dup {
+				continue
+			}
+			seen[remote] = struct{}{}
+			names = append(names, remote)
+		}
+	}
+	return names
+}
+
+func fetchOrigin(repo string) error {
+	_, err := git(repo, "fetch", "--quiet", "origin")
+	return err
+}
+
+func branchExistsAnywhere(repo, name string) (local, remote bool) {
+	local = branchExists(repo, name)
+	if out, err := git(repo, "ls-remote", "--heads", "origin", name); err == nil {
+		remote = strings.TrimSpace(out) != ""
+	}
+	return local, remote
+}
+
+func defaultBranch(repo string) string {
+	if out, err := git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		if _, b, ok := strings.Cut(strings.TrimSpace(out), "/"); ok {
+			return b
+		}
+	}
+	for _, c := range []string{"main", "master"} {
+		if branchExists(repo, c) {
+			return c
+		}
+	}
+	return ""
 }
 
 func findSession(name string) (Session, bool) {
@@ -268,23 +332,32 @@ func deleteSession(h *herdrClient, name string) error {
 	return fmt.Errorf("session %q not found", name)
 }
 
-type createInput struct {
-	Name   string
+// checkoutSpec mirrors utena's SessionWorkspaceSpec: Branch alone checks out an
+// existing branch, Base additionally creates Branch from it.
+type checkoutSpec struct {
+	Repo   string
 	Branch string
-	Repos  []string
+	Base   string
+}
+
+type createInput struct {
+	Name      string
+	Checkouts []checkoutSpec
 }
 
 func createSession(h *herdrClient, in createInput) (*Session, error) {
-	if in.Branch == "" {
-		return nil, fmt.Errorf("branch is required")
-	}
-	if len(in.Repos) == 0 {
+	if len(in.Checkouts) == 0 {
 		return nil, fmt.Errorf("at least one repo is required")
+	}
+	for _, c := range in.Checkouts {
+		if c.Branch == "" {
+			return nil, fmt.Errorf("branch is required for %s", filepath.Base(c.Repo))
+		}
 	}
 
 	name := sanitizeName(in.Name)
 	if in.Name == "" {
-		name = sanitizeName(in.Branch)
+		name = sanitizeName(in.Checkouts[0].Branch)
 	}
 	if _, exists := findSession(name); exists {
 		return nil, fmt.Errorf("session %q already exists", name)
@@ -300,26 +373,26 @@ func createSession(h *herdrClient, in createInput) (*Session, error) {
 	}
 
 	sess := Session{Name: name, Root: sessionRoot}
-	repoPaths := make([]string, 0, len(in.Repos))
-	guide := make([]claudesettings.SessionCheckout, 0, len(in.Repos))
+	repoPaths := make([]string, 0, len(in.Checkouts))
+	guide := make([]claudesettings.SessionCheckout, 0, len(in.Checkouts))
 
-	for _, repo := range in.Repos {
-		abs, err := filepath.Abs(repo)
+	for _, spec := range in.Checkouts {
+		abs, err := filepath.Abs(spec.Repo)
 		if err != nil {
-			return nil, fmt.Errorf("resolve repo %s: %w", repo, err)
+			return nil, fmt.Errorf("resolve repo %s: %w", spec.Repo, err)
 		}
 		if _, err := git(abs, "rev-parse", "--git-dir"); err != nil {
 			return nil, fmt.Errorf("%s is not a git repository: %w", abs, err)
 		}
 		label := filepath.Base(abs)
 		checkout := filepath.Join(sessionRoot, label)
-		if err := addWorktree(abs, checkout, in.Branch); err != nil {
+		if err := addWorktree(abs, checkout, spec.Branch, spec.Base); err != nil {
 			return nil, fmt.Errorf("worktree for %s: %w", label, err)
 		}
 		repoPaths = append(repoPaths, abs)
 		guide = append(guide, claudesettings.SessionCheckout{Subdir: label, WorkspaceName: label})
 		sess.Checkouts = append(sess.Checkouts, Checkout{
-			Repo: abs, Label: label, Path: checkout, Branch: in.Branch,
+			Repo: abs, Label: label, Path: checkout, Branch: spec.Branch,
 		})
 	}
 

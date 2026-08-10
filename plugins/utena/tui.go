@@ -115,7 +115,15 @@ type sidebar struct {
 	createKeys   createKeyMap
 	repos        []repoChoice
 	repoCursor   int
+	picked       []string
+	pickingFor   int
+	branches     []string
+	branchCursor int
 	branchInput  textinput.Model
+	branchErr    string
+	pendingCheck string
+	nameInput    textinput.Model
+	nameErr      string
 }
 
 type reloadedMsg struct {
@@ -344,6 +352,17 @@ func (m sidebar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = ""
 		return m, m.reload()
 
+	case branchesMsg:
+		if msg.repo == m.currentPickRepo() {
+			m.branches = msg.branches
+			m.branchCursor = 0
+			m.status = ""
+		}
+		return m, nil
+
+	case branchCheckedMsg:
+		return m.onBranchChecked(msg)
+
 	case createdMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -357,14 +376,23 @@ func (m sidebar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case modePickRepos:
 			return m.updatePickRepos(msg)
-		case modeBranch:
-			return m.updateBranch(msg)
+		case modeBranchPick:
+			return m.updateBranchPick(msg)
+		case modeBranchManual:
+			return m.updateBranchManual(msg)
+		case modeBranchMode:
+			return m.updateBranchMode(msg)
+		case modeName:
+			return m.updateName(msg)
 		}
 		return m.onKey(msg)
 	}
 
-	if m.mode == modeBranch {
-		return m.updateBranch(msg)
+	switch m.mode {
+	case modeBranchManual:
+		return m.updateBranchManual(msg)
+	case modeName:
+		return m.updateName(msg)
 	}
 	return m, nil
 }
@@ -660,8 +688,14 @@ func (m sidebar) View() string {
 	switch m.mode {
 	case modePickRepos:
 		return m.viewPickRepos()
-	case modeBranch:
-		return m.viewBranch()
+	case modeBranchPick:
+		return m.viewBranchPick()
+	case modeBranchManual:
+		return m.viewBranchManual()
+	case modeBranchMode:
+		return m.viewBranchMode()
+	case modeName:
+		return m.viewName()
 	}
 	t := theme.Current
 	var b strings.Builder
@@ -778,6 +812,8 @@ func rowTerm(r row) string {
 	return ""
 }
 
+func ansiStrip(s string) string { return ansi.Strip(s) }
+
 func fitLine(s string, width int) string {
 	inner := width - 2
 	if inner < 1 {
@@ -792,7 +828,7 @@ func (m sidebar) renderRow(r row, selected bool) string {
 	if selected {
 		// Inner segments end in resets, which clear an outer background part-way
 		// through the line. Strip them so the highlight covers the whole row.
-		line = ansi.Strip(line)
+		line = ansiStrip(line)
 		style = style.
 			Background(theme.Current.SurfaceActive).
 			Foreground(theme.Current.TextEmphasis).

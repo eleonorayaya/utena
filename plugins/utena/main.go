@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -86,18 +87,23 @@ func runPing() error {
 func runNew(args []string) error {
 	fs := flag.NewFlagSet("new", flag.ExitOnError)
 	name := fs.String("name", "", "session name (defaults to the branch name)")
-	branch := fs.String("branch", "", "branch to check out in every repo")
+	branch := fs.String("branch", "", "branch for every repo, unless repo:branch says otherwise")
+	base := fs.String("base", "", "create the branch from this ref instead of checking it out")
 	var repos repoList
-	fs.Var(&repos, "repo", "path to a git repository (repeatable)")
+	fs.Var(&repos, "repo", "path to a git repository, or path:branch (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	sess, err := createSession(newHerdrClient(), createInput{
-		Name:   *name,
-		Branch: *branch,
-		Repos:  repos,
-	})
+	in := createInput{Name: *name}
+	for _, r := range repos {
+		spec := checkoutSpec{Repo: r, Branch: *branch, Base: *base}
+		if path, br, ok := strings.Cut(r, ":"); ok {
+			spec.Repo, spec.Branch = path, br
+		}
+		in.Checkouts = append(in.Checkouts, spec)
+	}
+	sess, err := createSession(newHerdrClient(), in)
 	if err != nil {
 		return err
 	}

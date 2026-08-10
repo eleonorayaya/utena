@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -113,22 +112,6 @@ func TestPickReposView(t *testing.T) {
 	out := m.View()
 	t.Logf("repo picker:\n%s", out)
 	for _, want := range []string{"select repos", "api", "web", "svc", "2 selected", "space toggle"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q\n%s", want, out)
-		}
-	}
-}
-
-func TestBranchView(t *testing.T) {
-	m := demoSidebar()
-	m.repos = []repoChoice{{path: "/home/e/workspace/api", selected: true}}
-	m.mode = modeBranch
-	m.branchInput = textinput.New()
-	m.branchInput.Prompt = "branch: "
-	m.branchInput.SetValue("eqt/my-feature")
-	out := m.View()
-	t.Logf("branch input:\n%s", out)
-	for _, want := range []string{"new session", "api", "branch:", "eqt/my-feature", "enter create"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q\n%s", want, out)
 		}
@@ -466,5 +449,98 @@ func TestMarkDeletedLeavesTheFilesystemAlone(t *testing.T) {
 	}
 	if _, err := os.Stat(checkout); err != nil {
 		t.Errorf("the checkout must survive a soft delete: %v", err)
+	}
+}
+
+func TestBranchIsPickedPerRepo(t *testing.T) {
+	m := newSidebar(nil)
+	m.width, m.height = 60, 20
+	m.repos = []repoChoice{
+		{path: "/r/api", selected: true},
+		{path: "/r/web", selected: true},
+	}
+	m.picked = make([]string, 2)
+
+	m2, _ := m.startBranchPicking(0)
+	if m2.pickingFor != 0 || m2.mode != modeBranchPick {
+		t.Fatalf("should start on the first repo, got %d mode=%v", m2.pickingFor, m2.mode)
+	}
+	m2.branches = []string{"main", "eqt/api-work"}
+	m2.branchCursor = 1
+	next, _ := m2.updateBranchPick(tea.KeyMsg{Type: tea.KeyEnter})
+	m3 := next.(sidebar)
+
+	if m3.pickingFor != 1 {
+		t.Fatalf("enter should advance to the second repo, got %d", m3.pickingFor)
+	}
+	if m3.picked[0] != "eqt/api-work" {
+		t.Errorf("first repo branch = %q", m3.picked[0])
+	}
+
+	m3.branches = []string{"main", "eqt/web-work"}
+	m3.branchCursor = 1
+	next, _ = m3.updateBranchPick(tea.KeyMsg{Type: tea.KeyEnter})
+	m4 := next.(sidebar)
+	if m4.mode != modeBranchMode {
+		t.Fatalf("last repo should advance to the mode step, got %v", m4.mode)
+	}
+	if m4.picked[0] == m4.picked[1] {
+		t.Fatalf("repos must be able to take different branches, both got %q", m4.picked[0])
+	}
+}
+
+func TestBranchModeChoosesBaseOrCheckout(t *testing.T) {
+	mk := func() sidebar {
+		m := newSidebar(nil)
+		m.repos = []repoChoice{{path: "/r/api", selected: true}}
+		m.picked = []string{"develop"}
+		m.mode = modeBranchMode
+		return m
+	}
+	// "e" uses the picked branch as-is
+	asIs := mk()
+	next, _ := asIs.updateBranchMode(keyPress("e"))
+	if next.(sidebar).mode != modeList {
+		t.Error("e should submit immediately")
+	}
+	// "n" asks for a name first
+	fresh := mk()
+	next, _ = fresh.updateBranchMode(keyPress("n"))
+	if next.(sidebar).mode != modeName {
+		t.Error("n should ask for a session name")
+	}
+}
+
+func TestManualBranchRejectsUnknownName(t *testing.T) {
+	m := newSidebar(nil)
+	m.repos = []repoChoice{{path: "/r/api", selected: true}}
+	m.picked = make([]string, 1)
+	m.mode = modeBranchManual
+	m.pendingCheck = "nope"
+	next, _ := m.onBranchChecked(branchCheckedMsg{name: "nope"})
+	got := next.(sidebar)
+	if got.branchErr == "" {
+		t.Error("a branch that exists nowhere should be rejected")
+	}
+	if got.mode != modeBranchManual {
+		t.Error("should stay on the input after a rejection")
+	}
+
+	m.pendingCheck = "yes"
+	next, _ = m.onBranchChecked(branchCheckedMsg{name: "yes", remote: true})
+	if got := next.(sidebar); got.picked[0] != "yes" {
+		t.Errorf("a remote-only branch should be accepted, picked=%v", got.picked)
+	}
+}
+
+func TestStaleBranchCheckIsIgnored(t *testing.T) {
+	m := newSidebar(nil)
+	m.repos = []repoChoice{{path: "/r/api", selected: true}}
+	m.picked = make([]string, 1)
+	m.mode = modeBranchManual
+	m.pendingCheck = "current"
+	next, _ := m.onBranchChecked(branchCheckedMsg{name: "stale", local: true})
+	if got := next.(sidebar); got.picked[0] != "" {
+		t.Errorf("a response for a superseded query must be ignored, got %q", got.picked[0])
 	}
 }
