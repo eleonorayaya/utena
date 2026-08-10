@@ -405,7 +405,7 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Up):
 		for i := m.cursor - 1; i >= 0; i-- {
-			if m.rows[m.visible[i]].kind != rowHeading {
+			if selectableRow(m.rows[m.visible[i]]) {
 				m.cursor = i
 				m.clamp()
 				break
@@ -414,7 +414,7 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Down):
 		for i := m.cursor + 1; i < len(m.visible); i++ {
-			if m.rows[m.visible[i]].kind != rowHeading {
+			if selectableRow(m.rows[m.visible[i]]) {
 				m.cursor = i
 				m.clamp()
 				break
@@ -566,7 +566,26 @@ func (m *sidebar) applyVisible() {
 	if m.cursor < 0 {
 		m.cursor = 0
 	}
+	m.snapToSelectable()
 	m.clamp()
+}
+
+func (m *sidebar) snapToSelectable() {
+	if m.cursor < len(m.visible) && selectableRow(m.rows[m.visible[m.cursor]]) {
+		return
+	}
+	for i := m.cursor; i < len(m.visible); i++ {
+		if selectableRow(m.rows[m.visible[i]]) {
+			m.cursor = i
+			return
+		}
+	}
+	for i := m.cursor - 1; i >= 0; i-- {
+		if selectableRow(m.rows[m.visible[i]]) {
+			m.cursor = i
+			return
+		}
+	}
 }
 
 func rowKey(r row) string {
@@ -740,14 +759,19 @@ func rowLine(r row, dirty map[string]int) string {
 	return ""
 }
 
-func selectableRow(r row) bool { return r.kind != rowHeading }
+func selectableRow(r row) bool {
+	return r.kind == rowSession || r.kind == rowWorkspace
+}
 
 func rowTerm(r row) string {
 	switch r.kind {
 	case rowSession:
-		return r.session.Name
-	case rowCheckout:
-		return r.session.Name + " " + r.checkout.Label + " " + r.checkout.Branch
+		parts := make([]string, 0, 1+2*len(r.session.Checkouts))
+		parts = append(parts, r.session.Name)
+		for _, c := range r.session.Checkouts {
+			parts = append(parts, c.Label, c.Branch)
+		}
+		return strings.Join(parts, " ")
 	case rowWorkspace:
 		return r.workspace.Label
 	}

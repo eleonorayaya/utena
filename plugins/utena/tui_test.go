@@ -63,12 +63,18 @@ func TestSidebarView(t *testing.T) {
 
 func TestSidebarNavigationClamps(t *testing.T) {
 	m := demoSidebar()
+	lastSelectable := -1
+	for i, idx := range m.visible {
+		if selectableRow(m.rows[idx]) {
+			lastSelectable = i
+		}
+	}
 	for i := 0; i < 20; i++ {
 		next, _ := m.Update(keyPress("j"))
 		m = next.(sidebar)
 	}
-	if m.cursor != len(m.rows)-1 {
-		t.Errorf("cursor should clamp to last row %d, got %d", len(m.rows)-1, m.cursor)
+	if m.cursor != lastSelectable {
+		t.Errorf("cursor should clamp to the last selectable row %d, got %d", lastSelectable, m.cursor)
 	}
 	for i := 0; i < 20; i++ {
 		next, _ := m.Update(keyPress("k"))
@@ -343,25 +349,6 @@ func TestCheckoutsCollapsedUntilExpanded(t *testing.T) {
 	}
 }
 
-func TestFilterReachesCollapsedCheckouts(t *testing.T) {
-	m := sessionUI([]Session{
-		{Name: "alpha", Checkouts: []Checkout{{Label: "needle", Path: "/n", Branch: "b"}}},
-	}, nil)
-	next, _ := m.Update(keyPress("/"))
-	m = next.(sidebar)
-	if !m.filtering {
-		t.Fatal("/ should enter filter mode")
-	}
-	m.input.SetValue("needle")
-	m.applyVisible()
-	if len(m.visible) == 0 {
-		t.Fatal("filtering must reach checkouts inside collapsed sessions")
-	}
-	if got := m.rows[m.visible[0]].checkout; got == nil || got.Label != "needle" {
-		t.Errorf("expected the needle checkout, got %+v", got)
-	}
-}
-
 func TestArchiveIsAvailableWhereverTheModelRuns(t *testing.T) {
 	s1 := Session{Name: "alpha"}
 	for _, popup := range []bool{false, true} {
@@ -371,5 +358,56 @@ func TestArchiveIsAvailableWhereverTheModelRuns(t *testing.T) {
 		if got := next.(sidebar).pending; got != "archive:alpha" {
 			t.Errorf("popup=%v: archive should arm, got pending=%q", popup, got)
 		}
+	}
+}
+
+func TestOnlySessionsAndWorkspacesAreSelectable(t *testing.T) {
+	m := sessionUI([]Session{
+		{Name: "alpha", Checkouts: []Checkout{
+			{Label: "api", Path: "/a", Branch: "b"},
+			{Label: "web", Path: "/w", Branch: "b"}}},
+		{Name: "beta"},
+	}, []liveWorkspace{{ID: "w9", Label: "scratch"}})
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	m = next.(sidebar)
+
+	var landed []string
+	for i := 0; i < 6; i++ {
+		r, ok := m.current()
+		if !ok {
+			break
+		}
+		if !selectableRow(r) {
+			t.Fatalf("cursor landed on a non-selectable row: %v", r.kind)
+		}
+		switch r.kind {
+		case rowSession:
+			landed = append(landed, r.session.Name)
+		case rowWorkspace:
+			landed = append(landed, r.workspace.Label)
+		}
+		nx, _ := m.Update(keyPress("j"))
+		m = nx.(sidebar)
+	}
+	want := "alpha beta scratch"
+	if got := strings.Join(landed[:3], " "); got != want {
+		t.Errorf("down should step session→session→workspace, got %q want %q", got, want)
+	}
+}
+
+func TestSessionMatchesOnItsRepoNames(t *testing.T) {
+	m := sessionUI([]Session{
+		{Name: "alpha", Checkouts: []Checkout{{Label: "needle", Path: "/n", Branch: "b"}}},
+		{Name: "beta"},
+	}, nil)
+	m.input.SetValue("needle")
+	m.applyVisible()
+	if len(m.visible) != 1 {
+		t.Fatalf("expected the parent session to match, got %d rows", len(m.visible))
+	}
+	r := m.rows[m.visible[0]]
+	if r.kind != rowSession || r.session.Name != "alpha" {
+		t.Errorf("filtering a repo name should select its session, got %+v", r)
 	}
 }
