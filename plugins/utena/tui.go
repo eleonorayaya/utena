@@ -164,6 +164,18 @@ func (m sidebar) dirtyForCursor() tea.Cmd {
 	return dirtyCmd(r.checkout.Path)
 }
 
+func themedHelp() help.Model {
+	h := help.New()
+	t := theme.Current
+	key := lipgloss.NewStyle().Foreground(t.TextEmphasis)
+	desc := lipgloss.NewStyle().Foreground(t.Text)
+	sep := lipgloss.NewStyle().Foreground(t.TextMuted)
+	h.Styles.ShortKey, h.Styles.FullKey = key, key
+	h.Styles.ShortDesc, h.Styles.FullDesc = desc, desc
+	h.Styles.ShortSeparator, h.Styles.FullSeparator = sep, sep
+	return h
+}
+
 func filterInput() textinput.Model {
 	ti := textinput.New()
 	ti.Prompt = "/"
@@ -178,7 +190,7 @@ func keyPress(s string) tea.KeyMsg {
 func newSidebar(h *herdrClient) sidebar {
 	return sidebar{herdr: h, keys: newKeyMap(), createKeys: newCreateKeyMap(),
 		dirty: map[string]int{}, expanded: map[string]bool{}, input: filterInput(),
-		help: help.New(), width: 48, height: 24}
+		help: themedHelp(), width: 48, height: 24}
 }
 
 var subscribedEvents = []string{
@@ -639,7 +651,8 @@ func (m sidebar) View() string {
 	t := theme.Current
 	var b strings.Builder
 
-	title := headerStyle(m.width).Render("sessions")
+	title := headerStyle(m.width).Render(
+		fmt.Sprintf("sessions  %d", len(m.visible)))
 	b.WriteString(title + "\n")
 
 	if m.err != nil {
@@ -656,12 +669,17 @@ func (m sidebar) View() string {
 	}
 
 	body := m.bodyHeight()
+	drawn := 0
 	for i := m.offset; i < len(m.visible) && i < m.offset+body; i++ {
 		idx := m.visible[i]
 		if idx < 0 || idx >= len(m.rows) {
 			continue
 		}
 		b.WriteString(m.renderRow(m.rows[idx], i == m.cursor) + "\n")
+		drawn++
+	}
+	for ; drawn < body; drawn++ {
+		b.WriteString("\n")
 	}
 
 	foot := m.status
@@ -670,7 +688,7 @@ func (m sidebar) View() string {
 	} else if foot == "" {
 		foot = m.help.View(m.keys)
 	}
-	b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).
+	b.WriteString(lipgloss.NewStyle().Foreground(t.Text).
 		Padding(0, 1).Render(fitLine(foot, m.width)))
 	return b.String()
 }
@@ -681,7 +699,7 @@ func rowLine(r row, dirty map[string]int) string {
 
 	switch r.kind {
 	case rowHeading:
-		return lipgloss.NewStyle().Foreground(t.TextMuted).Render(r.heading)
+		return lipgloss.NewStyle().Foreground(t.Tertiary).Render(r.heading)
 
 	case rowWorkspace:
 		return fmt.Sprintf("%s %s",
@@ -755,9 +773,16 @@ func fitLine(s string, width int) string {
 }
 
 func (m sidebar) renderRow(r row, selected bool) string {
+	line := fitLine(rowLine(r, m.dirty), m.width)
 	style := lipgloss.NewStyle().Width(m.width).MaxWidth(m.width).Padding(0, 1)
 	if selected {
-		style = style.Background(theme.Current.Selection)
+		// Inner segments end in resets, which clear an outer background part-way
+		// through the line. Strip them so the highlight covers the whole row.
+		line = ansi.Strip(line)
+		style = style.
+			Background(theme.Current.SurfaceActive).
+			Foreground(theme.Current.TextEmphasis).
+			Bold(true)
 	}
-	return style.Render(fitLine(rowLine(r, m.dirty), m.width))
+	return style.Render(line)
 }
