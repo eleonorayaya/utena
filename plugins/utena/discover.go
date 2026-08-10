@@ -64,6 +64,7 @@ type Session struct {
 	Name        string
 	Root        string
 	Archived    bool
+	Broken      bool
 	LastUsedAt  time.Time
 	Checkouts   []Checkout
 	WorkspaceID string
@@ -71,6 +72,10 @@ type Session struct {
 }
 
 func (s Session) Active() bool { return s.WorkspaceID != "" }
+
+// Hidden mirrors utena's Session.IsHidden: broken or archived sessions are
+// kept out of the default listing until the . toggle reveals them.
+func (s Session) Hidden() bool { return s.Archived || s.Broken }
 
 func sessionRoots() []string {
 	if raw := os.Getenv("UTENA_SESSION_ROOTS"); raw != "" {
@@ -195,18 +200,30 @@ func scanSessions() []Session {
 					used = fi.ModTime()
 				}
 			}
+			checkouts := scanCheckouts(dir)
+			broken := len(checkouts) == 0
+			for _, repo := range m.Repos {
+				if _, err := os.Stat(repo); err != nil {
+					broken = true
+					break
+				}
+			}
+			if len(m.Repos) > 0 && len(checkouts) < len(m.Repos) {
+				broken = true
+			}
 			sessions = append(sessions, Session{
 				Name:       e.Name(),
 				Root:       dir,
 				Archived:   m.Archived,
+				Broken:     broken,
 				LastUsedAt: used,
-				Checkouts:  scanCheckouts(dir),
+				Checkouts:  checkouts,
 			})
 		}
 	}
 	sort.SliceStable(sessions, func(i, j int) bool {
-		if sessions[i].Archived != sessions[j].Archived {
-			return !sessions[i].Archived
+		if sessions[i].Hidden() != sessions[j].Hidden() {
+			return !sessions[i].Hidden()
 		}
 		return sessions[i].LastUsedAt.After(sessions[j].LastUsedAt)
 	})

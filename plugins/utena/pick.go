@@ -63,7 +63,7 @@ func buildPickerRows(sessions []Session, ungrouped []liveWorkspace) ([]row, []pi
 
 	for i := range sessions {
 		s := &sessions[i]
-		if s.Archived {
+		if s.Hidden() {
 			continue
 		}
 		rows = append(rows, row{kind: rowSession, session: s, status: s.AgentStatus})

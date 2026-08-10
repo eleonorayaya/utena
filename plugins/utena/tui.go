@@ -212,7 +212,7 @@ func (m sidebar) reload() tea.Cmd {
 		archivedHidden := 0
 		for i := range sessions {
 			s := &sessions[i]
-			if s.Archived && !showArchived {
+			if s.Hidden() && !showArchived {
 				archivedHidden++
 				continue
 			}
@@ -236,7 +236,7 @@ func (m sidebar) reload() tea.Cmd {
 		}
 		if archivedHidden > 0 {
 			rows = append(rows, row{kind: rowHeading,
-				heading: fmt.Sprintf("%d archived · press . to show", archivedHidden)})
+				heading: fmt.Sprintf("%d hidden · press . to show", archivedHidden)})
 		}
 		if len(ungrouped) > 0 {
 			rows = append(rows, row{kind: rowHeading, heading: "other workspaces"})
@@ -389,7 +389,7 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.ToggleArchived):
 		m.showArchived = !m.showArchived
 		if m.showArchived {
-			m.status = "showing archived"
+			m.status = "showing hidden"
 		} else {
 			m.status = ""
 		}
@@ -597,7 +597,11 @@ func rowLine(r row, dirty map[string]int) string {
 			nameStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
 		}
 		label := r.session.Name
-		if r.session.Archived {
+		switch {
+		case r.session.Broken:
+			label = "! " + label
+			nameStyle = lipgloss.NewStyle().Foreground(t.Error)
+		case r.session.Archived:
 			label = "⌁ " + label
 		}
 		count := lipgloss.NewStyle().Foreground(t.TextMuted).

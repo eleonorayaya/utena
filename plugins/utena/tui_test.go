@@ -267,3 +267,45 @@ func TestCursorSurvivesReload(t *testing.T) {
 		t.Errorf("cursor should follow beta to index 0, got %d", got)
 	}
 }
+
+func TestHiddenCoversBrokenAndArchived(t *testing.T) {
+	cases := []struct {
+		s    Session
+		want bool
+	}{
+		{Session{Name: "ok"}, false},
+		{Session{Name: "arch", Archived: true}, true},
+		{Session{Name: "brk", Broken: true}, true},
+		{Session{Name: "both", Archived: true, Broken: true}, true},
+	}
+	for _, c := range cases {
+		if got := c.s.Hidden(); got != c.want {
+			t.Errorf("%s.Hidden() = %v, want %v", c.s.Name, got, c.want)
+		}
+	}
+}
+
+func TestBrokenSessionRendersDistinctly(t *testing.T) {
+	brk := Session{Name: "missing-repo", Broken: true}
+	m := demoSidebar()
+	m.rows = []row{{kind: rowSession, session: &brk}}
+	out := m.View()
+	if !strings.Contains(out, "!") {
+		t.Errorf("broken session should carry a marker:\n%s", out)
+	}
+	if strings.Contains(out, "⌁") {
+		t.Errorf("broken is not archived; wrong marker:\n%s", out)
+	}
+}
+
+func TestPickerExcludesBroken(t *testing.T) {
+	p := newPicker([]Session{
+		{Name: "fine"},
+		{Name: "busted", Broken: true},
+	}, nil)
+	for _, term := range p.terms {
+		if strings.Contains(term, "busted") {
+			t.Error("broken sessions must not be offered in the picker")
+		}
+	}
+}

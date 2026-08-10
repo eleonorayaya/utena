@@ -211,6 +211,8 @@ func runList() error {
 	for _, s := range sessions {
 		state := "inactive"
 		switch {
+		case s.Broken:
+			state = "broken"
 		case s.Archived:
 			state = "archived"
 		case s.Active():
