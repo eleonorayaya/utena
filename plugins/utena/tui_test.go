@@ -373,3 +373,38 @@ func TestPickerFilterFindsCollapsedCheckouts(t *testing.T) {
 		t.Errorf("expected the needle checkout, got %q", got)
 	}
 }
+
+func TestToggleReportsWhenNothingIsHidden(t *testing.T) {
+	m := demoSidebar()
+	m.hiddenCount = 0
+	next, _ := m.Update(keyPress("."))
+	m = next.(sidebar)
+	if !m.showArchived {
+		t.Fatal("toggle should flip showArchived")
+	}
+	if m.status != "no hidden sessions" {
+		t.Errorf("with nothing hidden the toggle must say so, got %q", m.status)
+	}
+
+	m.hiddenCount = 3
+	m.showArchived = false
+	next, _ = m.Update(keyPress("."))
+	if got := next.(sidebar).status; got != "showing 3 hidden" {
+		t.Errorf("status = %q, want \"showing 3 hidden\"", got)
+	}
+}
+
+func TestInactiveSessionsAreNotStyledAsArchived(t *testing.T) {
+	inactive := Session{Name: "plain-inactive"}
+	archived := Session{Name: "put-away", Archived: true}
+	m := demoSidebar()
+
+	m.rows = []row{{kind: rowSession, session: &inactive}}
+	if out := m.View(); strings.Contains(out, "⌁") {
+		t.Errorf("an inactive session must not carry the archived marker:\n%s", out)
+	}
+	m.rows = []row{{kind: rowSession, session: &archived}}
+	if out := m.View(); !strings.Contains(out, "⌁") {
+		t.Errorf("an archived session should carry the marker:\n%s", out)
+	}
+}

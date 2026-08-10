@@ -100,6 +100,7 @@ type sidebar struct {
 	live    bool
 
 	showArchived bool
+	hiddenCount  int
 	expanded     map[string]bool
 	dirty        map[string]int
 	mode         mode
@@ -110,8 +111,9 @@ type sidebar struct {
 }
 
 type reloadedMsg struct {
-	rows []row
-	err  error
+	rows   []row
+	hidden int
+	err    error
 }
 
 type tickMsg time.Time
@@ -212,9 +214,11 @@ func (m sidebar) reload() tea.Cmd {
 		archivedHidden := 0
 		for i := range sessions {
 			s := &sessions[i]
-			if s.Hidden() && !showArchived {
+			if s.Hidden() {
 				archivedHidden++
-				continue
+				if !showArchived {
+					continue
+				}
 			}
 			isOpen := expanded[s.Name]
 			rows = append(rows, row{kind: rowSession, session: s, status: s.AgentStatus, expanded: isOpen})
@@ -234,7 +238,7 @@ func (m sidebar) reload() tea.Cmd {
 				})
 			}
 		}
-		if archivedHidden > 0 {
+		if archivedHidden > 0 && !showArchived {
 			rows = append(rows, row{kind: rowHeading,
 				heading: fmt.Sprintf("%d hidden · press . to show", archivedHidden)})
 		}
@@ -245,7 +249,7 @@ func (m sidebar) reload() tea.Cmd {
 				rows = append(rows, row{kind: rowWorkspace, workspace: &w, status: w.AgentStatus})
 			}
 		}
-		return reloadedMsg{rows: rows}
+		return reloadedMsg{rows: rows, hidden: archivedHidden}
 	}
 }
 
@@ -292,6 +296,7 @@ func (m sidebar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
+		m.hiddenCount = msg.hidden
 		want := m.cursorKey()
 		m.rows = msg.rows
 		if want != "" {
@@ -388,10 +393,13 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.ToggleArchived):
 		m.showArchived = !m.showArchived
-		if m.showArchived {
-			m.status = "showing hidden"
-		} else {
+		switch {
+		case !m.showArchived:
 			m.status = ""
+		case m.hiddenCount == 0:
+			m.status = "no hidden sessions"
+		default:
+			m.status = fmt.Sprintf("showing %d hidden", m.hiddenCount)
 		}
 		return m, m.reload()
 
@@ -592,17 +600,17 @@ func rowLine(r row, dirty map[string]int) string {
 			lipgloss.NewStyle().Foreground(t.Text).Render(r.workspace.Label))
 
 	case rowSession:
-		nameStyle := lipgloss.NewStyle().Foreground(t.TextEmphasis).Bold(true)
-		if !r.session.Active() {
-			nameStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
-		}
 		label := r.session.Name
+		nameStyle := lipgloss.NewStyle().Foreground(t.Text)
 		switch {
 		case r.session.Broken:
 			label = "! " + label
 			nameStyle = lipgloss.NewStyle().Foreground(t.Error)
 		case r.session.Archived:
 			label = "⌁ " + label
+			nameStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
+		case r.session.Active():
+			nameStyle = lipgloss.NewStyle().Foreground(t.TextEmphasis).Bold(true)
 		}
 		count := lipgloss.NewStyle().Foreground(t.TextMuted).
 			Render(fmt.Sprintf(" (%d)", len(r.session.Checkouts)))
