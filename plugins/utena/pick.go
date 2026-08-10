@@ -18,52 +18,62 @@ type pickTarget struct {
 }
 
 type pickerKeyMap struct {
-	Up     key.Binding
-	Down   key.Binding
-	Top    key.Binding
-	Bottom key.Binding
-	Filter key.Binding
-	Accept key.Binding
-	Back   key.Binding
-	Quit   key.Binding
+	Up           key.Binding
+	Down         key.Binding
+	Top          key.Binding
+	Bottom       key.Binding
+	Expand       key.Binding
+	Collapse     key.Binding
+	ToggleHidden key.Binding
+	Filter       key.Binding
+	Accept       key.Binding
+	Back         key.Binding
+	Quit         key.Binding
 }
 
 func newPickerKeyMap() pickerKeyMap {
 	return pickerKeyMap{
-		Up:     key.NewBinding(key.WithKeys("k", "up")),
-		Down:   key.NewBinding(key.WithKeys("j", "down")),
-		Top:    key.NewBinding(key.WithKeys("g")),
-		Bottom: key.NewBinding(key.WithKeys("G")),
-		Filter: key.NewBinding(key.WithKeys("/")),
-		Accept: key.NewBinding(key.WithKeys("enter")),
-		Back:   key.NewBinding(key.WithKeys("esc")),
-		Quit:   key.NewBinding(key.WithKeys("q", "ctrl+c")),
+		Up:           key.NewBinding(key.WithKeys("k", "up")),
+		Down:         key.NewBinding(key.WithKeys("j", "down")),
+		Top:          key.NewBinding(key.WithKeys("g")),
+		Bottom:       key.NewBinding(key.WithKeys("G")),
+		Expand:       key.NewBinding(key.WithKeys(" ", "l", "right")),
+		Collapse:     key.NewBinding(key.WithKeys("h", "left")),
+		ToggleHidden: key.NewBinding(key.WithKeys(".")),
+		Filter:       key.NewBinding(key.WithKeys("/")),
+		Accept:       key.NewBinding(key.WithKeys("enter")),
+		Back:         key.NewBinding(key.WithKeys("esc")),
+		Quit:         key.NewBinding(key.WithKeys("q", "ctrl+c")),
 	}
 }
 
 type picker struct {
-	rows      []row
-	targets   []pickTarget
-	terms     []string
-	visible   []int
-	cursor    int
-	offset    int
-	filtering bool
-	input     textinput.Model
-	keys      pickerKeyMap
-	width     int
-	height    int
-	chosen    *pickTarget
+	sessions   []Session
+	ungrouped  []liveWorkspace
+	expanded   map[string]bool
+	showHidden bool
+	rows       []row
+	targets    []pickTarget
+	terms      []string
+	visible    []int
+	cursor     int
+	offset     int
+	filtering  bool
+	input      textinput.Model
+	keys       pickerKeyMap
+	width      int
+	height     int
+	chosen     *pickTarget
 }
 
-func buildPickerRows(sessions []Session, ungrouped []liveWorkspace) ([]row, []pickTarget, []string) {
+func buildPickerRows(sessions []Session, ungrouped []liveWorkspace, showHidden bool) ([]row, []pickTarget, []string) {
 	var rows []row
 	var targets []pickTarget
 	var terms []string
 
 	for i := range sessions {
 		s := &sessions[i]
-		if s.Hidden() {
+		if s.Hidden() && !showHidden {
 			continue
 		}
 		rows = append(rows, row{kind: rowSession, session: s, status: s.AgentStatus})
@@ -88,15 +98,27 @@ func buildPickerRows(sessions []Session, ungrouped []liveWorkspace) ([]row, []pi
 }
 
 func newPicker(sessions []Session, ungrouped []liveWorkspace) picker {
-	rows, targets, terms := buildPickerRows(sessions, ungrouped)
 	ti := textinput.New()
 	ti.Prompt = "/"
 	ti.Placeholder = "filter"
 
-	p := picker{rows: rows, targets: targets, terms: terms,
+	p := picker{sessions: sessions, ungrouped: ungrouped, expanded: map[string]bool{},
 		input: ti, keys: newPickerKeyMap(), width: 72, height: 20}
-	p.applyFilter()
+	p.rebuild()
 	return p
+}
+
+func (p *picker) rebuild() {
+	p.rows, p.targets, p.terms = buildPickerRows(p.sessions, p.ungrouped, p.showHidden)
+	p.applyFilter()
+}
+
+func (p picker) visibleUnfiltered(i int) bool {
+	r := p.rows[i]
+	if r.kind != rowCheckout {
+		return true
+	}
+	return p.expanded[r.session.Name]
 }
 
 func (p *picker) applyFilter() {
@@ -104,7 +126,9 @@ func (p *picker) applyFilter() {
 	p.visible = p.visible[:0]
 	if q == "" {
 		for i := range p.rows {
-			p.visible = append(p.visible, i)
+			if p.visibleUnfiltered(i) {
+				p.visible = append(p.visible, i)
+			}
 		}
 	} else {
 		for _, m := range fuzzy.Find(q, p.terms) {
@@ -187,6 +211,19 @@ func (p picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				p.cursor++
 				p.clamp()
 			}
+		case key.Matches(msg, p.keys.Expand):
+			if r, ok := p.currentRow(); ok && r.session != nil && len(r.session.Checkouts) > 0 {
+				p.expanded[r.session.Name] = !p.expanded[r.session.Name]
+				p.applyFilter()
+			}
+		case key.Matches(msg, p.keys.Collapse):
+			if r, ok := p.currentRow(); ok && r.session != nil {
+				p.expanded[r.session.Name] = false
+				p.applyFilter()
+			}
+		case key.Matches(msg, p.keys.ToggleHidden):
+			p.showHidden = !p.showHidden
+			p.rebuild()
 		case key.Matches(msg, p.keys.Top):
 			p.cursor, p.offset = 0, 0
 		case key.Matches(msg, p.keys.Bottom):
@@ -195,6 +232,13 @@ func (p picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return p, nil
+}
+
+func (p picker) currentRow() (row, bool) {
+	if p.cursor < 0 || p.cursor >= len(p.visible) {
+		return row{}, false
+	}
+	return p.rows[p.visible[p.cursor]], true
 }
 
 func (p picker) choose() (tea.Model, tea.Cmd) {
@@ -217,14 +261,21 @@ func (p picker) View() string {
 		if i == p.cursor {
 			style = style.Background(t.Selection)
 		}
-		b.WriteString(style.Render(fitLine(rowLine(p.rows[p.visible[i]], nil), p.width)) + "\n")
+		r := p.rows[p.visible[i]]
+		if r.kind == rowSession {
+			r.expanded = p.expanded[r.session.Name]
+		}
+		b.WriteString(style.Render(fitLine(rowLine(r, nil), p.width)) + "\n")
 	}
 	if len(p.visible) == 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).Padding(0, 1).
 			Render("no matches") + "\n")
 	}
 
-	foot := "j/k move · / filter · enter open · q quit"
+	foot := "j/k · space expand · / filter · enter open · q quit"
+	if p.showHidden {
+		foot = "showing hidden · " + foot
+	}
 	if p.filtering {
 		foot = p.input.View()
 	}

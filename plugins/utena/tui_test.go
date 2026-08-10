@@ -140,8 +140,10 @@ func TestPickerExcludesArchivedAndFilters(t *testing.T) {
 	ung := []liveWorkspace{{ID: "w9", Label: "scratch"}}
 
 	p := newPicker(sessions, ung)
-	if len(p.visible) != len(p.rows) {
-		t.Fatalf("empty filter should show every row, got %d of %d", len(p.visible), len(p.rows))
+	for _, i := range p.visible {
+		if p.rows[i].kind == rowCheckout {
+			t.Error("checkouts should be collapsed in the picker by default")
+		}
 	}
 	for _, term := range p.terms {
 		if strings.Contains(term, "zzz-archived") {
@@ -199,10 +201,22 @@ func TestPickerView(t *testing.T) {
 	}
 	p := newPicker(sessions, []liveWorkspace{{ID: "w9", Label: "helm"}})
 	p.width, p.height = 54, 12
-	t.Logf("picker:\n%s", p.View())
-	for _, want := range []string{"go to", "eqt-checkout-flow", "├─", "└─", "helm", "/ filter"} {
+	t.Logf("picker collapsed:\n%s", p.View())
+	for _, want := range []string{"go to", "eqt-checkout-flow", "▸", "helm", "/ filter"} {
 		if !strings.Contains(p.View(), want) {
-			t.Errorf("missing %q", want)
+			t.Errorf("missing %q in collapsed view", want)
+		}
+	}
+	if strings.Contains(p.View(), "├─") {
+		t.Error("collapsed picker should not render checkouts")
+	}
+
+	p.expanded["eqt-checkout-flow"] = true
+	p.applyFilter()
+	t.Logf("picker expanded:\n%s", p.View())
+	for _, want := range []string{"▾", "├─", "└─", "api"} {
+		if !strings.Contains(p.View(), want) {
+			t.Errorf("missing %q in expanded view", want)
 		}
 	}
 }
@@ -307,5 +321,55 @@ func TestPickerExcludesBroken(t *testing.T) {
 		if strings.Contains(term, "busted") {
 			t.Error("broken sessions must not be offered in the picker")
 		}
+	}
+}
+
+func TestPickerCollapseAndHiddenMatchSidebar(t *testing.T) {
+	sessions := []Session{
+		{Name: "alpha", Checkouts: []Checkout{{Label: "api", Path: "/a"}}},
+		{Name: "old", Archived: true},
+		{Name: "busted", Broken: true},
+	}
+	p := newPicker(sessions, nil)
+
+	if len(p.visible) != 1 {
+		t.Fatalf("only the one healthy session should show collapsed, got %d", len(p.visible))
+	}
+
+	next, _ := p.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	p = next.(picker)
+	if len(p.visible) != 2 {
+		t.Errorf("space should reveal the checkout, got %d rows", len(p.visible))
+	}
+
+	next, _ = p.Update(keyPress("."))
+	p = next.(picker)
+	names := ""
+	for _, i := range p.visible {
+		if p.rows[i].session != nil {
+			names += p.rows[i].session.Name + " "
+		}
+	}
+	for _, want := range []string{"alpha", "old", "busted"} {
+		if !strings.Contains(names, want) {
+			t.Errorf(". should reveal hidden sessions; %q missing from %q", want, names)
+		}
+	}
+}
+
+func TestPickerFilterFindsCollapsedCheckouts(t *testing.T) {
+	p := newPicker([]Session{
+		{Name: "alpha", Checkouts: []Checkout{{Label: "needle", Path: "/n", WorkspaceID: "w7"}}},
+	}, nil)
+	if len(p.visible) != 1 {
+		t.Fatalf("expected the checkout collapsed, got %d rows", len(p.visible))
+	}
+	p.input.SetValue("needle")
+	p.applyFilter()
+	if len(p.visible) == 0 {
+		t.Fatal("filtering must reach checkouts inside collapsed sessions")
+	}
+	if got := p.targets[p.visible[0]].workspaceID; got != "w7" {
+		t.Errorf("expected the needle checkout, got %q", got)
 	}
 }
