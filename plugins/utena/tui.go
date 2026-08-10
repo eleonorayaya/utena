@@ -300,11 +300,15 @@ func (m sidebar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		want := m.cursorKey()
 		m.rows = msg.rows
 		if want != "" {
+			found := false
 			for i, r := range m.rows {
 				if rowKey(r) == want {
-					m.cursor = i
+					m.cursor, found = i, true
 					break
 				}
+			}
+			if !found {
+				m.cursor, m.offset = 0, 0
 			}
 		}
 		m.clamp()
