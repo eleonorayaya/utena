@@ -164,6 +164,7 @@ type snapshotLayout struct {
 
 type snapshot struct {
 	FocusedWorkspaceID string           `json:"focused_workspace_id"`
+	FocusedPaneID      string           `json:"focused_pane_id"`
 	FocusedTabID       string           `json:"focused_tab_id"`
 	Panes              []snapshotPane   `json:"panes"`
 	Layouts            []snapshotLayout `json:"layouts"`
@@ -196,6 +197,10 @@ func (s *snapshot) leftmostPane(tabID string) string {
 		}
 	}
 	return best
+}
+
+func (h *herdrClient) closePane(id string) error {
+	return h.socketCall("pane.close", map[string]any{"pane_id": id})
 }
 
 func (h *herdrClient) focusPane(id string) error {

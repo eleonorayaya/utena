@@ -100,8 +100,27 @@ func isSessionRoot(dir string) bool {
 	return strings.Contains(string(data), legacyMarker)
 }
 
+func headBranch(gitdir string) string {
+	head, err := os.ReadFile(filepath.Join(gitdir, "HEAD"))
+	if err != nil {
+		return ""
+	}
+	b := strings.TrimSpace(string(head))
+	if ref, found := strings.CutPrefix(b, "ref: refs/heads/"); found {
+		return ref
+	}
+	if len(b) > 8 {
+		return "detached " + b[:8]
+	}
+	return b
+}
+
 func worktreeInfo(checkout string) (repo, branch string, ok bool) {
-	data, err := os.ReadFile(filepath.Join(checkout, ".git"))
+	dotgit := filepath.Join(checkout, ".git")
+	if fi, err := os.Stat(dotgit); err == nil && fi.IsDir() {
+		return checkout, headBranch(dotgit), true
+	}
+	data, err := os.ReadFile(dotgit)
 	if err != nil {
 		return "", "", false
 	}
@@ -119,17 +138,7 @@ func worktreeInfo(checkout string) (repo, branch string, ok bool) {
 	}
 	repo = filepath.Dir(common)
 
-	head, err := os.ReadFile(filepath.Join(gitdir, "HEAD"))
-	if err != nil {
-		return repo, "", true
-	}
-	branch = strings.TrimSpace(string(head))
-	if ref, found := strings.CutPrefix(branch, "ref: refs/heads/"); found {
-		branch = ref
-	} else if len(branch) > 8 {
-		branch = "detached " + branch[:8]
-	}
-	return repo, branch, true
+	return repo, headBranch(gitdir), true
 }
 
 func scanCheckouts(sessionDir string) []Checkout {

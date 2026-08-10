@@ -11,15 +11,16 @@ import (
 func demoSidebar() sidebar {
 	s1 := Session{Name: "eqt-checkout-flow", WorkspaceID: "w1M",
 		Checkouts: []Checkout{
-			{Label: "api", Branch: "eqt/checkout-flow", WorkspaceID: "w1H"},
-			{Label: "web", Branch: "eqt/checkout-flow", WorkspaceID: "w1J"},
-			{Label: "svc", Branch: "eqt/checkout-flow", WorkspaceID: "w1K"},
+			{Label: "api", Path: "/s/api", Branch: "eqt/checkout-flow", WorkspaceID: "w1H"},
+			{Label: "web", Path: "/s/web", Branch: "eqt/checkout-flow", WorkspaceID: "w1J"},
+			{Label: "svc", Path: "/s/svc", Branch: "eqt/checkout-flow", WorkspaceID: "w1K"},
 		}}
 	s2 := Session{Name: "eqt-monitor-fix", WorkspaceID: "w20",
 		Checkouts: []Checkout{{Label: "utena", Branch: "eqt/monitor-fix", WorkspaceID: "w21"}}}
 
 	m := newSidebar(nil)
 	m.width, m.height = 46, 14
+	m.dirty["/s/web"] = 3
 	m.rows = []row{
 		{kind: rowSession, session: &s1, status: "working"},
 		{kind: rowCheckout, session: &s1, checkout: &s1.Checkouts[0], status: "working", branch: "eqt/checkout-flow"},

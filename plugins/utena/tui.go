@@ -94,6 +94,7 @@ type sidebar struct {
 	live    bool
 
 	showArchived bool
+	dirty        map[string]int
 	mode         mode
 	createKeys   createKeyMap
 	repos        []repoChoice
@@ -116,13 +117,43 @@ type streamClosedMsg struct{}
 
 type reconnectMsg struct{}
 
+type dirtyMsg struct {
+	path  string
+	dirty int
+}
+
+func dirtyCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		out, err := git(path, "status", "--porcelain")
+		if err != nil {
+			return dirtyMsg{path: path, dirty: -1}
+		}
+		out = strings.TrimSpace(out)
+		if out == "" {
+			return dirtyMsg{path: path, dirty: 0}
+		}
+		return dirtyMsg{path: path, dirty: len(strings.Split(out, "\n"))}
+	}
+}
+
+func (m sidebar) dirtyForCursor() tea.Cmd {
+	r, ok := m.current()
+	if !ok || r.kind != rowCheckout || r.checkout == nil {
+		return nil
+	}
+	if _, done := m.dirty[r.checkout.Path]; done {
+		return nil
+	}
+	return dirtyCmd(r.checkout.Path)
+}
+
 func keyPress(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
 func newSidebar(h *herdrClient) sidebar {
 	return sidebar{herdr: h, keys: newKeyMap(), createKeys: newCreateKeyMap(),
-		help: help.New(), width: 48, height: 24}
+		dirty: map[string]int{}, help: help.New(), width: 48, height: 24}
 }
 
 var subscribedEvents = []string{
@@ -234,6 +265,13 @@ func (m sidebar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case reconnectMsg:
 		return m, startStream(m.herdr)
+
+	case dirtyMsg:
+		if m.dirty == nil {
+			m.dirty = map[string]int{}
+		}
+		m.dirty[msg.path] = msg.dirty
+		return m, nil
 
 	case reloadedMsg:
 		if msg.err != nil {
@@ -393,7 +431,7 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = "deleted " + name
 		return m, m.reload()
 	}
-	return m, nil
+	return m, m.dirtyForCursor()
 }
 
 func (m sidebar) archive(name string) error { return archiveSession(m.herdr, name) }
@@ -516,8 +554,8 @@ func (m sidebar) renderRow(r row, selected bool) string {
 	case rowCheckout:
 		branch := lipgloss.NewStyle().Foreground(t.AccentBlue).Render(r.branch)
 		dirty := ""
-		if r.dirty > 0 {
-			dirty = lipgloss.NewStyle().Foreground(t.StatusPending).Render(fmt.Sprintf(" ●%d", r.dirty))
+		if n, ok := m.dirty[r.checkout.Path]; ok && n > 0 {
+			dirty = lipgloss.NewStyle().Foreground(t.StatusPending).Render(fmt.Sprintf(" ●%d", n))
 		}
 		tree := "├─"
 		if r.last {

@@ -126,9 +126,13 @@ func runOpenSidebar() error {
 	root = filepath.Dir(filepath.Dir(root))
 
 	for _, p := range snap.Panes {
-		if p.WorkspaceID == snap.FocusedWorkspaceID && sameDir(p.Cwd, root) {
-			return h.focusPane(p.PaneID)
+		if p.WorkspaceID != snap.FocusedWorkspaceID || !sameDir(p.Cwd, root) {
+			continue
 		}
+		if p.PaneID == snap.FocusedPaneID {
+			return h.closePane(p.PaneID)
+		}
+		return h.focusPane(p.PaneID)
 	}
 
 	leftmost := snap.leftmostPane(snap.FocusedTabID)

@@ -1,6 +1,7 @@
-# herdr-utena: design
+# utena as a herdr plugin: design
 
-Status: proposal. Target: `plugins/herdr-utena/`, inside this module.
+Status: phases 1–3 built and in use. Lives at `plugins/utena/`, inside this module.
+Sections marked **verified** were measured against herdr 0.8.0, not inferred.
 
 ## Context
 
@@ -40,40 +41,55 @@ it's orthogonal to sessions); the daemon, HTTP API, and SQLite.
 no repo actually uses utena's version — no `.utena/config.json` in any registered workspace
 and no global `~/.config/utena/worktree-setup` hook — so porting `workspaceconfig.go`,
 `setupstepdefinition.go` and the `setupexecutor.go` DAG would be work for a feature with no
-users. The installed plugin fires on the same `worktree.opened` event our checkouts emit.
-`herdr-routines` is the other external dependency (below).
+users. Note the plugin will **not** fire for our checkouts, since we no longer create
+worktree bindings — see the session model. `herdr-routines` is the other external
+dependency (below).
 
 ## Architecture
 
-One Go binary, `plugins/herdr-utena/`, dispatching on `os.Args[1]` — the same
+One Go binary, `plugins/utena/`, dispatching on `os.Args[1]` — the same
 action→pane→binary shape `cloudmanic/herdr-plus` uses in production. It talks to a running
 herdr server by shelling out to `$HERDR_BIN_PATH` and parsing the JSON each command returns.
 No daemon, no HTTP server, no GORM/SQLite (which also drops the CGO build requirement).
 
 ```toml
 # herdr-plugin.toml
-id = "eleonorayaya.herdr-utena"
+id = "eleonorayaya.utena"
 min_herdr_version = "0.8.0"
 
 [[build]]
 command = ["sh", "scripts/build.sh"]
 
 [[actions]]
-id = "sessions"                                    # opens the pane below
-command = ["./bin/herdr-utena", "sessions"]
+id = "sessions"                       # prefix+u — toggles the sidebar pane
+command = ["./bin/utena", "open-sidebar"]
 
 [[panes]]
-id = "sessions-ui"
-placement = "zoomed"
-command = ["./bin/herdr-utena", "sessions-ui"]     # the bubbletea TUI
+id = "sidebar"
+placement = "split"                   # opened leftmost, then swapped into place
+command = ["./bin/utena", "sidebar"]
 
 [[actions]]
-id = "poll"                                        # invoked by herdr-routines, headless
-command = ["./bin/herdr-utena", "poll"]
+id = "pick"                           # prefix+p — session-aware picker
+command = ["./bin/utena", "open-pick"]
+
+[[panes]]
+id = "picker"
+placement = "popup"                   # valid over the socket, not on the CLI flag
+command = ["./bin/utena", "pick"]
+
+[[actions]]
+id = "poll"                           # invoked by herdr-routines, headless
+command = ["./bin/utena", "poll"]
 ```
 
+The binary talks to herdr two ways: the `herdr` CLI for anything it exposes, and the unix
+socket at `$HERDR_SOCKET_PATH` for what it does not — `workspace.report_metadata`,
+`workspace.move_block`, `events.subscribe`, `popup.close`, and `plugin.pane.open` with
+`placement = "popup"`.
+
 **Module placement is load-bearing.** Go's `internal/` rule is directory-tree scoped but
-enforced against the *importing module's* root. `plugins/herdr-utena/` as part of the root
+enforced against the *importing module's* root. `plugins/utena/` as part of the root
 module can import `github.com/eleonorayaya/utena/internal/...` directly. A nested `go.mod`
 **cannot**, even with a `replace`. So: no nested `go.mod`. This is also why we get
 `internal/claudesettings` for free.
@@ -89,10 +105,10 @@ its `type = "plugin_action"` fires our action headlessly with no tab:
 
 ```toml
 [[routine]]
-name = "herdr-utena-poll"
+name = "utena-poll"
 every = "1m"
 type = "plugin_action"
-action = "eleonorayaya.herdr-utena.poll"
+action = "eleonorayaya.utena.poll"
 ```
 
 One tick does: sync PRs → diff against state → lifecycle actions → sync activity → emit
@@ -102,82 +118,79 @@ re-resolved instead of being cached for the daemon's lifetime.
 
 ## Session model
 
-herdr has no session concept, and we do not try to add one to its data model. A session is
-a **directory convention plus a state file**; herdr sees ordinary workspaces.
-
-```
-~/herdr-sessions/<name>/          # session root — the +1 workspace, agent runs here
-  CLAUDE.md                       # generated, marker-guarded
-  .claude/settings.local.json     # merged allowWrite for every checkout
-  <repo-a>/                       # git worktree
-  <repo-b>/                       # git worktree
-```
-
-Creation, per repo: `git worktree add` **directly** (not `herdr worktree create`, which
-couples checkout creation to workspace creation and gives no control over placement), then
-register it:
-
-```
-herdr worktree open --workspace <parent-repo-ws-id> --path <session-root>/<repo>
-```
-
-Verified against herdr 0.8.0: this accepts a worktree created by plain `git worktree add`,
-returns full git provenance (`branch`, `repo_key`, `repo_root`, `is_linked_worktree`), fires
-the same `worktree.opened` event other plugins hook, and is idempotent — a repeat call
-returns `already_open: true` and reuses the existing workspace. So `herdr-worktree-setup`,
-`herdr-plugin-gh-pr`, and herdr-plus auto-layouts all keep working against our checkouts.
-
-**Do not use `herdr worktree open`.** It was the obvious choice and it is the wrong one.
-Each call creates *two* workspaces — the checkout plus a parent-repo workspace — giving
-2N+1 per session. The parent is structural: closing it **cascades and destroys its worktree
-children**, so it cannot be cleaned away afterwards, and herdr has no way to hide a
-workspace (no `hidden`/`visible` field in the API schema, no sidebar filter option).
-
-Register each checkout as a plain workspace instead:
+**Do not use `herdr worktree open`.** It was the obvious choice and it is wrong. Each call
+creates *two* workspaces — the checkout plus a parent-repo workspace — giving 2N+1 per
+session. The parent is structural: closing it **cascades and destroys its worktree
+children**, and herdr cannot hide a workspace (no `hidden`/`visible` field in the schema, no
+sidebar filter). Register each checkout as a plain workspace instead:
 
 ```
 herdr workspace create --cwd <session-root>/<repo> --label <repo>
 ```
 
-Plus one for the agent: `herdr workspace create --cwd <session-root>`. That is **N+1**,
-with no parent rows at all.
+Plus one for the agent at the session root. That is **N+1**, with no parent rows.
 
-The reason this is safe: **the sidebar's `branch` token reads from the workspace cwd, not
-from the `worktree` binding.** Verified on 0.8.0 by registering an identical git worktree as
-a plain workspace and confirming its distinct branch (`zz-unbound-probe`) rendered in the
-sidebar exactly like bound rows. So the binding buys no per-repo git display that we lose.
+This is safe because **the sidebar's `branch` token reads from the workspace cwd, not the
+`worktree` binding** — verified on 0.8.0 by registering an identical worktree as a plain
+workspace and watching its distinct branch render. The binding buys no git display we lose.
+What N+1 forfeits: `worktree.created`/`worktree.opened` never fire, so
+`tdi/herdr-worktree-setup` will not run against our checkouts and `herdr worktree
+list/remove` will not manage them. No repo currently uses setup actions, so this costs
+nothing today.
 
-What the binding *does* buy, and what N+1 forfeits: `worktree.created`/`worktree.opened`
-never fire, so `tdi/herdr-worktree-setup` will not run against our checkouts, and
-`herdr worktree list/remove` will not manage them (they remain ordinary git worktrees,
-removed with `git worktree remove`). Given no repo currently uses setup actions, this costs
-nothing today — but it is the tradeoff to revisit if that changes.
+## Persistence: the filesystem is the source of truth
 
-### Grouping without nesting
+There is no central state file. A session **is** a directory:
 
-herdr cannot nest workspaces on demand. Confirmed against the full API schema: no parent,
-child, group, indent or depth field exists anywhere, and nesting is derived solely from the
-`worktree` binding's `repo_root`. Two socket-only calls provide the alternative — neither is
-exposed by the `herdr` CLI, so the plugin dials `$HERDR_SOCKET_PATH` directly:
-
-- `workspace.report_metadata` — `{workspace_id, source, tokens}`; tag every workspace in a
-  session with `session=<name>`. Token names must match `^[A-Za-z0-9_-]{1,32}$`, max 16.
-- `workspace.move_block` — `{workspace_ids}`; make the session's rows contiguous in one call,
-  session root first.
-
-Render it with a `$session` column, which lets checkout labels stay short (`api`, not
-`<session>/api`):
-
-```toml
-[ui.sidebar.spaces]
-rows = [["state_icon", "$session", "workspace"], ["branch", "git_status"]]
+```
+<sessions-root>/<name>/
+  .utena-session.json     manifest — owner, name, created_at, archived, repos
+  CLAUDE.md               generated, marker-guarded
+  .claude/settings.local.json
+  <repo-a>/  <repo-b>/    git checkouts
 ```
 
-**herdr IDs are strings** (`w1`, `w3`, `w1:p1`) — verified live. utena's TUI threads `uint`
-everywhere (`ActivateSession(id uint)`, `workspacepicker.selected map[uint]struct{}`,
-`sessionprogress.Start(uint)`). This is a mechanical but wide change across pickers, msg
-types, and provider signatures. Budget for it explicitly; it is the single most pervasive
-edit in the port.
+Three layers, each holding only what it uniquely can:
+
+1. **Filesystem** — durable truth, survives herdr restarts and plugin reinstalls. The
+   colocated manifest is the pattern `herdr-multirepo` uses for `.feature.json`.
+2. **herdr** — live state: which workspaces are open, agent status, focus. Matched to
+   checkouts by pane cwd, since workspace ids are not durable.
+3. **git** — branch and dirtiness, always derived, never stored.
+
+A central `sessions.json` was tried first and caused two bugs: the sidebar pane and the CLI
+resolved `HERDR_PLUGIN_STATE_DIR` differently and read different files, and the sidebar
+reported zero sessions while 27 existed on disk. Both are duplicate-source-of-truth
+failures.
+
+**Archiving is persisted, not derived.** "No live workspaces" cannot mean archived, because
+every session looks like that after a herdr restart. `archived: true` lives in the manifest;
+the sidebar hides those behind a `.` toggle.
+
+**Discovery must not shell out to git.** A worktree's `.git` is a file pointing at its
+gitdir; `HEAD` and `commondir` there give branch and origin repo by plain file read — 83
+checkouts in 0.06s. Running `git status --porcelain` per checkout instead took over two
+minutes (43 of them exceed 0.5s; the worst is 12s), which hung the sidebar's first load
+entirely. Dirtiness is therefore computed asynchronously, for the selected row only. Handle
+both layouts: `.git` as a file (worktree) **and** as a directory (an ordinary clone inside a
+session), or checkouts get silently dropped.
+
+**Existing utena sessions need no import.** Discovery falls back to the
+`<!-- utena:multi-session-guide -->` marker in a generated `CLAUDE.md`, so pre-plugin
+sessions appear as soon as their root is scanned.
+
+## Grouping without nesting
+
+herdr cannot nest workspaces on demand: the API schema has no parent, child, group, indent
+or depth field anywhere, and nesting derives solely from the `worktree` binding. Two
+socket-only calls provide the alternative — neither is exposed on the CLI:
+
+- `workspace.report_metadata` — tag each workspace `session=<name>`; render with a
+  `$session` column in `[ui.sidebar.spaces]`.
+- `workspace.move_block` — make a session's rows contiguous in one call.
+
+The plugin renders its own tree in a pane instead, which is the only way to get real
+nesting, hidden repo rows, and archived-session filtering.
 
 ## What we reuse
 
@@ -188,15 +201,11 @@ edit in the port.
 | `internal/tui/branchpicker` | **import, 1-line tweak** | all-string API already; only consumes `provider.Branches*Msg`. |
 | `internal/tui/workspacepicker` | **copy, new data layer** | multi-select UI already exists — `space` toggles, `enter` implicit-selects the row under the cursor. `map[uint]` → string. |
 | `internal/tui/sessionform` | **copy, new data layer** | the 6-step machine (`workspacePicker → filePicker → branchPicker → branchManualInput → branchMode → nameInput`) is pure logic; ~8 `provider.X()` call sites change. Its tests drive it purely through messages and port with it. |
-| `internal/tui/sessionprogress` | **copy, simplify** | polls at 200ms today; in-process now, so back it with a channel instead. |
 | `internal/tui/sessionlist` | **copy, trim** | widest surface — drags in `sessiondetail`, `statusview`, `claude`, `git`. Port the list half; rewrite the detail panel. |
-| `internal/tui/provider/*provider.go` | **keep** | caching, refetch-chaining, busy-polling are transport-agnostic. |
-| `internal/tui/provider/client.go` | **rewrite** | 700 lines; **the entire data-layer change**. Every method already returns `tea.Cmd`, and nothing outside `provider/` calls it — so a `herdrClient` behind a small interface leaves all 18 view packages untouched. |
-| `internal/git/gitcli.go` | **copy (~477 lines)** | zero deps, but `gitCLI` and its methods are unexported and `NewGitService` demands a `db.Database`. Exportize on copy. Drop `migrateToBare`. |
+| `internal/tui/provider/` | **not used** | the sidebar was written fresh against the socket rather than porting the provider layer; it needed a tree, ungrouped rows and archived filtering that the session-list views did not have. |
+| `internal/git/gitcli.go` | **not used** | discovery reads git metadata from files; only `worktree add`/`remove` shell out. |
 | `internal/git/githubclient.go` | **reuse verbatim** | `NewGitHubClient(ctx)` takes only a context. `$GITHUB_TOKEN` → `gh auth token`. |
-| `internal/session/workspaceconfig.go` | **copy** | stdlib only; `.utena/config.json` schema unchanged. |
-| `setupstepdefinition.go` + `setupexecutor.go` | **copy, rewire** | `buildSetupSteps` is pure. The executor's DB coupling funnels through one type, `stepUpdater`, at 3 call sites — swap for a progress callback (~15 lines). It already no-ops on unpersisted steps. Rewrite `execSetupWorktree`; delete `StepKindSetupTmux`. |
-| `SanitizeSessionName` / `ValidateSessionName` | **copy (~25 lines)** | pure, but live in the GORM-laden `session` package. |
+| `SanitizeSessionName` | **copied (~15 lines)** | pure, but lives in the GORM-laden `session` package. |
 | daemon, HTTP API, SQLite, gotmux, tmux plugin, `utena-claude` hook, monitor WebSocket | **delete** | herdr covers all of it. |
 
 Preserve the hook-script contract verbatim (`<ws>/.utena/worktree-setup`, global
@@ -276,12 +285,10 @@ branch from one detection pass, or the second session silently loses its notific
 
 ## Phases
 
-1. **Skeleton** — manifest, build script, `main.go` dispatch, `herdrClient` shelling to the
-   CLI. Prove the loop with a `ping` action.
-2. **Session core** — state file, `git worktree add` + `worktree open` + `workspace create`,
-   `claudesettings` wiring, setup pipeline. Headless `new-session` subcommand first, no TUI.
-3. **TUI** — port the pickers and `sessionform` onto the new client; the `uint` → string ID
-   sweep lands here.
+1. ~~**Skeleton**~~ — manifest, build script, `main.go` dispatch, socket + CLI client.
+2. ~~**Session core**~~ — worktrees, `claudesettings`, manifest, create/list.
+3. ~~**Sidebar**~~ — Bubbletea tree in a pane, event-driven; create, activate, archive,
+   delete; `prefix+u` toggles it, `prefix+p` opens a session-aware picker popup.
 4. **PR automation** — `poll` action, both cold-start guards, `herdr-routines` config.
 5. **Event injection** — activity sync + `agent prompt` formatting.
 6. **Delete** — daemon, HTTP API, SQLite, gotmux, tmux plugin, `utena-claude`, monitor.
