@@ -213,11 +213,11 @@ func (p picker) View() string {
 
 	body := p.bodyHeight()
 	for i := p.offset; i < len(p.visible) && i < p.offset+body; i++ {
-		style := lipgloss.NewStyle().Width(p.width).Padding(0, 1)
+		style := lipgloss.NewStyle().Width(p.width).MaxWidth(p.width).Padding(0, 1)
 		if i == p.cursor {
 			style = style.Background(t.Selection)
 		}
-		b.WriteString(style.Render(rowLine(p.rows[p.visible[i]], nil)) + "\n")
+		b.WriteString(style.Render(fitLine(rowLine(p.rows[p.visible[i]], nil), p.width)) + "\n")
 	}
 	if len(p.visible) == 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).Padding(0, 1).
@@ -228,7 +228,8 @@ func (p picker) View() string {
 	if p.filtering {
 		foot = p.input.View()
 	}
-	b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).Padding(0, 1).Render(foot))
+	b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).
+		Padding(0, 1).Render(fitLine(foot, p.width)))
 	return b.String()
 }
 

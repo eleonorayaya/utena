@@ -188,6 +188,7 @@ func activateSession(h *herdrClient, name string) error {
 		if _, err := registerSession(h, s); err != nil {
 			return err
 		}
+		touchSession(s.Root)
 		return setArchived(s.Root, false)
 	}
 	return fmt.Errorf("session %q not found", name)

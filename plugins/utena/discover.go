@@ -17,11 +17,12 @@ const (
 )
 
 type manifest struct {
-	Owner     string    `json:"owner"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
-	Archived  bool      `json:"archived,omitempty"`
-	Repos     []string  `json:"repos"`
+	Owner      string    `json:"owner"`
+	Name       string    `json:"name"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastUsedAt time.Time `json:"last_used_at,omitempty"`
+	Archived   bool      `json:"archived,omitempty"`
+	Repos      []string  `json:"repos"`
 }
 
 func writeManifest(sessionRoot string, m manifest) error {
@@ -63,6 +64,7 @@ type Session struct {
 	Name        string
 	Root        string
 	Archived    bool
+	LastUsedAt  time.Time
 	Checkouts   []Checkout
 	WorkspaceID string
 	AgentStatus string
@@ -184,15 +186,30 @@ func scanSessions() []Session {
 			}
 			seen[dir] = struct{}{}
 			m, _ := readManifest(dir)
+			used := m.LastUsedAt
+			if used.IsZero() {
+				used = m.CreatedAt
+			}
+			if used.IsZero() {
+				if fi, err := os.Stat(dir); err == nil {
+					used = fi.ModTime()
+				}
+			}
 			sessions = append(sessions, Session{
-				Name:      e.Name(),
-				Root:      dir,
-				Archived:  m.Archived,
-				Checkouts: scanCheckouts(dir),
+				Name:       e.Name(),
+				Root:       dir,
+				Archived:   m.Archived,
+				LastUsedAt: used,
+				Checkouts:  scanCheckouts(dir),
 			})
 		}
 	}
-	sort.Slice(sessions, func(i, j int) bool { return sessions[i].Name < sessions[j].Name })
+	sort.SliceStable(sessions, func(i, j int) bool {
+		if sessions[i].Archived != sessions[j].Archived {
+			return !sessions[i].Archived
+		}
+		return sessions[i].LastUsedAt.After(sessions[j].LastUsedAt)
+	})
 	return sessions
 }
 
@@ -279,4 +296,13 @@ func setArchived(sessionRoot string, archived bool) error {
 	}
 	m.Archived = archived
 	return writeManifest(sessionRoot, m)
+}
+
+func touchSession(sessionRoot string) {
+	m, ok := readManifest(sessionRoot)
+	if !ok {
+		m = manifest{Name: filepath.Base(sessionRoot), CreatedAt: time.Now()}
+	}
+	m.LastUsedAt = time.Now()
+	_ = writeManifest(sessionRoot, m)
 }

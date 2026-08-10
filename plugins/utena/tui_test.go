@@ -1,8 +1,10 @@
 package main
 
 import (
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -202,5 +204,66 @@ func TestPickerView(t *testing.T) {
 		if !strings.Contains(p.View(), want) {
 			t.Errorf("missing %q", want)
 		}
+	}
+}
+
+func TestSessionsCollapsedByDefault(t *testing.T) {
+	m := newSidebar(nil)
+	if len(m.expanded) != 0 {
+		t.Fatal("nothing should be expanded on a fresh sidebar")
+	}
+	s1 := Session{Name: "alpha", Checkouts: []Checkout{{Label: "api", Path: "/a"}}}
+	m.width, m.height = 46, 12
+	m.rows = []row{{kind: rowSession, session: &s1, expanded: false}}
+	out := m.View()
+	if !strings.Contains(out, "▸") {
+		t.Errorf("collapsed session should show a ▸ chevron:\n%s", out)
+	}
+	if strings.Contains(out, "api") {
+		t.Errorf("collapsed session must not render its checkouts:\n%s", out)
+	}
+
+	m.rows[0].expanded = true
+	if !strings.Contains(m.View(), "▾") {
+		t.Error("expanded session should show a ▾ chevron")
+	}
+}
+
+func TestSessionsOrderedByLastUsed(t *testing.T) {
+	now := time.Now()
+	in := []Session{
+		{Name: "old", LastUsedAt: now.Add(-48 * time.Hour)},
+		{Name: "newest", LastUsedAt: now},
+		{Name: "archived-recent", LastUsedAt: now, Archived: true},
+		{Name: "yesterday", LastUsedAt: now.Add(-24 * time.Hour)},
+	}
+	sort.SliceStable(in, func(i, j int) bool {
+		if in[i].Archived != in[j].Archived {
+			return !in[i].Archived
+		}
+		return in[i].LastUsedAt.After(in[j].LastUsedAt)
+	})
+	got := []string{in[0].Name, in[1].Name, in[2].Name, in[3].Name}
+	want := []string{"newest", "yesterday", "old", "archived-recent"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestCursorSurvivesReload(t *testing.T) {
+	a := Session{Name: "alpha"}
+	b := Session{Name: "beta"}
+	m := demoSidebar()
+	m.rows = []row{{kind: rowSession, session: &a}, {kind: rowSession, session: &b}}
+	m.cursor = 1
+	if got := m.cursorKey(); got != "s:beta" {
+		t.Fatalf("cursorKey = %q", got)
+	}
+	reordered := []row{{kind: rowSession, session: &b}, {kind: rowSession, session: &a}}
+	next, _ := m.Update(reloadedMsg{rows: reordered})
+	if got := next.(sidebar).cursor; got != 0 {
+		t.Errorf("cursor should follow beta to index 0, got %d", got)
 	}
 }

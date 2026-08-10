@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
@@ -25,6 +26,7 @@ const (
 
 type row struct {
 	kind      rowKind
+	expanded  bool
 	heading   string
 	workspace *liveWorkspace
 	session   *Session
@@ -42,6 +44,8 @@ type keyMap struct {
 	Archive        key.Binding
 	Delete         key.Binding
 	New            key.Binding
+	Expand         key.Binding
+	Collapse       key.Binding
 	ToggleArchived key.Binding
 	Refresh        key.Binding
 	Help           key.Binding
@@ -56,6 +60,8 @@ func newKeyMap() keyMap {
 		Archive:        key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archive")),
 		Delete:         key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 		New:            key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
+		Expand:         key.NewBinding(key.WithKeys(" ", "l", "right"), key.WithHelp("space", "expand")),
+		Collapse:       key.NewBinding(key.WithKeys("h", "left"), key.WithHelp("h", "collapse")),
 		ToggleArchived: key.NewBinding(key.WithKeys("."), key.WithHelp(".", "archived")),
 		Refresh:        key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Help:           key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
@@ -64,12 +70,13 @@ func newKeyMap() keyMap {
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Focus, k.New, k.Archive, k.Delete, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Expand, k.Focus, k.New, k.Archive, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Focus},
+		{k.Expand, k.Collapse},
 		{k.New, k.Archive, k.Delete},
 		{k.ToggleArchived},
 		{k.Refresh},
@@ -93,6 +100,7 @@ type sidebar struct {
 	live    bool
 
 	showArchived bool
+	expanded     map[string]bool
 	dirty        map[string]int
 	mode         mode
 	createKeys   createKeyMap
@@ -152,7 +160,8 @@ func keyPress(s string) tea.KeyMsg {
 
 func newSidebar(h *herdrClient) sidebar {
 	return sidebar{herdr: h, keys: newKeyMap(), createKeys: newCreateKeyMap(),
-		dirty: map[string]int{}, help: help.New(), width: 48, height: 24}
+		dirty: map[string]int{}, expanded: map[string]bool{},
+		help: help.New(), width: 48, height: 24}
 }
 
 var subscribedEvents = []string{
@@ -193,6 +202,7 @@ func startStream(h *herdrClient) tea.Cmd {
 func (m sidebar) reload() tea.Cmd {
 	h := m.herdr
 	showArchived := m.showArchived
+	expanded := m.expanded
 	return func() tea.Msg {
 		sessions, ungrouped, err := loadSessions(h)
 		if err != nil {
@@ -206,7 +216,11 @@ func (m sidebar) reload() tea.Cmd {
 				archivedHidden++
 				continue
 			}
-			rows = append(rows, row{kind: rowSession, session: s, status: s.AgentStatus})
+			isOpen := expanded[s.Name]
+			rows = append(rows, row{kind: rowSession, session: s, status: s.AgentStatus, expanded: isOpen})
+			if !isOpen {
+				continue
+			}
 			for j := range s.Checkouts {
 				c := &s.Checkouts[j]
 				rows = append(rows, row{
@@ -278,7 +292,16 @@ func (m sidebar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
+		want := m.cursorKey()
 		m.rows = msg.rows
+		if want != "" {
+			for i, r := range m.rows {
+				if rowKey(r) == want {
+					m.cursor = i
+					break
+				}
+			}
+		}
 		m.clamp()
 		return m, nil
 
@@ -343,6 +366,20 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.cursor = i
 				m.clamp()
 				break
+			}
+		}
+
+	case key.Matches(msg, m.keys.Expand):
+		if r, ok := m.current(); ok && r.session != nil && len(r.session.Checkouts) > 0 {
+			m.expanded[r.session.Name] = !m.expanded[r.session.Name]
+			return m, m.reload()
+		}
+
+	case key.Matches(msg, m.keys.Collapse):
+		if r, ok := m.current(); ok && r.session != nil {
+			if r.kind == rowCheckout || m.expanded[r.session.Name] {
+				m.expanded[r.session.Name] = false
+				return m, m.reload()
 			}
 		}
 
@@ -437,6 +474,25 @@ func (m sidebar) archive(name string) error { return archiveSession(m.herdr, nam
 
 func (m sidebar) remove(name string) error { return deleteSession(m.herdr, name) }
 
+func rowKey(r row) string {
+	switch r.kind {
+	case rowSession:
+		return "s:" + r.session.Name
+	case rowCheckout:
+		return "c:" + r.checkout.Path
+	case rowWorkspace:
+		return "w:" + r.workspace.ID
+	}
+	return ""
+}
+
+func (m sidebar) cursorKey() string {
+	if r, ok := m.current(); ok {
+		return rowKey(r)
+	}
+	return ""
+}
+
 func (m sidebar) current() (row, bool) {
 	if m.cursor < 0 || m.cursor >= len(m.rows) {
 		return row{}, false
@@ -496,8 +552,7 @@ func (m sidebar) View() string {
 	t := theme.Current
 	var b strings.Builder
 
-	title := lipgloss.NewStyle().Foreground(t.TextOnPrimary).Background(t.Primary).Bold(true).
-		Width(m.width).Padding(0, 1).Render("sessions")
+	title := headerStyle(m.width).Render("sessions")
 	b.WriteString(title + "\n")
 
 	if m.err != nil {
@@ -518,7 +573,8 @@ func (m sidebar) View() string {
 	if foot == "" {
 		foot = m.help.View(m.keys)
 	}
-	b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).Padding(0, 1).Render(foot))
+	b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).
+		Padding(0, 1).Render(fitLine(foot, m.width)))
 	return b.String()
 }
 
@@ -546,7 +602,15 @@ func rowLine(r row, dirty map[string]int) string {
 		}
 		count := lipgloss.NewStyle().Foreground(t.TextMuted).
 			Render(fmt.Sprintf(" (%d)", len(r.session.Checkouts)))
-		return fmt.Sprintf("%s %s%s",
+		chevron := " "
+		if len(r.session.Checkouts) > 0 {
+			chevron = "▸"
+			if r.expanded {
+				chevron = "▾"
+			}
+		}
+		return fmt.Sprintf("%s %s %s%s",
+			lipgloss.NewStyle().Foreground(t.TextMuted).Render(chevron),
 			lipgloss.NewStyle().Foreground(gc).Render(glyph), nameStyle.Render(label), count)
 
 	case rowCheckout:
@@ -569,10 +633,18 @@ func rowLine(r row, dirty map[string]int) string {
 
 func selectableRow(r row) bool { return r.kind != rowHeading }
 
+func fitLine(s string, width int) string {
+	inner := width - 2
+	if inner < 1 {
+		inner = 1
+	}
+	return ansi.Truncate(s, inner, "…")
+}
+
 func (m sidebar) renderRow(r row, selected bool) string {
-	style := lipgloss.NewStyle().Width(m.width).Padding(0, 1)
+	style := lipgloss.NewStyle().Width(m.width).MaxWidth(m.width).Padding(0, 1)
 	if selected {
 		style = style.Background(theme.Current.Selection)
 	}
-	return style.Render(rowLine(r, m.dirty))
+	return style.Render(fitLine(rowLine(r, m.dirty), m.width))
 }

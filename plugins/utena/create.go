@@ -170,8 +170,8 @@ func (m sidebar) viewPickRepos() string {
 		if r.selected {
 			mark = lipgloss.NewStyle().Foreground(t.AccentMint).Render("✓ ")
 		}
-		line := mark + filepath.Base(r.path)
-		style := lipgloss.NewStyle().Width(m.width).Padding(0, 1)
+		line := fitLine(mark+filepath.Base(r.path), m.width)
+		style := lipgloss.NewStyle().Width(m.width).MaxWidth(m.width).Padding(0, 1)
 		if i == m.repoCursor {
 			style = style.Background(t.Selection)
 		}
