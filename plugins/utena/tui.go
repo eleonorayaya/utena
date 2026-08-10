@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -523,18 +522,16 @@ func (m sidebar) View() string {
 	return b.String()
 }
 
-func (m sidebar) renderRow(r row, selected bool) string {
+func rowLine(r row, dirty map[string]int) string {
 	t := theme.Current
 	glyph, gc := statusGlyph(r.status)
 
-	var line string
 	switch r.kind {
 	case rowHeading:
-		return lipgloss.NewStyle().Width(m.width).Padding(0, 1).
-			Foreground(t.TextMuted).Render(r.heading)
+		return lipgloss.NewStyle().Foreground(t.TextMuted).Render(r.heading)
 
 	case rowWorkspace:
-		line = fmt.Sprintf("%s %s",
+		return fmt.Sprintf("%s %s",
 			lipgloss.NewStyle().Foreground(gc).Render(glyph),
 			lipgloss.NewStyle().Foreground(t.Text).Render(r.workspace.Label))
 
@@ -547,30 +544,35 @@ func (m sidebar) renderRow(r row, selected bool) string {
 		if r.session.Archived {
 			label = "⌁ " + label
 		}
-		name := nameStyle.Render(label)
 		count := lipgloss.NewStyle().Foreground(t.TextMuted).
 			Render(fmt.Sprintf(" (%d)", len(r.session.Checkouts)))
-		line = fmt.Sprintf("%s %s%s", lipgloss.NewStyle().Foreground(gc).Render(glyph), name, count)
+		return fmt.Sprintf("%s %s%s",
+			lipgloss.NewStyle().Foreground(gc).Render(glyph), nameStyle.Render(label), count)
+
 	case rowCheckout:
-		branch := lipgloss.NewStyle().Foreground(t.AccentBlue).Render(r.branch)
-		dirty := ""
-		if n, ok := m.dirty[r.checkout.Path]; ok && n > 0 {
-			dirty = lipgloss.NewStyle().Foreground(t.StatusPending).Render(fmt.Sprintf(" ●%d", n))
-		}
 		tree := "├─"
 		if r.last {
 			tree = "└─"
 		}
-		line = fmt.Sprintf("%s %s %s %s%s",
+		out := fmt.Sprintf("%s %s %s %s",
 			lipgloss.NewStyle().Foreground(t.TextMuted).Render(tree),
 			lipgloss.NewStyle().Foreground(gc).Render(glyph),
-			lipgloss.NewStyle().Foreground(t.Text).Render(filepath.Base(r.checkout.Label)),
-			branch, dirty)
+			lipgloss.NewStyle().Foreground(t.Text).Render(r.checkout.Label),
+			lipgloss.NewStyle().Foreground(t.AccentBlue).Render(r.checkout.Branch))
+		if n, ok := dirty[r.checkout.Path]; ok && n > 0 {
+			out += lipgloss.NewStyle().Foreground(t.StatusPending).Render(fmt.Sprintf(" ●%d", n))
+		}
+		return out
 	}
+	return ""
+}
 
+func selectableRow(r row) bool { return r.kind != rowHeading }
+
+func (m sidebar) renderRow(r row, selected bool) string {
 	style := lipgloss.NewStyle().Width(m.width).Padding(0, 1)
 	if selected {
-		style = style.Background(t.Selection)
+		style = style.Background(theme.Current.Selection)
 	}
-	return style.Render(line)
+	return style.Render(rowLine(r, m.dirty))
 }

@@ -128,31 +128,50 @@ func TestSpaceTogglesRepoSelection(t *testing.T) {
 	}
 }
 
-func TestBuildPickRows(t *testing.T) {
+func TestPickerExcludesArchivedAndFilters(t *testing.T) {
 	sessions := []Session{
 		{Name: "alpha", WorkspaceID: "w1", Checkouts: []Checkout{
-			{Label: "api", Branch: "eqt/x", WorkspaceID: "w2"}}},
+			{Label: "api", Branch: "eqt/x", Path: "/s/api", WorkspaceID: "w2"}}},
 		{Name: "zzz-archived", Archived: true},
 		{Name: "beta"},
 	}
 	ung := []liveWorkspace{{ID: "w9", Label: "scratch"}}
-	rows := buildPickRows(sessions, ung)
 
-	var keys []string
-	for _, r := range rows {
-		keys = append(keys, r.key)
+	p := newPicker(sessions, ung)
+	if len(p.visible) != len(p.rows) {
+		t.Fatalf("empty filter should show every row, got %d of %d", len(p.visible), len(p.rows))
 	}
-	joined := strings.Join(keys, "\n")
-	for _, want := range []string{"session\talpha", "workspace\tw2\talpha", "session\tbeta", "workspace\tw9\t"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("missing row %q in:\n%s", want, joined)
+	for _, term := range p.terms {
+		if strings.Contains(term, "zzz-archived") {
+			t.Error("archived sessions must not be offered in the picker")
 		}
 	}
-	if strings.Contains(joined, "zzz-archived") {
-		t.Error("archived sessions should not be offered in the picker")
+
+	p.input.SetValue("scratch")
+	p.applyFilter()
+	if len(p.visible) != 1 {
+		t.Fatalf("expected 1 match for \"scratch\", got %d", len(p.visible))
 	}
-	if !strings.Contains(rows[0].display, "●") {
-		t.Errorf("active session should be marked, got %q", rows[0].display)
+	if got := p.targets[p.visible[0]].workspaceID; got != "w9" {
+		t.Errorf("filter matched the wrong row: %q", got)
+	}
+
+	p.input.SetValue("api")
+	p.applyFilter()
+	if len(p.visible) == 0 {
+		t.Fatal("expected the checkout row to match \"api\"")
+	}
+	if got := p.targets[p.visible[0]].workspaceID; got != "w2" {
+		t.Errorf("expected the api checkout, got %q", got)
+	}
+}
+
+func TestPickerEnterSelectsCursorRow(t *testing.T) {
+	p := newPicker([]Session{{Name: "alpha", WorkspaceID: "w1"}}, nil)
+	next, _ := p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(picker).chosen
+	if got == nil || got.workspaceID != "w1" {
+		t.Errorf("enter should choose the cursor row, got %+v", got)
 	}
 }
 
@@ -165,5 +184,23 @@ func TestArchivedHiddenFromSidebar(t *testing.T) {
 	out := m.View()
 	if !strings.Contains(out, "⌁") {
 		t.Errorf("archived session should render with a marker when shown:\n%s", out)
+	}
+}
+
+func TestPickerView(t *testing.T) {
+	sessions := []Session{
+		{Name: "eqt-checkout-flow", WorkspaceID: "w1", Checkouts: []Checkout{
+			{Label: "api", Branch: "eqt/checkout-flow", Path: "/s/api", WorkspaceID: "w2"},
+			{Label: "web", Branch: "eqt/checkout-flow", Path: "/s/web", WorkspaceID: "w3"}}},
+		{Name: "monitor-scripts", Checkouts: []Checkout{
+			{Label: "utena", Branch: "eqt/monitor-fix", Path: "/s/u"}}},
+	}
+	p := newPicker(sessions, []liveWorkspace{{ID: "w9", Label: "helm"}})
+	p.width, p.height = 54, 12
+	t.Logf("picker:\n%s", p.View())
+	for _, want := range []string{"go to", "eqt-checkout-flow", "├─", "└─", "helm", "/ filter"} {
+		if !strings.Contains(p.View(), want) {
+			t.Errorf("missing %q", want)
+		}
 	}
 }
