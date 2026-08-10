@@ -170,11 +170,15 @@ func runOpenPick() error {
 	return err
 }
 
-func runSidebar() error {
+func runSidebar() error { return runSessionUI(false) }
+
+func runSessionUI(popup bool) error {
 	if path, err := utenaThemePath(); err == nil {
 		_ = theme.Load(path)
 	}
-	_, err := tea.NewProgram(newSidebar(newHerdrClient()), tea.WithAltScreen()).Run()
+	m := newSidebar(newHerdrClient())
+	m.popup = popup
+	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
 

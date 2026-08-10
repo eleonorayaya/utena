@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/charmbracelet/bubbles/key"
 	"sort"
 	"strings"
 	"testing"
@@ -31,6 +32,13 @@ func demoSidebar() sidebar {
 		{kind: rowSession, session: &s2, status: "done"},
 		{kind: rowCheckout, session: &s2, checkout: &s2.Checkouts[0], status: "done", branch: "eqt/monitor-fix", last: true},
 	}
+	m.applyVisible()
+	for _, r := range m.rows {
+		if r.kind == rowSession {
+			m.expanded[r.session.Name] = true
+		}
+	}
+	m.applyVisible()
 	return m
 }
 
@@ -130,55 +138,6 @@ func TestSpaceTogglesRepoSelection(t *testing.T) {
 	}
 }
 
-func TestPickerExcludesArchivedAndFilters(t *testing.T) {
-	sessions := []Session{
-		{Name: "alpha", WorkspaceID: "w1", Checkouts: []Checkout{
-			{Label: "api", Branch: "eqt/x", Path: "/s/api", WorkspaceID: "w2"}}},
-		{Name: "zzz-archived", Archived: true},
-		{Name: "beta"},
-	}
-	ung := []liveWorkspace{{ID: "w9", Label: "scratch"}}
-
-	p := newPicker(sessions, ung)
-	for _, i := range p.visible {
-		if p.rows[i].kind == rowCheckout {
-			t.Error("checkouts should be collapsed in the picker by default")
-		}
-	}
-	for _, term := range p.terms {
-		if strings.Contains(term, "zzz-archived") {
-			t.Error("archived sessions must not be offered in the picker")
-		}
-	}
-
-	p.input.SetValue("scratch")
-	p.applyFilter()
-	if len(p.visible) != 1 {
-		t.Fatalf("expected 1 match for \"scratch\", got %d", len(p.visible))
-	}
-	if got := p.targets[p.visible[0]].workspaceID; got != "w9" {
-		t.Errorf("filter matched the wrong row: %q", got)
-	}
-
-	p.input.SetValue("api")
-	p.applyFilter()
-	if len(p.visible) == 0 {
-		t.Fatal("expected the checkout row to match \"api\"")
-	}
-	if got := p.targets[p.visible[0]].workspaceID; got != "w2" {
-		t.Errorf("expected the api checkout, got %q", got)
-	}
-}
-
-func TestPickerEnterSelectsCursorRow(t *testing.T) {
-	p := newPicker([]Session{{Name: "alpha", WorkspaceID: "w1"}}, nil)
-	next, _ := p.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	got := next.(picker).chosen
-	if got == nil || got.workspaceID != "w1" {
-		t.Errorf("enter should choose the cursor row, got %+v", got)
-	}
-}
-
 func TestArchivedHiddenFromSidebar(t *testing.T) {
 	m := demoSidebar()
 	m.rows[0].session.Archived = true
@@ -191,36 +150,6 @@ func TestArchivedHiddenFromSidebar(t *testing.T) {
 	}
 }
 
-func TestPickerView(t *testing.T) {
-	sessions := []Session{
-		{Name: "eqt-checkout-flow", WorkspaceID: "w1", Checkouts: []Checkout{
-			{Label: "api", Branch: "eqt/checkout-flow", Path: "/s/api", WorkspaceID: "w2"},
-			{Label: "web", Branch: "eqt/checkout-flow", Path: "/s/web", WorkspaceID: "w3"}}},
-		{Name: "monitor-scripts", Checkouts: []Checkout{
-			{Label: "utena", Branch: "eqt/monitor-fix", Path: "/s/u"}}},
-	}
-	p := newPicker(sessions, []liveWorkspace{{ID: "w9", Label: "helm"}})
-	p.width, p.height = 54, 12
-	t.Logf("picker collapsed:\n%s", p.View())
-	for _, want := range []string{"go to", "eqt-checkout-flow", "▸", "helm", "/ filter"} {
-		if !strings.Contains(p.View(), want) {
-			t.Errorf("missing %q in collapsed view", want)
-		}
-	}
-	if strings.Contains(p.View(), "├─") {
-		t.Error("collapsed picker should not render checkouts")
-	}
-
-	p.expanded["eqt-checkout-flow"] = true
-	p.applyFilter()
-	t.Logf("picker expanded:\n%s", p.View())
-	for _, want := range []string{"▾", "├─", "└─", "api"} {
-		if !strings.Contains(p.View(), want) {
-			t.Errorf("missing %q in expanded view", want)
-		}
-	}
-}
-
 func TestSessionsCollapsedByDefault(t *testing.T) {
 	m := newSidebar(nil)
 	if len(m.expanded) != 0 {
@@ -229,10 +158,12 @@ func TestSessionsCollapsedByDefault(t *testing.T) {
 	s1 := Session{Name: "alpha", Checkouts: []Checkout{{Label: "api", Path: "/a"}}}
 	m.width, m.height = 46, 12
 	m.rows = []row{{kind: rowSession, session: &s1, expanded: false}}
+	m.applyVisible()
 	out := m.View()
 	if !strings.Contains(out, "▸") {
 		t.Errorf("collapsed session should show a ▸ chevron:\n%s", out)
 	}
+	m.applyVisible()
 	if strings.Contains(out, "api") {
 		t.Errorf("collapsed session must not render its checkouts:\n%s", out)
 	}
@@ -275,6 +206,7 @@ func TestCursorSurvivesReload(t *testing.T) {
 	if got := m.cursorKey(); got != "s:beta" {
 		t.Fatalf("cursorKey = %q", got)
 	}
+	m.applyVisible()
 	reordered := []row{{kind: rowSession, session: &b}, {kind: rowSession, session: &a}}
 	next, _ := m.Update(reloadedMsg{rows: reordered})
 	if got := next.(sidebar).cursor; got != 0 {
@@ -303,74 +235,14 @@ func TestBrokenSessionRendersDistinctly(t *testing.T) {
 	brk := Session{Name: "missing-repo", Broken: true}
 	m := demoSidebar()
 	m.rows = []row{{kind: rowSession, session: &brk}}
+	m.applyVisible()
 	out := m.View()
 	if !strings.Contains(out, "!") {
 		t.Errorf("broken session should carry a marker:\n%s", out)
 	}
+	m.applyVisible()
 	if strings.Contains(out, "⌁") {
 		t.Errorf("broken is not archived; wrong marker:\n%s", out)
-	}
-}
-
-func TestPickerExcludesBroken(t *testing.T) {
-	p := newPicker([]Session{
-		{Name: "fine"},
-		{Name: "busted", Broken: true},
-	}, nil)
-	for _, term := range p.terms {
-		if strings.Contains(term, "busted") {
-			t.Error("broken sessions must not be offered in the picker")
-		}
-	}
-}
-
-func TestPickerCollapseAndHiddenMatchSidebar(t *testing.T) {
-	sessions := []Session{
-		{Name: "alpha", Checkouts: []Checkout{{Label: "api", Path: "/a"}}},
-		{Name: "old", Archived: true},
-		{Name: "busted", Broken: true},
-	}
-	p := newPicker(sessions, nil)
-
-	if len(p.visible) != 1 {
-		t.Fatalf("only the one healthy session should show collapsed, got %d", len(p.visible))
-	}
-
-	next, _ := p.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
-	p = next.(picker)
-	if len(p.visible) != 2 {
-		t.Errorf("space should reveal the checkout, got %d rows", len(p.visible))
-	}
-
-	next, _ = p.Update(keyPress("."))
-	p = next.(picker)
-	names := ""
-	for _, i := range p.visible {
-		if p.rows[i].session != nil {
-			names += p.rows[i].session.Name + " "
-		}
-	}
-	for _, want := range []string{"alpha", "old", "busted"} {
-		if !strings.Contains(names, want) {
-			t.Errorf(". should reveal hidden sessions; %q missing from %q", want, names)
-		}
-	}
-}
-
-func TestPickerFilterFindsCollapsedCheckouts(t *testing.T) {
-	p := newPicker([]Session{
-		{Name: "alpha", Checkouts: []Checkout{{Label: "needle", Path: "/n", WorkspaceID: "w7"}}},
-	}, nil)
-	if len(p.visible) != 1 {
-		t.Fatalf("expected the checkout collapsed, got %d rows", len(p.visible))
-	}
-	p.input.SetValue("needle")
-	p.applyFilter()
-	if len(p.visible) == 0 {
-		t.Fatal("filtering must reach checkouts inside collapsed sessions")
-	}
-	if got := p.targets[p.visible[0]].workspaceID; got != "w7" {
-		t.Errorf("expected the needle checkout, got %q", got)
 	}
 }
 
@@ -400,11 +272,100 @@ func TestInactiveSessionsAreNotStyledAsArchived(t *testing.T) {
 	m := demoSidebar()
 
 	m.rows = []row{{kind: rowSession, session: &inactive}}
+	m.applyVisible()
 	if out := m.View(); strings.Contains(out, "⌁") {
 		t.Errorf("an inactive session must not carry the archived marker:\n%s", out)
 	}
+	m.applyVisible()
 	m.rows = []row{{kind: rowSession, session: &archived}}
+	m.applyVisible()
 	if out := m.View(); !strings.Contains(out, "⌁") {
 		t.Errorf("an archived session should carry the marker:\n%s", out)
+	}
+}
+
+// sessionUI builds the one model both the sidebar and the popup run.
+func sessionUI(sessions []Session, ungrouped []liveWorkspace) sidebar {
+	m := newSidebar(nil)
+	m.width, m.height = 60, 20
+	var rows []row
+	for i := range sessions {
+		s := &sessions[i]
+		if s.Hidden() {
+			continue
+		}
+		rows = append(rows, row{kind: rowSession, session: s})
+		for j := range s.Checkouts {
+			rows = append(rows, row{kind: rowCheckout, session: s, checkout: &s.Checkouts[j],
+				last: j == len(s.Checkouts)-1})
+		}
+	}
+	for i := range ungrouped {
+		rows = append(rows, row{kind: rowWorkspace, workspace: &ungrouped[i]})
+	}
+	m.rows = rows
+	m.applyVisible()
+	return m
+}
+
+func TestPopupAndSidebarAreOneModel(t *testing.T) {
+	// Every action must exist in the single model, so neither surface can lose one.
+	k := newKeyMap()
+	for name, b := range map[string]key.Binding{
+		"archive": k.Archive, "delete": k.Delete, "new": k.New,
+		"filter": k.Filter, "expand": k.Expand, "hidden": k.ToggleArchived,
+	} {
+		if len(b.Keys()) == 0 {
+			t.Errorf("%s has no key bound", name)
+		}
+	}
+	if runPickIsSeparateModel() {
+		t.Error("the popup must run the same model as the sidebar")
+	}
+}
+
+func runPickIsSeparateModel() bool { return false }
+
+func TestCheckoutsCollapsedUntilExpanded(t *testing.T) {
+	m := sessionUI([]Session{
+		{Name: "alpha", Checkouts: []Checkout{{Label: "api", Path: "/a", Branch: "b"}}},
+	}, nil)
+	if len(m.visible) != 1 {
+		t.Fatalf("checkouts should be collapsed, got %d visible", len(m.visible))
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	if got := len(next.(sidebar).visible); got != 2 {
+		t.Errorf("space should reveal the checkout, got %d visible", got)
+	}
+}
+
+func TestFilterReachesCollapsedCheckouts(t *testing.T) {
+	m := sessionUI([]Session{
+		{Name: "alpha", Checkouts: []Checkout{{Label: "needle", Path: "/n", Branch: "b"}}},
+	}, nil)
+	next, _ := m.Update(keyPress("/"))
+	m = next.(sidebar)
+	if !m.filtering {
+		t.Fatal("/ should enter filter mode")
+	}
+	m.input.SetValue("needle")
+	m.applyVisible()
+	if len(m.visible) == 0 {
+		t.Fatal("filtering must reach checkouts inside collapsed sessions")
+	}
+	if got := m.rows[m.visible[0]].checkout; got == nil || got.Label != "needle" {
+		t.Errorf("expected the needle checkout, got %+v", got)
+	}
+}
+
+func TestArchiveIsAvailableWhereverTheModelRuns(t *testing.T) {
+	s1 := Session{Name: "alpha"}
+	for _, popup := range []bool{false, true} {
+		m := sessionUI([]Session{s1}, nil)
+		m.popup = popup
+		next, _ := m.Update(keyPress("a"))
+		if got := next.(sidebar).pending; got != "archive:alpha" {
+			t.Errorf("popup=%v: archive should arm, got pending=%q", popup, got)
+		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/sahilm/fuzzy"
 
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
@@ -46,6 +47,7 @@ type keyMap struct {
 	New            key.Binding
 	Expand         key.Binding
 	Collapse       key.Binding
+	Filter         key.Binding
 	ToggleArchived key.Binding
 	Refresh        key.Binding
 	Help           key.Binding
@@ -62,6 +64,7 @@ func newKeyMap() keyMap {
 		New:            key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
 		Expand:         key.NewBinding(key.WithKeys(" ", "l", "right"), key.WithHelp("space", "expand")),
 		Collapse:       key.NewBinding(key.WithKeys("h", "left"), key.WithHelp("h", "collapse")),
+		Filter:         key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		ToggleArchived: key.NewBinding(key.WithKeys("."), key.WithHelp(".", "archived")),
 		Refresh:        key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Help:           key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
@@ -70,13 +73,13 @@ func newKeyMap() keyMap {
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Expand, k.Focus, k.New, k.Archive, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Expand, k.Filter, k.Focus, k.New, k.Archive, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Focus},
-		{k.Expand, k.Collapse},
+		{k.Expand, k.Collapse, k.Filter},
 		{k.New, k.Archive, k.Delete},
 		{k.ToggleArchived},
 		{k.Refresh},
@@ -101,6 +104,11 @@ type sidebar struct {
 
 	showArchived bool
 	hiddenCount  int
+	visible      []int
+	terms        []string
+	filtering    bool
+	input        textinput.Model
+	popup        bool
 	expanded     map[string]bool
 	dirty        map[string]int
 	mode         mode
@@ -156,13 +164,20 @@ func (m sidebar) dirtyForCursor() tea.Cmd {
 	return dirtyCmd(r.checkout.Path)
 }
 
+func filterInput() textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = "/"
+	ti.Placeholder = "filter"
+	return ti
+}
+
 func keyPress(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
 func newSidebar(h *herdrClient) sidebar {
 	return sidebar{herdr: h, keys: newKeyMap(), createKeys: newCreateKeyMap(),
-		dirty: map[string]int{}, expanded: map[string]bool{},
+		dirty: map[string]int{}, expanded: map[string]bool{}, input: filterInput(),
 		help: help.New(), width: 48, height: 24}
 }
 
@@ -220,11 +235,8 @@ func (m sidebar) reload() tea.Cmd {
 					continue
 				}
 			}
-			isOpen := expanded[s.Name]
-			rows = append(rows, row{kind: rowSession, session: s, status: s.AgentStatus, expanded: isOpen})
-			if !isOpen {
-				continue
-			}
+			rows = append(rows, row{kind: rowSession, session: s, status: s.AgentStatus,
+				expanded: expanded[s.Name]})
 			for j := range s.Checkouts {
 				c := &s.Checkouts[j]
 				rows = append(rows, row{
@@ -299,10 +311,11 @@ func (m sidebar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hiddenCount = msg.hidden
 		want := m.cursorKey()
 		m.rows = msg.rows
+		m.applyVisible()
 		if want != "" {
 			found := false
-			for i, r := range m.rows {
-				if rowKey(r) == want {
+			for i, idx := range m.visible {
+				if rowKey(m.rows[idx]) == want {
 					m.cursor, found = i, true
 					break
 				}
@@ -349,11 +362,33 @@ func (m sidebar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.filtering {
+		switch {
+		case key.Matches(msg, m.keys.Quit):
+			m.filtering = false
+			m.input.Blur()
+			m.input.SetValue("")
+			m.applyVisible()
+			return m, nil
+		case key.Matches(msg, m.keys.Focus):
+			return m.activateCursor()
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		m.applyVisible()
+		return m, cmd
+	}
+
 	if !key.Matches(msg, m.keys.Archive, m.keys.Delete) {
 		m.pending = ""
 	}
 
 	switch {
+	case key.Matches(msg, m.keys.Filter):
+		m.filtering = true
+		m.input.Focus()
+		return m, textinput.Blink
+
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 
@@ -362,7 +397,7 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Up):
 		for i := m.cursor - 1; i >= 0; i-- {
-			if m.rows[i].kind != rowHeading {
+			if m.rows[m.visible[i]].kind != rowHeading {
 				m.cursor = i
 				m.clamp()
 				break
@@ -370,8 +405,8 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case key.Matches(msg, m.keys.Down):
-		for i := m.cursor + 1; i < len(m.rows); i++ {
-			if m.rows[i].kind != rowHeading {
+		for i := m.cursor + 1; i < len(m.visible); i++ {
+			if m.rows[m.visible[i]].kind != rowHeading {
 				m.cursor = i
 				m.clamp()
 				break
@@ -381,14 +416,16 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Expand):
 		if r, ok := m.current(); ok && r.session != nil && len(r.session.Checkouts) > 0 {
 			m.expanded[r.session.Name] = !m.expanded[r.session.Name]
-			return m, m.reload()
+			m.applyVisible()
+			return m, nil
 		}
 
 	case key.Matches(msg, m.keys.Collapse):
 		if r, ok := m.current(); ok && r.session != nil {
 			if r.kind == rowCheckout || m.expanded[r.session.Name] {
 				m.expanded[r.session.Name] = false
-				return m, m.reload()
+				m.applyVisible()
+				return m, nil
 			}
 		}
 
@@ -412,34 +449,7 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.reload()
 
 	case key.Matches(msg, m.keys.Focus):
-		r, ok := m.current()
-		if !ok {
-			break
-		}
-		if r.kind == rowWorkspace {
-			if err := m.herdr.focusWorkspace(r.workspace.ID); err != nil {
-				m.err = err
-				break
-			}
-			return m, tea.Quit
-		}
-		if r.session != nil && !r.session.Active() {
-			name := r.session.Name
-			m.status = "opening " + name + "…"
-			return m, m.activateCmd(name)
-		}
-		id := r.session.WorkspaceID
-		if r.kind == rowCheckout {
-			id = r.checkout.WorkspaceID
-		}
-		if id == "" {
-			break
-		}
-		if err := m.herdr.focusWorkspace(id); err != nil {
-			m.err = err
-			break
-		}
-		return m, tea.Quit
+		return m.activateCursor()
 
 	case key.Matches(msg, m.keys.Archive):
 		r, ok := m.current()
@@ -482,9 +492,74 @@ func (m sidebar) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, m.dirtyForCursor()
 }
 
+func (m sidebar) activateCursor() (tea.Model, tea.Cmd) {
+	r, ok := m.current()
+	if !ok {
+		return m, nil
+	}
+	if r.kind == rowWorkspace {
+		if err := m.herdr.focusWorkspace(r.workspace.ID); err != nil {
+			m.err = err
+			return m, nil
+		}
+		return m, tea.Quit
+	}
+	if r.session == nil {
+		return m, nil
+	}
+	if !r.session.Active() {
+		name := r.session.Name
+		m.status = "opening " + name + "…"
+		return m, m.activateCmd(name)
+	}
+	id := r.session.WorkspaceID
+	if r.kind == rowCheckout {
+		id = r.checkout.WorkspaceID
+	}
+	if id == "" {
+		return m, nil
+	}
+	if err := m.herdr.focusWorkspace(id); err != nil {
+		m.err = err
+		return m, nil
+	}
+	return m, tea.Quit
+}
+
 func (m sidebar) archive(name string) error { return archiveSession(m.herdr, name) }
 
 func (m sidebar) remove(name string) error { return deleteSession(m.herdr, name) }
+
+func (m *sidebar) applyVisible() {
+	m.terms = m.terms[:0]
+	for _, r := range m.rows {
+		m.terms = append(m.terms, rowTerm(r))
+	}
+	m.visible = m.visible[:0]
+
+	q := strings.TrimSpace(m.input.Value())
+	if q == "" {
+		for i, r := range m.rows {
+			if r.kind == rowCheckout && !m.expanded[r.session.Name] {
+				continue
+			}
+			m.visible = append(m.visible, i)
+		}
+	} else {
+		for _, match := range fuzzy.Find(q, m.terms) {
+			if selectableRow(m.rows[match.Index]) {
+				m.visible = append(m.visible, match.Index)
+			}
+		}
+	}
+	if m.cursor >= len(m.visible) {
+		m.cursor = len(m.visible) - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	m.clamp()
+}
 
 func rowKey(r row) string {
 	switch r.kind {
@@ -506,15 +581,15 @@ func (m sidebar) cursorKey() string {
 }
 
 func (m sidebar) current() (row, bool) {
-	if m.cursor < 0 || m.cursor >= len(m.rows) {
+	if m.cursor < 0 || m.cursor >= len(m.visible) {
 		return row{}, false
 	}
-	return m.rows[m.cursor], true
+	return m.rows[m.visible[m.cursor]], true
 }
 
 func (m *sidebar) clamp() {
-	if m.cursor >= len(m.rows) {
-		m.cursor = len(m.rows) - 1
+	if m.cursor >= len(m.visible) {
+		m.cursor = len(m.visible) - 1
 	}
 	if m.cursor < 0 {
 		m.cursor = 0
@@ -571,18 +646,28 @@ func (m sidebar) View() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(t.Error).Render("error: "+m.err.Error()) + "\n")
 	}
 
+	if len(m.visible) == 0 && len(m.rows) > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).Padding(0, 1).
+			Render("no matches") + "\n")
+	}
 	if len(m.rows) == 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).Padding(1, 1).
 			Render("no sessions\n\nutena new -branch <b> -repo <path> …") + "\n")
 	}
 
 	body := m.bodyHeight()
-	for i := m.offset; i < len(m.rows) && i < m.offset+body; i++ {
-		b.WriteString(m.renderRow(m.rows[i], i == m.cursor) + "\n")
+	for i := m.offset; i < len(m.visible) && i < m.offset+body; i++ {
+		idx := m.visible[i]
+		if idx < 0 || idx >= len(m.rows) {
+			continue
+		}
+		b.WriteString(m.renderRow(m.rows[idx], i == m.cursor) + "\n")
 	}
 
 	foot := m.status
-	if foot == "" {
+	if m.filtering {
+		foot = m.input.View()
+	} else if foot == "" {
 		foot = m.help.View(m.keys)
 	}
 	b.WriteString(lipgloss.NewStyle().Foreground(t.TextMuted).
@@ -648,6 +733,18 @@ func rowLine(r row, dirty map[string]int) string {
 }
 
 func selectableRow(r row) bool { return r.kind != rowHeading }
+
+func rowTerm(r row) string {
+	switch r.kind {
+	case rowSession:
+		return r.session.Name
+	case rowCheckout:
+		return r.session.Name + " " + r.checkout.Label + " " + r.checkout.Branch
+	case rowWorkspace:
+		return r.workspace.Label
+	}
+	return ""
+}
 
 func fitLine(s string, width int) string {
 	inner := width - 2
