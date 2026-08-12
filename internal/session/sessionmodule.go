@@ -128,6 +128,5 @@ func (t *prActivityTask) Run(ctx context.Context) error {
 
 func (m *SessionModule) RegisterJobs(svc *jobs.JobService) {
 	svc.Register(&reconcileSyncTask{service: m.Service})
-	svc.Register(&completedCleanupTask{service: m.Service})
 	svc.Register(&prActivityTask{service: m.Service})
 }
