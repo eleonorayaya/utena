@@ -1,0 +1,48 @@
+id = "eleonorayaya.utena"
+name = "utena"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Multi-repo sessions for herdr: group N git worktrees under one session root with a generated CLAUDE.md and merged Claude sandbox settings."
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["sh", "scripts/build.sh"]
+
+[[actions]]
+id = "sessions"
+title = "utena: sessions"
+command = ["./bin/utena", "open-sidebar"]
+
+[[panes]]
+id = "sidebar"
+title = "sessions"
+placement = "split"
+command = ["./bin/utena", "sidebar"]
+
+[[actions]]
+id = "pick"
+title = "utena: go to session"
+command = ["./bin/utena", "open-pick"]
+
+[[panes]]
+id = "picker"
+title = "go to"
+placement = "popup"
+width = "70%"
+height = "60%"
+command = ["./bin/utena", "pick"]
+
+[[actions]]
+id = "doctor"
+title = "utena: doctor"
+command = ["./bin/utena", "doctor"]
+
+[[actions]]
+id = "ping"
+title = "utena: ping"
+command = ["./bin/utena", "ping"]
+
+[[actions]]
+id = "list"
+title = "utena: list sessions"
+command = ["./bin/utena", "list"]

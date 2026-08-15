@@ -50,6 +50,13 @@ tasks:
       - mkdir -p ~/.config/tmux/plugins/utena-tmux
       - cp -r plugins/utena-tmux/ ~/.config/tmux/plugins/utena-tmux/
 
+  plugin:build:
+    dir: plugins/utena
+    sources:
+      - '**/*.go'
+    cmds:
+      - sh scripts/build.sh
+
   install:
     cmds:
       - task: daemon:install
