@@ -109,10 +109,6 @@ type sessionsLoadedMsg struct {
 	sessions []session.Session
 }
 
-type sessionActivatedMsg struct {
-	tmuxSessionName string
-}
-
 type SessionCreatedMsg struct {
 	ID     uint
 	Status session.SessionStatus
@@ -223,9 +219,6 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 
 	case SessionCreatedMsg:
 		return p, p.client.fetchSessions()
-
-	case sessionActivatedMsg:
-		return p, p.client.switchTmuxSession(msg.tmuxSessionName)
 
 	case deleteSessionIntentMsg:
 		return p, p.client.deleteSession(msg.id, msg.force)

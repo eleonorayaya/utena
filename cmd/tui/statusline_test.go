@@ -19,7 +19,7 @@ func TestFormatStatusLine(t *testing.T) {
 		{Name: "finished", Attention: claude.StatusDone},
 	}
 
-	want := "#[fg=red,bold]! urgent#[default] #[fg=green]✓ review#[default]"
+	want := "! urgent ✓ review"
 	if got := formatStatusLine(rows); got != want {
 		t.Fatalf("needs_attention must sort before ready_for_review regardless of input order: got %q, want %q", got, want)
 	}

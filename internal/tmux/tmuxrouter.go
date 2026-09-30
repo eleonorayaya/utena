@@ -18,8 +18,9 @@ func (tr *TmuxRouter) Routes() chi.Router {
 	r := chi.NewRouter()
 
 	r.Put("/hooks/{event}", tr.controller.HandleHook)
-	r.Put("/windows", tr.controller.HandleSyncWindows)
 	r.Get("/windows/{sessionName}", tr.controller.HandleGetWindows)
+	r.Get("/sessions/{sessionName}/env/{key}", tr.controller.HandleGetSessionEnv)
+	r.Get("/activations/next", tr.controller.HandleNextActivation)
 
 	return r
 }

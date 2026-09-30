@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"context"
 	"fmt"
 	"sync"
 )
@@ -9,6 +10,7 @@ type SpawnedWindow struct {
 	SessionName string
 	StartDir    string
 	Command     string
+	Env         map[string]string
 }
 
 type MockRunner struct {
@@ -25,13 +27,14 @@ func NewMockRunner() *MockRunner {
 	return &MockRunner{Sessions: make(map[string]bool)}
 }
 
-func (m *MockRunner) newWindow(sessionName, startDir, command string) error {
+func (m *MockRunner) newWindow(sessionName, startDir, command string, env map[string]string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.SpawnedWindows = append(m.SpawnedWindows, SpawnedWindow{
 		SessionName: sessionName,
 		StartDir:    startDir,
 		Command:     command,
+		Env:         env,
 	})
 	return nil
 }
@@ -71,10 +74,6 @@ func (m *MockRunner) hasSession(name string) bool {
 	return m.Sessions[name]
 }
 
-func (m *MockRunner) switchClient(targetSession string) error {
-	return nil
-}
-
 func (m *MockRunner) listSessionNames() ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -85,8 +84,13 @@ func (m *MockRunner) listSessionNames() ([]string, error) {
 	return names, nil
 }
 
-func (m *MockRunner) command(args ...string) (string, error) {
-	return "", nil
+func (m *MockRunner) listWindows(sessionName string) ([]Window, error) {
+	return nil, nil
+}
+
+func (m *MockRunner) subscribe(ctx context.Context, types []string, onEvent func(tuiosEvent)) error {
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func (m *MockRunner) SetCreateErr(err error) {

@@ -211,7 +211,7 @@ External tools (git, tmux) are wrapped behind an interface with an `exec.Command
 
 This keeps the wrapper's internals private and allows mock injection in tests without modifying production code.
 
-See: `internal/git/gitcli.go`, `internal/tmux/tmuxclient.go`
+See: `internal/git/gitcli.go`, `internal/tmux/tuiosclient.go`
 
 ---
 

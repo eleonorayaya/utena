@@ -6,10 +6,9 @@
 
 ## System Components
 
-Utena consists of three main components:
+Utena consists of two main components, driving [tuios](https://tuios.dev):
 - **daemon** — HTTP API server managing workspace and session state
 - **tui** — Terminal UI client for user interaction
-- **tmux plugin** — TPM plugin that registers tmux hooks to sync state with the daemon
 
 ---
 
@@ -35,11 +34,11 @@ monitor (depends on: session, eventbus)
 ### Event Flow
 
 ```
-tmux hooks → TmuxService → EventBus → SessionService
+tuios event stream → TmuxService → EventBus → SessionService
 SessionService → (direct calls) → TmuxService
 ```
 
-- Tmux hook events (session created, client attached, etc.) are published on the event bus and consumed by SessionService to update session state
+- tuios events (session created/closed) and `utena attach` client hooks (attached, detached, session changed) are published on the event bus and consumed by SessionService to update session state
 - SessionService calls TmuxService directly for session lifecycle operations (spawn, kill)
 
 See: `internal/eventbus/events.go`, `internal/session/sessionservice.go`, `internal/tmux/tmuxservice.go`
@@ -48,28 +47,29 @@ See: `internal/eventbus/events.go`, `internal/session/sessionservice.go`, `inter
 
 ## Communication Patterns
 
-### tmux hooks → Daemon (State Sync)
+### tuios → Daemon (State Sync)
 
-HTTP PUT `/tmux/hooks/{event}` with session name from tmux hook.
+`TmuxService.followEvents` holds a `subscribe` connection on the tuios control socket.
 
 Flow:
-1. tmux fires a hook (e.g., session-created, client-session-changed)
-2. TPM plugin's `hook.sh` sends HTTP request to daemon
-3. TmuxController receives request, extracts event type
-4. TmuxService publishes event on event bus
-5. SessionService handler updates session state
+1. On every (re)subscribe, TmuxService resyncs `TmuxSession.Status` and window lists from `list-sessions`/`list-windows`
+2. `session-created`/`session-closed` update the record and publish on the event bus; a close of a record utena already marked inactive (its own kill) is not republished
+3. Window events refresh that session's cached window list
+4. SessionService handler updates session state
 
-See: `internal/tmux/tmuxservice.go`
+If the tuios daemon is down, the runner runs `tuios start-server`, which restores saved sessions.
 
-### Daemon → tmux (Session Lifecycle)
+See: `internal/tmux/tmuxservice.go`, `internal/tmux/tuiosclient.go`
 
-SessionService calls TmuxService directly to manage tmux sessions.
+### Daemon → tuios (Session Lifecycle)
+
+SessionService calls TmuxService directly to manage tuios sessions.
 
 Flow:
 1. HTTP POST `/sessions` creates new session record
 2. SessionService calls TmuxService to register a pending tmux session
 3. Background setup goroutine calls TmuxService to spawn the session
-4. Tmux session becomes active
+4. tuios session becomes active
 
 See: `internal/session/sessionservice.go`, `internal/tmux/tmuxservice.go`
 
@@ -89,12 +89,13 @@ See: `internal/monitor/`, `cmd/tui/monitor.go`, `plugins/utena-claude/monitors/m
 
 ### TUI → Daemon
 
-HTTP requests to fetch session/workspace data. Session switching via `tmux switch-client`.
+HTTP requests to fetch session/workspace data. tuios has no programmatic `switch-client`, so switching goes through the `utena attach` wrapper.
 
 Flow:
 1. TUI fetches `/sessions` endpoint
 2. SessionController returns current state
 3. TUI renders in terminal
-4. User selects session → TUI calls `tmux switch-client -t <name>`
+4. User selects session → TUI calls `PUT /sessions/{id}/activate` → `SessionActivated` is published
+5. `utena attach` (long-polling `GET /tmux/activations/next`) sends SIGTERM to its `tuios attach` child, which detaches, then attaches the new session
 
-See: `internal/tui/provider/client.go`
+See: `internal/tui/provider/client.go`, `cmd/tui/attach.go`

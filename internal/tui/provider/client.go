@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/GianlucaP106/gotmux/gotmux"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
@@ -232,18 +231,7 @@ func (c *client) activateSession(id uint) tea.Cmd {
 			return parseAPIError(res, "activate session")
 		}
 
-		var resp struct {
-			TmuxSession *struct {
-				Name string `json:"name"`
-			} `json:"tmux_session"`
-		}
-		json.NewDecoder(res.Body).Decode(&resp)
-
-		tmuxName := ""
-		if resp.TmuxSession != nil {
-			tmuxName = resp.TmuxSession.Name
-		}
-		return sessionActivatedMsg{tmuxSessionName: tmuxName}
+		return SessionSwitchedMsg{}
 	}
 }
 
@@ -681,19 +669,5 @@ func (c *client) getSession(id uint) tea.Cmd {
 		}
 
 		return sessionPolledMsg{session: *resp.Session}
-	}
-}
-
-func (c *client) switchTmuxSession(name string) tea.Cmd {
-	return func() tea.Msg {
-		t, err := gotmux.DefaultTmux()
-		if err != nil {
-			log.Printf("[ERROR] gotmux init failed: %v", err)
-			return ErrMsg{err}
-		}
-		if err := t.SwitchClient(&gotmux.SwitchClientOptions{TargetSession: name}); err != nil {
-			log.Printf("[ERROR] tmux switch-client failed: %v", err)
-		}
-		return SessionSwitchedMsg{}
 	}
 }

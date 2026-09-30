@@ -245,32 +245,22 @@ func TestDaemon_ListSessions(t *testing.T) {
 	require.True(t, names["session-2"])
 }
 
-func TestDaemon_TmuxHookSessionCreated(t *testing.T) {
-	_, router, _, ws1ID, _ := setupTestRouter(t)
+func TestDaemon_TuiosSessionCreated(t *testing.T) {
+	app, router, _, ws1ID, _ := setupTestRouter(t)
 
 	body := fmt.Sprintf(`{"name":"test-session","workspaces":[{"workspace_id":%d,"base_branch":"main"}]}`, ws1ID)
 	createResp := createSessionViaAPI(t, router, body)
 
 	waitForSessionStatus(t, router, createResp.ID, session.StatusActive, 5*time.Second)
 
-	hookBody := []byte(`{"session_name":"test-session"}`)
-	req := httptest.NewRequest("PUT", "/tmux/hooks/session-created", bytes.NewReader(hookBody))
-	req.Header.Set("Content-Type", "application/json")
+	require.NoError(t, app.Tmux.Service.HandleSessionCreated(context.Background(), "test-session"))
+
+	req := httptest.NewRequest("GET", "/sessions", nil)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var hookResponse map[string]string
-	err := json.Unmarshal(w.Body.Bytes(), &hookResponse)
-	require.NoError(t, err)
-	require.Equal(t, "ok", hookResponse["status"])
-
-	req = httptest.NewRequest("GET", "/sessions", nil)
-	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	var sessionsResponse session.SessionListResponse
-	err = json.Unmarshal(w.Body.Bytes(), &sessionsResponse)
+	err := json.Unmarshal(w.Body.Bytes(), &sessionsResponse)
 	require.NoError(t, err)
 	require.Len(t, sessionsResponse.Sessions, 1)
 
@@ -288,23 +278,18 @@ func findSessionByTmuxName(sessions []*session.SessionResponse, tmuxName string)
 	return nil
 }
 
-func TestDaemon_TmuxHookSessionClosed(t *testing.T) {
-	_, router, _, ws1ID, _ := setupTestRouter(t)
+func TestDaemon_TuiosSessionClosed(t *testing.T) {
+	app, router, _, ws1ID, _ := setupTestRouter(t)
 
 	body := fmt.Sprintf(`{"name":"test-session","workspaces":[{"workspace_id":%d,"base_branch":"main"}]}`, ws1ID)
 	createResp := createSessionViaAPI(t, router, body)
 
 	waitForSessionStatus(t, router, createResp.ID, session.StatusActive, 5*time.Second)
 
-	hookBody := []byte(`{"session_name":"test-session"}`)
-	req := httptest.NewRequest("PUT", "/tmux/hooks/session-closed", bytes.NewReader(hookBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, app.Tmux.Service.HandleSessionClosed(context.Background(), "test-session"))
 
-	req = httptest.NewRequest("GET", "/sessions", nil)
-	w = httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/sessions", nil)
+	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	var sessionsResponse session.SessionListResponse

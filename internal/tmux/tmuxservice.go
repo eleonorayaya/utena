@@ -3,21 +3,38 @@ package tmux
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
+	"time"
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
 )
 
-var ErrTmuxNotAvailable = errors.New("tmux is not available")
+var ErrTmuxNotAvailable = errors.New("tuios is not available")
+
+var followedTuiosEvents = []string{
+	"session-created",
+	"session-closed",
+	"window-created",
+	"window-closed",
+	"window-retitled",
+	"window-focused",
+	"window-moved",
+	"workspace-switched",
+	"gap",
+}
 
 type TmuxService struct {
-	runner           tmuxRunner
-	store            *TmuxStore
-	eventBus         eventbus.EventBus
-	windowsBySession map[string][]Window
-	windowsMu        sync.RWMutex
-	nameLocks        sync.Map
+	runner            tmuxRunner
+	store             *TmuxStore
+	eventBus          eventbus.EventBus
+	windowsBySession  map[string][]Window
+	windowsMu         sync.RWMutex
+	nameLocks         sync.Map
+	activationsMu     sync.Mutex
+	activationWaiters []chan string
 }
 
 func (t *TmuxService) lockName(name string) func() {
@@ -28,19 +45,138 @@ func (t *TmuxService) lockName(name string) func() {
 }
 
 func NewTmuxService(runner tmuxRunner, store *TmuxStore, bus eventbus.EventBus) *TmuxService {
-	return &TmuxService{
+	t := &TmuxService{
 		runner:           runner,
 		store:            store,
 		eventBus:         bus,
 		windowsBySession: make(map[string][]Window),
 	}
+	bus.Subscribe(eventbus.SessionActivated, t.handleSessionActivated)
+	return t
 }
 
 func (t *TmuxService) OnAppStart(ctx context.Context) error {
 	if err := t.store.BackfillStatus(); err != nil {
 		slog.WarnContext(ctx, "tmux: backfill status from is_alive failed", "error", err)
 	}
+	if t.runner != nil {
+		go t.followEvents(ctx)
+	}
 	return nil
+}
+
+func (t *TmuxService) followEvents(ctx context.Context) {
+	for ctx.Err() == nil {
+		err := t.runner.subscribe(ctx, followedTuiosEvents, func(ev tuiosEvent) {
+			t.handleTuiosEvent(ctx, ev)
+		})
+		if ctx.Err() != nil {
+			return
+		}
+		slog.Warn("tuios event stream ended; reconnecting", "error", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func (t *TmuxService) handleTuiosEvent(ctx context.Context, ev tuiosEvent) {
+	var err error
+	switch ev.Type {
+	case tuiosEventSubscribed, "gap":
+		t.resync()
+	case "session-created":
+		err = t.HandleSessionCreated(ctx, ev.Session)
+		t.refreshWindows(ev.Session)
+	case "session-closed":
+		err = t.HandleSessionClosed(ctx, ev.Session)
+	default:
+		t.refreshWindows(ev.Session)
+	}
+	if err != nil {
+		slog.Warn("tuios event handler failed", "type", ev.Type, "session", ev.Session, "error", err)
+	}
+}
+
+func (t *TmuxService) resync() {
+	names, err := t.runner.listSessionNames()
+	if err != nil {
+		slog.Warn("tuios resync: list-sessions failed", "error", err)
+		return
+	}
+	for _, ts := range t.store.List() {
+		alive := slices.Contains(names, ts.Name)
+		switch {
+		case alive && ts.Status == TmuxStatusInactive:
+			ts.Status = TmuxStatusActive
+		case !alive && ts.Status == TmuxStatusActive:
+			ts.Status = TmuxStatusInactive
+		default:
+			continue
+		}
+		if err := t.store.Update(&ts); err != nil {
+			slog.Warn("tuios resync: update failed", "tmux", ts.Name, "error", err)
+		}
+	}
+	for _, name := range names {
+		t.refreshWindows(name)
+	}
+}
+
+func (t *TmuxService) refreshWindows(sessionName string) {
+	if sessionName == "" {
+		return
+	}
+	windows, err := t.runner.listWindows(sessionName)
+	if err != nil {
+		slog.Debug("tuios list-windows failed", "session", sessionName, "error", err)
+		return
+	}
+	t.windowsMu.Lock()
+	defer t.windowsMu.Unlock()
+	t.windowsBySession[sessionName] = windows
+}
+
+func (t *TmuxService) handleSessionActivated(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(eventbus.SessionActivatedEvent)
+	if !ok {
+		return fmt.Errorf("unexpected event data type: %T", event.Data)
+	}
+	t.activationsMu.Lock()
+	defer t.activationsMu.Unlock()
+	for _, ch := range t.activationWaiters {
+		ch <- data.SessionName
+	}
+	t.activationWaiters = nil
+	return nil
+}
+
+func (t *TmuxService) WaitForActivation(ctx context.Context) (string, error) {
+	ch := make(chan string, 1)
+	t.activationsMu.Lock()
+	t.activationWaiters = append(t.activationWaiters, ch)
+	t.activationsMu.Unlock()
+
+	select {
+	case name := <-ch:
+		return name, nil
+	case <-ctx.Done():
+		t.activationsMu.Lock()
+		t.activationWaiters = slices.DeleteFunc(t.activationWaiters, func(c chan string) bool { return c == ch })
+		t.activationsMu.Unlock()
+		return "", ctx.Err()
+	}
+}
+
+func (t *TmuxService) SessionEnv(name, key string) (string, bool) {
+	ts, err := t.store.GetByName(name)
+	if err != nil {
+		return "", false
+	}
+	v, ok := ts.Env[key]
+	return v, ok
 }
 
 func (t *TmuxService) OnAppEnd(ctx context.Context) error {
@@ -161,60 +297,11 @@ func (t *TmuxService) KillSession(id uint) error {
 	return t.store.Update(ts)
 }
 
-func (t *TmuxService) KillSessionByName(name string) error {
-	if t.runner == nil {
-		return ErrTmuxNotAvailable
-	}
-	defer t.lockName(name)()
-	if err := t.runner.killSession(name); err != nil {
-		return err
-	}
-	ts, err := t.store.GetByName(name)
-	if err != nil {
-		if errors.Is(err, ErrTmuxSessionNotFound) {
-			return nil
-		}
-		return err
-	}
-	ts.Status = TmuxStatusInactive
-	return t.store.Update(ts)
-}
-
-func (t *TmuxService) RecreateSession(id uint) error {
-	if t.runner == nil {
-		return ErrTmuxNotAvailable
-	}
-	ts, err := t.store.GetByID(id)
-	if err != nil {
-		return err
-	}
-	defer t.lockName(ts.Name)()
-	if err := t.runner.newSession(ts.Name, ts.StartDir, ts.Env); err != nil {
-		return err
-	}
-	ts.Status = TmuxStatusActive
-	return t.store.Update(ts)
-}
-
 func (t *TmuxService) HasSession(name string) bool {
 	if t.runner == nil {
 		return false
 	}
 	return t.runner.hasSession(name)
-}
-
-func (t *TmuxService) SwitchClient(targetSession string) error {
-	if t.runner == nil {
-		return ErrTmuxNotAvailable
-	}
-	return t.runner.switchClient(targetSession)
-}
-
-func (t *TmuxService) GetCurrentSessionName(paneID string) (string, error) {
-	if t.runner == nil {
-		return "", ErrTmuxNotAvailable
-	}
-	return t.runner.command("display-message", "-p", "-t", paneID, "#{session_name}")
 }
 
 func (t *TmuxService) GetSession(id uint) (*TmuxSession, error) {
@@ -254,21 +341,8 @@ func (t *TmuxService) GetOrTrackSession(name, startDir string, env map[string]st
 	return ts, nil
 }
 
-func (t *TmuxService) ListSessionNames() ([]string, error) {
-	if t.runner == nil {
-		return nil, ErrTmuxNotAvailable
-	}
-	return t.runner.listSessionNames()
-}
-
 func (t *TmuxService) HandleSessionCreated(ctx context.Context, tmuxName string) error {
-	ts, err := t.store.GetByName(tmuxName)
-	if err == nil {
-		ts.Status = TmuxStatusActive
-		if updateErr := t.store.Update(ts); updateErr != nil {
-			slog.Warn("failed to mark tmux session active", "tmux", tmuxName, "error", updateErr)
-		}
-	}
+	t.setStatus(tmuxName, TmuxStatusActive)
 	return t.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.TmuxSessionCreated,
 		Data: eventbus.TmuxHookEvent{TmuxSessionName: tmuxName},
@@ -276,20 +350,32 @@ func (t *TmuxService) HandleSessionCreated(ctx context.Context, tmuxName string)
 }
 
 func (t *TmuxService) HandleSessionClosed(ctx context.Context, tmuxName string) error {
-	ts, err := t.store.GetByName(tmuxName)
-	if err == nil {
-		ts.Status = TmuxStatusInactive
-		if updateErr := t.store.Update(ts); updateErr != nil {
-			slog.Warn("failed to mark tmux session inactive", "tmux", tmuxName, "error", updateErr)
-		}
-	}
 	t.windowsMu.Lock()
 	delete(t.windowsBySession, tmuxName)
 	t.windowsMu.Unlock()
+	if prev, found := t.setStatus(tmuxName, TmuxStatusInactive); found && prev != TmuxStatusActive {
+		return nil
+	}
 	return t.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.TmuxSessionClosed,
 		Data: eventbus.TmuxHookEvent{TmuxSessionName: tmuxName},
 	})
+}
+
+func (t *TmuxService) setStatus(tmuxName string, status TmuxSessionStatus) (TmuxSessionStatus, bool) {
+	defer t.lockName(tmuxName)()
+	ts, err := t.store.GetByName(tmuxName)
+	if err != nil {
+		return "", false
+	}
+	prev := ts.Status
+	if prev != status {
+		ts.Status = status
+		if err := t.store.Update(ts); err != nil {
+			slog.Warn("failed to update tmux session status", "tmux", tmuxName, "status", status, "error", err)
+		}
+	}
+	return prev, true
 }
 
 func (t *TmuxService) HandleClientSessionChanged(ctx context.Context, tmuxName string) error {
@@ -317,13 +403,11 @@ func (t *TmuxService) SpawnWindow(sessionName, startDir, command string) error {
 	if t.runner == nil {
 		return ErrTmuxNotAvailable
 	}
-	return t.runner.newWindow(sessionName, startDir, command)
-}
-
-func (t *TmuxService) SyncWindows(ctx context.Context, tmuxName string, windows []Window) {
-	t.windowsMu.Lock()
-	defer t.windowsMu.Unlock()
-	t.windowsBySession[tmuxName] = windows
+	var env map[string]string
+	if ts, err := t.store.GetByName(sessionName); err == nil {
+		env = ts.Env
+	}
+	return t.runner.newWindow(sessionName, startDir, command, env)
 }
 
 func (t *TmuxService) GetWindows(ctx context.Context, tmuxName string) []Window {

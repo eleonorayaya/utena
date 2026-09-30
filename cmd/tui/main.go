@@ -23,7 +23,7 @@ var (
 func main() {
 	rootCmd := &cobra.Command{
 		Use:          "utena",
-		Short:        "Utena workspace manager for tmux",
+		Short:        "Utena workspace manager for tuios",
 		SilenceUsage: true,
 		RunE:         runTUI,
 	}
@@ -37,6 +37,7 @@ func main() {
 	rootCmd.AddCommand(sessionsCmd())
 	rootCmd.AddCommand(statusLineCmd())
 	rootCmd.AddCommand(monitorCmd())
+	rootCmd.AddCommand(attachCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

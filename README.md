@@ -1,6 +1,6 @@
 # Utena
 
-A workspace management system for tmux, consisting of a daemon API server, TUI client, and TPM plugin.
+A workspace management system for [tuios](https://tuios.dev), consisting of a daemon API server and a TUI client.
 
 ## Documentation
 
@@ -23,15 +23,35 @@ task tui:install     # builds and copies to /usr/local/bin/utena
 task daemon:install  # builds and installs daemon
 ```
 
-#### TPM Plugin
+#### tuios
 
-Add to your `.tmux.conf`:
+Requires `tuios` on the daemon's `PATH`. The daemon talks to the tuios daemon over its control socket (`$TUIOS_SOCKET`, else `$XDG_RUNTIME_DIR/tuios/tuios.sock`, else `/tmp/tuios-<uid>/tuios.sock`), starts it if it isn't running, and follows its event stream to keep session and window state in sync.
 
+Start your terminal with `utena attach` instead of `tuios attach`. It runs `tuios attach` and reattaches to whatever session you pick in the utena TUI (tuios has no programmatic `switch-client`, so the wrapper restarts the client on the chosen session).
+
+Add to `~/.config/tuios/config.toml`:
+
+```toml
+[[keybindings.command]]
+key = "prefix+p"
+type = "popup"
+command = "utena"
+description = "utena sessions"
+
+[[keybindings.command]]
+key = "prefix+t"
+type = "popup"
+command = "utena new-task"
+description = "utena new task"
+
+[dock]
+right = ["custom/utena", "notifications", "clock"]
+
+[dock.custom.utena]
+command = "utena status-line"
+refresh = "5s"
+max-width = 60
 ```
-set -g @plugin 'path/to/utena/plugins/utena-tmux'
-```
-
-This registers tmux hooks for session state sync and binds `prefix + p` to open the utena TUI in a popup.
 
 #### Shell initialization
 
@@ -41,7 +61,7 @@ Add to your `.zshrc` (or `.bashrc`):
 eval "$(utena shell-init)"
 ```
 
-This sets up environment variables needed for utena integrations (like Claude Code status tracking) when running inside tmux.
+This sets up environment variables needed for utena integrations (like Claude Code status tracking) when running inside tuios. It resolves `UTENA_SESSION_ID` from `$TUIOS_SESSION`, so panes you open by hand are attributed to the right session.
 
 #### Claude Code integration
 
@@ -49,7 +69,7 @@ Utena can track Claude Code session status (working, needs attention, completed)
 
 1. Install the `utena-claude` plugin in Claude Code — point it at this repo's `.claude-plugin/marketplace.json`
 2. Ensure `eval "$(utena shell-init)"` is in your shell profile (see above)
-3. Start the daemon and use Claude Code inside a tmux session managed by utena — the TUI will show Claude's status next to each session
+3. Start the daemon and use Claude Code inside a tuios session managed by utena — the TUI will show Claude's status next to each session
 
 ## Theming
 
