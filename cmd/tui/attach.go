@@ -64,7 +64,7 @@ func attachUntilSwitch(ctx context.Context, port, target string) (string, error)
 				}
 				continue
 			}
-			if name != "" && name != target {
+			if name != "" {
 				switched <- name
 				_ = child.Process.Signal(syscall.SIGTERM)
 				return

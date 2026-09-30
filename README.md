@@ -51,7 +51,12 @@ right = ["custom/utena", "notifications", "clock"]
 command = "utena status-line"
 refresh = "5s"
 max-width = 60
+
+[hooks]
+after-attach = '''curl -sf --max-time 1 -X PUT -H 'Content-Type: application/json' -d "{\"session_name\":\"$TUIOS_SESSION_ID\"}" http://localhost:3333/tmux/hooks/client-session-changed'''
 ```
+
+The `after-attach` hook also fires when you switch sessions with tuios's own switcher (`Ctrl+B S`), which keeps utena's attached session accurate. A config error makes tuios discard the whole file, and `right` replaces the default dock list, so check with `tuios list-hooks` and `tuios list-dock-components` after editing.
 
 #### Shell initialization
 
