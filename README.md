@@ -29,34 +29,7 @@ Requires `tuios` on the daemon's `PATH`. The daemon talks to the tuios daemon ov
 
 Start your terminal with `utena attach` instead of `tuios attach`. It runs `tuios attach` and reattaches to whatever session you pick in the utena TUI (tuios has no programmatic `switch-client`, so the wrapper restarts the client on the chosen session).
 
-Add to `~/.config/tuios/config.toml`:
-
-```toml
-[[keybindings.command]]
-key = "prefix+p"
-type = "popup"
-command = "utena"
-description = "utena sessions"
-
-[[keybindings.command]]
-key = "prefix+t"
-type = "popup"
-command = "utena new-task"
-description = "utena new task"
-
-[dock]
-right = ["custom/utena", "notifications", "clock"]
-
-[dock.custom.utena]
-command = "utena status-line"
-refresh = "5s"
-max-width = 60
-
-[hooks]
-after-attach = '''curl -sf --max-time 1 -X PUT -H 'Content-Type: application/json' -d "{\"session_name\":\"$TUIOS_SESSION_ID\"}" http://localhost:3333/tmux/hooks/client-session-changed'''
-```
-
-The `after-attach` hook also fires when you switch sessions with tuios's own switcher (`Ctrl+B S`), which keeps utena's attached session accurate. A config error makes tuios discard the whole file, and `right` replaces the default dock list, so check with `tuios list-hooks` and `tuios list-dock-components` after editing.
+The tuios side (`prefix+p` / `prefix+t` popups, the `custom/utena` dock cell running `utena status-line`, and an `after-attach` hook that keeps the attached session accurate when you switch with `Ctrl+B S`) is deployed from dotfiles: `programs/tuios/contents/config.toml`.
 
 #### Shell initialization
 
