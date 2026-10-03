@@ -238,3 +238,15 @@ func (r *tuiosRunner) subscribe(ctx context.Context, types []string, onEvent fun
 	}
 	return errors.New("tuios event stream closed")
 }
+
+func CloseWindow(session, window string) error {
+	if session == "" || window == "" {
+		return errors.New("close-window needs an explicit session and window")
+	}
+	r := &tuiosRunner{socketPath: tuiosSocketPath()}
+	err := r.call("close-window", map[string]any{"session": session, "window": window}, nil)
+	if isTuiosCode(err, "window_not_found") || isTuiosCode(err, "session_not_found") {
+		return nil
+	}
+	return err
+}

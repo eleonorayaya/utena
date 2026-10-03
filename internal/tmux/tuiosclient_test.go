@@ -136,3 +136,21 @@ func TestTuiosRunner_DaemonDownIsAnErrorNotAStart(t *testing.T) {
 	assert.Contains(t, err.Error(), "utena attach")
 	assert.NoFileExists(t, sock)
 }
+
+func TestCloseWindow_TargetsSessionAndWindowAndToleratesGone(t *testing.T) {
+	r, d := startFakeTuios(t, map[string]string{
+		"close-window": `{"id":1,"error":{"code":"window_not_found","message":"gone"}}`,
+	})
+	t.Setenv("TUIOS_SOCKET", r.socketPath)
+
+	require.NoError(t, CloseWindow("work", "abc"))
+	req := d.last()
+	assert.Equal(t, "close-window", req.Verb)
+	assert.Equal(t, "work", req.Params["session"])
+	assert.Equal(t, "abc", req.Params["window"])
+}
+
+func TestCloseWindow_RefusesEmptyTargets(t *testing.T) {
+	require.Error(t, CloseWindow("work", ""))
+	require.Error(t, CloseWindow("", "abc"))
+}
