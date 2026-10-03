@@ -66,14 +66,19 @@ func (t *TmuxService) OnAppStart(ctx context.Context) error {
 }
 
 func (t *TmuxService) followEvents(ctx context.Context) {
+	lastErr := ""
 	for ctx.Err() == nil {
 		err := t.runner.subscribe(ctx, followedTuiosEvents, func(ev tuiosEvent) {
+			lastErr = ""
 			t.handleTuiosEvent(ctx, ev)
 		})
 		if ctx.Err() != nil {
 			return
 		}
-		slog.Warn("tuios event stream ended; reconnecting", "error", err)
+		if err != nil && err.Error() != lastErr {
+			lastErr = err.Error()
+			slog.Warn("tuios event stream unavailable; retrying", "error", err)
+		}
 		select {
 		case <-ctx.Done():
 			return

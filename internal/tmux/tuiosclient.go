@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -49,17 +48,11 @@ func isTuiosCode(err error, code string) bool {
 }
 
 type tuiosRunner struct {
-	bin        string
 	socketPath string
 }
 
 func newTuiosRunner() tmuxRunner {
-	bin, err := exec.LookPath("tuios")
-	if err != nil {
-		slog.Warn("tuios binary not found", "error", err)
-		return nil
-	}
-	return &tuiosRunner{bin: bin, socketPath: tuiosSocketPath()}
+	return &tuiosRunner{socketPath: tuiosSocketPath()}
 }
 
 func tuiosSocketPath() string {
@@ -74,13 +67,10 @@ func tuiosSocketPath() string {
 
 func (r *tuiosRunner) dial() (net.Conn, error) {
 	conn, err := net.DialTimeout("unix", r.socketPath, 2*time.Second)
-	if err == nil {
-		return conn, nil
+	if err != nil {
+		return nil, fmt.Errorf("tuios daemon not running at %s (start it with `utena attach`): %w", r.socketPath, err)
 	}
-	if out, startErr := exec.Command(r.bin, "start-server").CombinedOutput(); startErr != nil {
-		return nil, fmt.Errorf("tuios daemon unreachable (%w) and start-server failed: %v: %s", err, startErr, out)
-	}
-	return net.DialTimeout("unix", r.socketPath, 2*time.Second)
+	return conn, nil
 }
 
 func (r *tuiosRunner) call(verb string, params map[string]any, out any) error {

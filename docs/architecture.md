@@ -57,7 +57,7 @@ Flow:
 3. Window events refresh that session's cached window list
 4. SessionService handler updates session state
 
-If the tuios daemon is down, the runner runs `tuios start-server`, which restores saved sessions.
+The daemon never starts tuios itself: a tuios daemon started from launchd would hand every pane, popup and hook launchd's minimal environment. Start tuios from a terminal with `utena attach`; until then, tuios calls fail and the event follower keeps retrying.
 
 See: `internal/tmux/tmuxservice.go`, `internal/tmux/tuiosclient.go`
 

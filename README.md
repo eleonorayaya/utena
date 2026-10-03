@@ -25,9 +25,9 @@ task daemon:install  # builds and installs daemon
 
 #### tuios
 
-Requires `tuios` on the daemon's `PATH`. The daemon talks to the tuios daemon over its control socket (`$TUIOS_SOCKET`, else `$XDG_RUNTIME_DIR/tuios/tuios.sock`, else `/tmp/tuios-<uid>/tuios.sock`), starts it if it isn't running, and follows its event stream to keep session and window state in sync.
+The daemon talks to the tuios daemon over its control socket (`$TUIOS_SOCKET`, else `$XDG_RUNTIME_DIR/tuios/tuios.sock`, else `/tmp/tuios-<uid>/tuios.sock`) and follows its event stream to keep session and window state in sync.
 
-Start your terminal with `utena attach` instead of `tuios attach`. It runs `tuios attach` and reattaches to whatever session you pick in the utena TUI (tuios has no programmatic `switch-client`, so the wrapper restarts the client on the chosen session).
+Start your terminal with `utena attach` instead of `tuios attach`. The utena daemon never starts tuios itself (a launchd-started tuios would give every pane and popup launchd's minimal environment), so `utena attach` is also what brings the tuios daemon up. It runs `tuios attach` and reattaches to whatever session you pick in the utena TUI (tuios has no programmatic `switch-client`, so the wrapper restarts the client on the chosen session).
 
 The tuios side (`prefix+p` / `prefix+t` popups, the `custom/utena` dock cell running `utena status-line`, and an `after-attach` hook that keeps the attached session accurate when you switch with `Ctrl+B S`) is deployed from dotfiles: `programs/tuios/contents/config.toml`.
 

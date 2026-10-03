@@ -45,7 +45,7 @@ func startFakeTuios(t *testing.T, replies map[string]string) (*tuiosRunner, *fak
 			go d.serve(conn)
 		}
 	}()
-	return &tuiosRunner{bin: "false", socketPath: sock}, d
+	return &tuiosRunner{socketPath: sock}, d
 }
 
 func (d *fakeTuiosDaemon) serve(conn net.Conn) {
@@ -122,4 +122,17 @@ func TestTuiosRunner_ListWindowsAndHasSession(t *testing.T) {
 
 	assert.True(t, r.hasSession("work"))
 	assert.False(t, r.hasSession("other"))
+}
+
+func TestTuiosRunner_DaemonDownIsAnErrorNotAStart(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "tuios-test")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "tuios.sock")
+	r := &tuiosRunner{socketPath: sock}
+
+	err = r.newSession("work", "/src", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "utena attach")
+	assert.NoFileExists(t, sock)
 }
