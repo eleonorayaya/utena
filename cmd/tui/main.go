@@ -39,6 +39,7 @@ func main() {
 	rootCmd.AddCommand(statusLineCmd())
 	rootCmd.AddCommand(monitorCmd())
 	rootCmd.AddCommand(attachCmd())
+	rootCmd.AddCommand(workspaceCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
