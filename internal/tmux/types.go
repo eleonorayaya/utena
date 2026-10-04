@@ -15,12 +15,3 @@ type Window struct {
 	Name   string `json:"name"`
 	Active bool   `json:"active"`
 }
-
-type SyncWindowsRequest struct {
-	SessionName string   `json:"session_name"`
-	Windows     []Window `json:"windows"`
-}
-
-func (s *SyncWindowsRequest) Bind(r *http.Request) error {
-	return nil
-}

@@ -15,7 +15,7 @@ type TmuxModule struct {
 }
 
 func NewTmuxModule(bus eventbus.EventBus, database db.Database) *TmuxModule {
-	runner := newGotmuxRunner()
+	runner := newTuiosRunner()
 	store := NewTmuxStore(database)
 	service := NewTmuxService(runner, store, bus)
 	controller := NewTmuxController(service)

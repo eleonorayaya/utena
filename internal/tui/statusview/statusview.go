@@ -1,12 +1,10 @@
 package statusview
 
 import (
-	"os"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/GianlucaP106/gotmux/gotmux"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,32 +21,17 @@ const collapsedWidth = 14
 type tickMsg time.Time
 
 type Model struct {
-	sessions           []session.Session
-	tabs               map[uint]SessionTab
-	currentTmuxSession string
-	paneID             string
-	focused            bool
-	cursor             int
-	width              int
-	height             int
+	sessions []session.Session
+	tabs     map[uint]SessionTab
+	focused  bool
+	cursor   int
+	width    int
+	height   int
 }
 
 func New() Model {
-	paneID := os.Getenv("TMUX_PANE")
-	var currentSession string
-	if paneID != "" {
-		t, err := gotmux.DefaultTmux()
-		if err == nil {
-			output, err := t.Command("display-message", "-p", "-t", paneID, "#{session_name}")
-			if err == nil {
-				currentSession = strings.TrimSpace(output)
-			}
-		}
-	}
 	return Model{
-		paneID:             paneID,
-		currentTmuxSession: currentSession,
-		tabs:               make(map[uint]SessionTab),
+		tabs: make(map[uint]SessionTab),
 	}
 }
 
@@ -102,7 +85,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, m.syncTabs()
 
 	case provider.SessionSwitchedMsg:
-		m.focusNextPane()
 		m.focused = false
 		return m, nil
 
@@ -189,17 +171,6 @@ func (m Model) expandedView() string {
 	}
 
 	return strings.Join(parts, "\n")
-}
-
-func (m Model) focusNextPane() {
-	if m.paneID == "" {
-		return
-	}
-	t, err := gotmux.DefaultTmux()
-	if err != nil {
-		return
-	}
-	t.Command("select-pane", "-t", "{right-of}")
 }
 
 func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {

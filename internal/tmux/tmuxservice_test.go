@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -99,8 +100,6 @@ func TestTmuxService_ConcurrentKillCreateNoOverlap(t *testing.T) {
 			ts, err := svc.CreateSession("shared", "/tmp", nil)
 			if err == nil {
 				_ = svc.KillSession(ts.ID)
-			} else {
-				_ = svc.KillSessionByName("shared")
 			}
 		}()
 	}
@@ -202,4 +201,59 @@ func TestTmuxService_SpawnForRecord_DoubleSpawnIsSafe(t *testing.T) {
 
 	_, err = svc.SpawnForRecord(ts.ID)
 	require.NoError(t, err, "spawn should be idempotent if tmux process already exists by name")
+}
+
+func TestTmuxService_SessionClosedAfterUtenaKillIsNotPublished(t *testing.T) {
+	database := testdb.New(t, &TmuxSession{})
+	bus := eventbus.NewEventBus()
+	svc := NewTmuxService(NewMockRunner(), NewTmuxStore(database), bus)
+
+	var published int32
+	bus.Subscribe(eventbus.TmuxSessionClosed, func(ctx context.Context, e eventbus.Event) error {
+		atomic.AddInt32(&published, 1)
+		return nil
+	})
+
+	ts, err := svc.CreateSession("work", "/tmp", nil)
+	require.NoError(t, err)
+	require.NoError(t, svc.KillSession(ts.ID))
+	require.NoError(t, svc.HandleSessionClosed(context.Background(), "work"))
+	assert.Equal(t, int32(0), atomic.LoadInt32(&published), "utena-initiated kill must not surface as an external close")
+
+	_, err = svc.CreateSession("other", "/tmp", nil)
+	require.NoError(t, err)
+	require.NoError(t, svc.HandleSessionClosed(context.Background(), "other"))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&published), "external close of an active session is published")
+}
+
+func TestTmuxService_WaitForActivationReceivesActivatedSession(t *testing.T) {
+	svc := newTestService(t)
+	bus := svc.eventBus
+
+	got := make(chan string, 1)
+	go func() {
+		name, _ := svc.WaitForActivation(context.Background())
+		got <- name
+	}()
+	require.Eventually(t, func() bool {
+		svc.activationsMu.Lock()
+		defer svc.activationsMu.Unlock()
+		return len(svc.activationWaiters) == 1
+	}, time.Second, time.Millisecond)
+
+	require.NoError(t, bus.Publish(context.Background(), eventbus.Event{
+		Type: eventbus.SessionActivated,
+		Data: eventbus.SessionActivatedEvent{SessionName: "work"},
+	}))
+	assert.Equal(t, "work", <-got)
+}
+
+func TestTmuxService_WaitForActivationTimesOut(t *testing.T) {
+	svc := newTestService(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	_, err := svc.WaitForActivation(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Empty(t, svc.activationWaiters)
 }

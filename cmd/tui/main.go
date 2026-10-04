@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/eleonorayaya/utena/internal/shellinit"
+	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/tui"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
@@ -23,7 +24,7 @@ var (
 func main() {
 	rootCmd := &cobra.Command{
 		Use:          "utena",
-		Short:        "Utena workspace manager for tmux",
+		Short:        "Utena workspace manager for tuios",
 		SilenceUsage: true,
 		RunE:         runTUI,
 	}
@@ -37,6 +38,8 @@ func main() {
 	rootCmd.AddCommand(sessionsCmd())
 	rootCmd.AddCommand(statusLineCmd())
 	rootCmd.AddCommand(monitorCmd())
+	rootCmd.AddCommand(attachCmd())
+	rootCmd.AddCommand(workspaceCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -75,10 +78,19 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	loadTheme()
 
 	p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, router.SessionListView))
-	if _, err := p.Run(); err != nil {
-		return err
+	_, err := p.Run()
+	closeOwnPopup()
+	return err
+}
+
+func closeOwnPopup() {
+	window := os.Getenv("TUIOS_WINDOW_ID")
+	if os.Getenv("UTENA_POPUP") == "" || window == "" {
+		return
 	}
-	return nil
+	if err := tmux.CloseWindow(os.Getenv("TUIOS_SESSION"), window); err != nil {
+		log.Printf("[ERROR] close popup window: %v", err)
+	}
 }
 
 func todosCmd() *cobra.Command {
@@ -115,10 +127,9 @@ func newTaskCmd() *cobra.Command {
 				resolvedLogPath, port, router.TodoListView,
 				tui.WithNavigateTo(router.TodoFormView),
 			))
-			if _, err := p.Run(); err != nil {
-				return err
-			}
-			return nil
+			_, err := p.Run()
+			closeOwnPopup()
+			return err
 		},
 	}
 	return cmd

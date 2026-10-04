@@ -4,12 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Utena is a workspace management system for tmux, consisting of three interconnected components:
+Utena is a workspace management system for tuios, consisting of two interconnected components:
 - **daemon**: HTTP API server (Go) that manages workspace state and session information
 - **tui**: Terminal UI client (Go + Bubbletea) for interacting with the daemon
-- **tmux plugin**: TPM plugin (bash) that registers tmux hooks to sync session state with the daemon
 
-The architecture enables tmux hooks to detect session changes and push updates to the daemon via HTTP, while the TUI can query the daemon to display workspace information. The TUI is launched via `tmux display-popup`.
+The daemon drives tuios over its JSON control socket and follows the tuios event stream to track session and window state. The TUI queries the daemon to display workspace information and is launched from a tuios popup keybinding.
 
 ## Build & Run Commands
 
@@ -23,13 +22,13 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 
 ### Component Communication
 
-1. **tmux hooks → Daemon**: The TPM plugin registers tmux hooks (session-created, session-closed, client-session-changed, client-attached, client-detached) that send HTTP PUT requests to `http://localhost:3333/tmux/hooks/{event}` with session name
+1. **tuios → Daemon**: `TmuxService` holds a long-lived `subscribe` connection on the tuios socket. `session-created`/`session-closed` and window events update `TmuxSession` state and are republished on the eventbus. Every (re)subscribe resyncs from `list-sessions`/`list-windows`.
 
-2. **TUI → Daemon**: The TUI makes HTTP requests to `http://localhost:3333/sessions` to fetch workspace/session data and uses `tmux switch-client` to switch sessions
+2. **TUI → Daemon**: The TUI makes HTTP requests to `http://localhost:3333/sessions`. Activating a session publishes `SessionActivated`; `utena attach` long-polls `GET /tmux/activations/next` and restarts its `tuios attach` child on the new session, reporting attach/detach via `PUT /tmux/hooks/{event}`
 
 3. **Daemon API**: Uses chi router, serves on port 3333, mounts controllers:
    - `/sessions` - session management endpoints
-   - `/tmux` - tmux hook endpoints
+   - `/tmux` - client attach hooks, activation long-poll, session env lookup
    - `/claude` - Claude session endpoints
    - `/workspaces` - workspace management endpoints
    - `/todos` - todo management endpoints
@@ -42,12 +41,11 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 - `internal/db/` - SQLite database via GORM (Database interface, migrations)
 - `internal/session/` - session controller logic
 - `internal/workspace/` - workspace discovery and management
-- `internal/tmux/` - tmux service and controller
+- `internal/tmux/` - tuios service, socket client (`tuiosclient.go`) and controller (package name kept from the tmux era)
 - `internal/claude/` - Claude session management
 - `internal/todo/` - todo management
 - `internal/tui/` - Bubbletea TUI application
 - `internal/common/` - shared utilities
-- `plugins/utena-tmux/` - TPM plugin scripts
 
 ### Persistence
 
@@ -59,14 +57,12 @@ All domain data (workspaces, sessions, todos, claude sessions) is stored in SQLi
 
 **Workspace Manager** (internal/workspace/workspace.go): Uses functional options pattern (`WithRootDir()`) to configure root directories for workspace discovery. Scans directories to find workspace folders.
 
-**Tmux Service** (internal/tmux/tmuxservice.go): Handles tmux hook events to track session state. Subscribes to eventbus events to create/kill tmux sessions when utena sessions are created/deleted. Uses `TmuxClient` interface for testability.
-
-**TPM Plugin** (plugins/utena-tmux/utena.tmux): Registers tmux hooks that curl the daemon's hook endpoint. Binds `prefix + p` to open the TUI in a display-popup.
+**Tmux Service** (internal/tmux/tmuxservice.go): Creates/kills tuios sessions for utena sessions and follows the tuios event stream to track their state. Uses the `tmuxRunner` interface (`tuiosRunner` in production, `MockRunner` in tests).
 
 ## Dependencies
 
 - **Go**: chi (HTTP router), bubbletea (TUI framework), GORM (ORM) with SQLite driver
-- **External**: Requires tmux terminal multiplexer to be installed, CGO_ENABLED=1 for SQLite
+- **External**: Requires `tuios` to be installed, CGO_ENABLED=1 for SQLite
 
 ## Testing
 

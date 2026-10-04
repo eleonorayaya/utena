@@ -13,7 +13,7 @@ import (
 func statusLineCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "status-line",
-		Short:        "Print a one-line tmux status-bar segment for sessions waiting on you",
+		Short:        "Print a one-line tuios dock segment for sessions waiting on you",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
@@ -54,9 +54,9 @@ func formatStatusLine(rows []barRow) string {
 	for _, r := range rows {
 		switch r.Attention {
 		case claude.StatusNeedsAttention:
-			needsAttention = append(needsAttention, fmt.Sprintf("#[fg=red,bold]! %s#[default]", r.Name))
+			needsAttention = append(needsAttention, "! "+r.Name)
 		case claude.StatusReadyForReview:
-			readyForReview = append(readyForReview, fmt.Sprintf("#[fg=green]✓ %s#[default]", r.Name))
+			readyForReview = append(readyForReview, "✓ "+r.Name)
 		}
 	}
 	return strings.Join(append(needsAttention, readyForReview...), " ")

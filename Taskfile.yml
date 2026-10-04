@@ -45,16 +45,10 @@ tasks:
   tidy:
     cmds:
       - task: go:tidy
-  tmux:install:
-    cmds:
-      - mkdir -p ~/.config/tmux/plugins/utena-tmux
-      - cp -r plugins/utena-tmux/ ~/.config/tmux/plugins/utena-tmux/
-
   install:
     cmds:
       - task: daemon:install
       - task: tui:install
-      - task: tmux:install
 
   dev:
     cmds:
