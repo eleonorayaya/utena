@@ -1,10 +1,14 @@
 package sessiondetail
 
 import (
+	"fmt"
+	"reflect"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,4 +127,74 @@ func TestSessionDetail_View_ShowsWarning(t *testing.T) {
 func TestSessionDetail_View_NoWarningWhenClean(t *testing.T) {
 	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
 	assert.NotContains(t, m.View(), "[!]")
+}
+
+func makeBlockedSession() session.Session {
+	s := makeActiveSession()
+	s.Blockers = []session.SessionBlocker{
+		{Model: gorm.Model{ID: 10}, Kind: session.BlockerKindReview, Note: "first"},
+		{Model: gorm.Model{ID: 11}, Kind: session.BlockerKindSlack, Note: "second"},
+	}
+	return s
+}
+
+func runeKey(r string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(r)}
+}
+
+func TestSessionDetail_RendersOpenBlockers(t *testing.T) {
+	m, _ := New().Update(SelectMsg{Session: makeBlockedSession()})
+	out := m.View()
+	assert.Contains(t, out, "Blockers")
+	assert.Contains(t, out, "first")
+	assert.Contains(t, out, "second")
+}
+
+func TestSessionDetail_ResolveHighlightedBlocker(t *testing.T) {
+	m, _ := New().Update(SelectMsg{Session: makeBlockedSession()})
+	m, _ = m.Update(runeKey("j"))
+	_, cmd := m.Update(runeKey("u"))
+	require.NotNil(t, cmd)
+	msg := cmd()
+	assert.Equal(t, "provider.resolveBlockerIntentMsg", reflect.TypeOf(msg).String())
+	assert.Contains(t, fmt.Sprintf("%+v", msg), "blockerID:11")
+}
+
+func TestSessionDetail_DeleteBlockerNeedsTwoPresses(t *testing.T) {
+	m, _ := New().Update(SelectMsg{Session: makeBlockedSession()})
+	m, cmd := m.Update(runeKey("x"))
+	assert.Nil(t, cmd)
+	_, cmd = m.Update(runeKey("x"))
+	require.NotNil(t, cmd)
+	assert.Equal(t, "provider.deleteBlockerIntentMsg", reflect.TypeOf(cmd()).String())
+}
+
+func TestSessionDetail_RefreshClampsCursorWhenLastBlockerResolved(t *testing.T) {
+	m, _ := New().Update(SelectMsg{Session: makeBlockedSession()})
+	m, _ = m.Update(runeKey("j"))
+
+	now := time.Now()
+	refreshed := makeBlockedSession()
+	refreshed.Blockers[0].ResolvedAt = &now
+	refreshed.Blockers[1].ResolvedAt = &now
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{refreshed}})
+
+	assert.NotContains(t, m.View(), "Blockers")
+	_, cmd := m.Update(runeKey("u"))
+	assert.Nil(t, cmd)
+	_, cmd = m.Update(runeKey("x"))
+	assert.Nil(t, cmd)
+}
+
+func TestSessionDetail_BlockKeyOpensForm(t *testing.T) {
+	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
+	_, cmd := m.Update(runeKey("b"))
+	require.NotNil(t, cmd)
+}
+
+func TestRenderPanel_ShowsBlockersWithoutCursor(t *testing.T) {
+	s := makeBlockedSession()
+	out := RenderPanel(&s, nil, 60, 30)
+	assert.Contains(t, out, "first")
+	assert.NotContains(t, out, "›")
 }

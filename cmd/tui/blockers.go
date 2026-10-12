@@ -131,7 +131,9 @@ func sessionsBlockersCmd() *cobra.Command {
 				if !b.IsOpen() {
 					line += "\tresolved"
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), line)
+				if _, err := fmt.Fprintln(cmd.OutOrStdout(), line); err != nil {
+					return err
+				}
 			}
 			return nil
 		},

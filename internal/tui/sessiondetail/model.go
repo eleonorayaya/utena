@@ -8,9 +8,11 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/addworkspaceform"
+	"github.com/eleonorayaya/utena/internal/tui/blockerform"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
@@ -80,11 +82,14 @@ func prStateColor(state git.PRState) lipgloss.Color {
 }
 
 type Model struct {
-	sess            *session.Session
-	prs             []git.PullRequest
-	pendingDeleteID uint
-	width           int
-	height          int
+	sess                   *session.Session
+	prs                    []git.PullRequest
+	pendingDeleteID        uint
+	interactive            bool
+	blockerCursor          int
+	pendingBlockerDeleteID uint
+	width                  int
+	height                 int
 }
 
 func New() Model {
@@ -92,7 +97,29 @@ func New() Model {
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
-	return m, nil
+	if m.sess == nil {
+		return m, nil
+	}
+	return m, provider.RequestSessionsState()
+}
+
+func (m *Model) clampBlockerCursor() {
+	n := len(m.sess.OpenBlockers())
+	if m.blockerCursor >= n {
+		m.blockerCursor = n - 1
+	}
+	if m.blockerCursor < 0 {
+		m.blockerCursor = 0
+	}
+}
+
+func (m Model) selectedBlocker() *session.SessionBlocker {
+	open := m.sess.OpenBlockers()
+	if m.blockerCursor < 0 || m.blockerCursor >= len(open) {
+		return nil
+	}
+	b := open[m.blockerCursor]
+	return &b
 }
 
 func (m Model) Keys() help.KeyMap {
@@ -110,6 +137,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.sess = &s
 		m.prs = nil
 		m.pendingDeleteID = 0
+		m.interactive = true
+		m.blockerCursor = 0
+		m.pendingBlockerDeleteID = 0
 		if len(s.Worktrees) > 0 && s.Worktrees[0].Workspace != nil {
 			return m, provider.FetchPRs(s.Worktrees[0].Workspace.ID, "")
 		}
@@ -118,6 +148,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.sess != nil && len(m.sess.Worktrees) > 0 && m.sess.Worktrees[0].Workspace != nil && msg.WorkspaceID == m.sess.Worktrees[0].Workspace.ID {
 			m.prs = filterPRsByBranch(msg.PullRequests, m.sess.Worktrees[0].Worktree.Branch)
 		}
+		return m, nil
+	case provider.SessionsStateUpdatedMsg:
+		if m.sess == nil {
+			return m, nil
+		}
+		for _, s := range msg.Sessions {
+			if s.ID == m.sess.ID {
+				fresh := s
+				m.sess = &fresh
+				break
+			}
+		}
+		m.clampBlockerCursor()
 		return m, nil
 	case tea.KeyMsg:
 		return m.onKeyMsg(msg)
@@ -132,10 +175,51 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	pendingID := m.pendingDeleteID
 	m.pendingDeleteID = 0
+	pendingBlockerID := m.pendingBlockerDeleteID
+	m.pendingBlockerDeleteID = 0
 
 	switch {
 	case key.Matches(msg, keys.Back):
 		return m, router.Back()
+
+	case key.Matches(msg, keys.Up):
+		if m.blockerCursor > 0 {
+			m.blockerCursor--
+		}
+		return m, nil
+
+	case key.Matches(msg, keys.Down):
+		if m.blockerCursor < len(m.sess.OpenBlockers())-1 {
+			m.blockerCursor++
+		}
+		return m, nil
+
+	case key.Matches(msg, keys.Block):
+		if m.sess.Status == session.StatusDeleted {
+			return m, nil
+		}
+		return m, tea.Sequence(
+			router.NavigateTo(router.BlockerFormView),
+			blockerform.Start(m.sess.ID),
+		)
+
+	case key.Matches(msg, keys.Resolve):
+		b := m.selectedBlocker()
+		if b == nil {
+			return m, nil
+		}
+		return m, provider.ResolveBlocker(m.sess.ID, b.ID)
+
+	case key.Matches(msg, keys.RemoveBlocker):
+		b := m.selectedBlocker()
+		if b == nil {
+			return m, nil
+		}
+		if pendingBlockerID == b.ID {
+			return m, provider.DeleteBlocker(m.sess.ID, b.ID)
+		}
+		m.pendingBlockerDeleteID = b.ID
+		return m, nil
 
 	case key.Matches(msg, keys.Activate):
 		if m.sess.IsAttached {
@@ -274,6 +358,21 @@ func (m Model) View() string {
 		stateStyle := lipgloss.NewStyle().Foreground(prStateColor(pr.State))
 		prStr := fmt.Sprintf("#%d %s ", pr.Number, pr.Title) + stateStyle.Render("["+string(pr.State)+"]")
 		b.WriteString(labelStyle().Render("PR") + prStr + "\n")
+	}
+
+	if open := s.OpenBlockers(); len(open) > 0 {
+		b.WriteString("\n" + sectionStyle().Render("⏸ Blockers") + "\n")
+		for i, bl := range open {
+			prefix := "  "
+			if m.interactive && i == m.blockerCursor {
+				prefix = lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true).Render("› ")
+			}
+			line := fmt.Sprintf("%s · %s · %s", bl.Kind, bl.Label(), common.TimeAgo(bl.CreatedAt))
+			if m.pendingBlockerDeleteID == bl.ID {
+				line += warningStyle().Render("  press x again to delete")
+			}
+			b.WriteString(prefix + valueStyle().Render(line) + "\n")
+		}
 	}
 
 	if s.TmuxSession != nil {
