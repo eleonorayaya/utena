@@ -100,6 +100,19 @@ func (r *AddWorkspaceRequest) Bind(_ *http.Request) error {
 	return nil
 }
 
+type AddBlockerRequest struct {
+	Kind BlockerKind `json:"kind"`
+	Note string      `json:"note,omitempty"`
+	URL  string      `json:"url,omitempty"`
+}
+
+func (r *AddBlockerRequest) Bind(_ *http.Request) error {
+	if !r.Kind.Valid() {
+		return fmt.Errorf("kind must be one of review, slack, other (got %q)", r.Kind)
+	}
+	return nil
+}
+
 type UpdateSessionRequest struct {
 	*Session
 }

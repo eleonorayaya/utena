@@ -231,3 +231,70 @@ func (c *SessionController) DismissSession(w http.ResponseWriter, r *http.Reques
 
 	render.JSON(w, r, map[string]string{"status": "ok"})
 }
+
+func (c *SessionController) AddBlocker(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	data := &AddBlockerRequest{}
+	if err := render.Bind(r, data); err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	session, err := c.service.AddBlocker(ctx, id, AddBlockerInput{Kind: data.Kind, Note: data.Note, URL: data.URL})
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	render.Status(r, http.StatusCreated)
+	common.RenderResponse(w, r, NewSessionResponse(session))
+}
+
+func (c *SessionController) ResolveBlocker(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+	blockerID, err := parseUintParam(r, "blockerId")
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	session, err := c.service.ResolveBlocker(ctx, id, blockerID)
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	common.RenderResponse(w, r, NewSessionResponse(session))
+}
+
+func (c *SessionController) DeleteBlocker(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+	blockerID, err := parseUintParam(r, "blockerId")
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	if err := c.service.DeleteBlocker(ctx, id, blockerID); err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
