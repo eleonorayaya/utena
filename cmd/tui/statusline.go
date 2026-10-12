@@ -31,6 +31,7 @@ func statusLineCmd() *cobra.Command {
 type barRow struct {
 	Name      string
 	Attention claude.ClaudeSessionStatus
+	Blocked   bool
 }
 
 func fetchStatusLineRows(port string) ([]barRow, error) {
@@ -44,7 +45,7 @@ func fetchStatusLineRows(port string) ([]barRow, error) {
 		if sr.Session == nil || !sr.ListVisible(false) {
 			continue
 		}
-		rows = append(rows, barRow{Name: sr.DisplayLabel(), Attention: sr.AttentionStatus})
+		rows = append(rows, barRow{Name: sr.DisplayLabel(), Attention: sr.AttentionStatus, Blocked: sr.IsBlocked})
 	}
 	return rows, nil
 }
@@ -52,6 +53,9 @@ func fetchStatusLineRows(port string) ([]barRow, error) {
 func formatStatusLine(rows []barRow) string {
 	var needsAttention, readyForReview []string
 	for _, r := range rows {
+		if r.Blocked {
+			continue
+		}
 		switch r.Attention {
 		case claude.StatusNeedsAttention:
 			needsAttention = append(needsAttention, "! "+r.Name)

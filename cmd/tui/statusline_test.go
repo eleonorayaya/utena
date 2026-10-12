@@ -24,3 +24,13 @@ func TestFormatStatusLine(t *testing.T) {
 		t.Fatalf("needs_attention must sort before ready_for_review regardless of input order: got %q, want %q", got, want)
 	}
 }
+
+func TestFormatStatusLine_SkipsBlocked(t *testing.T) {
+	rows := []barRow{
+		{Name: "a", Attention: claude.StatusNeedsAttention},
+		{Name: "b", Attention: claude.StatusNeedsAttention, Blocked: true},
+	}
+	if got := formatStatusLine(rows); got != "! a" {
+		t.Fatalf("got %q", got)
+	}
+}

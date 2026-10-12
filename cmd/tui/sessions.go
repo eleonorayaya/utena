@@ -18,6 +18,9 @@ func sessionsCmd() *cobra.Command {
 		SilenceUsage: true,
 	}
 	cmd.AddCommand(sessionsLsCmd())
+	cmd.AddCommand(sessionsBlockCmd())
+	cmd.AddCommand(sessionsBlockersCmd())
+	cmd.AddCommand(sessionsUnblockCmd())
 	return cmd
 }
 
@@ -36,7 +39,11 @@ func sessionsLsCmd() *cobra.Command {
 			}
 
 			for _, s := range filterSessions(sessions, all) {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", s.Name, s.Status, s.SessionRoot)
+				blocked := ""
+				if s.IsBlocked() {
+					blocked = "blocked"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", s.Name, s.Status, s.SessionRoot, blocked)
 			}
 			return nil
 		},
