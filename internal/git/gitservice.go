@@ -235,6 +235,10 @@ func (s *GitService) HasUnpushedCommits(ctx context.Context, repoPath string, br
 	return s.cli.hasUnpushedCommits(ctx, repoPath, branch)
 }
 
+func (s *GitService) BranchHead(ctx context.Context, repoPath string, branch string) (string, error) {
+	return s.cli.branchHead(ctx, repoPath, branch)
+}
+
 func (s *GitService) RepointWorktree(wt *Worktree, branch *Branch) error {
 	if wt == nil || branch == nil {
 		return fmt.Errorf("worktree and branch are required")

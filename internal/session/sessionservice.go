@@ -1246,7 +1246,11 @@ func (s *SessionService) cleanupPastBranches(ctx context.Context, session *Sessi
 
 func (s *SessionService) pastBranchDeletable(ctx context.Context, branch *git.Branch, repoPath string) bool {
 	for _, pr := range s.gitService.GetPRsForBranch(branch.ID) {
-		if pr.State == git.PRStateMerged {
+		if pr.State != git.PRStateMerged || pr.HeadSHA == "" {
+			continue
+		}
+		head, err := s.gitService.BranchHead(ctx, repoPath, branch.Name)
+		if err == nil && head == pr.HeadSHA {
 			return true
 		}
 	}

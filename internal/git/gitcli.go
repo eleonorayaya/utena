@@ -207,6 +207,15 @@ func (s *gitCLI) hasUnpushedCommits(ctx context.Context, repoPath string, branch
 	return strings.TrimSpace(string(output)) != "", nil
 }
 
+func (s *gitCLI) branchHead(ctx context.Context, repoPath string, branch string) (string, error) {
+	cmd := gitCommand(ctx, "-C", repoPath, "rev-parse", "--verify", "refs/heads/"+branch)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve head of %s: %w", branch, err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 func (s *gitCLI) isDirty(ctx context.Context, repoPath string) (bool, error) {
 	cmd := gitCommand(ctx, "-C", repoPath, "status", "--porcelain")
 	output, err := cmd.Output()

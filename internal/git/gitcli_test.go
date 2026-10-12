@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -439,5 +440,24 @@ func TestGitCLI_HasUnpushedCommits(t *testing.T) {
 	require.True(t, unpushed)
 
 	_, err = svc.hasUnpushedCommits(ctx, clone, "does-not-exist")
+	require.Error(t, err)
+}
+
+func TestGitCLI_BranchHead(t *testing.T) {
+	clone, _ := initTestRepoWithOrigin(t)
+	svc := newGitCLI()
+	ctx := context.Background()
+
+	run(t, clone, "git", "checkout", "-b", "head-branch")
+	run(t, clone, "git", "commit", "--allow-empty", "-m", "wip")
+	out, err := exec.Command("git", "-C", clone, "rev-parse", "HEAD").Output()
+	require.NoError(t, err)
+	want := string(bytes.TrimSpace(out))
+
+	got, err := svc.branchHead(ctx, clone, "head-branch")
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+
+	_, err = svc.branchHead(ctx, clone, "does-not-exist")
 	require.Error(t, err)
 }

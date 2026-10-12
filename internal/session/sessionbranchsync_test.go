@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,6 +156,13 @@ func TestSyncSessionBranches_PicksUpBranchChangedOnDisk(t *testing.T) {
 	require.Equal(t, "eqt/from-disk", env.reload(t).Worktrees[0].Worktree.Branch.Name)
 }
 
+func gitRevParse(t *testing.T, dir string, rev string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", rev).Output()
+	require.NoError(t, err)
+	return strings.TrimSpace(string(out))
+}
+
 func localBranchExists(t *testing.T, repo string, name string) bool {
 	t.Helper()
 	cmd := exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+name)
@@ -174,6 +182,13 @@ func TestDeleteSession_DeletesPastBranchesOnlyWhenSafe(t *testing.T) {
 	gitIn(t, env.wtPath, "checkout", "-b", "eqt/merged-past")
 	gitIn(t, env.wtPath, "commit", "--allow-empty", "-m", "merged work")
 	record("eqt/merged-past")
+	mergedTip := gitRevParse(t, env.wtPath, "HEAD")
+
+	gitIn(t, env.wtPath, "checkout", "-b", "eqt/merged-then-more", "main")
+	gitIn(t, env.wtPath, "commit", "--allow-empty", "-m", "merged part")
+	record("eqt/merged-then-more")
+	moreMergedTip := gitRevParse(t, env.wtPath, "HEAD")
+	gitIn(t, env.wtPath, "commit", "--allow-empty", "-m", "post-merge local work")
 
 	gitIn(t, env.wtPath, "checkout", "-b", "eqt/unpushed-past", "main")
 	gitIn(t, env.wtPath, "commit", "--allow-empty", "-m", "local only")
@@ -184,9 +199,12 @@ func TestDeleteSession_DeletesPastBranchesOnlyWhenSafe(t *testing.T) {
 
 	sess := env.reload(t)
 	for _, b := range sess.PastBranches() {
-		if b.Name == "eqt/merged-past" {
-			id := b.ID
-			require.NoError(t, env.store.db.Create(&git.PullRequest{RepoID: b.RepoID, Number: 11, HeadBranchID: &id, State: git.PRStateMerged}).Error)
+		id := b.ID
+		switch b.Name {
+		case "eqt/merged-past":
+			require.NoError(t, env.store.db.Create(&git.PullRequest{RepoID: b.RepoID, Number: 11, HeadBranchID: &id, HeadSHA: mergedTip, State: git.PRStateMerged}).Error)
+		case "eqt/merged-then-more":
+			require.NoError(t, env.store.db.Create(&git.PullRequest{RepoID: b.RepoID, Number: 12, HeadBranchID: &id, HeadSHA: moreMergedTip, State: git.PRStateMerged}).Error)
 		}
 	}
 
@@ -199,4 +217,5 @@ func TestDeleteSession_DeletesPastBranchesOnlyWhenSafe(t *testing.T) {
 	require.False(t, localBranchExists(t, env.repoPath, "eqt/pushed-past"))
 	require.False(t, localBranchExists(t, env.repoPath, "eqt/merged-past"))
 	require.True(t, localBranchExists(t, env.repoPath, "eqt/unpushed-past"), "unmerged local work must survive")
+	require.True(t, localBranchExists(t, env.repoPath, "eqt/merged-then-more"), "commits added after the merged head must survive")
 }
