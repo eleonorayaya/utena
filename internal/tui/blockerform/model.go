@@ -128,10 +128,10 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	if m.focus == kindField {
 		n := len(session.BlockerKinds)
-		switch msg.Type {
-		case tea.KeyRight:
+		switch {
+		case key.Matches(msg, keys.KindNext):
 			m.kindIdx = (m.kindIdx + 1) % n
-		case tea.KeyLeft:
+		case key.Matches(msg, keys.KindPrev):
 			m.kindIdx = (m.kindIdx - 1 + n) % n
 		}
 		return m, nil

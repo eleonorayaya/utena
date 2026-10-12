@@ -72,3 +72,19 @@ func TestBlockerForm_ArrowsInTextFieldDoNotChangeKind(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
 	assert.Equal(t, session.BlockerKindReview, m.kind())
 }
+
+func TestBlockerForm_VimKeysCycleKind(t *testing.T) {
+	m := started(t)
+	m = typeText(m, "l")
+	assert.Equal(t, session.BlockerKindSlack, m.kind())
+	m = typeText(m, "hh")
+	assert.Equal(t, session.BlockerKindOther, m.kind())
+}
+
+func TestBlockerForm_VimKeysTypeInTextFields(t *testing.T) {
+	m := started(t)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = typeText(m, "hl")
+	assert.Equal(t, session.BlockerKindReview, m.kind())
+	assert.Equal(t, "hl", m.note.Value())
+}
