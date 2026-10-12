@@ -22,13 +22,24 @@ type tmuxRunner interface {
 	hasSession(name string) bool
 	listSessionNames() ([]string, error)
 	listWindows(sessionName string) ([]Window, error)
+	listAgents() ([]agentPane, error)
+	setAgentMeta(sessionName, windowID string, meta map[string]string) error
 	subscribe(ctx context.Context, types []string, onEvent func(tuiosEvent)) error
 }
 
 type tuiosEvent struct {
 	Type    string `json:"type"`
 	Session string `json:"session"`
+	Window  string `json:"window"`
+	State   string `json:"state"`
 	Reason  string `json:"reason"`
+}
+
+type agentPane struct {
+	Session  string            `json:"session"`
+	WindowID string            `json:"window_id"`
+	State    string            `json:"state"`
+	Meta     map[string]string `json:"meta"`
 }
 
 const tuiosEventSubscribed = "subscribed"
@@ -192,6 +203,25 @@ func (r *tuiosRunner) listWindows(sessionName string) ([]Window, error) {
 		windows[i] = Window{Index: w.Index, Name: w.DisplayName, Active: w.Focused}
 	}
 	return windows, nil
+}
+
+func (r *tuiosRunner) listAgents() ([]agentPane, error) {
+	var res struct {
+		Agents []agentPane `json:"agents"`
+	}
+	if err := r.call("list-agents", map[string]any{"all_sessions": true}, &res); err != nil {
+		return nil, err
+	}
+	return res.Agents, nil
+}
+
+func (r *tuiosRunner) setAgentMeta(sessionName, windowID string, meta map[string]string) error {
+	return r.call("set-agent-meta", map[string]any{
+		"session": sessionName,
+		"window":  windowID,
+		"source":  "utena",
+		"tokens":  meta,
+	}, nil)
 }
 
 func (r *tuiosRunner) subscribe(ctx context.Context, types []string, onEvent func(tuiosEvent)) error {

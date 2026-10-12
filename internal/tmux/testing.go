@@ -3,6 +3,7 @@ package tmux
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 )
 
@@ -13,14 +14,22 @@ type SpawnedWindow struct {
 	Env         map[string]string
 }
 
+type AgentMetaWrite struct {
+	SessionName string
+	WindowID    string
+	Meta        map[string]string
+}
+
 type MockRunner struct {
-	mu             sync.Mutex
-	Sessions       map[string]bool
-	SpawnedWindows []SpawnedWindow
-	CreateErr      error
-	KillErr        error
-	OnNewSession   func()
-	OnKillSession  func()
+	mu              sync.Mutex
+	Sessions        map[string]bool
+	SpawnedWindows  []SpawnedWindow
+	Agents          []agentPane
+	AgentMetaWrites []AgentMetaWrite
+	CreateErr       error
+	KillErr         error
+	OnNewSession    func()
+	OnKillSession   func()
 }
 
 func NewMockRunner() *MockRunner {
@@ -86,6 +95,25 @@ func (m *MockRunner) listSessionNames() ([]string, error) {
 
 func (m *MockRunner) listWindows(sessionName string) ([]Window, error) {
 	return nil, nil
+}
+
+func (m *MockRunner) listAgents() ([]agentPane, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.Agents, nil
+}
+
+func (m *MockRunner) setAgentMeta(sessionName, windowID string, meta map[string]string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.AgentMetaWrites = append(m.AgentMetaWrites, AgentMetaWrite{SessionName: sessionName, WindowID: windowID, Meta: meta})
+	return nil
+}
+
+func (m *MockRunner) MetaWrites() []AgentMetaWrite {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.AgentMetaWrites)
 }
 
 func (m *MockRunner) subscribe(ctx context.Context, types []string, onEvent func(tuiosEvent)) error {

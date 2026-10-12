@@ -23,8 +23,11 @@ var followedTuiosEvents = []string{
 	"window-focused",
 	"window-moved",
 	"workspace-switched",
+	"agent-state",
 	"gap",
 }
+
+const agentSessionMetaKey = "session"
 
 type TmuxService struct {
 	runner            tmuxRunner
@@ -97,6 +100,8 @@ func (t *TmuxService) handleTuiosEvent(ctx context.Context, ev tuiosEvent) {
 		t.refreshWindows(ev.Session)
 	case "session-closed":
 		err = t.HandleSessionClosed(ctx, ev.Session)
+	case "agent-state":
+		t.tagAgentPane(ev.Session, ev.Window, ev.State)
 	default:
 		t.refreshWindows(ev.Session)
 	}
@@ -127,6 +132,30 @@ func (t *TmuxService) resync() {
 	}
 	for _, name := range names {
 		t.refreshWindows(name)
+	}
+	t.tagAgentPanes()
+}
+
+func (t *TmuxService) tagAgentPanes() {
+	agents, err := t.runner.listAgents()
+	if err != nil {
+		slog.Debug("tuios list-agents failed", "error", err)
+		return
+	}
+	for _, a := range agents {
+		if a.Meta[agentSessionMetaKey] == a.Session {
+			continue
+		}
+		t.tagAgentPane(a.Session, a.WindowID, a.State)
+	}
+}
+
+func (t *TmuxService) tagAgentPane(sessionName, windowID, state string) {
+	if sessionName == "" || windowID == "" || state == "" || state == "none" {
+		return
+	}
+	if err := t.runner.setAgentMeta(sessionName, windowID, map[string]string{agentSessionMetaKey: sessionName}); err != nil {
+		slog.Debug("tuios set-agent-meta failed", "session", sessionName, "window", windowID, "error", err)
 	}
 }
 

@@ -257,3 +257,26 @@ func TestTmuxService_WaitForActivationTimesOut(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Empty(t, svc.activationWaiters)
 }
+
+func TestTmuxService_AgentStateTagsPaneWithSessionName(t *testing.T) {
+	runner := NewMockRunner()
+	svc := &TmuxService{runner: runner}
+
+	svc.handleTuiosEvent(context.Background(), tuiosEvent{Type: "agent-state", Session: "work", Window: "w1", State: "working"})
+	svc.handleTuiosEvent(context.Background(), tuiosEvent{Type: "agent-state", Session: "work", Window: "w2", State: "none"})
+
+	assert.Equal(t, []AgentMetaWrite{{SessionName: "work", WindowID: "w1", Meta: map[string]string{"session": "work"}}}, runner.MetaWrites())
+}
+
+func TestTmuxService_TagAgentPanesSkipsAlreadyTagged(t *testing.T) {
+	runner := NewMockRunner()
+	runner.Agents = []agentPane{
+		{Session: "work", WindowID: "w1", State: "idle", Meta: map[string]string{"session": "work"}},
+		{Session: "other", WindowID: "w2", State: "done"},
+	}
+	svc := &TmuxService{runner: runner}
+
+	svc.tagAgentPanes()
+
+	assert.Equal(t, []AgentMetaWrite{{SessionName: "other", WindowID: "w2", Meta: map[string]string{"session": "other"}}}, runner.MetaWrites())
+}

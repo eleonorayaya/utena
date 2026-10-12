@@ -154,3 +154,28 @@ func TestCloseWindow_RefusesEmptyTargets(t *testing.T) {
 	require.Error(t, CloseWindow("work", ""))
 	require.Error(t, CloseWindow("", "abc"))
 }
+
+func TestTuiosRunner_ListAgentsAcrossSessions(t *testing.T) {
+	r, d := startFakeTuios(t, map[string]string{
+		"list-agents": `{"id":1,"result":{"agents":[{"session":"work","window_id":"w1","state":"idle","meta":{"session":"work"}}]}}`,
+	})
+
+	agents, err := r.listAgents()
+	require.NoError(t, err)
+	assert.Equal(t, []agentPane{{Session: "work", WindowID: "w1", State: "idle", Meta: map[string]string{"session": "work"}}}, agents)
+	assert.Equal(t, true, d.last().Params["all_sessions"])
+}
+
+func TestTuiosRunner_SetAgentMetaTargetsPane(t *testing.T) {
+	r, d := startFakeTuios(t, map[string]string{
+		"set-agent-meta": `{"id":1,"result":{"type":"agent_meta_set"}}`,
+	})
+
+	require.NoError(t, r.setAgentMeta("work", "w1", map[string]string{"session": "work"}))
+
+	req := d.last()
+	assert.Equal(t, "work", req.Params["session"])
+	assert.Equal(t, "w1", req.Params["window"])
+	assert.Equal(t, "utena", req.Params["source"])
+	assert.Equal(t, map[string]any{"session": "work"}, req.Params["tokens"])
+}
