@@ -28,6 +28,7 @@ func (sr *SessionRouter) Routes() chi.Router {
 	r.Post("/{id}/blockers", sr.controller.AddBlocker)
 	r.Put("/{id}/blockers/{blockerId}/resolve", sr.controller.ResolveBlocker)
 	r.Delete("/{id}/blockers/{blockerId}", sr.controller.DeleteBlocker)
+	r.Put("/branch-hook", sr.controller.BranchHook)
 	r.Get("/{id}", sr.controller.GetSessionByID)
 	r.Put("/{id}", sr.controller.UpdateSession)
 	r.Delete("/{id}", sr.controller.DeleteSession)

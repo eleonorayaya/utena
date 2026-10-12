@@ -113,6 +113,18 @@ func (r *AddBlockerRequest) Bind(_ *http.Request) error {
 	return nil
 }
 
+type BranchHookRequest struct {
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
+}
+
+func (r *BranchHookRequest) Bind(_ *http.Request) error {
+	if r.Path == "" {
+		return errors.New("path is required")
+	}
+	return nil
+}
+
 type UpdateSessionRequest struct {
 	*Session
 }

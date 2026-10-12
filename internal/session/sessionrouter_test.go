@@ -376,3 +376,29 @@ func TestSessionRouter_GetSessionByID_ShowsBrokenStatusError(t *testing.T) {
 	require.Equal(t, StatusBroken, response.Status)
 	require.Equal(t, "worktree setup failed: timeout", response.StatusError)
 }
+
+func TestSessionRouter_BranchHook_UnknownPathReturnsNoContent(t *testing.T) {
+	router, _, _, _, _, _ := setupSessionRouter(t)
+
+	body := bytes.NewBufferString(`{"path":"/not/a/session","branch":"eqt/x"}`)
+	req := httptest.NewRequest(http.MethodPut, "/branch-hook", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+}
+
+func TestSessionRouter_BranchHook_RequiresPath(t *testing.T) {
+	router, _, _, _, _, _ := setupSessionRouter(t)
+
+	body := bytes.NewBufferString(`{"branch":"eqt/x"}`)
+	req := httptest.NewRequest(http.MethodPut, "/branch-hook", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.Routes().ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}

@@ -216,6 +216,21 @@ func (c *SessionController) AddWorkspace(w http.ResponseWriter, r *http.Request)
 	common.RenderResponse(w, r, NewSessionResponse(session))
 }
 
+func (c *SessionController) BranchHook(w http.ResponseWriter, r *http.Request) {
+	data := &BranchHookRequest{}
+	if err := render.Bind(r, data); err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	if err := c.service.RecordWorktreeBranch(r.Context(), data.Path, data.Branch); err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (c *SessionController) DismissSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id, err := parseUintParam(r, "id")
