@@ -239,9 +239,12 @@ func (s *GitService) RepointWorktree(wt *Worktree, branch *Branch) error {
 	if wt == nil || branch == nil {
 		return fmt.Errorf("worktree and branch are required")
 	}
+	if err := s.worktreeStore.UpdateBranchID(wt.ID, branch.ID); err != nil {
+		return err
+	}
 	wt.BranchID = branch.ID
 	wt.Branch = branch
-	return s.worktreeStore.Update(wt)
+	return nil
 }
 
 func (s *GitService) IsDirty(ctx context.Context, repoPath string) (bool, error) {

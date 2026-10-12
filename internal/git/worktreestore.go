@@ -66,6 +66,19 @@ func (s *WorktreeStore) Update(worktree *Worktree) error {
 	return nil
 }
 
+func (s *WorktreeStore) UpdateBranchID(id uint, branchID uint) error {
+	if id == 0 {
+		return errors.New("worktree ID cannot be zero")
+	}
+	if err := s.db.Model(&Worktree{}).Where("id = ?", id).Update("branch_id", branchID).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+			return common.WrapConflict(worktreeConflictMessage(&Worktree{BranchID: branchID}, err), ErrWorktreeAlreadyExists)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *WorktreeStore) GetByID(id uint) (*Worktree, error) {
 	var worktree Worktree
 	if err := s.db.First(&worktree, "id = ?", id).Error; err != nil {
