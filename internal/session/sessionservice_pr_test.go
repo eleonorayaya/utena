@@ -258,38 +258,46 @@ func TestHandlePRUpdated_SkipsExistingSession(t *testing.T) {
 	require.Len(t, sessions, 1)
 }
 
-func TestHandlePRUpdated_CompletesSessionOnMerge(t *testing.T) {
+func TestHandlePRUpdated_MergeDoesNotCompleteSession(t *testing.T) {
 	env := setupPRTestEnv(t)
 	ctx := context.Background()
+	got := collectNotifications(env)
 
 	branchID := env.branch.ID
-	sess := &Session{
-		Name:       "feature-pr",
-		Status:     StatusActive,
-		LastUsedAt: time.Now(),
-	}
+	sess := &Session{Name: "feature-pr", Status: StatusActive, LastUsedAt: time.Now()}
 	require.NoError(t, env.sessionStore.Add(sess))
 	env.attachBranchWorktree(t, sess.ID, branchID, 0)
 
-	event := eventbus.Event{
+	require.NoError(t, env.service.handlePRUpdated(ctx, eventbus.Event{
 		Type: git.EventPRUpdated,
 		Data: git.PRUpdatedEvent{
-			PullRequest: &git.PullRequest{
-				Number:       42,
-				HeadBranchID: &branchID,
-				State:        git.PRStateMerged,
-			},
-			Previous: &git.PullRequest{State: git.PRStateOpen},
-			Repo:     env.repo,
+			PullRequest: &git.PullRequest{Number: 42, HeadBranchID: &branchID, State: git.PRStateMerged},
+			Previous:    &git.PullRequest{State: git.PRStateOpen},
+			Repo:        env.repo,
 		},
-	}
+	}))
 
-	err := env.service.handlePRUpdated(ctx, event)
+	updated, err := env.sessionStore.GetByID(sess.ID)
 	require.NoError(t, err)
+	require.Equal(t, StatusActive, updated.Status)
+	require.Len(t, got(), 1, "the merge is still reported to the session")
+}
 
-	updated, err := env.sessionStore.GetByBranchID(branchID)
-	require.NoError(t, err)
-	require.Equal(t, StatusCompleted, updated.Status)
+func TestDismissSession_DismissesHistoryBranchPRs(t *testing.T) {
+	env := setupPRTestEnv(t)
+	sess := &Session{Name: "pending", Status: StatusPending, LastUsedAt: time.Now()}
+	require.NoError(t, env.sessionStore.Add(sess))
+	env.attachBranchWorktree(t, sess.ID, env.branch.ID, 0)
+	past := &git.Branch{Name: "older", RepoID: env.repo.ID}
+	require.NoError(t, env.database.Create(past).Error)
+	require.NoError(t, NewSessionBranchStore(env.database).Add(&SessionBranch{SessionID: sess.ID, WorktreeID: 1, BranchID: past.ID, FirstSeenAt: time.Now()}))
+	pastID := past.ID
+	pr := &git.PullRequest{RepoID: env.repo.ID, Number: 77, HeadBranchID: &pastID, State: git.PRStateOpen}
+	require.NoError(t, env.database.Create(pr).Error)
+
+	require.NoError(t, env.service.DismissSession(context.Background(), sess.ID))
+
+	require.True(t, env.dismissedPRStore.IsDismissed(pr.ID))
 }
 
 func TestHandlePRUpdated_IgnoresNonMerge(t *testing.T) {

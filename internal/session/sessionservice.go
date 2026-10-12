@@ -1398,8 +1398,7 @@ func (s *SessionService) DismissSession(ctx context.Context, id uint) error {
 	}
 
 	if s.dismissedPRStore != nil {
-		branchIDs := s.sessionBranchIDs(sess)
-		for _, branchID := range branchIDs {
+		for _, branchID := range sess.BranchIDs() {
 			for _, pr := range s.gitService.GetPRsForBranch(branchID) {
 				if err := s.dismissedPRStore.Add(&DismissedPR{
 					PullRequestID: pr.ID,
@@ -1463,18 +1462,6 @@ func (s *SessionService) reconcileLoadedSession(ctx context.Context, sess *Sessi
 		return nil, fmt.Errorf("failed to persist reconciled session: %w", err)
 	}
 	return sess, nil
-}
-
-func (s *SessionService) sessionBranchIDs(sess *Session) []uint {
-	out := make([]uint, 0, len(sess.Worktrees))
-	for i := range sess.Worktrees {
-		wt := sess.Worktrees[i].Worktree
-		if wt == nil || wt.BranchID == 0 {
-			continue
-		}
-		out = append(out, wt.BranchID)
-	}
-	return out
 }
 
 func (s *SessionService) ensureSessionWorktrees(ctx context.Context, sess *Session) {
@@ -1563,7 +1550,6 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 
 	isNew := data.Previous == nil
 	newlyAssigned := pr.IsAssignedToMe && pr.State == git.PRStateOpen && (isNew || !data.Previous.IsAssignedToMe)
-	newlyMerged := pr.State == git.PRStateMerged && (isNew || data.Previous.State != git.PRStateMerged)
 
 	sess, _ := s.store.GetByBranchID(*pr.HeadBranchID)
 
@@ -1575,17 +1561,13 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 		return nil
 	}
 
-	if newlyMerged {
-		s.maybeCompleteSession(sess, pr)
-	}
-
 	s.notifyPRUpdated(ctx, sess, pr, data.Previous)
 
 	return nil
 }
 
 func (s *SessionService) notifyPRUpdated(ctx context.Context, sess *Session, pr *git.PullRequest, previous *git.PullRequest) {
-	data := git.NewPRNotification(pr, previous, sessionBranchName(sess, *pr.HeadBranchID))
+	data := git.NewPRNotification(pr, previous, s.prBranchName(pr))
 	s.publishNotification(ctx, sess.ID, git.NotificationPullRequest, data)
 }
 
@@ -1596,8 +1578,7 @@ func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []
 	}
 
 	var out []eventbus.SessionNotificationEvent
-	for _, branchID := range s.sessionBranchIDs(sess) {
-		branch := sessionBranchName(sess, branchID)
+	for _, branchID := range sess.BranchIDs() {
 		for _, pr := range s.gitService.GetPRsForBranch(branchID) {
 			if !pr.State.IsOpen() {
 				continue
@@ -1605,7 +1586,7 @@ func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []
 			out = append(out, eventbus.SessionNotificationEvent{
 				SessionID: sessionID,
 				Type:      git.NotificationPullRequest,
-				Data:      git.NewPRNotification(&pr, nil, branch),
+				Data:      git.NewPRNotification(&pr, nil, s.prBranchName(&pr)),
 			})
 		}
 	}
@@ -1630,7 +1611,7 @@ func (s *SessionService) SyncPRActivity(ctx context.Context) error {
 		if !sess.watchesPRActivity() {
 			continue
 		}
-		for _, branchID := range s.sessionBranchIDs(sess) {
+		for _, branchID := range sess.BranchIDs() {
 			if _, seen := watchers[branchID]; !seen {
 				order = append(order, branchID)
 			}
@@ -1675,14 +1656,18 @@ func (s *SessionService) publishNotification(ctx context.Context, sessionID uint
 	}
 }
 
-func sessionBranchName(sess *Session, branchID uint) string {
-	for i := range sess.Worktrees {
-		wt := sess.Worktrees[i].Worktree
-		if wt != nil && wt.BranchID == branchID && wt.Branch != nil {
-			return wt.Branch.Name
-		}
+func (s *SessionService) prBranchName(pr *git.PullRequest) string {
+	if pr.HeadBranch != nil {
+		return pr.HeadBranch.Name
 	}
-	return ""
+	if pr.HeadBranchID == nil {
+		return ""
+	}
+	branch, err := s.gitService.GetBranch(*pr.HeadBranchID)
+	if err != nil {
+		return ""
+	}
+	return branch.Name
 }
 
 func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git.PRUpdatedEvent) {
@@ -1721,19 +1706,6 @@ func (s *SessionService) maybeCreatePendingSession(ctx context.Context, data git
 	}
 
 	slog.Info("activating session for assigned PR", "pr", pr.Number, "session", sess.ID, "branch", branch.Name)
-}
-
-func (s *SessionService) maybeCompleteSession(sess *Session, pr *git.PullRequest) {
-	if sess.Status == StatusDeleted || sess.Status == StatusArchived || sess.Status == StatusCompleted {
-		return
-	}
-
-	sess.Status = StatusCompleted
-	if err := s.store.Update(sess); err != nil {
-		slog.Warn("failed to mark session completed", "session", sess.ID, "error", err)
-	} else {
-		slog.Info("marked session completed after PR merge", "session", sess.ID, "pr", pr.Number)
-	}
 }
 
 type AddBlockerInput struct {
