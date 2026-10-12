@@ -154,3 +154,49 @@ func TestSyncSessionBranches_PicksUpBranchChangedOnDisk(t *testing.T) {
 
 	require.Equal(t, "eqt/from-disk", env.reload(t).Worktrees[0].Worktree.Branch.Name)
 }
+
+func localBranchExists(t *testing.T, repo string, name string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+name)
+	return cmd.Run() == nil
+}
+
+func TestDeleteSession_DeletesPastBranchesOnlyWhenSafe(t *testing.T) {
+	env := setupBranchSyncEnv(t)
+	ctx := context.Background()
+	record := func(name string) {
+		require.NoError(t, env.service.RecordWorktreeBranch(ctx, env.wtPath, name))
+	}
+
+	gitIn(t, env.wtPath, "checkout", "-b", "eqt/pushed-past")
+	record("eqt/pushed-past")
+
+	gitIn(t, env.wtPath, "checkout", "-b", "eqt/merged-past")
+	gitIn(t, env.wtPath, "commit", "--allow-empty", "-m", "merged work")
+	record("eqt/merged-past")
+
+	gitIn(t, env.wtPath, "checkout", "-b", "eqt/unpushed-past", "main")
+	gitIn(t, env.wtPath, "commit", "--allow-empty", "-m", "local only")
+	record("eqt/unpushed-past")
+
+	gitIn(t, env.wtPath, "checkout", "-b", "eqt/current", "main")
+	record("eqt/current")
+
+	sess := env.reload(t)
+	for _, b := range sess.PastBranches() {
+		if b.Name == "eqt/merged-past" {
+			id := b.ID
+			require.NoError(t, env.store.db.Create(&git.PullRequest{RepoID: b.RepoID, Number: 11, HeadBranchID: &id, State: git.PRStateMerged}).Error)
+		}
+	}
+
+	_, err := env.service.ArchiveSession(ctx, sess.ID)
+	require.NoError(t, err)
+	require.NoError(t, env.service.DeleteSession(ctx, sess.ID, true, false))
+
+	require.False(t, localBranchExists(t, env.repoPath, "eqt/current"))
+	require.False(t, localBranchExists(t, env.repoPath, "eqt/multi"))
+	require.False(t, localBranchExists(t, env.repoPath, "eqt/pushed-past"))
+	require.False(t, localBranchExists(t, env.repoPath, "eqt/merged-past"))
+	require.True(t, localBranchExists(t, env.repoPath, "eqt/unpushed-past"), "unmerged local work must survive")
+}

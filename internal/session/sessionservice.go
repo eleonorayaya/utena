@@ -1211,7 +1211,47 @@ func (s *SessionService) cleanupSessionResources(ctx context.Context, session *S
 		}
 	}
 
+	if deleteBranch {
+		s.cleanupPastBranches(ctx, session, wsCache)
+	}
+
 	s.removeSessionRoot(session)
+}
+
+func (s *SessionService) cleanupPastBranches(ctx context.Context, session *Session, wsCache map[uint]*workspace.Workspace) {
+	for _, branch := range session.PastBranches() {
+		ws, ok := wsCache[branch.RepoID]
+		if !ok {
+			found, err := s.workspaceService.GetWorkspaceByRepoID(ctx, branch.RepoID)
+			if err != nil {
+				slog.Warn("cleanup: failed to resolve workspace for past branch", "branch", branch.Name, "error", err)
+				continue
+			}
+			ws = found
+			wsCache[branch.RepoID] = ws
+		}
+		exists, err := s.gitService.HasBranch(ctx, ws.Path, branch.Name)
+		if err != nil || !exists {
+			continue
+		}
+		if !s.pastBranchDeletable(ctx, &branch, ws.Path) {
+			slog.Warn("keeping past session branch with unpushed work", "session", session.ID, "branch", branch.Name)
+			continue
+		}
+		if err := s.gitService.CleanupBranch(ctx, &branch, ws.Path, true); err != nil {
+			slog.Warn("failed to delete past session branch", "session", session.ID, "branch", branch.Name, "error", err)
+		}
+	}
+}
+
+func (s *SessionService) pastBranchDeletable(ctx context.Context, branch *git.Branch, repoPath string) bool {
+	for _, pr := range s.gitService.GetPRsForBranch(branch.ID) {
+		if pr.State == git.PRStateMerged {
+			return true
+		}
+	}
+	unpushed, err := s.gitService.HasUnpushedCommits(ctx, repoPath, branch.Name)
+	return err == nil && !unpushed
 }
 
 // removeSessionRoot deletes the session's container directory, but only when it
