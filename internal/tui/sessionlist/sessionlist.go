@@ -60,20 +60,28 @@ func (m Model) listWidth() int {
 	return min(max(w, 36), 52)
 }
 
-func listGroup(s session.Session) int {
+type listGroupKind int
+
+const (
+	groupLive listGroupKind = iota
+	groupBlocked
+	groupHidden
+)
+
+func listGroup(s session.Session) listGroupKind {
 	switch {
 	case s.IsHidden():
-		return 2
+		return groupHidden
 	case s.IsBlocked():
-		return 1
+		return groupBlocked
 	default:
-		return 0
+		return groupLive
 	}
 }
 
 func (m Model) firstBlockedIndex() int {
 	for i, s := range m.filtered {
-		if listGroup(s) == 1 {
+		if listGroup(s) == groupBlocked {
 			return i
 		}
 	}
@@ -405,7 +413,7 @@ func sessionDisplayName(s session.Session) string {
 
 func (m Model) renderRow(s session.Session, selected bool, width int) string {
 	var badgeStr string
-	if s.IsBlocked() && !s.IsHidden() {
+	if listGroup(s) == groupBlocked {
 		badgeStr = lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render(" " + blockedTag(s) + " ")
 	} else {
 		badgeStr = statusview.NewStatusBadge(s.ClaudeSessions, false).View()

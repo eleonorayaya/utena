@@ -271,3 +271,14 @@ func (s *SessionStore) OnAppStart(ctx context.Context) error {
 func (s *SessionStore) OnAppEnd(ctx context.Context) error {
 	return nil
 }
+
+func (s *SessionStore) GetStatus(id uint) (SessionStatus, error) {
+	var sess Session
+	if err := s.db.Model(&Session{}).Select("status").First(&sess, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", ErrSessionNotFound
+		}
+		return "", err
+	}
+	return sess.Status, nil
+}

@@ -51,14 +51,11 @@ func TestSessionBlockerStore_CRUD(t *testing.T) {
 	resolved.ResolvedAt = &now
 	require.NoError(t, bs.Update(resolved))
 
-	openOnly, err := bs.ListBySessionID(sess.ID, false)
+	loaded, err := store.GetByID(sess.ID)
 	require.NoError(t, err)
-	require.Len(t, openOnly, 1)
-	require.Equal(t, open.ID, openOnly[0].ID)
-
-	all, err := bs.ListBySessionID(sess.ID, true)
-	require.NoError(t, err)
-	require.Len(t, all, 2)
+	require.Len(t, loaded.Blockers, 2)
+	require.Len(t, loaded.OpenBlockers(), 1)
+	require.Equal(t, open.ID, loaded.OpenBlockers()[0].ID)
 
 	got, err := bs.GetByID(open.ID)
 	require.NoError(t, err)
@@ -98,7 +95,7 @@ func TestSessionStore_HardDeleteCascadesBlockers(t *testing.T) {
 	require.NoError(t, bs.Create(&SessionBlocker{SessionID: sess.ID, Kind: BlockerKindOther}))
 
 	require.NoError(t, store.HardDelete(sess.ID))
-	all, err := bs.ListBySessionID(sess.ID, true)
-	require.NoError(t, err)
-	require.Empty(t, all)
+	var remaining []SessionBlocker
+	require.NoError(t, store.db.Where("session_id = ?", sess.ID).Find(&remaining).Error)
+	require.Empty(t, remaining)
 }

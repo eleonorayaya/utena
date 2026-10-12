@@ -258,12 +258,7 @@ func (c *SessionController) AddBlocker(w http.ResponseWriter, r *http.Request) {
 
 func (c *SessionController) ResolveBlocker(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id, err := parseUintParam(r, "id")
-	if err != nil {
-		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
-		return
-	}
-	blockerID, err := parseUintParam(r, "blockerId")
+	id, blockerID, err := parseBlockerParams(r)
 	if err != nil {
 		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
@@ -280,12 +275,7 @@ func (c *SessionController) ResolveBlocker(w http.ResponseWriter, r *http.Reques
 
 func (c *SessionController) DeleteBlocker(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id, err := parseUintParam(r, "id")
-	if err != nil {
-		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
-		return
-	}
-	blockerID, err := parseUintParam(r, "blockerId")
+	id, blockerID, err := parseBlockerParams(r)
 	if err != nil {
 		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
 		return
@@ -297,4 +287,16 @@ func (c *SessionController) DeleteBlocker(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func parseBlockerParams(r *http.Request) (uint, uint, error) {
+	id, err := parseUintParam(r, "id")
+	if err != nil {
+		return 0, 0, err
+	}
+	blockerID, err := parseUintParam(r, "blockerId")
+	if err != nil {
+		return 0, 0, err
+	}
+	return id, blockerID, nil
 }

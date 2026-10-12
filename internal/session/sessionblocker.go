@@ -79,15 +79,3 @@ func (s *SessionBlockerStore) Update(b *SessionBlocker) error {
 func (s *SessionBlockerStore) Delete(id uint) error {
 	return s.db.Where("id = ?", id).Unscoped().Delete(&SessionBlocker{}).Error
 }
-
-func (s *SessionBlockerStore) ListBySessionID(sessionID uint, includeResolved bool) ([]SessionBlocker, error) {
-	q := s.db.Where("session_id = ?", sessionID)
-	if !includeResolved {
-		q = q.Where("resolved_at IS NULL")
-	}
-	var out []SessionBlocker
-	if err := q.Order("created_at ASC").Find(&out).Error; err != nil {
-		return nil, err
-	}
-	return out, nil
-}

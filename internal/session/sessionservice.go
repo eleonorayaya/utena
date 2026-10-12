@@ -25,7 +25,7 @@ type SetupWarning struct{ Message string }
 func (w SetupWarning) Error() string { return w.Message }
 
 const (
-	envSessionID      = "UTENA_SESSION_ID"
+	EnvSessionID      = "UTENA_SESSION_ID"
 	envSessionName    = "UTENA_SESSION_NAME"
 	envSessionRoot    = "UTENA_SESSION_ROOT"
 	envBranch         = "UTENA_BRANCH"
@@ -380,7 +380,7 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 	}
 
 	tmuxName := SanitizeTmuxName(name)
-	tmuxEnv := map[string]string{envSessionID: fmt.Sprintf("%d", sess.ID)}
+	tmuxEnv := map[string]string{EnvSessionID: fmt.Sprintf("%d", sess.ID)}
 	tmuxRecord, err := s.tmuxService.RegisterPending(tmuxName, sessionRoot, tmuxEnv)
 	if err != nil {
 		if delErr := s.store.Delete(sess.ID); delErr != nil {
@@ -933,7 +933,7 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName 
 	if startDir == "" {
 		startDir = sess.SessionRoot
 	}
-	env := map[string]string{envSessionID: fmt.Sprintf("%d", sess.ID)}
+	env := map[string]string{EnvSessionID: fmt.Sprintf("%d", sess.ID)}
 
 	ts, err := tracedOp(ctx, "tmux new-session", func() (*utmux.TmuxSession, error) {
 		return s.tmuxService.CreateSession(tmuxName, startDir, env)
@@ -1740,19 +1740,19 @@ type AddBlockerInput struct {
 	URL  string
 }
 
-func (s *SessionService) liveSession(id uint) (*Session, error) {
-	sess, err := s.store.GetByID(id)
+func (s *SessionService) requireLiveSession(id uint) error {
+	status, err := s.store.GetStatus(id)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if sess.Status == StatusDeleted {
-		return nil, ErrSessionNotFound
+	if status == StatusDeleted {
+		return ErrSessionNotFound
 	}
-	return sess, nil
+	return nil
 }
 
 func (s *SessionService) ownedBlocker(sessionID, blockerID uint) (*SessionBlocker, error) {
-	if _, err := s.liveSession(sessionID); err != nil {
+	if err := s.requireLiveSession(sessionID); err != nil {
 		return nil, err
 	}
 	b, err := s.blockerStore.GetByID(blockerID)
@@ -1766,7 +1766,7 @@ func (s *SessionService) ownedBlocker(sessionID, blockerID uint) (*SessionBlocke
 }
 
 func (s *SessionService) AddBlocker(_ context.Context, sessionID uint, in AddBlockerInput) (*Session, error) {
-	if _, err := s.liveSession(sessionID); err != nil {
+	if err := s.requireLiveSession(sessionID); err != nil {
 		return nil, err
 	}
 	b := &SessionBlocker{SessionID: sessionID, Kind: in.Kind, Note: in.Note, URL: in.URL}

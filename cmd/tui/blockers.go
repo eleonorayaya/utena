@@ -73,7 +73,7 @@ func lookupSession(port, name string) (*session.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	return resolveSession(sessions, name, os.Getenv("UTENA_SESSION_ID"))
+	return resolveSession(sessions, name, os.Getenv(session.EnvSessionID))
 }
 
 func blockerRequest(method, url string, body any) error {

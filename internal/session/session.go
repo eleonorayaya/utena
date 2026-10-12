@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -106,7 +107,7 @@ func (s *Session) OpenBlockers() []SessionBlocker {
 }
 
 func (s *Session) IsBlocked() bool {
-	return len(s.OpenBlockers()) > 0
+	return slices.ContainsFunc(s.Blockers, SessionBlocker.IsOpen)
 }
 
 // IsHidden reports whether the session is normally hidden from the default

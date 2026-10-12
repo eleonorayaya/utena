@@ -9,7 +9,7 @@ import (
 
 func newSetupStepStore(t *testing.T) *SessionSetupStepStore {
 	t.Helper()
-	database := testdb.New(t, &SessionSetupStep{}, &SessionBlocker{})
+	database := testdb.New(t, &SessionSetupStep{})
 	return NewSessionSetupStepStore(database)
 }
 

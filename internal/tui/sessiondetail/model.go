@@ -365,7 +365,7 @@ func (m Model) View() string {
 		for i, bl := range open {
 			prefix := "  "
 			if m.interactive && i == m.blockerCursor {
-				prefix = lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true).Render("› ")
+				prefix = sectionStyle().Render("› ")
 			}
 			line := fmt.Sprintf("%s · %s · %s", bl.Kind, bl.Label(), common.TimeAgo(bl.CreatedAt))
 			if m.pendingBlockerDeleteID == bl.ID {
