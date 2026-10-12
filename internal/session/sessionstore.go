@@ -36,7 +36,9 @@ func (s *SessionStore) loaded() *gorm.DB {
 			return db.Order("session_worktrees.position ASC")
 		}).
 		Preload("Worktrees.Worktree").
-		Preload("Worktrees.Worktree.Branch")
+		Preload("Worktrees.Worktree.Branch").
+		Preload("Branches").
+		Preload("Branches.Branch")
 }
 
 func (s *SessionStore) enrichWorkspaces(sessions []*Session) error {
@@ -232,13 +234,17 @@ func (s *SessionStore) GetByWorkspaceAndName(workspaceID uint, name string, excl
 }
 
 func (s *SessionStore) GetByBranchID(branchID uint) (*Session, error) {
-	subquery := s.db.
+	viaWorktree := s.db.
 		Model(&SessionWorktree{}).
 		Select("session_worktrees.session_id").
 		Joins("JOIN worktrees ON worktrees.id = session_worktrees.worktree_id").
 		Where("worktrees.branch_id = ?", branchID)
+	viaHistory := s.db.
+		Model(&SessionBranch{}).
+		Select("session_branches.session_id").
+		Where("session_branches.branch_id = ?", branchID)
 	var session Session
-	if err := s.loaded().First(&session, "sessions.id IN (?)", subquery).Error; err != nil {
+	if err := s.loaded().First(&session, "sessions.id IN (?) OR sessions.id IN (?)", viaWorktree, viaHistory).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound
 		}

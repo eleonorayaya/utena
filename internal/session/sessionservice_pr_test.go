@@ -63,6 +63,7 @@ func setupPRTestEnv(t *testing.T, gitOpts ...git.GitServiceOption) *prTestEnv {
 		&utmux.TmuxSession{},
 		&Session{},
 		&SessionWorktree{},
+		&SessionBranch{},
 		&DismissedPR{},
 		&claude.ClaudeSession{},
 		&SessionAction{},

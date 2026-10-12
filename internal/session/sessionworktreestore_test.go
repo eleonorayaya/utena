@@ -19,6 +19,7 @@ func TestSessionWorktreeStore_Add_Duplicate(t *testing.T) {
 		&git.Worktree{},
 		&Session{},
 		&SessionWorktree{},
+		&SessionBranch{},
 	)
 
 	repo := &git.Repo{Path: "/tmp/swt-test", FullName: "owner/swt"}

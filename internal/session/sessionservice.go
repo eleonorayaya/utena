@@ -68,6 +68,7 @@ func tracedOp[T any](ctx context.Context, op string, fn func() (T, error), attrs
 type SessionService struct {
 	store                *SessionStore
 	sessionWorktreeStore *SessionWorktreeStore
+	sessionBranchStore   *SessionBranchStore
 	dismissedPRStore     *DismissedPRStore
 	sessionActionStore   *SessionActionStore
 	setupStepStore       *SessionSetupStepStore
@@ -86,6 +87,7 @@ func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktre
 	return &SessionService{
 		store:                store,
 		sessionWorktreeStore: sessionWorktreeStore,
+		sessionBranchStore:   NewSessionBranchStore(store.db),
 		dismissedPRStore:     dismissedPRStore,
 		sessionActionStore:   sessionActionStore,
 		setupStepStore:       setupStepStore,

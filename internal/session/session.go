@@ -47,6 +47,7 @@ type Session struct {
 	SetupSteps     []SessionSetupStep     `json:"setup_steps,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	Worktrees      []SessionWorktree      `json:"worktrees,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	Blockers       []SessionBlocker       `json:"blockers,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Branches       []SessionBranch        `json:"branches,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	TmuxSessionID  *uint                  `json:"tmux_session_id,omitempty" gorm:"uniqueIndex"`
 	StatusError    string                 `json:"status_error,omitempty"`
 	TmuxSession    *utmux.TmuxSession     `json:"tmux_session,omitempty" gorm:"foreignKey:TmuxSessionID"`

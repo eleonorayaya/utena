@@ -64,7 +64,7 @@ func (m *SessionModule) OnAppEnd(ctx context.Context) error {
 }
 
 func (m *SessionModule) Models() []any {
-	return []any{&Session{}, &SessionWorktree{}, &DismissedPR{}, &SessionAction{}, &SessionSetupStep{}, &SessionBlocker{}}
+	return []any{&Session{}, &SessionWorktree{}, &SessionBranch{}, &DismissedPR{}, &SessionAction{}, &SessionSetupStep{}, &SessionBlocker{}}
 }
 
 func (m *SessionModule) Routes() chi.Router {
