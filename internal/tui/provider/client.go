@@ -671,3 +671,60 @@ func (c *client) getSession(id uint) tea.Cmd {
 		return sessionPolledMsg{session: *resp.Session}
 	}
 }
+
+func (c *client) addBlocker(sessionID uint, reqBody session.AddBlockerRequest) tea.Cmd {
+	return func() tea.Msg {
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			return ErrMsg{err}
+		}
+		res, err := c.httpClient.Post(fmt.Sprintf("%s/sessions/%d/blockers", c.baseURL, sessionID), "application/json", bytes.NewReader(body))
+		if err != nil {
+			log.Printf("[ERROR] add blocker %d: %v", sessionID, err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusCreated {
+			return parseAPIError(res, "add blocker")
+		}
+		return blockerAddedMsg{sessionID: sessionID}
+	}
+}
+
+func (c *client) resolveBlocker(sessionID, blockerID uint) tea.Cmd {
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/sessions/%d/blockers/%d/resolve", c.baseURL, sessionID, blockerID), nil)
+		if err != nil {
+			return ErrMsg{err}
+		}
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] resolve blocker %d: %v", blockerID, err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			return parseAPIError(res, "resolve blocker")
+		}
+		return blockerChangedMsg{}
+	}
+}
+
+func (c *client) deleteBlocker(sessionID, blockerID uint) tea.Cmd {
+	return func() tea.Msg {
+		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/sessions/%d/blockers/%d", c.baseURL, sessionID, blockerID), nil)
+		if err != nil {
+			return ErrMsg{err}
+		}
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] delete blocker %d: %v", blockerID, err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusNoContent {
+			return parseAPIError(res, "delete blocker")
+		}
+		return blockerChangedMsg{}
+	}
+}

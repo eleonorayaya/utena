@@ -255,7 +255,57 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 			p.client.fetchSessions(),
 			func() tea.Msg { return WorkspaceAddedToSessionMsg{SessionID: id} },
 		)
+
+	case addBlockerIntentMsg:
+		return p, p.client.addBlocker(msg.sessionID, msg.req)
+
+	case blockerAddedMsg:
+		id := msg.sessionID
+		return p, tea.Batch(
+			p.client.fetchSessions(),
+			func() tea.Msg { return BlockerAddedMsg{SessionID: id} },
+		)
+
+	case resolveBlockerIntentMsg:
+		return p, p.client.resolveBlocker(msg.sessionID, msg.blockerID)
+
+	case deleteBlockerIntentMsg:
+		return p, p.client.deleteBlocker(msg.sessionID, msg.blockerID)
+
+	case blockerChangedMsg:
+		return p, p.client.fetchSessions()
 	}
 
 	return p, nil
+}
+
+func AddBlocker(sessionID uint, kind session.BlockerKind, note, url string) tea.Cmd {
+	return func() tea.Msg {
+		return addBlockerIntentMsg{sessionID: sessionID, req: session.AddBlockerRequest{Kind: kind, Note: note, URL: url}}
+	}
+}
+
+func ResolveBlocker(sessionID, blockerID uint) tea.Cmd {
+	return func() tea.Msg { return resolveBlockerIntentMsg{sessionID: sessionID, blockerID: blockerID} }
+}
+
+func DeleteBlocker(sessionID, blockerID uint) tea.Cmd {
+	return func() tea.Msg { return deleteBlockerIntentMsg{sessionID: sessionID, blockerID: blockerID} }
+}
+
+type addBlockerIntentMsg struct {
+	sessionID uint
+	req       session.AddBlockerRequest
+}
+
+type resolveBlockerIntentMsg struct{ sessionID, blockerID uint }
+
+type deleteBlockerIntentMsg struct{ sessionID, blockerID uint }
+
+type blockerAddedMsg struct{ sessionID uint }
+
+type blockerChangedMsg struct{}
+
+type BlockerAddedMsg struct {
+	SessionID uint
 }

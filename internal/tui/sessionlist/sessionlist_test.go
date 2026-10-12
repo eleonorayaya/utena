@@ -2,7 +2,9 @@ package sessionlist
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/session"
@@ -167,4 +169,74 @@ func TestSessionList_ToggleHidden_RevealsArchivedAndBroken(t *testing.T) {
 	assert.True(t, handled)
 	assert.True(t, result.showHidden)
 	assert.Len(t, result.filtered, 3)
+}
+
+func openBlocker(kind session.BlockerKind) session.SessionBlocker {
+	return session.SessionBlocker{Kind: kind}
+}
+
+func TestSessionList_GroupsBlockedBetweenActiveAndHidden(t *testing.T) {
+	m := New()
+	m.showHidden = true
+	m.sessions = []session.Session{
+		{Model: gorm.Model{ID: 1}, Name: "blocked1", Status: session.StatusActive, Blockers: []session.SessionBlocker{openBlocker(session.BlockerKindReview)}},
+		{Model: gorm.Model{ID: 2}, Name: "live", Status: session.StatusActive},
+		{Model: gorm.Model{ID: 3}, Name: "old", Status: session.StatusArchived, Blockers: []session.SessionBlocker{openBlocker(session.BlockerKindSlack)}},
+		{Model: gorm.Model{ID: 4}, Name: "live2", Status: session.StatusInactive},
+	}
+	m.rebuildFiltered()
+
+	var names []string
+	for _, s := range m.filtered {
+		names = append(names, s.Name)
+	}
+	assert.Equal(t, []string{"live", "live2", "blocked1", "old"}, names)
+}
+
+func TestSessionList_ResolvedBlockersAreNotBlocked(t *testing.T) {
+	now := time.Now()
+	m := New()
+	m.width, m.height = 60, 20
+	m.sessions = []session.Session{
+		{Model: gorm.Model{ID: 1}, Name: "was-blocked", Status: session.StatusActive, Blockers: []session.SessionBlocker{{Kind: session.BlockerKindReview, ResolvedAt: &now}}},
+		{Model: gorm.Model{ID: 2}, Name: "live", Status: session.StatusActive},
+	}
+	m.rebuildFiltered()
+	assert.Equal(t, "was-blocked", m.filtered[0].Name)
+	assert.NotContains(t, m.renderList(60), "Blocked")
+}
+
+func TestSessionList_RendersBlockedHeaderAndTag(t *testing.T) {
+	m := New()
+	m.width, m.height = 60, 20
+	m.sessions = []session.Session{
+		{Model: gorm.Model{ID: 1}, Name: "live", Status: session.StatusActive},
+		{Model: gorm.Model{ID: 2}, Name: "waiting", Status: session.StatusActive, Blockers: []session.SessionBlocker{openBlocker(session.BlockerKindSlack), openBlocker(session.BlockerKindReview)}},
+	}
+	m.rebuildFiltered()
+	out := m.renderList(60)
+	assert.Contains(t, out, "Blocked")
+	assert.Contains(t, out, "⏸ slack ×2")
+	assert.Less(t, strings.Index(out, "live"), strings.Index(out, "Blocked"))
+	assert.Less(t, strings.Index(out, "Blocked"), strings.Index(out, "waiting"))
+}
+
+func TestSessionList_CursorMovesAcrossHeader(t *testing.T) {
+	m := New()
+	m.width, m.height = 60, 20
+	m.sessions = []session.Session{
+		{Model: gorm.Model{ID: 1}, Name: "live", Status: session.StatusActive},
+		{Model: gorm.Model{ID: 2}, Name: "waiting", Status: session.StatusActive, Blockers: []session.SessionBlocker{openBlocker(session.BlockerKindOther)}},
+	}
+	m.rebuildFiltered()
+	m, _, _ = m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	assert.Equal(t, "waiting", m.selectedSession().Name)
+}
+
+func TestSessionList_BlockKey_NavigatesToBlockerForm(t *testing.T) {
+	m := New()
+	m.filtered = []session.Session{{Model: gorm.Model{ID: 5}, Name: "s", Status: session.StatusActive}}
+	_, cmd, handled := m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	assert.True(t, handled)
+	assert.NotNil(t, cmd)
 }

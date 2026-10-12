@@ -11,6 +11,7 @@ type keyMap struct {
 	Select       key.Binding
 	Archive      key.Binding
 	Delete       key.Binding
+	Block        key.Binding
 	New          key.Binding
 	Info         key.Binding
 	Todos        key.Binding
@@ -20,11 +21,11 @@ type keyMap struct {
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Select, k.Archive, k.Delete, k.New, k.Info, k.Todos, k.Workspaces, k.ToggleHidden, k.Quit}
+	return []key.Binding{k.Select, k.Archive, k.Delete, k.Block, k.New, k.Info, k.Todos, k.Workspaces, k.ToggleHidden, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Select, k.Archive, k.Delete, k.New, k.Info, k.Todos, k.Workspaces, k.ToggleHidden, k.Quit}}
+	return [][]key.Binding{{k.Up, k.Down, k.Select, k.Archive, k.Delete, k.Block, k.New, k.Info, k.Todos, k.Workspaces, k.ToggleHidden, k.Quit}}
 }
 
 var keys = keyMap{
@@ -33,6 +34,7 @@ var keys = keyMap{
 	Select:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
 	Archive:      key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archive")),
 	Delete:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+	Block:        key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "block")),
 	New:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
 	Info:         key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "info")),
 	Todos:        key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "todos")),

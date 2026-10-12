@@ -16,4 +16,5 @@ const (
 	PRListView
 	SessionDetailView
 	AddWorkspaceFormView
+	BlockerFormView
 )
