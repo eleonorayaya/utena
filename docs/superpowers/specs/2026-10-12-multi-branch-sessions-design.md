@@ -88,15 +88,13 @@ type SessionBranch struct {
 `Session` gains `Branches []SessionBranch` (`foreignKey:SessionID`,
 `OnDelete:CASCADE`), preloaded by the session store's `loaded()` scope.
 
-New `SessionBranchStore` with `Add` (idempotent on the unique index),
-`ListBySessionID`, `ListSessionIDsByBranchID`.
+New `SessionBranchStore` with `Add` (idempotent on the unique index).
 
-Writes:
-
-- Session creation (`setupSingleWorktree`) and `AddWorkspace` write the initial
-  row once the branch record exists.
-- `SessionService.OnAppStart` backfills one row per existing `SessionWorktree`
-  from its `Worktree.BranchID` (idempotent).
+A session's branches are the union of its worktrees' current `BranchID`s and
+its `SessionBranch` rows (`Session.BranchIDs()`). The current branch therefore
+never needs a history row; a row is written for the *old* branch at the moment
+a worktree is repointed (and for the new one). No creation-time writes or
+startup backfill are needed, and existing sessions work unchanged.
 
 ### 2. Detection
 
@@ -104,17 +102,18 @@ Writes:
 
 The single entry point. Given a worktree path and its checked-out branch:
 
-1. Look up the `Worktree` by path (path is already unique), comparing
-   `filepath.EvalSymlinks`-canonicalized paths on both sides. No match → return
+1. Find the session worktree whose path matches, comparing
+   `filepath.EvalSymlinks`-canonicalized paths on both sides, across all
+   sessions in `SessionStore.List()` (any status but deleted, so an archived
+   session that is later reactivated keeps its history). No match → return
    (not a utena worktree; the global hook fires everywhere).
-2. Find the owning session via `SessionWorktree` (any status but deleted, so
-   an archived session that is later reactivated keeps its history). None →
-   return.
+2. Resolve the worktree's workspace (needed for the default-branch lookup and
+   repo ID).
 3. Skip if `branchName` is empty (detached HEAD, e.g. mid-rebase) or equals the
    repo's default branch (checking out `main` to pull must not adopt main's PRs).
 4. Skip if it equals the worktree's current branch.
 5. `FindOrCreateBranch(branchName, repoID)`.
-6. Add a `SessionBranch` row (no-op if present).
+6. Add `SessionBranch` rows for the old and the new branch (no-op if present).
 7. Repoint `Worktree.BranchID` to the new branch so repair/recreate use the live
    branch. `Worktree.BranchID` is unique: if a stale row elsewhere still claims
    the branch, log a warning and skip the repoint; the history row is still
@@ -154,7 +153,7 @@ the session's worktree paths and calls `RecordWorktreeBranch`. It covers missed
 events (daemon down), `git branch -m` renames, and tools that bypass the git
 CLI. It runs:
 
-- on daemon start (after the backfill), for live sessions;
+- on daemon start, for live sessions;
 - on `ActivateSession`;
 - in a new `session.branches` job every 2 minutes, for sessions where
   `watchesPRActivity()` is true.
@@ -163,13 +162,13 @@ CLI. It runs:
 
 | Consumer | Change |
 |---|---|
-| `sessionBranchIDs` | Return branch IDs from `sess.Branches`. Drives `SyncPRActivity`, `SessionSnapshot`, `DismissSession`. |
-| `SessionStore.GetByBranchID` | Match via `session_branches.branch_id` instead of `worktrees.branch_id`. Fixes attribution in `handlePRUpdated` and stops auto-review sessions spawning for the user's own stacked PRs. |
-| `sessionBranchName` | Deleted. Notifications read the name from `pr.HeadBranch`. `PRStore.ListByBranch` preloads `HeadBranch`; `syncGitHubPR` sets `pr.HeadBranch = branch` before publishing. |
+| `sessionBranchIDs` | Replaced by `sess.BranchIDs()`. Drives `SyncPRActivity`, `SessionSnapshot`, `DismissSession`. |
+| `SessionStore.GetByBranchID` | Match `worktrees.branch_id` OR `session_branches.branch_id`. Fixes attribution in `handlePRUpdated` and stops auto-review sessions spawning for the user's own stacked PRs. |
+| `sessionBranchName` | Replaced by `s.prBranchName(pr)`, which uses `pr.HeadBranch` when loaded and otherwise `gitService.GetBranch(*pr.HeadBranchID)`. |
 | `maybeCompleteSession`, `newlyMerged` | Removed. Merge notifications still reach the monitor. `StatusCompleted` stays so existing rows load; nothing sets it. |
-| `cleanupSessionResources` | With `deleteBranch`: the current `wt.Branch` uses today's `CleanupBranch` (`-D`). Each other `SessionBranch` is deleted (`-D`) only if its PR is merged or closed, or `git rev-list <branch> --not --remotes` is empty (every commit is on a remote). Otherwise it is kept and a warning logged. Failures (e.g. checked out elsewhere) are logged and skipped. |
+| `cleanupSessionResources` | With `deleteBranch`: the current `wt.Branch` uses today's `CleanupBranch` (`-D`). Each other `SessionBranch` is deleted (`-D`) only if it has a merged PR, or `git rev-list <branch> --not --remotes` is empty (every commit is on a remote). Otherwise it is kept and a warning logged. Failures (e.g. checked out elsewhere) are logged and skipped. |
 | `ensureSessionWorktrees`, `RepairSession` | No code change; they follow the repointed `Worktree.BranchID`. |
-| TUI session detail (`internal/tui/sessiondetail/model.go`) | Shows the current branch per worktree as today, plus a "Branches" list of past branches with PR number and state when present. |
+| TUI session detail and list preview (`internal/tui/sessiondetail/model.go`, `internal/tui/sessionlist/sessionlist.go`) | PRs are filtered with `sess.FilterPRs` (all session branches) instead of the first worktree's branch. Detail shows the current branch per worktree as today, plus a "Past" line per past branch; PR lines already show number and state. |
 
 Not changing:
 
@@ -205,7 +204,8 @@ the `git` program's ini.v1 re-merge of `~/.gitconfig` round-trips the
   - detached HEAD and default branch are skipped;
   - a new branch writes history, repoints the worktree, and replays open PRs;
   - a unique-index collision on repoint still writes history.
-- Backfill creates one row per existing session worktree and is idempotent.
+- `Session.BranchIDs()` returns the union of current and history branches,
+  deduplicated; `GetByBranchID` finds a session by either.
 - `SyncSessionBranches` picks up a branch changed on disk (real git repo in a
   temp dir, as existing gitcli tests do).
 - With a session that has two branches:
