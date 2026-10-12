@@ -146,7 +146,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case provider.PRsStateUpdatedMsg:
 		if m.sess != nil && len(m.sess.Worktrees) > 0 && m.sess.Worktrees[0].Workspace != nil && msg.WorkspaceID == m.sess.Worktrees[0].Workspace.ID {
-			m.prs = filterPRsByBranch(msg.PullRequests, m.sess.Worktrees[0].Worktree.Branch)
+			m.prs = m.sess.FilterPRs(msg.PullRequests)
 		}
 		return m, nil
 	case provider.SessionsStateUpdatedMsg:
@@ -276,19 +276,6 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func filterPRsByBranch(prs []git.PullRequest, branch *git.Branch) []git.PullRequest {
-	if branch == nil {
-		return nil
-	}
-	var out []git.PullRequest
-	for _, pr := range prs {
-		if pr.HeadBranchID != nil && *pr.HeadBranchID == branch.ID {
-			out = append(out, pr)
-		}
-	}
-	return out
-}
-
 func RenderPanel(s *session.Session, prs []git.PullRequest, width, height int) string {
 	if s == nil {
 		return ""
@@ -346,6 +333,10 @@ func (m Model) View() string {
 			} else {
 				b.WriteString(labelStyle().Render(label) + lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("—") + "\n")
 			}
+		}
+		mutedStyle := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
+		for _, past := range s.PastBranches() {
+			b.WriteString(labelStyle().Render("Past") + mutedStyle.Render(past.Name) + "\n")
 		}
 	} else {
 		b.WriteString(labelStyle().Render("") + valueStyle().Render(s.WorkspaceDisplay()) + "\n")

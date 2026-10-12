@@ -205,11 +205,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		sel := m.selectedSession()
 		if sel != nil && len(sel.Worktrees) > 0 && sel.Worktrees[0].Workspace != nil &&
 			msg.WorkspaceID == sel.Worktrees[0].Workspace.ID {
-			var branch *git.Branch
-			if sel.Worktrees[0].Worktree != nil {
-				branch = sel.Worktrees[0].Worktree.Branch
-			}
-			m.prs = filterPRsByBranch(msg.PullRequests, branch)
+			m.prs = sel.FilterPRs(msg.PullRequests)
 		}
 		return m, nil
 	case provider.ErrMsg:
@@ -386,19 +382,6 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 
 	return m, nil, false
-}
-
-func filterPRsByBranch(prs []git.PullRequest, branch *git.Branch) []git.PullRequest {
-	if branch == nil {
-		return nil
-	}
-	var out []git.PullRequest
-	for _, pr := range prs {
-		if pr.HeadBranchID != nil && *pr.HeadBranchID == branch.ID {
-			out = append(out, pr)
-		}
-	}
-	return out
 }
 
 func sessionDisplayName(s session.Session) string {

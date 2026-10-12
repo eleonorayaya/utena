@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
@@ -197,4 +198,32 @@ func TestRenderPanel_ShowsBlockersWithoutCursor(t *testing.T) {
 	out := RenderPanel(&s, nil, 60, 30)
 	assert.Contains(t, out, "first")
 	assert.NotContains(t, out, "›")
+}
+
+func TestRenderPanel_ShowsPastBranchesAndTheirPRs(t *testing.T) {
+	current, past := uint(2), uint(1)
+	s := session.Session{
+		Model:  gorm.Model{ID: 9},
+		Name:   "stacked",
+		Status: session.StatusActive,
+		Worktrees: []session.SessionWorktree{{
+			Worktree: &git.Worktree{BranchID: current, Branch: &git.Branch{Model: gorm.Model{ID: current}, Name: "eqt/top"}},
+		}},
+		Branches: []session.SessionBranch{
+			{BranchID: past, Branch: &git.Branch{Model: gorm.Model{ID: past}, Name: "eqt/base"}},
+			{BranchID: current, Branch: &git.Branch{Model: gorm.Model{ID: current}, Name: "eqt/top"}},
+		},
+	}
+	prs := s.FilterPRs([]git.PullRequest{
+		{Number: 1, Title: "base", HeadBranchID: &past, State: git.PRStateOpen},
+		{Number: 2, Title: "top", HeadBranchID: &current, State: git.PRStateDraft},
+	})
+
+	out := RenderPanel(&s, prs, 80, 0)
+
+	assert.Contains(t, out, "eqt/top")
+	assert.Contains(t, out, "Past")
+	assert.Contains(t, out, "eqt/base")
+	assert.Contains(t, out, "#1 base")
+	assert.Contains(t, out, "#2 top")
 }
