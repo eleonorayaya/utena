@@ -63,9 +63,26 @@ func TestNewWorkspaceWindow_OpensInEmptyWorkspaceAndShowsIt(t *testing.T) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	require.Len(t, d.requests, 3)
-	assert.Equal(t, "new-window", d.requests[1].Verb)
+	assert.Equal(t, "select-workspace", d.requests[1].Verb, "switches before creating so the client streams the new pane")
 	assert.Equal(t, float64(2), d.requests[1].Params["workspace"])
-	assert.Equal(t, "/src", d.requests[1].Params["cwd"])
-	assert.Equal(t, "select-workspace", d.requests[2].Verb)
+	assert.Equal(t, "new-window", d.requests[2].Verb)
 	assert.Equal(t, float64(2), d.requests[2].Params["workspace"])
+	assert.Equal(t, "/src", d.requests[2].Params["cwd"])
+}
+
+func TestNewWorkspaceWindow_SwitchesBackWhenWindowFails(t *testing.T) {
+	r, d := startFakeTuios(t, map[string]string{
+		"list-workspaces":  `{"id":1,"result":{"workspaces":[{"workspace":1,"window_count":2,"current":true},{"workspace":2,"window_count":0}]}}`,
+		"new-window":       `{"id":1,"error":{"code":"spawn_failed","message":"boom"}}`,
+		"select-workspace": `{"id":1,"result":{"type":"ok"}}`,
+	})
+	t.Setenv("TUIOS_SOCKET", r.socketPath)
+
+	require.Error(t, NewWorkspaceWindow("work", "/src"))
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	require.Len(t, d.requests, 4)
+	assert.Equal(t, "select-workspace", d.requests[3].Verb)
+	assert.Equal(t, float64(1), d.requests[3].Params["workspace"])
 }

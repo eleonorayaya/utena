@@ -31,13 +31,17 @@ func stepWorkspace(workspaces []workspaceInfo, step int) int {
 	return used[((i+step)%len(used)+len(used))%len(used)]
 }
 
-func pickEmptyWorkspace(workspaces []workspaceInfo) (int, bool) {
-	current := 0
+func currentWorkspace(workspaces []workspaceInfo) int {
 	for _, w := range workspaces {
 		if w.Current {
-			current = w.Workspace
+			return w.Workspace
 		}
 	}
+	return 0
+}
+
+func pickEmptyWorkspace(workspaces []workspaceInfo) (int, bool) {
+	current := currentWorkspace(workspaces)
 	first := 0
 	for _, w := range workspaces {
 		if w.WindowCount > 0 || w.Current {
@@ -89,12 +93,18 @@ func NewWorkspaceWindow(session, cwd string) error {
 	if !ok {
 		return ErrNoEmptyWorkspace
 	}
+	if err := r.call("select-workspace", map[string]any{"session": session, "workspace": target}, nil); err != nil {
+		return err
+	}
 	params := map[string]any{"session": session, "workspace": target, "focus": true}
 	if cwd != "" {
 		params["cwd"] = cwd
 	}
 	if err := r.call("new-window", params, nil); err != nil {
+		if previous := currentWorkspace(workspaces); previous != 0 {
+			_ = r.call("select-workspace", map[string]any{"session": session, "workspace": previous}, nil)
+		}
 		return err
 	}
-	return r.call("select-workspace", map[string]any{"session": session, "workspace": target}, nil)
+	return nil
 }
