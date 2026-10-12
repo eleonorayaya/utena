@@ -67,6 +67,7 @@ func setupPRTestEnv(t *testing.T, gitOpts ...git.GitServiceOption) *prTestEnv {
 		&claude.ClaudeSession{},
 		&SessionAction{},
 		&SessionSetupStep{},
+		&SessionBlocker{},
 	)
 
 	bus := eventbus.NewEventBus()

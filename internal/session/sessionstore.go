@@ -29,6 +29,9 @@ func (s *SessionStore) loaded() *gorm.DB {
 		Preload("SetupSteps", func(db *gorm.DB) *gorm.DB {
 			return db.Order("session_setup_steps.position ASC")
 		}).
+		Preload("Blockers", func(db *gorm.DB) *gorm.DB {
+			return db.Order("session_blockers.created_at ASC")
+		}).
 		Preload("Worktrees", func(db *gorm.DB) *gorm.DB {
 			return db.Order("session_worktrees.position ASC")
 		}).

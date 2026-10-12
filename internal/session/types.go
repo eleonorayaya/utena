@@ -11,12 +11,14 @@ import (
 type SessionResponse struct {
 	*Session
 	AttentionStatus claude.ClaudeSessionStatus `json:"attention_status,omitempty"`
+	IsBlocked       bool                       `json:"is_blocked"`
 }
 
 func NewSessionResponse(session *Session) *SessionResponse {
 	return &SessionResponse{
 		Session:         session,
 		AttentionStatus: session.AttentionStatus(),
+		IsBlocked:       session.IsBlocked(),
 	}
 }
 
