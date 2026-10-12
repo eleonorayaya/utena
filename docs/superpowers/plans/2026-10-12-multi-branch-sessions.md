@@ -11,10 +11,8 @@
 **Spec:** `docs/superpowers/specs/2026-10-12-multi-branch-sessions-design.md`
 
 **Repos (two):**
-- utena: `/Users/eleonora.tennyson/utena-sessions/multi-branch-handling/utena` (Tasks 1–8)
-- dotfiles (shizuku): `/Users/eleonora.tennyson/utena-sessions/multi-branch-handling/dotfiles` (Task 9)
-
-Both are git worktrees on branch `eqt/multi-branch-handling`. Do not look at or edit any other checkout of these repos.
+- utena (Tasks 1–8)
+- dotfiles / shizuku (Task 9)
 
 ## Global Constraints
 
@@ -1664,7 +1662,7 @@ git commit -m "feat(tui): show PRs and past branches for multi-branch sessions"
 
 ### Task 9: Dotfiles — install the global git hook (dotfiles repo)
 
-**Repo:** `/Users/eleonora.tennyson/utena-sessions/multi-branch-handling/dotfiles`
+**Repo:** dotfiles (shizuku)
 
 **Files:**
 - Modify: `programs/utena/utena.go` (`Sync`, add `configureGitHook`)
