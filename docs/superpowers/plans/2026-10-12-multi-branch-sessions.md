@@ -26,7 +26,7 @@ Both are git worktrees on branch `eqt/multi-branch-handling`. Do not look at or 
 - Daemon endpoint: `PUT /sessions/branch-hook`, body `{"path": "...", "branch": "..."}`, 204 on success including unknown paths.
 - The hook CLI always exits 0, prints nothing, and uses a 1s HTTP timeout.
 - Sessions are never auto-completed on PR merge.
-- Past branches on delete-with-branch: deleted (`-D`) only if the branch has a merged PR or `git rev-list refs/heads/<branch> --not --remotes` is empty; otherwise kept with a warning.
+- Past branches on delete-with-branch: deleted (`-D`) only if the branch has a merged PR whose HeadSHA equals the local branch tip (ruling during execution) or `git rev-list refs/heads/<branch> --not --remotes` is empty; otherwise kept with a warning.
 
 ## Review Focus
 
