@@ -227,6 +227,23 @@ func (s *GitService) CurrentBranch(ctx context.Context, repoPath string) (string
 	return s.cli.currentBranch(ctx, repoPath)
 }
 
+func (s *GitService) DefaultBranch(ctx context.Context, repoPath string) string {
+	return s.cli.defaultBranch(ctx, repoPath)
+}
+
+func (s *GitService) HasUnpushedCommits(ctx context.Context, repoPath string, branch string) (bool, error) {
+	return s.cli.hasUnpushedCommits(ctx, repoPath, branch)
+}
+
+func (s *GitService) RepointWorktree(wt *Worktree, branch *Branch) error {
+	if wt == nil || branch == nil {
+		return fmt.Errorf("worktree and branch are required")
+	}
+	wt.BranchID = branch.ID
+	wt.Branch = branch
+	return s.worktreeStore.Update(wt)
+}
+
 func (s *GitService) IsDirty(ctx context.Context, repoPath string) (bool, error) {
 	return s.cli.isDirty(ctx, repoPath)
 }

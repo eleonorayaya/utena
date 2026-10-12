@@ -21,6 +21,10 @@ func newGitCLI() *gitCLI {
 	return &gitCLI{}
 }
 
+func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "git", append([]string{"-c", "hook.utena.enabled=false"}, args...)...)
+}
+
 type BranchRef struct {
 	Name   string `json:"name"`
 	Remote bool   `json:"remote"`
@@ -31,7 +35,7 @@ func (s *gitCLI) defaultBranch(ctx context.Context, repoPath string) string {
 	if isBareWorkspace(repoPath) {
 		ref = "HEAD"
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "symbolic-ref", ref)
+	cmd := gitCommand(ctx, "-C", repoPath, "symbolic-ref", ref)
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -47,7 +51,7 @@ func (s *gitCLI) defaultBranch(ctx context.Context, repoPath string) string {
 }
 
 func (s *gitCLI) listBranches(ctx context.Context, repoPath string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "branch", "--format=%(refname:short)")
+	cmd := gitCommand(ctx, "-C", repoPath, "branch", "--format=%(refname:short)")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list branches: %w", err)
@@ -83,7 +87,7 @@ func (s *gitCLI) listBranches(ctx context.Context, repoPath string) ([]string, e
 }
 
 func (s *gitCLI) listAllBranches(ctx context.Context, repoPath string) ([]BranchRef, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin")
+	cmd := gitCommand(ctx, "-C", repoPath, "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list branches: %w", err)
@@ -127,7 +131,7 @@ func (s *gitCLI) listAllBranches(ctx context.Context, repoPath string) ([]Branch
 }
 
 func (s *gitCLI) fetchOrigin(ctx context.Context, repoPath string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "fetch", "--prune", "origin")
+	cmd := gitCommand(ctx, "-C", repoPath, "fetch", "--prune", "origin")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch failed: %s: %w", strings.TrimSpace(string(output)), err)
 	}
@@ -135,9 +139,9 @@ func (s *gitCLI) fetchOrigin(ctx context.Context, repoPath string) error {
 }
 
 func (s *gitCLI) pull(ctx context.Context, repoPath string, branch string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "fetch", "origin", branch+":"+branch)
+	cmd := gitCommand(ctx, "-C", repoPath, "fetch", "origin", branch+":"+branch)
 	if _, err := cmd.CombinedOutput(); err != nil {
-		fallback := exec.CommandContext(ctx, "git", "-C", repoPath, "pull", "origin", branch)
+		fallback := gitCommand(ctx, "-C", repoPath, "pull", "origin", branch)
 		if output, err := fallback.CombinedOutput(); err != nil {
 			return fmt.Errorf("git pull failed: %s: %w", string(output), err)
 		}
@@ -146,7 +150,7 @@ func (s *gitCLI) pull(ctx context.Context, repoPath string, branch string) error
 }
 
 func (s *gitCLI) fetch(ctx context.Context, repoPath string, branch string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "fetch", "origin", branch+":"+branch)
+	cmd := gitCommand(ctx, "-C", repoPath, "fetch", "origin", branch+":"+branch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch failed: %s: %w", strings.TrimSpace(string(output)), err)
 	}
@@ -158,7 +162,7 @@ func (s *gitCLI) createWorktree(ctx context.Context, repoPath string, branchName
 	if worktreePath == "" {
 		worktreePath = s.worktreePath(repoPath, branchName)
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, baseBranch)
+	cmd := gitCommand(ctx, "-C", repoPath, "worktree", "add", "-b", branchName, worktreePath, baseBranch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
 	}
@@ -170,7 +174,7 @@ func (s *gitCLI) checkoutWorktree(ctx context.Context, repoPath string, branch s
 	if worktreePath == "" {
 		worktreePath = s.worktreePath(repoPath, branch)
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "add", worktreePath, branch)
+	cmd := gitCommand(ctx, "-C", repoPath, "worktree", "add", worktreePath, branch)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s: %w", string(output), err)
 	}
@@ -178,7 +182,7 @@ func (s *gitCLI) checkoutWorktree(ctx context.Context, repoPath string, branch s
 }
 
 func (s *gitCLI) pushSetUpstream(ctx context.Context, repoPath string, branchName string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "push", "--set-upstream", "origin", branchName)
+	cmd := gitCommand(ctx, "-C", repoPath, "push", "--set-upstream", "origin", branchName)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git push --set-upstream failed: %s: %w", strings.TrimSpace(string(output)), err)
 	}
@@ -186,7 +190,7 @@ func (s *gitCLI) pushSetUpstream(ctx context.Context, repoPath string, branchNam
 }
 
 func (s *gitCLI) currentBranch(ctx context.Context, repoPath string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "branch", "--show-current")
+	cmd := gitCommand(ctx, "-C", repoPath, "branch", "--show-current")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get current branch: %w", err)
@@ -194,8 +198,17 @@ func (s *gitCLI) currentBranch(ctx context.Context, repoPath string) (string, er
 	return strings.TrimSpace(string(output)), nil
 }
 
+func (s *gitCLI) hasUnpushedCommits(ctx context.Context, repoPath string, branch string) (bool, error) {
+	cmd := gitCommand(ctx, "-C", repoPath, "rev-list", "--max-count=1", "refs/heads/"+branch, "--not", "--remotes")
+	output, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("failed to list unpushed commits for %s: %w", branch, err)
+	}
+	return strings.TrimSpace(string(output)) != "", nil
+}
+
 func (s *gitCLI) isDirty(ctx context.Context, repoPath string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "status", "--porcelain")
+	cmd := gitCommand(ctx, "-C", repoPath, "status", "--porcelain")
 	output, err := cmd.Output()
 	if err != nil {
 		return false, fmt.Errorf("git status failed: %w", err)
@@ -204,7 +217,7 @@ func (s *gitCLI) isDirty(ctx context.Context, repoPath string) (bool, error) {
 }
 
 func (s *gitCLI) hasRemoteBranch(ctx context.Context, repoPath string, branch string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "ls-remote", "--heads", "origin", "refs/heads/"+branch)
+	cmd := gitCommand(ctx, "-C", repoPath, "ls-remote", "--heads", "origin", "refs/heads/"+branch)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("git ls-remote failed: %s: %w", strings.TrimSpace(string(output)), err)
@@ -213,7 +226,7 @@ func (s *gitCLI) hasRemoteBranch(ctx context.Context, repoPath string, branch st
 }
 
 func (s *gitCLI) hasBranch(ctx context.Context, repoPath string, branch string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--verify", "refs/heads/"+branch)
+	cmd := gitCommand(ctx, "-C", repoPath, "rev-parse", "--verify", "refs/heads/"+branch)
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return false, ctx.Err()
@@ -253,7 +266,7 @@ func (s *gitCLI) worktreePath(repoPath string, branch string) string {
 }
 
 func (s *gitCLI) pruneWorktrees(ctx context.Context, repoPath string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "prune")
+	cmd := gitCommand(ctx, "-C", repoPath, "worktree", "prune")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree prune failed: %s: %w", strings.TrimSpace(string(output)), err)
 	}
@@ -261,7 +274,7 @@ func (s *gitCLI) pruneWorktrees(ctx context.Context, repoPath string) error {
 }
 
 func (s *gitCLI) removeWorktree(ctx context.Context, repoPath string, worktreePath string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "remove", worktreePath, "--force")
+	cmd := gitCommand(ctx, "-C", repoPath, "worktree", "remove", worktreePath, "--force")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree remove failed: %s: %w", string(output), err)
 	}
@@ -269,7 +282,7 @@ func (s *gitCLI) removeWorktree(ctx context.Context, repoPath string, worktreePa
 }
 
 func (s *gitCLI) deleteBranch(ctx context.Context, repoPath string, branchName string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "branch", "-D", branchName)
+	cmd := gitCommand(ctx, "-C", repoPath, "branch", "-D", branchName)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git branch delete failed: %s: %w", string(output), err)
 	}
@@ -277,7 +290,7 @@ func (s *gitCLI) deleteBranch(ctx context.Context, repoPath string, branchName s
 }
 
 func (s *gitCLI) remoteURL(ctx context.Context, repoPath string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "config", "--get", "remote.origin.url")
+	cmd := gitCommand(ctx, "-C", repoPath, "config", "--get", "remote.origin.url")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get remote URL: %w", err)
@@ -371,7 +384,7 @@ func (s *gitCLI) cloneBareWorkspace(ctx context.Context, remoteURL, workspacePat
 
 func (s *gitCLI) runBareClone(ctx context.Context, remoteURL, workspacePath string, onProgress func(string)) error {
 	barePath := filepath.Join(workspacePath, ".bare")
-	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", "--progress", remoteURL, barePath)
+	cmd := gitCommand(ctx, "clone", "--bare", "--progress", remoteURL, barePath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -433,7 +446,7 @@ func writeBareMarker(workspacePath string) error {
 }
 
 func (s *gitCLI) configureBareFetchRefspec(ctx context.Context, workspacePath string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", workspacePath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	cmd := gitCommand(ctx, "-C", workspacePath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to set fetch refspec: %s: %w", strings.TrimSpace(string(output)), err)
 	}
