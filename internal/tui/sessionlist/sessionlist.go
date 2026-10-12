@@ -12,6 +12,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tui/blockerform"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessiondetail"
@@ -349,10 +350,14 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, cmd, true
 
 	case key.Matches(msg, keys.Block):
-		if m.selectedSession() == nil {
+		sel := m.selectedSession()
+		if sel == nil {
 			return m, nil, false
 		}
-		return m, router.NavigateTo(router.BlockerFormView), true
+		return m, tea.Sequence(
+			router.NavigateTo(router.BlockerFormView),
+			blockerform.Start(sel.ID),
+		), true
 
 	case key.Matches(msg, keys.Delete):
 		sel := m.selectedSession()
