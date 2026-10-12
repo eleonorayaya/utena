@@ -243,17 +243,26 @@ func (s *SessionStore) GetByBranchID(branchID uint) (*Session, error) {
 		Model(&SessionBranch{}).
 		Select("session_branches.session_id").
 		Where("session_branches.branch_id = ?", branchID)
-	var session Session
-	if err := s.loaded().First(&session, "sessions.id IN (?) OR sessions.id IN (?)", viaWorktree, viaHistory).Error; err != nil {
+
+	for _, candidates := range []any{viaWorktree, viaHistory} {
+		var session Session
+		err := s.loaded().
+			Where("sessions.id IN (?)", candidates).
+			Order("CASE WHEN sessions.status IN ('deleted', 'archived', 'completed', 'pending', 'creating') THEN 1 ELSE 0 END").
+			Order("sessions.last_used_at DESC").
+			First(&session).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrSessionNotFound
+			continue
 		}
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
+		if err := s.enrichWorkspaces([]*Session{&session}); err != nil {
+			return nil, err
+		}
+		return &session, nil
 	}
-	if err := s.enrichWorkspaces([]*Session{&session}); err != nil {
-		return nil, err
-	}
-	return &session, nil
+	return nil, ErrSessionNotFound
 }
 
 func (s *SessionStore) GetByTmuxSessionID(tmuxSessionID uint) (*Session, error) {

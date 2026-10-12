@@ -1158,6 +1158,13 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 		}
 	}
 
+	if deleteBranch {
+		s.SyncSessionBranches(ctx, session)
+		if refreshed, err := s.store.GetByID(id); err == nil {
+			session = refreshed
+		}
+	}
+
 	s.cleanupSessionResources(ctx, session, deleteBranch)
 
 	if err := s.store.HardDelete(id); err != nil {
@@ -1229,6 +1236,9 @@ func (s *SessionService) cleanupPastBranches(ctx context.Context, session *Sessi
 			}
 			ws = found
 			wsCache[branch.RepoID] = ws
+		}
+		if s.isDefaultBranch(ctx, ws.Path, branch.Name) {
+			continue
 		}
 		exists, err := s.gitService.HasBranch(ctx, ws.Path, branch.Name)
 		if err != nil || !exists {

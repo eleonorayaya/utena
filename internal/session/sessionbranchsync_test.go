@@ -32,8 +32,15 @@ type branchSyncEnv struct {
 
 func setupBranchSyncEnv(t *testing.T) *branchSyncEnv {
 	t.Helper()
+	return setupBranchSyncEnvWithOriginHead(t, true)
+}
+
+func setupBranchSyncEnvWithOriginHead(t *testing.T, setOriginHead bool) *branchSyncEnv {
+	t.Helper()
 	repoPath := initTestRepo(t)
-	gitIn(t, repoPath, "remote", "set-head", "origin", "main")
+	if setOriginHead {
+		gitIn(t, repoPath, "remote", "set-head", "origin", "main")
+	}
 	service, store, _, wsID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
 	sess := &Session{Name: "multi"}
@@ -218,4 +225,105 @@ func TestDeleteSession_DeletesPastBranchesOnlyWhenSafe(t *testing.T) {
 	require.False(t, localBranchExists(t, env.repoPath, "eqt/merged-past"))
 	require.True(t, localBranchExists(t, env.repoPath, "eqt/unpushed-past"), "unmerged local work must survive")
 	require.True(t, localBranchExists(t, env.repoPath, "eqt/merged-then-more"), "commits added after the merged head must survive")
+}
+
+func TestRecordWorktreeBranch_SkipsMainWhenOriginHeadMissing(t *testing.T) {
+	env := setupBranchSyncEnvWithOriginHead(t, false)
+	ctx := context.Background()
+	require.Empty(t, env.service.gitService.DefaultBranch(ctx, env.repoPath))
+
+	require.NoError(t, env.service.RecordWorktreeBranch(ctx, env.wtPath, "main"))
+	require.NoError(t, env.service.RecordWorktreeBranch(ctx, env.wtPath, "master"))
+
+	sess := env.reload(t)
+	require.Empty(t, sess.Branches)
+	require.Equal(t, "eqt/multi", sess.Worktrees[0].Worktree.Branch.Name)
+}
+
+func TestRecordWorktreeBranch_DoesNotRecordDefaultBranchAsHistory(t *testing.T) {
+	env := setupBranchSyncEnv(t)
+	ctx := context.Background()
+	mainBranch, err := env.service.gitService.FindOrCreateBranch(ctx, "main", env.sess.Worktrees[0].Worktree.RepoID)
+	require.NoError(t, err)
+	require.NoError(t, env.service.gitService.RepointWorktree(env.sess.Worktrees[0].Worktree, mainBranch))
+
+	gitIn(t, env.wtPath, "checkout", "-b", "eqt/feature")
+	require.NoError(t, env.service.RecordWorktreeBranch(ctx, env.wtPath, "eqt/feature"))
+
+	sess := env.reload(t)
+	require.Equal(t, []string{"eqt/feature"}, branchNames(sess))
+	require.Equal(t, "eqt/feature", sess.Worktrees[0].Worktree.Branch.Name)
+}
+
+func TestDeleteSession_NeverDeletesDefaultBranchFromHistory(t *testing.T) {
+	env := setupBranchSyncEnv(t)
+	ctx := context.Background()
+	gitIn(t, env.repoPath, "checkout", "-b", "elsewhere")
+
+	wt := env.sess.Worktrees[0].Worktree
+	mainBranch, err := env.service.gitService.FindOrCreateBranch(ctx, "main", wt.RepoID)
+	require.NoError(t, err)
+	require.NoError(t, env.service.sessionBranchStore.Add(&SessionBranch{SessionID: env.sess.ID, WorktreeID: wt.ID, BranchID: mainBranch.ID, FirstSeenAt: time.Now()}))
+
+	_, err = env.service.ArchiveSession(ctx, env.sess.ID)
+	require.NoError(t, err)
+	require.NoError(t, env.service.DeleteSession(ctx, env.sess.ID, true, false))
+
+	require.True(t, localBranchExists(t, env.repoPath, "main"))
+}
+
+func TestRecordWorktreeBranch_IgnoresWorktreeOfDeletedSession(t *testing.T) {
+	env := setupBranchSyncEnv(t)
+	require.NoError(t, env.store.db.Model(&Session{}).Where("id = ?", env.sess.ID).Update("status", StatusDeleted).Error)
+	gitIn(t, env.wtPath, "checkout", "-b", "eqt/after-delete")
+
+	require.NoError(t, env.service.RecordWorktreeBranch(context.Background(), env.wtPath, "eqt/after-delete"))
+
+	sess := env.reload(t)
+	require.Empty(t, sess.Branches)
+	require.Equal(t, "eqt/multi", sess.Worktrees[0].Worktree.Branch.Name)
+}
+
+func TestRecordWorktreeBranch_RepointCollisionWritesHistoryWithoutReplay(t *testing.T) {
+	env := setupBranchSyncEnv(t)
+	ctx := context.Background()
+	var replayed []string
+	env.service.eventBus.Subscribe(eventbus.SessionNotification, func(_ context.Context, event eventbus.Event) error {
+		if data, ok := event.Data.(eventbus.SessionNotificationEvent); ok {
+			if n, ok := data.Data.(git.PRNotification); ok {
+				replayed = append(replayed, n.Branch)
+			}
+		}
+		return nil
+	})
+
+	wt := env.sess.Worktrees[0].Worktree
+	target, err := env.service.gitService.FindOrCreateBranch(ctx, "eqt/collide", wt.RepoID)
+	require.NoError(t, err)
+	targetID := target.ID
+	require.NoError(t, env.store.db.Create(&git.PullRequest{RepoID: wt.RepoID, Number: 9, HeadBranchID: &targetID, State: git.PRStateOpen}).Error)
+	require.NoError(t, env.store.db.Create(&git.Worktree{Path: filepath.Join(t.TempDir(), "stale"), BranchID: target.ID, RepoID: wt.RepoID, Status: git.WorktreeStatusPresent}).Error)
+
+	gitIn(t, env.wtPath, "checkout", "-b", "eqt/collide")
+	require.NoError(t, env.service.RecordWorktreeBranch(ctx, env.wtPath, "eqt/collide"))
+
+	sess := env.reload(t)
+	require.ElementsMatch(t, []string{"eqt/multi", "eqt/collide"}, branchNames(sess))
+	require.Equal(t, "eqt/multi", sess.Worktrees[0].Worktree.Branch.Name)
+	require.Empty(t, replayed)
+}
+
+func TestDeleteSession_ReconcilesDiskBranchBeforeCleanup(t *testing.T) {
+	env := setupBranchSyncEnv(t)
+	ctx := context.Background()
+
+	gitIn(t, env.wtPath, "commit", "--allow-empty", "-m", "local work on stored branch")
+	gitIn(t, env.wtPath, "checkout", "-b", "eqt/on-disk")
+
+	_, err := env.service.ArchiveSession(ctx, env.sess.ID)
+	require.NoError(t, err)
+	require.NoError(t, env.service.DeleteSession(ctx, env.sess.ID, true, false))
+
+	require.False(t, localBranchExists(t, env.repoPath, "eqt/on-disk"), "on-disk branch is current and must be force-deleted")
+	require.True(t, localBranchExists(t, env.repoPath, "eqt/multi"), "previously stored branch with unpushed commits must be kept as past")
 }

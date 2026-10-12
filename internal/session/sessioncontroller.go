@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -223,7 +224,7 @@ func (c *SessionController) BranchHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := c.service.RecordWorktreeBranch(r.Context(), data.Path, data.Branch); err != nil {
+	if err := c.service.RecordWorktreeBranch(context.WithoutCancel(r.Context()), data.Path, data.Branch); err != nil {
 		common.RenderError(w, r, err)
 		return
 	}

@@ -92,3 +92,71 @@ func TestSessionStore_LoadsBranchesAndFindsSessionByHistoryBranch(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, sess.ID, found.ID)
 }
+
+func newSharedBranchFixture(t *testing.T) (*SessionStore, *SessionWorktreeStore, *SessionBranchStore, uint, *git.Branch, func(sess *Session)) {
+	t.Helper()
+	database, wsID, branch, _ := setupTestDBWithGitAndTmux(t)
+	store := NewSessionStore(database)
+	swtStore := NewSessionWorktreeStore(database)
+	sbStore := NewSessionBranchStore(database)
+	shared := &git.Branch{Name: "shared", RepoID: branch.RepoID}
+	require.NoError(t, database.Create(shared).Error)
+	add := func(sess *Session) {
+		require.NoError(t, store.Add(sess))
+	}
+	return store, swtStore, sbStore, wsID, shared, add
+}
+
+func TestSessionStore_GetByBranchID_CurrentWorktreeBeatsHistory(t *testing.T) {
+	store, swtStore, sbStore, wsID, shared, add := newSharedBranchFixture(t)
+
+	old := &Session{Name: "old", Status: StatusArchived, LastUsedAt: time.Now().Add(-time.Hour)}
+	add(old)
+	oldWt := attachTestWorktree(t, store.db, swtStore, old.ID, wsID, 0)
+	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: old.ID, WorktreeID: oldWt.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
+
+	current := &Session{Name: "current", Status: StatusActive, LastUsedAt: time.Now()}
+	add(current)
+	curWt := attachTestWorktree(t, store.db, swtStore, current.ID, wsID, 0)
+	require.NoError(t, store.db.Model(curWt).Update("branch_id", shared.ID).Error)
+
+	found, err := store.GetByBranchID(shared.ID)
+	require.NoError(t, err)
+	require.Equal(t, current.ID, found.ID)
+}
+
+func TestSessionStore_GetByBranchID_PrefersLiveSessionAmongHistoryMatches(t *testing.T) {
+	store, swtStore, sbStore, wsID, shared, add := newSharedBranchFixture(t)
+
+	old := &Session{Name: "old", Status: StatusArchived, LastUsedAt: time.Now().Add(-time.Hour)}
+	add(old)
+	oldWt := attachTestWorktree(t, store.db, swtStore, old.ID, wsID, 0)
+	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: old.ID, WorktreeID: oldWt.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
+
+	live := &Session{Name: "live", Status: StatusActive, LastUsedAt: time.Now().Add(-2 * time.Hour)}
+	add(live)
+	liveWt := attachTestWorktree(t, store.db, swtStore, live.ID, wsID, 0)
+	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: live.ID, WorktreeID: liveWt.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
+
+	found, err := store.GetByBranchID(shared.ID)
+	require.NoError(t, err)
+	require.Equal(t, live.ID, found.ID)
+}
+
+func TestSessionStore_GetByBranchID_MostRecentlyUsedAmongEquals(t *testing.T) {
+	store, swtStore, sbStore, wsID, shared, add := newSharedBranchFixture(t)
+
+	first := &Session{Name: "first", Status: StatusActive, LastUsedAt: time.Now().Add(-time.Hour)}
+	add(first)
+	firstWt := attachTestWorktree(t, store.db, swtStore, first.ID, wsID, 0)
+	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: first.ID, WorktreeID: firstWt.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
+
+	second := &Session{Name: "second", Status: StatusActive, LastUsedAt: time.Now()}
+	add(second)
+	secondWt := attachTestWorktree(t, store.db, swtStore, second.ID, wsID, 0)
+	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: second.ID, WorktreeID: secondWt.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
+
+	found, err := store.GetByBranchID(shared.ID)
+	require.NoError(t, err)
+	require.Equal(t, second.ID, found.ID)
+}

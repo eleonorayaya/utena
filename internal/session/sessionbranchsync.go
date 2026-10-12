@@ -64,7 +64,7 @@ func (s *SessionService) recordBranch(ctx context.Context, sess *Session, swt *S
 	if ws == nil {
 		return fmt.Errorf("worktree %d has no workspace", wt.ID)
 	}
-	if branchName == s.gitService.DefaultBranch(ctx, ws.Path) {
+	if s.isDefaultBranch(ctx, ws.Path, branchName) {
 		return nil
 	}
 
@@ -74,10 +74,11 @@ func (s *SessionService) recordBranch(ctx context.Context, sess *Session, swt *S
 	}
 
 	now := time.Now()
-	for _, id := range []uint{wt.BranchID, branch.ID} {
-		if id == 0 {
-			continue
-		}
+	recorded := []uint{branch.ID}
+	if wt.BranchID != 0 && !s.isDefaultBranch(ctx, ws.Path, branchNameOf(wt.Branch)) {
+		recorded = []uint{wt.BranchID, branch.ID}
+	}
+	for _, id := range recorded {
 		if err := s.sessionBranchStore.Add(&SessionBranch{SessionID: sess.ID, WorktreeID: wt.ID, BranchID: id, FirstSeenAt: now}); err != nil {
 			return fmt.Errorf("record session branch: %w", err)
 		}
@@ -85,11 +86,29 @@ func (s *SessionService) recordBranch(ctx context.Context, sess *Session, swt *S
 
 	if err := s.gitService.RepointWorktree(wt, branch); err != nil {
 		slog.WarnContext(ctx, "failed to repoint worktree to new branch", "session", sess.ID, "worktree", wt.ID, "branch", branchName, "error", err)
+		return nil
 	}
 	slog.InfoContext(ctx, "session branch attached", "session", sess.ID, "worktree", wt.ID, "branch", branchName)
 
 	s.replayOpenPRs(ctx, sess.ID, branch)
 	return nil
+}
+
+func branchNameOf(b *git.Branch) string {
+	if b == nil {
+		return ""
+	}
+	return b.Name
+}
+
+func (s *SessionService) isDefaultBranch(ctx context.Context, repoPath string, name string) bool {
+	if name == "" {
+		return false
+	}
+	if def := s.gitService.DefaultBranch(ctx, repoPath); def != "" {
+		return name == def
+	}
+	return name == "main" || name == "master"
 }
 
 func (s *SessionService) replayOpenPRs(ctx context.Context, sessionID uint, branch *git.Branch) {
