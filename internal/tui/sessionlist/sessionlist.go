@@ -502,9 +502,6 @@ func (m Model) renderList(width int) string {
 	for i, s := range visible {
 		idx := i + m.offset
 		if idx == blockedAt {
-			if i > 0 {
-				b.WriteString("\n")
-			}
 			b.WriteString(sectionHeader("Blocked", width))
 			b.WriteString("\n")
 		}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -19,12 +20,7 @@ import (
 
 func resolveSession(sessions []session.Session, name string, envID string) (*session.Session, error) {
 	if name != "" {
-		for i := range sessions {
-			if sessions[i].Name == name {
-				return &sessions[i], nil
-			}
-		}
-		return nil, fmt.Errorf("no session named %q", name)
+		return resolveSessionByName(sessions, name)
 	}
 	if envID == "" {
 		return nil, errors.New("no session name given and UTENA_SESSION_ID is not set")
@@ -39,6 +35,37 @@ func resolveSession(sessions []session.Session, name string, envID string) (*ses
 		}
 	}
 	return nil, fmt.Errorf("no session with id %d", id)
+}
+
+func resolveSessionByName(sessions []session.Session, name string) (*session.Session, error) {
+	var visible, hidden []*session.Session
+	for i := range sessions {
+		s := &sessions[i]
+		if s.Name != name || !s.ListVisible(true) {
+			continue
+		}
+		if s.IsHidden() {
+			hidden = append(hidden, s)
+		} else {
+			visible = append(visible, s)
+		}
+	}
+	matches := visible
+	if len(matches) == 0 {
+		matches = hidden
+	}
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("no session named %q", name)
+	case 1:
+		return matches[0], nil
+	default:
+		ids := make([]string, len(matches))
+		for i, s := range matches {
+			ids[i] = fmt.Sprintf("%d (%s)", s.ID, s.WorkspaceDisplay())
+		}
+		return nil, fmt.Errorf("session name %q is ambiguous; matching session ids: %s (run from inside the session or rename one)", name, strings.Join(ids, ", "))
+	}
 }
 
 func lookupSession(port, name string) (*session.Session, error) {

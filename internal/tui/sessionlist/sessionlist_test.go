@@ -240,3 +240,14 @@ func TestSessionList_BlockKey_NavigatesToBlockerForm(t *testing.T) {
 	assert.True(t, handled)
 	assert.NotNil(t, cmd)
 }
+
+func TestSessionList_ViewFitsHeightWithBlockedHeaderMidWindow(t *testing.T) {
+	m := New()
+	m.width, m.height = 60, 10
+	m.sessions = []session.Session{{Model: gorm.Model{ID: 1}, Name: "live", Status: session.StatusActive}}
+	for i := uint(2); i <= 14; i++ {
+		m.sessions = append(m.sessions, session.Session{Model: gorm.Model{ID: i}, Name: "b", Status: session.StatusActive, Blockers: []session.SessionBlocker{openBlocker(session.BlockerKindOther)}})
+	}
+	m.rebuildFiltered()
+	assert.LessOrEqual(t, strings.Count(m.View(), "\n")+1, m.height)
+}
