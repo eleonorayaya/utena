@@ -119,6 +119,11 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.markLegacyLayoutSessionsBroken(sessions)
 	s.recoverStuckCreatingSessions(sessions)
 	s.reconcileTmuxState(ctx, sessions)
+	for i := range sessions {
+		if sessions[i].watchesPRActivity() {
+			s.SyncSessionBranches(ctx, &sessions[i])
+		}
+	}
 	return nil
 }
 
@@ -1058,6 +1063,7 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 	}
 
 	s.ensureSessionWorktrees(ctx, session)
+	s.SyncSessionBranches(ctx, session)
 
 	tmuxName := SanitizeTmuxName(session.Name)
 	if session.TmuxSessionID != nil && session.TmuxSession != nil && session.TmuxSession.Name != "" {
