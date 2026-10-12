@@ -40,6 +40,7 @@ func main() {
 	rootCmd.AddCommand(monitorCmd())
 	rootCmd.AddCommand(attachCmd())
 	rootCmd.AddCommand(workspaceCmd())
+	rootCmd.AddCommand(hookCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
