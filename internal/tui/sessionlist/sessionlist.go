@@ -10,7 +10,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/common"
-	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/blockerform"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
@@ -33,9 +32,6 @@ type Model struct {
 	pendingDeleteID  uint
 	pendingRepairID  uint
 	statusMsg        string
-	prs              []git.PullRequest
-	prsByWorkspace   map[uint][]git.PullRequest
-	lastPRSessionID  uint
 	width            int
 	height           int
 }
@@ -172,21 +168,6 @@ func (m *Model) rebuildFiltered() {
 	m.clampOffset()
 }
 
-func (m *Model) maybeFetchPRs() tea.Cmd {
-	sel := m.selectedSession()
-	if sel == nil {
-		m.prs = nil
-		return nil
-	}
-	if sel.ID == m.lastPRSessionID {
-		return nil
-	}
-	m.prs = nil
-	m.prsByWorkspace = make(map[uint][]git.PullRequest)
-	m.lastPRSessionID = sel.ID
-	return provider.FetchSessionPRs(sel)
-}
-
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -199,14 +180,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if prevSel == nil || newSel == nil || prevSel.ID != newSel.ID {
 			m.clearPending()
 		}
-		return m, m.maybeFetchPRs()
-	case provider.PRsStateUpdatedMsg:
-		sel := m.selectedSession()
-		if sel == nil || sel.ID != m.lastPRSessionID || m.prsByWorkspace == nil {
-			return m, nil
-		}
-		m.prsByWorkspace[msg.WorkspaceID] = msg.PullRequests
-		m.prs = sel.CollectPRs(m.prsByWorkspace)
 		return m, nil
 	case provider.ErrMsg:
 		m.statusMsg = msg.Err.Error()
@@ -261,7 +234,6 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 		if sel := m.selectedSession(); sel != nil && sel.ID != prevID {
 			m.clearPending()
-			return m, m.maybeFetchPRs(), true
 		}
 		return m, nil, true
 
@@ -272,7 +244,6 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 		if sel := m.selectedSession(); sel != nil && sel.ID != prevID {
 			m.clearPending()
-			return m, m.maybeFetchPRs(), true
 		}
 		return m, nil, true
 
@@ -544,7 +515,7 @@ func (m Model) View() string {
 	divider := strings.Join(divLines, "\n")
 
 	sel := m.selectedSession()
-	panelStr := sessiondetail.RenderPanel(sel, m.prs, panelW, bodyH)
+	panelStr := sessiondetail.RenderPanel(sel, panelW, bodyH)
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, listStr, divider, panelStr)
 	return body + "\n" + footer

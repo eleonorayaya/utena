@@ -29,28 +29,29 @@ func makeMultiWorkspaceSession(utenaBranch, dotfilesBranch uint) session.Session
 			Workspace: &workspace.Workspace{Model: gorm.Model{ID: 20}, Name: "dotfiles"},
 		},
 	}
+	s.PullRequests = []git.PullRequest{
+		{Number: 116, Title: "utena pr", HeadBranchID: &utenaBranch, State: git.PRStateDraft},
+		{Number: 96, Title: "dotfiles pr", HeadBranchID: &dotfilesBranch, State: git.PRStateDraft},
+	}
 	return s
 }
 
-func TestSessionDetail_ShowsPRsFromEveryWorkspace(t *testing.T) {
-	utenaBranch, dotfilesBranch := uint(1), uint(2)
-	m, cmd := New().Update(SelectMsg{Session: makeMultiWorkspaceSession(utenaBranch, dotfilesBranch)})
-	require.NotNil(t, cmd)
-
-	m, _ = m.Update(provider.PRsStateUpdatedMsg{WorkspaceID: 10, PullRequests: []git.PullRequest{
-		{Number: 116, Title: "utena pr", HeadBranchID: &utenaBranch, State: git.PRStateDraft},
-	}})
-	m, _ = m.Update(provider.PRsStateUpdatedMsg{WorkspaceID: 20, PullRequests: []git.PullRequest{
-		{Number: 96, Title: "dotfiles pr", HeadBranchID: &dotfilesBranch, State: git.PRStateDraft},
-	}})
-	m, _ = m.Update(provider.PRsStateUpdatedMsg{WorkspaceID: 30, PullRequests: []git.PullRequest{
-		{Number: 5, Title: "unrelated", HeadBranchID: &utenaBranch, State: git.PRStateOpen},
-	}})
+func TestSessionDetail_ShowsEmbeddedPRsFromEveryWorkspace(t *testing.T) {
+	m, _ := New().Update(SelectMsg{Session: makeMultiWorkspaceSession(1, 2)})
 
 	out := m.View()
 	assert.Contains(t, out, "#116 utena pr")
 	assert.Contains(t, out, "#96 dotfiles pr")
-	assert.NotContains(t, out, "unrelated")
+}
+
+func TestSessionDetail_RefreshUpdatesEmbeddedPRs(t *testing.T) {
+	m, _ := New().Update(SelectMsg{Session: makeMultiWorkspaceSession(1, 2)})
+
+	refreshed := makeMultiWorkspaceSession(1, 2)
+	refreshed.PullRequests[0].State = git.PRStateMerged
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{refreshed}})
+
+	assert.Contains(t, m.View(), "#116 utena pr [merged]")
 }
 
 func makeActiveSession() session.Session {
@@ -232,7 +233,7 @@ func TestSessionDetail_BlockKeyOpensForm(t *testing.T) {
 
 func TestRenderPanel_ShowsBlockersWithoutCursor(t *testing.T) {
 	s := makeBlockedSession()
-	out := RenderPanel(&s, nil, 60, 30)
+	out := RenderPanel(&s, 60, 30)
 	assert.Contains(t, out, "first")
 	assert.NotContains(t, out, "›")
 }
@@ -250,13 +251,13 @@ func TestRenderPanel_ShowsPastBranchesAndTheirPRs(t *testing.T) {
 			{BranchID: past, Branch: &git.Branch{Model: gorm.Model{ID: past}, Name: "eqt/base"}},
 			{BranchID: current, Branch: &git.Branch{Model: gorm.Model{ID: current}, Name: "eqt/top"}},
 		},
+		PullRequests: []git.PullRequest{
+			{Number: 1, Title: "base", HeadBranchID: &past, State: git.PRStateOpen},
+			{Number: 2, Title: "top", HeadBranchID: &current, State: git.PRStateDraft},
+		},
 	}
-	prs := s.FilterPRs([]git.PullRequest{
-		{Number: 1, Title: "base", HeadBranchID: &past, State: git.PRStateOpen},
-		{Number: 2, Title: "top", HeadBranchID: &current, State: git.PRStateDraft},
-	})
 
-	out := RenderPanel(&s, prs, 80, 0)
+	out := RenderPanel(&s, 80, 0)
 
 	assert.Contains(t, out, "eqt/top")
 	assert.Contains(t, out, "Past")

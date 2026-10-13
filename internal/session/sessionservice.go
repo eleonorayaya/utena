@@ -195,7 +195,19 @@ func (s *SessionService) ListSessions(ctx context.Context) ([]Session, error) {
 	for i := range sessions {
 		s.populateTmuxWindows(ctx, &sessions[i])
 	}
+	s.attachPullRequests(sessions)
 	return sessions, nil
+}
+
+func (s *SessionService) attachPullRequests(sessions []Session) {
+	var branchIDs []uint
+	for i := range sessions {
+		branchIDs = append(branchIDs, sessions[i].BranchIDs()...)
+	}
+	prs := s.gitService.GetPRsForBranches(branchIDs)
+	for i := range sessions {
+		sessions[i].PullRequests = sessions[i].FilterPRs(prs)
+	}
 }
 
 func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceID uint) ([]Session, error) {
@@ -210,6 +222,7 @@ func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceI
 	for i := range sessions {
 		s.populateTmuxWindows(ctx, &sessions[i])
 	}
+	s.attachPullRequests(sessions)
 	return sessions, nil
 }
 
@@ -219,6 +232,7 @@ func (s *SessionService) GetSession(ctx context.Context, id uint) (*Session, err
 		return nil, err
 	}
 	s.populateTmuxWindows(ctx, sess)
+	sess.PullRequests = sess.FilterPRs(s.gitService.GetPRsForBranches(sess.BranchIDs()))
 	return sess, nil
 }
 

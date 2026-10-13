@@ -9,15 +9,6 @@ type SessionsStateUpdatedMsg struct {
 	Sessions []session.Session
 }
 
-func FetchSessionPRs(s *session.Session) tea.Cmd {
-	ids := s.WorkspaceIDs()
-	cmds := make([]tea.Cmd, 0, len(ids))
-	for _, id := range ids {
-		cmds = append(cmds, FetchPRs(id, ""))
-	}
-	return tea.Batch(cmds...)
-}
-
 func FetchSessions() tea.Cmd {
 	return func() tea.Msg { return fetchSessionsIntentMsg{} }
 }

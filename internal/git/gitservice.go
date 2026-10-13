@@ -503,6 +503,10 @@ func (s *GitService) GetPRsForBranch(branchID uint) []PullRequest {
 	return s.prStore.ListByBranch(branchID)
 }
 
+func (s *GitService) GetPRsForBranches(branchIDs []uint) []PullRequest {
+	return s.prStore.ListByBranches(branchIDs)
+}
+
 func (s *GitService) SearchPRs(repoID uint, state PRState) []PullRequest {
 	if state != "" {
 		return s.prStore.ListByState(repoID, state)

@@ -109,6 +109,34 @@ func TestPRStore_ListByBranch(t *testing.T) {
 	require.Len(t, otherPRs, 1)
 }
 
+func TestPRStore_ListByBranches(t *testing.T) {
+	database := setupPRTestDB(t)
+	repoStore := NewRepoStore(database)
+	branchStore := NewBranchStore(database)
+	prStore := NewPRStore(database)
+
+	repo := createPRTestRepo(t, repoStore)
+	first := &Branch{Name: "first", RepoID: repo.ID}
+	second := &Branch{Name: "second", RepoID: repo.ID}
+	unrelated := &Branch{Name: "unrelated", RepoID: repo.ID}
+	require.NoError(t, branchStore.Add(first))
+	require.NoError(t, branchStore.Add(second))
+	require.NoError(t, branchStore.Add(unrelated))
+
+	require.NoError(t, prStore.Add(&PullRequest{RepoID: repo.ID, Number: 1, HeadBranchID: &first.ID, State: PRStateOpen}))
+	require.NoError(t, prStore.Add(&PullRequest{RepoID: repo.ID, Number: 2, HeadBranchID: &second.ID, State: PRStateMerged}))
+	require.NoError(t, prStore.Add(&PullRequest{RepoID: repo.ID, Number: 3, HeadBranchID: &unrelated.ID, State: PRStateOpen}))
+
+	prs := prStore.ListByBranches([]uint{first.ID, second.ID, first.ID})
+	numbers := make([]int, 0, len(prs))
+	for _, pr := range prs {
+		numbers = append(numbers, pr.Number)
+	}
+	require.Equal(t, []int{2, 1}, numbers)
+
+	require.Empty(t, prStore.ListByBranches(nil))
+}
+
 func TestPRStore_ListByState(t *testing.T) {
 	database := setupPRTestDB(t)
 	repoStore := NewRepoStore(database)

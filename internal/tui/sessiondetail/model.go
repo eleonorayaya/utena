@@ -83,8 +83,6 @@ func prStateColor(state git.PRState) lipgloss.Color {
 
 type Model struct {
 	sess                   *session.Session
-	prs                    []git.PullRequest
-	prsByWorkspace         map[uint][]git.PullRequest
 	pendingDeleteID        uint
 	interactive            bool
 	blockerCursor          int
@@ -136,19 +134,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case SelectMsg:
 		s := msg.Session
 		m.sess = &s
-		m.prs = nil
-		m.prsByWorkspace = make(map[uint][]git.PullRequest)
 		m.pendingDeleteID = 0
 		m.interactive = true
 		m.blockerCursor = 0
 		m.pendingBlockerDeleteID = 0
-		return m, provider.FetchSessionPRs(m.sess)
-	case provider.PRsStateUpdatedMsg:
-		if m.sess == nil || m.prsByWorkspace == nil {
-			return m, nil
-		}
-		m.prsByWorkspace[msg.WorkspaceID] = msg.PullRequests
-		m.prs = m.sess.CollectPRs(m.prsByWorkspace)
 		return m, nil
 	case provider.SessionsStateUpdatedMsg:
 		if m.sess == nil {
@@ -277,11 +266,11 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func RenderPanel(s *session.Session, prs []git.PullRequest, width, height int) string {
+func RenderPanel(s *session.Session, width, height int) string {
 	if s == nil {
 		return ""
 	}
-	m := Model{sess: s, prs: prs, width: width, height: height}
+	m := Model{sess: s, width: width, height: height}
 	return m.View()
 }
 
@@ -346,7 +335,7 @@ func (m Model) View() string {
 		pathStyle := lipgloss.NewStyle().Foreground(theme.Current.Path)
 		b.WriteString(labelStyle().Render("Root") + pathStyle.Render(s.SessionRoot) + "\n")
 	}
-	for _, pr := range m.prs {
+	for _, pr := range s.PullRequests {
 		stateStyle := lipgloss.NewStyle().Foreground(prStateColor(pr.State))
 		prStr := fmt.Sprintf("#%d %s ", pr.Number, pr.Title) + stateStyle.Render("["+string(pr.State)+"]")
 		b.WriteString(labelStyle().Render("PR") + prStr + "\n")

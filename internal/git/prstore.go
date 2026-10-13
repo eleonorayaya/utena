@@ -70,6 +70,15 @@ func (s *PRStore) ListByBranch(headBranchID uint) []PullRequest {
 	return prs
 }
 
+func (s *PRStore) ListByBranches(headBranchIDs []uint) []PullRequest {
+	if len(headBranchIDs) == 0 {
+		return nil
+	}
+	var prs []PullRequest
+	s.db.Order("number DESC").Find(&prs, "head_branch_id IN ?", headBranchIDs)
+	return prs
+}
+
 func (s *PRStore) ListByState(repoID uint, state PRState) []PullRequest {
 	var prs []PullRequest
 	s.db.Where("repo_id = ? AND state = ?", repoID, state).Find(&prs)

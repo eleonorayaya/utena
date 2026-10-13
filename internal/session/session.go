@@ -48,6 +48,7 @@ type Session struct {
 	Worktrees      []SessionWorktree      `json:"worktrees,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	Blockers       []SessionBlocker       `json:"blockers,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	Branches       []SessionBranch        `json:"branches,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	PullRequests   []git.PullRequest      `json:"pull_requests,omitempty" gorm:"-"`
 	TmuxSessionID  *uint                  `json:"tmux_session_id,omitempty" gorm:"uniqueIndex"`
 	StatusError    string                 `json:"status_error,omitempty"`
 	TmuxSession    *utmux.TmuxSession     `json:"tmux_session,omitempty" gorm:"foreignKey:TmuxSessionID"`
