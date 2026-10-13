@@ -140,14 +140,15 @@ New `ui.ShortAgo(t)`: `now` (< 1m), `Nm`, `Nh`, `Nd`, `Nw`. It's used in list ro
 
 ## Footer and help
 
-- **App-level footer, one line.** It shows the active view's short-help hints as `key desc · key desc · …` in `TextMuted`, with keys in `Primary`. Hints that don't fit the width are dropped from the end, and `? more` is always kept.
-- **`?` toggles full help.** It replaces the footer with the bubbles full-help grid (grouped columns). Press `?` or `esc` to close it.
+- **App-level footer, one line.** It shows the active view's short-help hints as `key desc · key desc · …` in `TextMuted`, with keys in `Primary`. Hints that don't fit the width are dropped from the end, and `? more` is always kept (unless the active view is capturing text). Multi-line status text is flattened to one line, and the footer never exceeds the width.
+- **`?` toggles full help.** It replaces the whole view with a `Keys` screen showing the bubbles full-help grid (grouped columns), capped to the window height. Press `?` or `esc` to close it. The debug view moves from `?` to `ctrl+g`.
+- **Text entry keeps `?`.** Views can implement an optional `ui.TextCapturer { CapturesText() bool }`. The forms (session, todo, blocker, workspace clone, add workspace) always capture, and list views capture while filtering. While a view captures text, `?` is passed through and `? more` is hidden.
 - **Status and confirmation messages.** The footer gets them from an optional view interface:
   ```go
   type StatusReporter interface { Status() ui.Status }
   ```
   `ui.Status` carries `Text` and `Kind` (`Info` / `Warning` / `Error`). When a status is non-empty, it **replaces** the hints for that render. Two-press confirmations ("press d again to delete …") use `Warning`. `sessionlist` drops its own `renderFooter` and implements `StatusReporter` instead.
-- **Height accounting.** The app subtracts exactly the footer height (1, or the full-help height when open) before sending `WindowSizeMsg` to views, and views stop subtracting their own footer. This fixes the footer disappearing in the current build.
+- **Height accounting.** The app subtracts 2 rows (a blank spacer plus the footer line) before sending `WindowSizeMsg` to views. The session views render exactly their height. The other views keep their existing `padToHeight(m.height-1)`, which already renders exactly `m.height` lines. This fixes the footer disappearing in the previous build.
 - **Session list short help:** `enter switch · o open PR · n new · b block · a archive · ? more`. Full help also lists `d delete`, `i info`, `t todos`, `w workspaces`, `. hidden`, `q quit`.
 - Views that don't implement `StatusReporter` (every other view, for now) get the new footer with their existing keymaps and no other change.
 
@@ -157,16 +158,13 @@ Each piece has a single purpose and is tested on its own:
 
 | File | Exposes |
 |------|---------|
-| `section.go` | `SectionHeader(title string, count int) string` |
-| `glyph.go` | `ClaudeGlyph(status) string`, `ClaudeStatusText(status) string` |
-| `prbadge.go` | `PRBadge(state) string`, `PRCounts(prs) (ready, draft int)`, `PRCountCell(ready, draft int) string` |
-| `hyperlink.go` | `Hyperlink(url, text string) string` (OSC 8; visible width = width of `text`) |
-| `time.go` | `ShortAgo(t time.Time) string` |
-| `row.go` | `Row` column layout helper: fixed and flex columns, truncation, right-alignment, full-row background for the selected row |
-| `footer.go` | `Footer(keymap help.KeyMap, status Status, width int) string`, `Status` type |
-| `truncate.go` | `Truncate(s string, width int) string` (moves `truncateWidth` out of `sessionlist`) |
+| `text.go` | `Truncate(s string, width int) string`, `FitHeight(s string, h int) string`, `ShortAgo(t time.Time) string`, `Hyperlink(url, text string) string` (OSC 8; visible width = width of `text`) |
+| `status.go` | `ClaudeGlyph(status) Span`, `ClaudeStatusText(status) string`, `PRBadge(state) string`, `PRCounts(prs) (ready, draft int)`, `PRCountSpans(ready, draft int) []Span`, `SectionHeader(title string, count int) string` |
+| `row.go` | `Span`, `Cell`, `Align`, `Row(cells, width, bg)`: fixed and flex columns, truncation, right-alignment, full-row background for the selected row; output never exceeds `width` |
+| `footer.go` | `Footer(bindings []key.Binding, status Status, width int, showMore bool) string`, `Status`, `StatusKind`, `StatusReporter`, `TextCapturer`, `MoreKey` |
+| `prpicker.go` | `OpenablePRs(prs)`, `PRPicker` (`Update`, `Sync`, `Height(maxRows)`, `View(width, maxRows)`, windowed around the cursor when rows are short), `OpenURL(url) tea.Cmd`, `OpenURLFailedMsg` |
 
-Width calculations must treat OSC 8 sequences as zero-width. Verify that `lipgloss.Width` / `ansi.StringWidth` already does this; if not, `Row` measures the plain text.
+Width calculations must treat OSC 8 sequences as zero-width. Verified: `lipgloss.Width` (x/ansi) already does.
 
 ## Data flow
 
