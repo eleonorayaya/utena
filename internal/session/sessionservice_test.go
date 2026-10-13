@@ -539,9 +539,9 @@ func initTestRepo(t *testing.T) string {
 	t.Helper()
 	bareDir := t.TempDir()
 	t.Cleanup(func() {
-		filepath.Walk(bareDir, func(path string, _ os.FileInfo, err error) error {
+		_ = filepath.Walk(bareDir, func(path string, _ os.FileInfo, err error) error {
 			if err == nil {
-				os.Chmod(path, 0700)
+				_ = os.Chmod(path, 0700)
 			}
 			return nil
 		})

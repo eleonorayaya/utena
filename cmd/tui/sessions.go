@@ -43,7 +43,9 @@ func sessionsLsCmd() *cobra.Command {
 				if s.IsBlocked() {
 					blocked = "blocked"
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", s.Name, s.Status, s.SessionRoot, blocked)
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", s.Name, s.Status, s.SessionRoot, blocked); err != nil {
+					return err
+				}
 			}
 			return nil
 		},

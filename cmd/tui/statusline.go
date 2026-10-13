@@ -21,8 +21,8 @@ func statusLineCmd() *cobra.Command {
 			if err != nil {
 				return nil
 			}
-			fmt.Fprint(cmd.OutOrStdout(), formatStatusLine(rows))
-			return nil
+			_, err = fmt.Fprint(cmd.OutOrStdout(), formatStatusLine(rows))
+			return err
 		},
 	}
 	return cmd
