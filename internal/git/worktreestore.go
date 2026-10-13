@@ -41,13 +41,7 @@ func (s *WorktreeStore) Add(worktree *Worktree) error {
 		return errors.New("worktree cannot be nil")
 	}
 
-	if err := s.db.Create(worktree).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return common.WrapConflict(worktreeConflictMessage(worktree, err), ErrWorktreeAlreadyExists)
-		}
-		return err
-	}
-	return nil
+	return worktreeWriteError(worktree, s.db.Create(worktree).Error)
 }
 
 func (s *WorktreeStore) Update(worktree *Worktree) error {
@@ -57,26 +51,25 @@ func (s *WorktreeStore) Update(worktree *Worktree) error {
 	if worktree.ID == 0 {
 		return errors.New("worktree ID cannot be zero")
 	}
-	if err := s.db.Save(worktree).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return common.WrapConflict(worktreeConflictMessage(worktree, err), ErrWorktreeAlreadyExists)
-		}
-		return err
-	}
-	return nil
+	return worktreeWriteError(worktree, s.db.Save(worktree).Error)
 }
 
 func (s *WorktreeStore) UpdateBranchID(id uint, branchID uint) error {
 	if id == 0 {
 		return errors.New("worktree ID cannot be zero")
 	}
-	if err := s.db.Model(&Worktree{}).Where("id = ?", id).Update("branch_id", branchID).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
-			return common.WrapConflict(worktreeConflictMessage(&Worktree{BranchID: branchID}, err), ErrWorktreeAlreadyExists)
-		}
-		return err
+	err := s.db.Model(&Worktree{}).Where("id = ?", id).Update("branch_id", branchID).Error
+	return worktreeWriteError(&Worktree{BranchID: branchID}, err)
+}
+
+func worktreeWriteError(worktree *Worktree, err error) error {
+	if err == nil {
+		return nil
 	}
-	return nil
+	if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
+		return common.WrapConflict(worktreeConflictMessage(worktree, err), ErrWorktreeAlreadyExists)
+	}
+	return err
 }
 
 func (s *WorktreeStore) GetByID(id uint) (*Worktree, error) {

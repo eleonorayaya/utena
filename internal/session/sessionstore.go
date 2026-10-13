@@ -9,6 +9,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type SessionStore struct {
@@ -244,25 +245,24 @@ func (s *SessionStore) GetByBranchID(branchID uint) (*Session, error) {
 		Select("session_branches.session_id").
 		Where("session_branches.branch_id = ?", branchID)
 
-	for _, candidates := range []any{viaWorktree, viaHistory} {
-		var session Session
-		err := s.loaded().
-			Where("sessions.id IN (?)", candidates).
-			Order("CASE WHEN sessions.status IN ('deleted', 'archived', 'completed', 'pending', 'creating') THEN 1 ELSE 0 END").
-			Order("sessions.last_used_at DESC").
-			First(&session).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if err := s.enrichWorkspaces([]*Session{&session}); err != nil {
-			return nil, err
-		}
-		return &session, nil
+	var session Session
+	err := s.loaded().
+		Where("sessions.id IN (?) OR sessions.id IN (?)", viaWorktree, viaHistory).
+		Order(clause.OrderBy{Expression: clause.Expr{
+			SQL:  "sessions.id IN (?) DESC, sessions.status IN ? ASC, sessions.last_used_at DESC, sessions.id ASC",
+			Vars: []any{viaWorktree, unwatchedStatuses},
+		}}).
+		Take(&session).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrSessionNotFound
 	}
-	return nil, ErrSessionNotFound
+	if err != nil {
+		return nil, err
+	}
+	if err := s.enrichWorkspaces([]*Session{&session}); err != nil {
+		return nil, err
+	}
+	return &session, nil
 }
 
 func (s *SessionStore) GetByTmuxSessionID(tmuxSessionID uint) (*Session, error) {

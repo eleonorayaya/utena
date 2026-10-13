@@ -64,7 +64,8 @@ func (s *SessionService) recordBranch(ctx context.Context, sess *Session, swt *S
 	if ws == nil {
 		return fmt.Errorf("worktree %d has no workspace", wt.ID)
 	}
-	if s.isDefaultBranch(ctx, ws.Path, branchName) {
+	isDefault := s.defaultBranchMatcher(ctx, ws.Path)
+	if isDefault(branchName) {
 		return nil
 	}
 
@@ -75,7 +76,7 @@ func (s *SessionService) recordBranch(ctx context.Context, sess *Session, swt *S
 
 	now := time.Now()
 	recorded := []uint{branch.ID}
-	if wt.BranchID != 0 && !s.isDefaultBranch(ctx, ws.Path, branchNameOf(wt.Branch)) {
+	if wt.BranchID != 0 && (wt.Branch == nil || !isDefault(wt.Branch.Name)) {
 		recorded = []uint{wt.BranchID, branch.ID}
 	}
 	for _, id := range recorded {
@@ -90,33 +91,22 @@ func (s *SessionService) recordBranch(ctx context.Context, sess *Session, swt *S
 	}
 	slog.InfoContext(ctx, "session branch attached", "session", sess.ID, "worktree", wt.ID, "branch", branchName)
 
-	s.replayOpenPRs(ctx, sess.ID, branch)
+	for _, event := range openPRNotifications(sess.ID, s.gitService.GetPRsForBranch(branch.ID), func(uint) string { return branch.Name }) {
+		s.publishNotification(ctx, event.SessionID, event.Type, event.Data)
+	}
 	return nil
 }
 
-func branchNameOf(b *git.Branch) string {
-	if b == nil {
-		return ""
-	}
-	return b.Name
-}
-
-func (s *SessionService) isDefaultBranch(ctx context.Context, repoPath string, name string) bool {
-	if name == "" {
-		return false
-	}
-	if def := s.gitService.DefaultBranch(ctx, repoPath); def != "" {
-		return name == def
-	}
-	return name == "main" || name == "master"
-}
-
-func (s *SessionService) replayOpenPRs(ctx context.Context, sessionID uint, branch *git.Branch) {
-	for _, pr := range s.gitService.GetPRsForBranch(branch.ID) {
-		if !pr.State.IsOpen() {
-			continue
+func (s *SessionService) defaultBranchMatcher(ctx context.Context, repoPath string) func(string) bool {
+	def := s.gitService.DefaultBranch(ctx, repoPath)
+	return func(name string) bool {
+		if name == "" {
+			return false
 		}
-		s.publishNotification(ctx, sessionID, git.NotificationPullRequest, git.NewPRNotification(&pr, nil, branch.Name))
+		if def != "" {
+			return name == def
+		}
+		return name == "main" || name == "master"
 	}
 }
 
@@ -143,10 +133,14 @@ func (s *SessionService) SyncAllSessionBranches(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
+	s.syncWatchedSessionBranches(ctx, sessions)
+	return nil
+}
+
+func (s *SessionService) syncWatchedSessionBranches(ctx context.Context, sessions []Session) {
 	for i := range sessions {
 		if sessions[i].watchesPRActivity() {
 			s.SyncSessionBranches(ctx, &sessions[i])
 		}
 	}
-	return nil
 }

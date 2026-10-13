@@ -113,14 +113,22 @@ func nextActivation(ctx context.Context, port string) (string, error) {
 }
 
 func postClientHook(port, event, sessionName string) {
-	body, _ := json.Marshal(map[string]string{"session_name": sessionName})
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("http://localhost:%s/tmux/hooks/%s", port, event), bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	putJSON(ctx, fmt.Sprintf("http://localhost:%s/tmux/hooks/%s", port, event), map[string]string{"session_name": sessionName})
+}
+
+func putJSON(ctx context.Context, url string, payload any) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
 	if err != nil {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 2 * time.Second}
-	if res, err := client.Do(req); err == nil {
+	if res, err := http.DefaultClient.Do(req); err == nil {
 		res.Body.Close()
 	}
 }

@@ -34,22 +34,14 @@ func TestSession_PastBranches_ExcludesCurrent(t *testing.T) {
 	require.Equal(t, "first", past[0].Name)
 }
 
-func TestSession_FilterPRs(t *testing.T) {
-	one, two, other := uint(1), uint(2), uint(9)
+func TestSession_BranchName_ReadsCurrentAndHistory(t *testing.T) {
 	sess := Session{
-		Worktrees: []SessionWorktree{{Worktree: &git.Worktree{BranchID: 2}}},
-		Branches:  []SessionBranch{{BranchID: 1}},
+		Worktrees: []SessionWorktree{{Worktree: &git.Worktree{BranchID: 2, Branch: &git.Branch{Name: "current"}}}},
+		Branches:  []SessionBranch{{BranchID: 1, Branch: &git.Branch{Name: "past"}}},
 	}
-	prs := []git.PullRequest{
-		{Number: 10, HeadBranchID: &one},
-		{Number: 20, HeadBranchID: &two},
-		{Number: 30, HeadBranchID: &other},
-		{Number: 40},
-	}
-	got := sess.FilterPRs(prs)
-	require.Len(t, got, 2)
-	require.Equal(t, 10, got[0].Number)
-	require.Equal(t, 20, got[1].Number)
+	require.Equal(t, "current", sess.branchName(2))
+	require.Equal(t, "past", sess.branchName(1))
+	require.Equal(t, "", sess.branchName(9))
 }
 
 func TestSessionBranchStore_AddIsIdempotent(t *testing.T) {

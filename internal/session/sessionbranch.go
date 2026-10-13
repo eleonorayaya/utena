@@ -66,19 +66,16 @@ func (s *Session) PastBranches() []git.Branch {
 	return out
 }
 
-func (s *Session) FilterPRs(prs []git.PullRequest) []git.PullRequest {
-	owned := make(map[uint]struct{})
-	for _, id := range s.BranchIDs() {
-		owned[id] = struct{}{}
-	}
-	var out []git.PullRequest
-	for _, pr := range prs {
-		if pr.HeadBranchID == nil {
-			continue
-		}
-		if _, ok := owned[*pr.HeadBranchID]; ok {
-			out = append(out, pr)
+func (s *Session) branchName(id uint) string {
+	for i := range s.Worktrees {
+		if wt := s.Worktrees[i].Worktree; wt != nil && wt.BranchID == id && wt.Branch != nil {
+			return wt.Branch.Name
 		}
 	}
-	return out
+	for i := range s.Branches {
+		if sb := s.Branches[i]; sb.BranchID == id && sb.Branch != nil {
+			return sb.Branch.Name
+		}
+	}
+	return ""
 }

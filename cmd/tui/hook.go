@@ -1,10 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"net/http"
 	"os/exec"
 	"strings"
 	"time"
@@ -46,33 +43,17 @@ func reportCheckout(ctx context.Context, baseURL string, args []string) {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
-	toplevel, err := gitOutput(ctx, "rev-parse", "--show-toplevel")
+	out, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
 		return
 	}
-	branch, err := gitOutput(ctx, "branch", "--show-current")
-	if err != nil {
+	toplevel, branch, ok := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	if !ok {
 		return
+	}
+	if branch == "HEAD" {
+		branch = ""
 	}
 
-	body, err := json.Marshal(map[string]string{"path": toplevel, "branch": branch})
-	if err != nil {
-		return
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, baseURL+"/sessions/branch-hook", bytes.NewReader(body))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if res, err := http.DefaultClient.Do(req); err == nil {
-		res.Body.Close()
-	}
-}
-
-func gitOutput(ctx context.Context, args ...string) (string, error) {
-	out, err := exec.CommandContext(ctx, "git", args...).Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
+	putJSON(ctx, baseURL+"/sessions/branch-hook", map[string]string{"path": toplevel, "branch": branch})
 }

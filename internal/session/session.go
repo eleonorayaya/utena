@@ -54,13 +54,10 @@ type Session struct {
 	TmuxSession    *utmux.TmuxSession     `json:"tmux_session,omitempty" gorm:"foreignKey:TmuxSessionID"`
 }
 
+var unwatchedStatuses = []SessionStatus{StatusDeleted, StatusArchived, StatusCompleted, StatusPending, StatusCreating}
+
 func (s *Session) watchesPRActivity() bool {
-	switch s.Status {
-	case StatusDeleted, StatusArchived, StatusCompleted, StatusPending, StatusCreating:
-		return false
-	default:
-		return true
-	}
+	return !slices.Contains(unwatchedStatuses, s.Status)
 }
 
 type SessionWorktree struct {
