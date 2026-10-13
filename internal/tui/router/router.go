@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
 
 type Router struct {
@@ -81,4 +82,12 @@ func (r Router) View() string {
 
 func (r Router) Keys() help.KeyMap {
 	return mergedKeyMap{keymaps: []help.KeyMap{routerKeys, r.views[r.activeView].Keys()}}
+}
+
+func (r Router) Status() ui.Status {
+	return r.views[r.activeView].Status()
+}
+
+func (r Router) ActiveView() View {
+	return r.activeView
 }

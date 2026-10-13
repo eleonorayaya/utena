@@ -14,11 +14,11 @@ func (k routerKeyMap) ShortHelp() []key.Binding {
 }
 
 func (k routerKeyMap) FullHelp() [][]key.Binding {
-	return nil
+	return [][]key.Binding{{k.Debug}}
 }
 
 var routerKeys = routerKeyMap{
-	Debug: key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "debug")),
+	Debug: key.NewBinding(key.WithKeys("ctrl+g"), key.WithHelp("ctrl+g", "debug")),
 }
 
 type mergedKeyMap struct {

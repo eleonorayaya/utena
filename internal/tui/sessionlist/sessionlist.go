@@ -18,6 +18,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
 	"github.com/eleonorayaya/utena/internal/tui/statusview"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
 
 const splitThreshold = 90
@@ -32,6 +33,7 @@ type Model struct {
 	pendingDeleteID  uint
 	pendingRepairID  uint
 	statusMsg        string
+	statusKind       ui.StatusKind
 	width            int
 	height           int
 }
@@ -86,7 +88,7 @@ func (m Model) firstBlockedIndex() int {
 }
 
 func (m Model) bodyHeight() int {
-	h := m.height - 3
+	h := m.height - 2
 	if m.firstBlockedIndex() >= 0 {
 		h -= 2
 	}
@@ -110,15 +112,24 @@ func (m *Model) confirmTwoPress(pending *uint, id uint, action tea.Cmd, prompt s
 		return action
 	}
 	*pending = id
-	m.statusMsg = prompt
+	m.setStatus(prompt, ui.StatusWarning)
 	return nil
+}
+
+func (m *Model) setStatus(text string, kind ui.StatusKind) {
+	m.statusMsg = text
+	m.statusKind = kind
+}
+
+func (m Model) Status() ui.Status {
+	return ui.Status{Text: m.statusMsg, Kind: m.statusKind}
 }
 
 func (m *Model) clearPending() {
 	m.pendingArchiveID = 0
 	m.pendingDeleteID = 0
 	m.pendingRepairID = 0
-	m.statusMsg = ""
+	m.setStatus("", ui.StatusInfo)
 }
 
 func (m *Model) clampOffset() {
@@ -182,7 +193,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	case provider.ErrMsg:
-		m.statusMsg = msg.Err.Error()
+		m.setStatus(msg.Err.Error(), ui.StatusError)
 		return m, nil
 	case provider.SessionSwitchedMsg:
 		return m, tea.Quit
@@ -220,7 +231,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.pendingRepairID = 0
 	}
 	if !isNav {
-		m.statusMsg = ""
+		m.setStatus("", ui.StatusInfo)
 	}
 
 	switch {
@@ -277,12 +288,12 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, nil, false
 		}
 		if sel.IsAttached {
-			m.statusMsg = "already attached to this session"
+			m.setStatus("already attached to this session", ui.StatusInfo)
 			return m, nil, true
 		}
 		switch sel.Status {
 		case session.StatusCreating:
-			m.statusMsg = "session is still being created"
+			m.setStatus("session is still being created", ui.StatusInfo)
 			return m, nil, true
 		case session.StatusBroken:
 			if m.pendingRepairID == sel.ID {
@@ -301,7 +312,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 				errMsg = sel.StatusError
 			}
 			m.pendingRepairID = sel.ID
-			m.statusMsg = errMsg + " — press enter again to repair"
+			m.setStatus(errMsg+" — press enter again to repair", ui.StatusWarning)
 			return m, nil, true
 		default:
 			return m, provider.ActivateSession(sel.ID), true
@@ -313,11 +324,11 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, nil, false
 		}
 		if sel.IsAttached {
-			m.statusMsg = "cannot archive attached session"
+			m.setStatus("cannot archive attached session", ui.StatusInfo)
 			return m, nil, true
 		}
 		if sel.Status == session.StatusArchived {
-			m.statusMsg = "already archived"
+			m.setStatus("already archived", ui.StatusInfo)
 			return m, nil, true
 		}
 		cmd := m.confirmTwoPress(&m.pendingArchiveID, sel.ID, provider.ArchiveSession(sel.ID),
@@ -340,7 +351,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, nil, false
 		}
 		if sel.IsAttached {
-			m.statusMsg = "cannot delete attached session"
+			m.setStatus("cannot delete attached session", ui.StatusInfo)
 			return m, nil, true
 		}
 		// Pending sessions hold no real resources; dismiss them outright.
@@ -474,12 +485,7 @@ func (m Model) renderList(width int) string {
 		}
 	}
 
-	return b.String()
-}
-
-func (m Model) renderFooter() string {
-	msg := truncateWidth(m.statusMsg, m.width)
-	return lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render(msg)
+	return lipgloss.NewStyle().Width(width).Render(b.String())
 }
 
 func truncateWidth(s string, width int) string {
@@ -498,25 +504,19 @@ func (m Model) View() string {
 	if m.isSplit() {
 		listW = m.listWidth()
 	}
-	listStr := m.renderList(listW)
-	footer := m.renderFooter()
-
+	listStr := ui.FitHeight(m.renderList(listW), m.height)
 	if !m.isSplit() {
-		return listStr + "\n" + footer
+		return listStr
 	}
 
-	bodyH := m.height - 1
 	panelW := m.width - listW - 2
-	divStyle := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
-	divLines := make([]string, bodyH)
+	divStyle := lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant)
+	divLines := make([]string, m.height)
 	for i := range divLines {
 		divLines[i] = divStyle.Render("│ ")
 	}
 	divider := strings.Join(divLines, "\n")
 
-	sel := m.selectedSession()
-	panelStr := sessiondetail.RenderPanel(sel, panelW, bodyH)
-
-	body := lipgloss.JoinHorizontal(lipgloss.Top, listStr, divider, panelStr)
-	return body + "\n" + footer
+	panelStr := ui.FitHeight(sessiondetail.RenderPanel(m.selectedSession(), panelW, m.height), m.height)
+	return lipgloss.JoinHorizontal(lipgloss.Top, listStr, divider, panelStr)
 }

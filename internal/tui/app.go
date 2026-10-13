@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/tui/addworkspaceform"
@@ -19,6 +20,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/statusview"
 	"github.com/eleonorayaya/utena/internal/tui/todoform"
 	"github.com/eleonorayaya/utena/internal/tui/todolist"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/eleonorayaya/utena/internal/tui/workspacecloneform"
 	"github.com/eleonorayaya/utena/internal/tui/workspacedetail"
 	"github.com/eleonorayaya/utena/internal/tui/workspacelist"
@@ -26,6 +28,13 @@ import (
 
 const padX = 2
 const padY = 1
+
+var textEntryViews = map[router.View]bool{
+	router.SessionFormView:        true,
+	router.TodoFormView:           true,
+	router.BlockerFormView:        true,
+	router.WorkspaceCloneFormView: true,
+}
 
 type App struct {
 	provider   provider.Provider
@@ -97,6 +106,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+c" {
 			return a, tea.Quit
 		}
+		if a.help.full {
+			if key.Matches(msg, ui.MoreKey) || msg.Type == tea.KeyEsc {
+				a.help = a.help.SetFull(false)
+			}
+			return a, nil
+		}
+		if a.help.visible && key.Matches(msg, ui.MoreKey) && !textEntryViews[a.router.ActiveView()] {
+			a.help = a.help.SetFull(true)
+			return a, nil
+		}
 	}
 
 	a.help = a.help.Update(msg)
@@ -125,13 +144,17 @@ func (a App) OnWindowSizeMsg(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) View() string {
-	content := a.router.View()
-	keys := a.keys()
-	helpView := a.help.View(keys)
-	if helpView != "" {
-		content += "\n" + helpView
+	width := max(a.width-padX*2, 0)
+	pad := lipgloss.NewStyle().Padding(padY, padX)
+	if a.help.full {
+		return pad.Render(a.help.FullView(a.keys(), width))
 	}
-	return lipgloss.NewStyle().Padding(padY, padX).Render(content)
+	content := a.router.View()
+	showMore := !textEntryViews[a.router.ActiveView()]
+	if footer := a.help.Footer(a.keys(), a.router.Status(), width, showMore); footer != "" {
+		content += "\n\n" + footer
+	}
+	return pad.Render(content)
 }
 
 func (a App) keys() help.KeyMap {

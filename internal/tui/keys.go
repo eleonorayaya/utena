@@ -30,7 +30,7 @@ type appKeyMap struct {
 }
 
 func (k appKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Quit}
+	return nil
 }
 
 func (k appKeyMap) FullHelp() [][]key.Binding {
