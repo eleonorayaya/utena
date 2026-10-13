@@ -46,3 +46,19 @@ func TestApp_QuestionMarkIsTypedInTextForms(t *testing.T) {
 	m, _ := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	assert.False(t, m.(App).help.full)
 }
+
+func TestApp_QuestionMarkIsTypedInAddWorkspaceForm(t *testing.T) {
+	a := sized(t, router.AddWorkspaceFormView, 120, 30)
+	m, _ := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	assert.False(t, m.(App).help.full)
+}
+
+func TestApp_TinySplitWindowDoesNotPanic(t *testing.T) {
+	for _, h := range []int{1, 2, 3, 4} {
+		a := sized(t, router.SessionListView, 120, h)
+		m, _ := a.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{
+			{Model: gorm.Model{ID: 1}, Name: "one", Status: session.StatusActive},
+		}})
+		assert.NotPanics(t, func() { _ = m.View() })
+	}
+}

@@ -119,3 +119,7 @@ func (m Model) View() string {
 	v := strings.TrimRight(m.list.View(), "\n")
 	return padToHeight(v, m.height-1)
 }
+
+func (m Model) CapturesText() bool {
+	return m.Filtering()
+}

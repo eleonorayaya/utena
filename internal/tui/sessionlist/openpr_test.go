@@ -104,3 +104,16 @@ func TestOpenURLFailed_ShowsError(t *testing.T) {
 	m, _ = m.Update(ui.OpenURLFailedMsg{Err: errors.New("boom")})
 	assert.Equal(t, ui.Status{Text: "could not open PR: boom", Kind: ui.StatusError}, m.Status())
 }
+
+func TestOpenPR_PickerClosesWhenSelectedSessionPRsChange(t *testing.T) {
+	a := withPRs(withClaude(1, "a", claude.StatusIdle),
+		git.PullRequest{Number: 1, State: git.PRStateOpen, HTMLURL: "u1"},
+		git.PullRequest{Number: 2, State: git.PRStateOpen, HTMLURL: "u2"})
+	m := listWith(t, a)
+	m, _, _ = pressO(m)
+	require.True(t, m.picker.IsOpen())
+
+	a.PullRequests[1].State = git.PRStateClosed
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{a}})
+	assert.False(t, m.picker.IsOpen())
+}

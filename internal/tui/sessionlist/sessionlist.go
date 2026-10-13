@@ -163,6 +163,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		newSel := m.selectedSession()
 		if prevSel == nil || newSel == nil || prevSel.ID != newSel.ID {
 			m.clearPending()
+		} else {
+			m.picker = m.picker.Sync(newSel.PullRequests)
 		}
 		return m, nil
 	case ui.OpenURLFailedMsg:
@@ -410,19 +412,20 @@ func (m Model) View() string {
 	if m.picker.IsOpen() {
 		listStr += "\n" + lipgloss.NewStyle().Width(listW).Render(m.picker.View(listW))
 	}
-	listStr = ui.FitHeight(listStr, m.height)
+	h := max(m.height, 1)
+	listStr = ui.FitHeight(listStr, h)
 	if !m.isSplit() {
 		return listStr
 	}
 
 	panelW := m.width - listW - 2
 	divStyle := lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant)
-	divLines := make([]string, m.height)
+	divLines := make([]string, h)
 	for i := range divLines {
 		divLines[i] = divStyle.Render("│ ")
 	}
 	divider := strings.Join(divLines, "\n")
 
-	panelStr := ui.FitHeight(sessiondetail.RenderPanel(m.selectedSession(), panelW, m.height), m.height)
+	panelStr := ui.FitHeight(sessiondetail.RenderPanel(m.selectedSession(), panelW, h), h)
 	return lipgloss.JoinHorizontal(lipgloss.Top, listStr, divider, panelStr)
 }

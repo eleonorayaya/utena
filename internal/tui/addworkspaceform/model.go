@@ -247,3 +247,7 @@ func (m Model) View() string {
 		return v
 	}
 }
+
+func (m Model) CapturesText() bool {
+	return true
+}

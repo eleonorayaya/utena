@@ -91,3 +91,7 @@ func (r Router) Status() ui.Status {
 func (r Router) ActiveView() View {
 	return r.activeView
 }
+
+func (r Router) CapturesText() bool {
+	return r.views[r.activeView].CapturesText()
+}

@@ -97,12 +97,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.sess == nil {
 			return m, nil
 		}
+		found := false
 		for _, s := range msg.Sessions {
 			if s.ID == m.sess.ID {
 				fresh := s
 				m.sess = &fresh
+				found = true
 				break
 			}
+		}
+		if found {
+			m.picker = m.picker.Sync(m.sess.PullRequests)
+		} else {
+			m.picker = m.picker.Close()
 		}
 		m.clampBlockerCursor()
 		return m, nil

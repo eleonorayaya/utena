@@ -471,3 +471,7 @@ func buildSpecs(wss []workspace.Workspace, branches []string, isNew bool) []prov
 	}
 	return out
 }
+
+func (m Model) CapturesText() bool {
+	return true
+}

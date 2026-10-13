@@ -123,3 +123,19 @@ func OpenURL(url string) tea.Cmd {
 		return nil
 	}
 }
+
+func (p PRPicker) Sync(prs []git.PullRequest) PRPicker {
+	if !p.open {
+		return p
+	}
+	fresh := OpenablePRs(prs)
+	if len(fresh) != len(p.prs) {
+		return p.Close()
+	}
+	for i := range fresh {
+		if fresh[i].HTMLURL != p.prs[i].HTMLURL || fresh[i].State != p.prs[i].State {
+			return p.Close()
+		}
+	}
+	return p
+}

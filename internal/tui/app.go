@@ -29,13 +29,6 @@ import (
 const padX = 2
 const padY = 1
 
-var textEntryViews = map[router.View]bool{
-	router.SessionFormView:        true,
-	router.TodoFormView:           true,
-	router.BlockerFormView:        true,
-	router.WorkspaceCloneFormView: true,
-}
-
 type App struct {
 	provider   provider.Provider
 	router     router.Router
@@ -112,7 +105,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		}
-		if a.help.visible && key.Matches(msg, ui.MoreKey) && !textEntryViews[a.router.ActiveView()] {
+		if a.help.visible && key.Matches(msg, ui.MoreKey) && !a.router.CapturesText() {
 			a.help = a.help.SetFull(true)
 			return a, nil
 		}
@@ -150,7 +143,7 @@ func (a App) View() string {
 		return pad.Render(a.help.FullView(a.keys(), width))
 	}
 	content := a.router.View()
-	showMore := !textEntryViews[a.router.ActiveView()]
+	showMore := !a.router.CapturesText()
 	if footer := a.help.Footer(a.keys(), a.router.Status(), width, showMore); footer != "" {
 		content += "\n\n" + footer
 	}

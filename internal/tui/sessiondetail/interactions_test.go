@@ -7,6 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/git"
+	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,4 +79,28 @@ func TestDetail_ShortHelp(t *testing.T) {
 		got = append(got, b.Help().Key+" "+b.Help().Desc)
 	}
 	assert.Equal(t, []string{"enter switch", "o open PR", "b block", "a archive", "esc back"}, got)
+}
+
+func TestDetail_PickerClosesWhenSessionPRsChange(t *testing.T) {
+	s := richSession()
+	s.PullRequests = append(s.PullRequests, git.PullRequest{Number: 1, State: git.PRStateOpen, HTMLURL: "u1"})
+	m, _ := New().Update(SelectMsg{Session: s})
+	m, _ = m.Update(runeKey("o"))
+	require.True(t, m.picker.IsOpen())
+
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{s}})
+	require.True(t, m.picker.IsOpen())
+
+	s.PullRequests[1].State = git.PRStateMerged
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{s}})
+	assert.False(t, m.picker.IsOpen())
+}
+
+func TestDetail_PickerClosesWhenSessionDisappears(t *testing.T) {
+	s := richSession()
+	s.PullRequests = append(s.PullRequests, git.PullRequest{Number: 1, State: git.PRStateOpen, HTMLURL: "u1"})
+	m, _ := New().Update(SelectMsg{Session: s})
+	m, _ = m.Update(runeKey("o"))
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{})
+	assert.False(t, m.picker.IsOpen())
 }

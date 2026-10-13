@@ -82,3 +82,7 @@ func Footer(bindings []key.Binding, status Status, width int, showMore bool) str
 	}
 	return strings.Join(parts, fg(theme.Current.TextMuted).Render(footerSep))
 }
+
+type TextCapturer interface {
+	CapturesText() bool
+}

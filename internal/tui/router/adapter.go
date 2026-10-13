@@ -12,6 +12,7 @@ type ViewEntry interface {
 	View() string
 	Keys() help.KeyMap
 	Status() ui.Status
+	CapturesText() bool
 }
 
 type ViewAdapter[T interface {
@@ -48,4 +49,11 @@ func (a *ViewAdapter[T]) Status() ui.Status {
 		return sr.Status()
 	}
 	return ui.Status{}
+}
+
+func (a *ViewAdapter[T]) CapturesText() bool {
+	if tc, ok := any(a.Model).(ui.TextCapturer); ok {
+		return tc.CapturesText()
+	}
+	return false
 }

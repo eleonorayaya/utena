@@ -249,3 +249,7 @@ func derivedName(url string) string {
 	}
 	return repo
 }
+
+func (m Model) CapturesText() bool {
+	return true
+}

@@ -278,3 +278,7 @@ func (m Model) View() string {
 		return m.workspacePicker.View()
 	}
 }
+
+func (m Model) CapturesText() bool {
+	return true
+}

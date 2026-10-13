@@ -68,3 +68,13 @@ func TestPRPicker_ViewFitsWidth(t *testing.T) {
 		assert.LessOrEqual(t, lipgloss.Width(line), 40)
 	}
 }
+
+func TestPRPicker_SyncClosesWhenPRsChange(t *testing.T) {
+	prs := []git.PullRequest{pr(5, git.PRStateOpen, "u5"), pr(3, git.PRStateOpen, "u3")}
+	p := NewPRPicker(prs)
+	assert.True(t, p.Sync(prs).IsOpen())
+
+	merged := []git.PullRequest{pr(5, git.PRStateOpen, "u5"), pr(3, git.PRStateMerged, "u3")}
+	assert.False(t, p.Sync(merged).IsOpen())
+	assert.False(t, p.Sync(nil).IsOpen())
+}
