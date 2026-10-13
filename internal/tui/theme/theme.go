@@ -37,6 +37,11 @@ type Theme struct {
 	ListSelectedTitle  lipgloss.Color
 	ListSelectedDesc   lipgloss.Color
 	ListSelectedBorder lipgloss.Color
+	StatusAttention    lipgloss.Color
+	StatusReview       lipgloss.Color
+	StatusWorking      lipgloss.Color
+	StatusDone         lipgloss.Color
+	StatusIdle         lipgloss.Color
 }
 
 func Default() Theme {
@@ -65,6 +70,11 @@ func Default() Theme {
 		ListSelectedTitle:  lipgloss.Color("#e6537a"),
 		ListSelectedDesc:   lipgloss.Color("#d16577"),
 		ListSelectedBorder: lipgloss.Color("#d16577"),
+		StatusAttention:    lipgloss.Color("#e6537a"),
+		StatusReview:       lipgloss.Color("#5fafa5"),
+		StatusWorking:      lipgloss.Color("#a87bb7"),
+		StatusDone:         lipgloss.Color("#8a7873"),
+		StatusIdle:         lipgloss.Color("#8a7873"),
 	}
 }
 
@@ -93,6 +103,11 @@ type themeFile struct {
 	ListSelectedTitle  *string `json:"list_selected_title"`
 	ListSelectedDesc   *string `json:"list_selected_desc"`
 	ListSelectedBorder *string `json:"list_selected_border"`
+	StatusAttention    *string `json:"status_attention"`
+	StatusReview       *string `json:"status_review"`
+	StatusWorking      *string `json:"status_working"`
+	StatusDone         *string `json:"status_done"`
+	StatusIdle         *string `json:"status_idle"`
 }
 
 func Load(path string) error {
@@ -111,8 +126,27 @@ func Load(path string) error {
 
 	t := Default()
 	merge(&t, &f)
+	inheritStatusTokens(&t, &f)
 	Current = t
 	return nil
+}
+
+func inheritStatusTokens(t *Theme, f *themeFile) {
+	if f.StatusAttention == nil {
+		t.StatusAttention = t.Primary
+	}
+	if f.StatusReview == nil {
+		t.StatusReview = t.AccentMint
+	}
+	if f.StatusWorking == nil {
+		t.StatusWorking = t.AccentLavender
+	}
+	if f.StatusDone == nil {
+		t.StatusDone = t.TextMuted
+	}
+	if f.StatusIdle == nil {
+		t.StatusIdle = t.TextMuted
+	}
 }
 
 func merge(t *Theme, f *themeFile) {
