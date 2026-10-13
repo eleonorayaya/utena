@@ -31,6 +31,7 @@ type Model struct {
 	pendingRepairID  uint
 	statusMsg        string
 	statusKind       ui.StatusKind
+	picker           ui.PRPicker
 	width            int
 	height           int
 }
@@ -57,7 +58,7 @@ func (m Model) listWidth() int {
 }
 
 func (m Model) bodyHeight() int {
-	return max(m.height, 1)
+	return max(m.height-m.picker.Height(), 1)
 }
 
 func (m Model) selectedSession() *session.Session {
@@ -84,6 +85,9 @@ func (m *Model) setStatus(text string, kind ui.StatusKind) {
 }
 
 func (m Model) Status() ui.Status {
+	if m.picker.IsOpen() {
+		return ui.Status{Text: "↑/↓ choose · enter open · esc cancel", Kind: ui.StatusInfo}
+	}
 	return ui.Status{Text: m.statusMsg, Kind: m.statusKind}
 }
 
@@ -91,6 +95,7 @@ func (m *Model) clearPending() {
 	m.pendingArchiveID = 0
 	m.pendingDeleteID = 0
 	m.pendingRepairID = 0
+	m.picker = m.picker.Close()
 	m.setStatus("", ui.StatusInfo)
 }
 
@@ -160,6 +165,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.clearPending()
 		}
 		return m, nil
+	case ui.OpenURLFailedMsg:
+		m.setStatus("could not open PR: "+msg.Err.Error(), ui.StatusError)
+		return m, nil
 	case provider.ErrMsg:
 		m.setStatus(msg.Err.Error(), ui.StatusError)
 		return m, nil
@@ -184,6 +192,15 @@ func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	if m.picker.IsOpen() {
+		var url string
+		m.picker, url = m.picker.Update(msg)
+		if url != "" {
+			return m, ui.OpenURL(url), true
+		}
+		return m, nil, true
+	}
+
 	prevID := uint(0)
 	if sel := m.selectedSession(); sel != nil {
 		prevID = sel.ID
@@ -287,6 +304,24 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, provider.ActivateSession(sel.ID), true
 		}
 
+	case key.Matches(msg, keys.OpenPR):
+		sel := m.selectedSession()
+		if sel == nil {
+			return m, nil, false
+		}
+		prs := ui.OpenablePRs(sel.PullRequests)
+		switch len(prs) {
+		case 0:
+			m.setStatus("no open pull requests", ui.StatusInfo)
+			return m, nil, true
+		case 1:
+			return m, ui.OpenURL(prs[0].HTMLURL), true
+		default:
+			m.picker = ui.NewPRPicker(prs)
+			m.clampOffset()
+			return m, nil, true
+		}
+
 	case key.Matches(msg, keys.Archive):
 		sel := m.selectedSession()
 		if sel == nil {
@@ -371,7 +406,11 @@ func (m Model) View() string {
 	if m.isSplit() {
 		listW = m.listWidth()
 	}
-	listStr := ui.FitHeight(m.renderList(listW), m.height)
+	listStr := m.renderList(listW)
+	if m.picker.IsOpen() {
+		listStr += "\n" + lipgloss.NewStyle().Width(listW).Render(m.picker.View(listW))
+	}
+	listStr = ui.FitHeight(listStr, m.height)
 	if !m.isSplit() {
 		return listStr
 	}
