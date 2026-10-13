@@ -117,3 +117,35 @@ func TestOpenPR_PickerClosesWhenSelectedSessionPRsChange(t *testing.T) {
 	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{a}})
 	assert.False(t, m.picker.IsOpen())
 }
+
+func TestOpenPR_PickerRowsVisibleInTinyPopup(t *testing.T) {
+	s := withPRs(withClaude(1, "a", claude.StatusIdle),
+		git.PullRequest{Number: 41, State: git.PRStateOpen, HTMLURL: "u1"},
+		git.PullRequest{Number: 42, State: git.PRStateOpen, HTMLURL: "u2"},
+		git.PullRequest{Number: 43, State: git.PRStateOpen, HTMLURL: "u3"})
+	m, _ := New().Update(tea.WindowSizeMsg{Width: 40, Height: 2})
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{s}})
+	m, _, _ = pressO(m)
+	out := m.View()
+	assert.Equal(t, 2, len(splitLines(out)))
+	assert.Contains(t, out, "#43")
+}
+
+func TestOpenPR_OffsetReclampsAfterPickerCloses(t *testing.T) {
+	a := withClaude(1, "a", claude.StatusIdle)
+	b := withClaude(2, "b", claude.StatusIdle)
+	c := withPRs(withClaude(3, "c", claude.StatusIdle),
+		git.PullRequest{Number: 1, State: git.PRStateOpen, HTMLURL: "u1"},
+		git.PullRequest{Number: 2, State: git.PRStateOpen, HTMLURL: "u2"},
+		git.PullRequest{Number: 3, State: git.PRStateOpen, HTMLURL: "u3"})
+	m, _ := New().Update(tea.WindowSizeMsg{Width: 40, Height: 6})
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{a, b, c}})
+	for range 2 {
+		m, _, _ = m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	}
+	m, _, _ = pressO(m)
+	require.Greater(t, m.offset, 0)
+
+	m, _, _ = m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.Equal(t, 0, m.offset)
+}

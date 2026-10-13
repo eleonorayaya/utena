@@ -58,7 +58,11 @@ func (m Model) listWidth() int {
 }
 
 func (m Model) bodyHeight() int {
-	return max(m.height-m.picker.Height(), 1)
+	return max(m.height-m.pickerRows(), 1)
+}
+
+func (m Model) pickerRows() int {
+	return m.picker.Height(m.height - 1)
 }
 
 func (m Model) selectedSession() *session.Session {
@@ -197,6 +201,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if m.picker.IsOpen() {
 		var url string
 		m.picker, url = m.picker.Update(msg)
+		m.clampOffset()
 		if url != "" {
 			return m, ui.OpenURL(url), true
 		}
@@ -410,7 +415,7 @@ func (m Model) View() string {
 	}
 	listStr := m.renderList(listW)
 	if m.picker.IsOpen() {
-		listStr += "\n" + lipgloss.NewStyle().Width(listW).Render(m.picker.View(listW))
+		listStr += "\n" + lipgloss.NewStyle().Width(listW).Render(m.picker.View(listW, m.pickerRows()))
 	}
 	h := max(m.height, 1)
 	listStr = ui.FitHeight(listStr, h)

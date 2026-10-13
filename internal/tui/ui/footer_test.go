@@ -44,3 +44,12 @@ func TestFooter_SkipsDisabledAndHelpless(t *testing.T) {
 	noHelp := key.NewBinding(key.WithKeys("y"))
 	assert.Equal(t, "? more", Footer([]key.Binding{disabled, noHelp}, Status{}, 80, true))
 }
+
+func TestFooter_FlattensMultiLineStatus(t *testing.T) {
+	out := Footer(nil, Status{Text: "first line\nsecond line", Kind: StatusError}, 80, true)
+	assert.Equal(t, "first line second line", out)
+}
+
+func TestFooter_MoreFitsTinyWidth(t *testing.T) {
+	assert.LessOrEqual(t, lipgloss.Width(Footer([]key.Binding{kEnter}, Status{}, 4, true)), 4)
+}

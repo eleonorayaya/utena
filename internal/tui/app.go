@@ -140,7 +140,7 @@ func (a App) View() string {
 	width := max(a.width-padX*2, 0)
 	pad := lipgloss.NewStyle().Padding(padY, padX)
 	if a.help.full {
-		return pad.Render(a.help.FullView(a.keys(), width))
+		return pad.Render(ui.FitHeight(a.help.FullView(a.keys(), width), max(a.height-padY*2, 1)))
 	}
 	content := a.router.View()
 	showMore := !a.router.CapturesText()

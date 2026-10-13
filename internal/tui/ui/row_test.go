@@ -35,7 +35,7 @@ func TestRow_SpansTruncateAtCellWidth(t *testing.T) {
 
 func TestRow_FixedCellsWiderThanRowDoNotPanic(t *testing.T) {
 	out := Row([]Cell{plain("abcdef", 6), plain("name", 0), plain("xyz", 3)}, 5, nil)
-	assert.LessOrEqual(t, lipgloss.Width(out), 9)
+	assert.LessOrEqual(t, lipgloss.Width(out), 5)
 }
 
 func TestRow_BackgroundDoesNotChangeWidth(t *testing.T) {

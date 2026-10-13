@@ -110,7 +110,8 @@ func (m Model) View() string {
 
 	body := strings.Join(lines, "\n")
 	if m.picker.IsOpen() && m.height > 0 {
-		body = ui.FitHeight(body, max(m.height-m.picker.Height(), 1)) + "\n" + m.picker.View(width)
+		rows := m.picker.Height(m.height - 1)
+		body = ui.FitHeight(body, max(m.height-rows, 1)) + "\n" + m.picker.View(width, rows)
 	}
 	return ui.FitHeight(body, m.height)
 }

@@ -62,3 +62,17 @@ func TestApp_TinySplitWindowDoesNotPanic(t *testing.T) {
 		assert.NotPanics(t, func() { _ = m.View() })
 	}
 }
+
+func TestApp_FullHelpFitsShortWindow(t *testing.T) {
+	a := sized(t, router.SessionListView, 120, 8)
+	m, _ := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	assert.LessOrEqual(t, strings.Count(m.View(), "\n")+1, 8)
+}
+
+func TestApp_OtherViewsFitWindowWithFooter(t *testing.T) {
+	for _, v := range []router.View{router.TodoListView, router.WorkspaceListView, router.PRListView} {
+		a := sized(t, v, 120, 30)
+		out := a.View()
+		assert.LessOrEqual(t, strings.Count(out, "\n")+1, 30, "view %v", v)
+	}
+}

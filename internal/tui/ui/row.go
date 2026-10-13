@@ -34,7 +34,7 @@ func Row(cells []Cell, width int, bg lipgloss.TerminalColor) string {
 	for i, c := range cells {
 		b.WriteString(renderCell(c, widths[i], bg))
 	}
-	return b.String()
+	return clampWidth(b.String(), width)
 }
 
 func cellWidths(cells []Cell, width int) []int {

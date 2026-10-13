@@ -80,35 +80,48 @@ func (p PRPicker) Update(msg tea.KeyMsg) (PRPicker, string) {
 	return p, ""
 }
 
-func (p PRPicker) Height() int {
-	if !p.open {
+func (p PRPicker) Height(maxRows int) int {
+	if !p.open || maxRows <= 0 {
 		return 0
 	}
-	return len(p.prs) + 1
+	return min(len(p.prs)+1, maxRows)
 }
 
-func (p PRPicker) View(width int) string {
-	if !p.open {
+func (p PRPicker) View(width, maxRows int) string {
+	rows := p.Height(maxRows)
+	if rows == 0 {
 		return ""
 	}
-	lines := []string{""}
-	for i, pr := range p.prs {
-		gutter := "  "
-		if i == p.cursor {
-			gutter = fg(theme.Current.Primary).Render("▌ ")
-		}
-		num := fmt.Sprintf("#%-5d", pr.Number)
-		badge := PRBadge(pr.State)
-		titleW := max(width-2-lipgloss.Width(num)-2-lipgloss.Width(badge)-1, 1)
-		title := Truncate(pr.Title, titleW)
-		title += strings.Repeat(" ", max(titleW-lipgloss.Width(title), 0))
-		line := gutter + num + "  " + title + " " + badge
-		if lipgloss.Width(line) > width {
-			line = gutter + Truncate(num+"  "+pr.Title, max(width-2, 1))
-		}
-		lines = append(lines, line)
+	var lines []string
+	start, end := 0, len(p.prs)
+	if rows > len(p.prs) {
+		lines = append(lines, "")
+	} else {
+		start = min(max(p.cursor-rows+1, 0), len(p.prs)-rows)
+		end = start + rows
+	}
+	for i := start; i < end; i++ {
+		lines = append(lines, p.renderLine(i, width))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (p PRPicker) renderLine(i, width int) string {
+	pr := p.prs[i]
+	gutter := "  "
+	if i == p.cursor {
+		gutter = fg(theme.Current.Primary).Render("▌ ")
+	}
+	num := fmt.Sprintf("#%-5d", pr.Number)
+	badge := PRBadge(pr.State)
+	titleW := max(width-2-lipgloss.Width(num)-2-lipgloss.Width(badge)-1, 1)
+	title := Truncate(pr.Title, titleW)
+	title += strings.Repeat(" ", max(titleW-lipgloss.Width(title), 0))
+	line := gutter + num + "  " + title + " " + badge
+	if lipgloss.Width(line) > width {
+		line = gutter + Truncate(num+"  "+pr.Title, max(width-2, 1))
+	}
+	return line
 }
 
 type OpenURLFailedMsg struct{ Err error }

@@ -51,7 +51,8 @@ func renderBinding(b key.Binding) string {
 
 func Footer(bindings []key.Binding, status Status, width int, showMore bool) string {
 	if !status.Empty() {
-		return statusStyle(status.Kind).Render(Truncate(status.Text, width))
+		text := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(status.Text)
+		return statusStyle(status.Kind).Render(Truncate(text, width))
 	}
 
 	var tail string
@@ -80,7 +81,17 @@ func Footer(bindings []key.Binding, status Status, width int, showMore bool) str
 	if showMore {
 		parts = append(parts, tail)
 	}
-	return strings.Join(parts, fg(theme.Current.TextMuted).Render(footerSep))
+	return clampWidth(strings.Join(parts, fg(theme.Current.TextMuted).Render(footerSep)), width)
+}
+
+func clampWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	return lipgloss.NewStyle().MaxWidth(width).Render(s)
 }
 
 type TextCapturer interface {
