@@ -80,7 +80,7 @@ func (s *SessionService) recordBranch(ctx context.Context, sess *Session, swt *S
 		recorded = []uint{wt.BranchID, branch.ID}
 	}
 	for _, id := range recorded {
-		if err := s.sessionBranchStore.Add(&SessionBranch{SessionID: sess.ID, WorktreeID: wt.ID, BranchID: id, FirstSeenAt: now}); err != nil {
+		if err := s.sessionBranchStore.Add(&SessionBranch{SessionID: sess.ID, BranchID: id, FirstSeenAt: now}); err != nil {
 			return fmt.Errorf("record session branch: %w", err)
 		}
 	}

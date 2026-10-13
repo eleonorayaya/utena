@@ -263,7 +263,7 @@ func TestDeleteSession_NeverDeletesDefaultBranchFromHistory(t *testing.T) {
 	wt := env.sess.Worktrees[0].Worktree
 	mainBranch, err := env.service.gitService.FindOrCreateBranch(ctx, "main", wt.RepoID)
 	require.NoError(t, err)
-	require.NoError(t, env.service.sessionBranchStore.Add(&SessionBranch{SessionID: env.sess.ID, WorktreeID: wt.ID, BranchID: mainBranch.ID, FirstSeenAt: time.Now()}))
+	require.NoError(t, env.service.sessionBranchStore.Add(&SessionBranch{SessionID: env.sess.ID, BranchID: mainBranch.ID, FirstSeenAt: time.Now()}))
 
 	_, err = env.service.ArchiveSession(ctx, env.sess.ID)
 	require.NoError(t, err)

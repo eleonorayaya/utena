@@ -10,7 +10,6 @@ import (
 type SessionBranch struct {
 	gorm.Model
 	SessionID   uint        `json:"session_id" gorm:"uniqueIndex:idx_session_branch;index;not null"`
-	WorktreeID  uint        `json:"worktree_id" gorm:"index;not null"`
 	BranchID    uint        `json:"branch_id" gorm:"uniqueIndex:idx_session_branch;index;not null"`
 	FirstSeenAt time.Time   `json:"first_seen_at"`
 	Branch      *git.Branch `json:"branch,omitempty" gorm:"foreignKey:BranchID;constraint:OnDelete:CASCADE"`

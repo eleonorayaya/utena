@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/stretchr/testify/require"
 )
@@ -53,8 +54,8 @@ func TestSessionBranchStore_AddIsIdempotent(t *testing.T) {
 	require.NoError(t, database.Create(branch).Error)
 
 	first := time.Now().Add(-time.Hour).Truncate(time.Second)
-	require.NoError(t, store.Add(&SessionBranch{SessionID: sess.ID, WorktreeID: 1, BranchID: branch.ID, FirstSeenAt: first}))
-	require.NoError(t, store.Add(&SessionBranch{SessionID: sess.ID, WorktreeID: 1, BranchID: branch.ID, FirstSeenAt: time.Now()}))
+	require.NoError(t, store.Add(&SessionBranch{SessionID: sess.ID, BranchID: branch.ID, FirstSeenAt: first}))
+	require.NoError(t, store.Add(&SessionBranch{SessionID: sess.ID, BranchID: branch.ID, FirstSeenAt: time.Now()}))
 
 	var rows []SessionBranch
 	require.NoError(t, database.Find(&rows).Error)
@@ -72,7 +73,7 @@ func TestSessionStore_LoadsBranchesAndFindsSessionByHistoryBranch(t *testing.T) 
 
 	past := &git.Branch{Name: "past-branch", RepoID: branch.RepoID}
 	require.NoError(t, database.Create(past).Error)
-	require.NoError(t, NewSessionBranchStore(database).Add(&SessionBranch{SessionID: sess.ID, WorktreeID: 1, BranchID: past.ID, FirstSeenAt: time.Now()}))
+	require.NoError(t, NewSessionBranchStore(database).Add(&SessionBranch{SessionID: sess.ID, BranchID: past.ID, FirstSeenAt: time.Now()}))
 
 	loaded, err := store.GetByID(sess.ID)
 	require.NoError(t, err)
@@ -104,8 +105,8 @@ func TestSessionStore_GetByBranchID_CurrentWorktreeBeatsHistory(t *testing.T) {
 
 	old := &Session{Name: "old", Status: StatusArchived, LastUsedAt: time.Now().Add(-time.Hour)}
 	add(old)
-	oldWt := attachTestWorktree(t, store.db, swtStore, old.ID, wsID, 0)
-	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: old.ID, WorktreeID: oldWt.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
+	attachTestWorktree(t, store.db, swtStore, old.ID, wsID, 0)
+	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: old.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
 
 	current := &Session{Name: "current", Status: StatusActive, LastUsedAt: time.Now()}
 	add(current)
@@ -122,13 +123,13 @@ func TestSessionStore_GetByBranchID_PrefersLiveSessionAmongHistoryMatches(t *tes
 
 	old := &Session{Name: "old", Status: StatusArchived, LastUsedAt: time.Now().Add(-time.Hour)}
 	add(old)
-	oldWt := attachTestWorktree(t, store.db, swtStore, old.ID, wsID, 0)
-	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: old.ID, WorktreeID: oldWt.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
+	attachTestWorktree(t, store.db, swtStore, old.ID, wsID, 0)
+	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: old.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
 
 	live := &Session{Name: "live", Status: StatusActive, LastUsedAt: time.Now().Add(-2 * time.Hour)}
 	add(live)
-	liveWt := attachTestWorktree(t, store.db, swtStore, live.ID, wsID, 0)
-	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: live.ID, WorktreeID: liveWt.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
+	attachTestWorktree(t, store.db, swtStore, live.ID, wsID, 0)
+	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: live.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
 
 	found, err := store.GetByBranchID(shared.ID)
 	require.NoError(t, err)
@@ -140,15 +141,24 @@ func TestSessionStore_GetByBranchID_MostRecentlyUsedAmongEquals(t *testing.T) {
 
 	first := &Session{Name: "first", Status: StatusActive, LastUsedAt: time.Now().Add(-time.Hour)}
 	add(first)
-	firstWt := attachTestWorktree(t, store.db, swtStore, first.ID, wsID, 0)
-	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: first.ID, WorktreeID: firstWt.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
+	attachTestWorktree(t, store.db, swtStore, first.ID, wsID, 0)
+	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: first.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
 
 	second := &Session{Name: "second", Status: StatusActive, LastUsedAt: time.Now()}
 	add(second)
-	secondWt := attachTestWorktree(t, store.db, swtStore, second.ID, wsID, 0)
-	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: second.ID, WorktreeID: secondWt.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
+	attachTestWorktree(t, store.db, swtStore, second.ID, wsID, 0)
+	require.NoError(t, sbStore.Add(&SessionBranch{SessionID: second.ID, BranchID: shared.ID, FirstSeenAt: time.Now()}))
 
 	found, err := store.GetByBranchID(shared.ID)
 	require.NoError(t, err)
 	require.Equal(t, second.ID, found.ID)
+}
+
+func TestSessionBranch_MigratesTableCreatedWithoutWorktreeID(t *testing.T) {
+	database, err := db.OpenInMemory()
+	require.NoError(t, err)
+	require.NoError(t, database.Exec("CREATE TABLE `session_branches` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`updated_at` datetime,`deleted_at` datetime,`session_id` integer NOT NULL,`branch_id` integer NOT NULL,`first_seen_at` datetime)").Error)
+	require.NoError(t, database.Exec("INSERT INTO `session_branches` (`session_id`,`branch_id`) VALUES (1, 1)").Error)
+
+	require.NoError(t, database.Migrate(&SessionBranch{}))
 }

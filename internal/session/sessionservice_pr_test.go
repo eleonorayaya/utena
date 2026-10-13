@@ -290,7 +290,7 @@ func TestDismissSession_DismissesHistoryBranchPRs(t *testing.T) {
 	env.attachBranchWorktree(t, sess.ID, env.branch.ID, 0)
 	past := &git.Branch{Name: "older", RepoID: env.repo.ID}
 	require.NoError(t, env.database.Create(past).Error)
-	require.NoError(t, NewSessionBranchStore(env.database).Add(&SessionBranch{SessionID: sess.ID, WorktreeID: 1, BranchID: past.ID, FirstSeenAt: time.Now()}))
+	require.NoError(t, NewSessionBranchStore(env.database).Add(&SessionBranch{SessionID: sess.ID, BranchID: past.ID, FirstSeenAt: time.Now()}))
 	pastID := past.ID
 	pr := &git.PullRequest{RepoID: env.repo.ID, Number: 77, HeadBranchID: &pastID, State: git.PRStateOpen}
 	require.NoError(t, env.database.Create(pr).Error)

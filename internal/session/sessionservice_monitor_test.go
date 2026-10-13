@@ -186,7 +186,7 @@ func (env *prTestEnv) addHistoryBranch(t *testing.T, sessionID uint, name string
 	t.Helper()
 	branch := &git.Branch{Name: name, RepoID: env.repo.ID}
 	require.NoError(t, env.database.Create(branch).Error)
-	require.NoError(t, NewSessionBranchStore(env.database).Add(&SessionBranch{SessionID: sessionID, WorktreeID: 1, BranchID: branch.ID, FirstSeenAt: time.Now()}))
+	require.NoError(t, NewSessionBranchStore(env.database).Add(&SessionBranch{SessionID: sessionID, BranchID: branch.ID, FirstSeenAt: time.Now()}))
 	return branch
 }
 
