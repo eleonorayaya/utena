@@ -8,14 +8,12 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/blockerform"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessiondetail"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
-	"github.com/eleonorayaya/utena/internal/tui/statusview"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
@@ -347,66 +345,6 @@ func sessionDisplayName(s session.Session) string {
 	return fmt.Sprintf("%d", s.ID)
 }
 
-func (m Model) renderRow(s session.Session, selected bool, width int) string {
-	badgeStr := statusview.NewStatusBadge(s.ClaudeSessions, false).View()
-	badgeW := lipgloss.Width(badgeStr)
-
-	var timePart string
-	if !s.LastUsedAt.IsZero() {
-		timePart = " " + common.TimeAgo(s.LastUsedAt) + " "
-	}
-	timePartW := lipgloss.Width(timePart)
-
-	const wsColW = 19
-	showWS := !m.isSplit()
-	wsPartW := 0
-	if showWS {
-		wsPartW = wsColW
-	}
-
-	const cursorW = 2
-	nameW := max(width-cursorW-wsPartW-timePartW-badgeW, 1)
-
-	name := truncateWidth(sessionDisplayName(s), nameW)
-	namePad := strings.Repeat(" ", max(nameW-lipgloss.Width(name), 0))
-
-	var cursorStr string
-	if selected {
-		cursorStr = lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true).Render("› ")
-	} else if s.IsAttached {
-		cursorStr = lipgloss.NewStyle().Foreground(theme.Current.StatusReady).Render("· ")
-	} else {
-		cursorStr = "  "
-	}
-
-	var nameStyle lipgloss.Style
-	switch s.Status {
-	case session.StatusBroken:
-		nameStyle = lipgloss.NewStyle().Foreground(theme.Current.Error)
-	case session.StatusCreating:
-		nameStyle = lipgloss.NewStyle().Foreground(theme.Current.StatusActive)
-	default:
-		if selected {
-			nameStyle = lipgloss.NewStyle().Foreground(theme.Current.TextEmphasis).Bold(true)
-		} else {
-			nameStyle = lipgloss.NewStyle().Foreground(theme.Current.Text)
-		}
-	}
-	nameStr := nameStyle.Render(name + namePad)
-
-	var wsStr string
-	if showWS {
-		const wsTextW = 18
-		ws := truncateWidth(s.WorkspaceDisplay(), wsTextW)
-		wsPad := strings.Repeat(" ", max(wsTextW-lipgloss.Width(ws), 0))
-		wsStr = lipgloss.NewStyle().Foreground(theme.Current.Tertiary).Render(" " + ws + wsPad)
-	}
-
-	timeStr := lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render(timePart)
-
-	return cursorStr + nameStr + wsStr + timeStr + badgeStr
-}
-
 func (m Model) renderList(width int) string {
 	if len(m.filtered) == 0 {
 		empty := lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("  No sessions — press n to create one")
@@ -426,17 +364,6 @@ func (m Model) renderList(width int) string {
 		}
 	}
 	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
-}
-
-func truncateWidth(s string, width int) string {
-	if lipgloss.Width(s) <= width {
-		return s
-	}
-	runes := []rune(s)
-	for lipgloss.Width(string(runes)) > width-1 && len(runes) > 0 {
-		runes = runes[:len(runes)-1]
-	}
-	return string(runes) + "…"
 }
 
 func (m Model) View() string {

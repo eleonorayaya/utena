@@ -9,6 +9,7 @@ type keyMap struct {
 	Up           key.Binding
 	Down         key.Binding
 	Select       key.Binding
+	OpenPR       key.Binding
 	Archive      key.Binding
 	Delete       key.Binding
 	Block        key.Binding
@@ -21,25 +22,30 @@ type keyMap struct {
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Select, k.Archive, k.Delete, k.Block, k.New, k.Info, k.Todos, k.Workspaces, k.ToggleHidden, k.Quit}
+	return []key.Binding{k.Select, k.OpenPR, k.New, k.Block, k.Archive}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Select, k.Archive, k.Delete, k.Block, k.New, k.Info, k.Todos, k.Workspaces, k.ToggleHidden, k.Quit}}
+	return [][]key.Binding{
+		{k.Up, k.Down, k.Select, k.Info, k.OpenPR},
+		{k.New, k.Block, k.Archive, k.Delete},
+		{k.Todos, k.Workspaces, k.ToggleHidden, k.Quit},
+	}
 }
 
 var keys = keyMap{
 	Up:           key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
 	Down:         key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-	Select:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+	Select:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "switch")),
+	OpenPR:       key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open PR")),
 	Archive:      key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archive")),
 	Delete:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 	Block:        key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "block")),
 	New:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
-	Info:         key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "info")),
+	Info:         key.NewBinding(key.WithKeys("i", "right"), key.WithHelp("i/→", "details")),
 	Todos:        key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "todos")),
 	Workspaces:   key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "workspaces")),
-	ToggleHidden: key.NewBinding(key.WithKeys("."), key.WithHelp(".", "toggle hidden")),
+	ToggleHidden: key.NewBinding(key.WithKeys("."), key.WithHelp(".", "hidden")),
 	Quit:         key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 }
 
