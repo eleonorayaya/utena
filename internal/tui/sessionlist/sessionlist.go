@@ -2,7 +2,6 @@ package sessionlist
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -59,43 +58,8 @@ func (m Model) listWidth() int {
 	return min(max(w, 36), 52)
 }
 
-type listGroupKind int
-
-const (
-	groupLive listGroupKind = iota
-	groupBlocked
-	groupHidden
-)
-
-func listGroup(s session.Session) listGroupKind {
-	switch {
-	case s.IsHidden():
-		return groupHidden
-	case s.IsBlocked():
-		return groupBlocked
-	default:
-		return groupLive
-	}
-}
-
-func (m Model) firstBlockedIndex() int {
-	for i, s := range m.filtered {
-		if listGroup(s) == groupBlocked {
-			return i
-		}
-	}
-	return -1
-}
-
 func (m Model) bodyHeight() int {
-	h := m.height - 2
-	if m.firstBlockedIndex() >= 0 {
-		h -= 2
-	}
-	if h < 1 {
-		return 1
-	}
-	return h
+	return max(m.height, 1)
 }
 
 func (m Model) selectedSession() *session.Session {
@@ -133,16 +97,24 @@ func (m *Model) clearPending() {
 }
 
 func (m *Model) clampOffset() {
+	rows := layoutRows(m.filtered)
 	bh := m.bodyHeight()
-	if m.cursor < m.offset {
-		m.offset = m.cursor
-	}
-	if m.cursor >= m.offset+bh {
-		m.offset = m.cursor - bh + 1
-	}
-	if m.offset < 0 {
+	cr := rowOfSession(rows, m.cursor)
+	if cr < 0 {
 		m.offset = 0
+		return
 	}
+	top := cr
+	if cr > 0 && rows[cr-1].kind == rowHeader && bh > 1 {
+		top = cr - 1
+	}
+	if top < m.offset {
+		m.offset = top
+	}
+	if cr >= m.offset+bh {
+		m.offset = cr - bh + 1
+	}
+	m.offset = max(min(m.offset, len(rows)-bh), 0)
 }
 
 func (m *Model) rebuildFiltered() {
@@ -157,9 +129,7 @@ func (m *Model) rebuildFiltered() {
 			m.filtered = append(m.filtered, s)
 		}
 	}
-	sort.SliceStable(m.filtered, func(i, j int) bool {
-		return listGroup(m.filtered[i]) < listGroup(m.filtered[j])
-	})
+	sortSessions(m.filtered)
 
 	if selectedID != 0 {
 		for i, s := range m.filtered {
@@ -211,6 +181,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
+	m.clampOffset()
 	return m, nil
 }
 
@@ -377,12 +348,7 @@ func sessionDisplayName(s session.Session) string {
 }
 
 func (m Model) renderRow(s session.Session, selected bool, width int) string {
-	var badgeStr string
-	if listGroup(s) == groupBlocked {
-		badgeStr = lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render(" " + blockedTag(s) + " ")
-	} else {
-		badgeStr = statusview.NewStatusBadge(s.ClaudeSessions, false).View()
-	}
+	badgeStr := statusview.NewStatusBadge(s.ClaudeSessions, false).View()
 	badgeW := lipgloss.Width(badgeStr)
 
 	var timePart string
@@ -441,51 +407,25 @@ func (m Model) renderRow(s session.Session, selected bool, width int) string {
 	return cursorStr + nameStr + wsStr + timeStr + badgeStr
 }
 
-func blockedTag(s session.Session) string {
-	open := s.OpenBlockers()
-	tag := "⏸ " + string(open[0].Kind)
-	if len(open) > 1 {
-		tag += fmt.Sprintf(" ×%d", len(open))
-	}
-	return tag
-}
-
-func sectionHeader(title string, width int) string {
-	titleStyle := lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true)
-	return titleStyle.Render(title) + "\n" +
-		lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant).Render(strings.Repeat("─", width))
-}
-
 func (m Model) renderList(width int) string {
-	var b strings.Builder
-
-	b.WriteString(sectionHeader("Sessions", width))
-	b.WriteString("\n")
-
-	bh := m.bodyHeight()
-	end := min(m.offset+bh, len(m.filtered))
-	visible := m.filtered
-	if m.offset < len(visible) {
-		visible = visible[m.offset:end]
-	} else {
-		visible = nil
+	if len(m.filtered) == 0 {
+		empty := lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("  No sessions — press n to create one")
+		return lipgloss.NewStyle().Width(width).Render(empty)
 	}
-
-	blockedAt := m.firstBlockedIndex()
-	for i, s := range visible {
-		idx := i + m.offset
-		if idx == blockedAt {
-			b.WriteString(sectionHeader("Blocked", width))
-			b.WriteString("\n")
-		}
-		selected := idx == m.cursor
-		b.WriteString(m.renderRow(s, selected, width))
-		if i < len(visible)-1 {
-			b.WriteString("\n")
+	rows := layoutRows(m.filtered)
+	end := min(m.offset+m.bodyHeight(), len(rows))
+	var lines []string
+	for _, r := range rows[m.offset:end] {
+		switch r.kind {
+		case rowGap:
+			lines = append(lines, "")
+		case rowHeader:
+			lines = append(lines, "  "+ui.SectionHeader(r.section.title(), r.count))
+		default:
+			lines = append(lines, m.renderRow(m.filtered[r.index], r.index == m.cursor, width))
 		}
 	}
-
-	return lipgloss.NewStyle().Width(width).Render(b.String())
+	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 }
 
 func truncateWidth(s string, width int) string {

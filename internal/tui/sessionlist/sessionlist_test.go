@@ -235,7 +235,7 @@ func TestSessionList_ResolvedBlockersAreNotBlocked(t *testing.T) {
 	assert.NotContains(t, m.renderList(60), "Blocked")
 }
 
-func TestSessionList_RendersBlockedHeaderAndTag(t *testing.T) {
+func TestSessionList_RendersBlockedSection(t *testing.T) {
 	m := New()
 	m.width, m.height = 60, 20
 	m.sessions = []session.Session{
@@ -244,10 +244,10 @@ func TestSessionList_RendersBlockedHeaderAndTag(t *testing.T) {
 	}
 	m.rebuildFiltered()
 	out := m.renderList(60)
-	assert.Contains(t, out, "Blocked")
-	assert.Contains(t, out, "⏸ slack ×2")
-	assert.Less(t, strings.Index(out, "live"), strings.Index(out, "Blocked"))
-	assert.Less(t, strings.Index(out, "Blocked"), strings.Index(out, "waiting"))
+	assert.Contains(t, out, "Blocked 1")
+	assert.NotContains(t, out, "⏸")
+	assert.Less(t, strings.Index(out, "live"), strings.Index(out, "Blocked 1"))
+	assert.Less(t, strings.Index(out, "Blocked 1"), strings.Index(out, "waiting"))
 }
 
 func TestSessionList_CursorMovesAcrossHeader(t *testing.T) {
