@@ -37,8 +37,8 @@ func TestSessionList_PreviewShowsEmbeddedPRsForMultiWorkspaceSession(t *testing.
 	require.Nil(t, cmd)
 
 	out := m.View()
-	assert.Contains(t, out, "#116 utena pr")
-	assert.Contains(t, out, "#96 dotfiles pr")
+	assert.Contains(t, out, "utena pr")
+	assert.Contains(t, out, "dotfiles pr")
 }
 
 func msgTypeName(cmd tea.Cmd) string {

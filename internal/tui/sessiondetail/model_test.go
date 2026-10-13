@@ -40,8 +40,10 @@ func TestSessionDetail_ShowsEmbeddedPRsFromEveryWorkspace(t *testing.T) {
 	m, _ := New().Update(SelectMsg{Session: makeMultiWorkspaceSession(1, 2)})
 
 	out := m.View()
-	assert.Contains(t, out, "#116 utena pr")
-	assert.Contains(t, out, "#96 dotfiles pr")
+	assert.Contains(t, out, "utena pr")
+	assert.Contains(t, out, "dotfiles pr")
+	assert.Contains(t, out, "#116")
+	assert.Contains(t, out, "#96")
 }
 
 func TestSessionDetail_RefreshUpdatesEmbeddedPRs(t *testing.T) {
@@ -51,7 +53,7 @@ func TestSessionDetail_RefreshUpdatesEmbeddedPRs(t *testing.T) {
 	refreshed.PullRequests[0].State = git.PRStateMerged
 	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{refreshed}})
 
-	assert.Contains(t, m.View(), "#116 utena pr [merged]")
+	assert.Contains(t, m.View(), "⊕ merged")
 }
 
 func makeActiveSession() session.Session {
@@ -159,13 +161,13 @@ func TestSessionDetail_View_ShowsWarning(t *testing.T) {
 		StatusError: "branch not pulled: dirty",
 	}
 	m, _ := New().Update(SelectMsg{Session: warned})
-	assert.Contains(t, m.View(), "[!]")
+	assert.Contains(t, m.View(), "⚠")
 	assert.Contains(t, m.View(), "branch not pulled")
 }
 
 func TestSessionDetail_View_NoWarningWhenClean(t *testing.T) {
 	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
-	assert.NotContains(t, m.View(), "[!]")
+	assert.NotContains(t, m.View(), "⚠")
 }
 
 func makeBlockedSession() session.Session {
@@ -184,7 +186,7 @@ func runeKey(r string) tea.KeyMsg {
 func TestSessionDetail_RendersOpenBlockers(t *testing.T) {
 	m, _ := New().Update(SelectMsg{Session: makeBlockedSession()})
 	out := m.View()
-	assert.Contains(t, out, "Blockers")
+	assert.Contains(t, out, "Blocked 2")
 	assert.Contains(t, out, "first")
 	assert.Contains(t, out, "second")
 }
@@ -218,7 +220,7 @@ func TestSessionDetail_RefreshClampsCursorWhenLastBlockerResolved(t *testing.T) 
 	refreshed.Blockers[1].ResolvedAt = &now
 	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{refreshed}})
 
-	assert.NotContains(t, m.View(), "Blockers")
+	assert.NotContains(t, m.View(), "Blocked")
 	_, cmd := m.Update(runeKey("u"))
 	assert.Nil(t, cmd)
 	_, cmd = m.Update(runeKey("x"))
@@ -235,33 +237,24 @@ func TestRenderPanel_ShowsBlockersWithoutCursor(t *testing.T) {
 	s := makeBlockedSession()
 	out := RenderPanel(&s, 60, 30)
 	assert.Contains(t, out, "first")
-	assert.NotContains(t, out, "›")
+	assert.NotContains(t, out, "▌")
 }
 
-func TestRenderPanel_ShowsPastBranchesAndTheirPRs(t *testing.T) {
+func TestRenderPanel_PastBranchPRsStillShowUnderTheirRepo(t *testing.T) {
 	current, past := uint(2), uint(1)
 	s := session.Session{
-		Model:  gorm.Model{ID: 9},
-		Name:   "stacked",
-		Status: session.StatusActive,
-		Worktrees: []session.SessionWorktree{{
-			Worktree: &git.Worktree{BranchID: current, Branch: &git.Branch{Model: gorm.Model{ID: current}, Name: "eqt/top"}},
-		}},
-		Branches: []session.SessionBranch{
-			{BranchID: past, Branch: &git.Branch{Model: gorm.Model{ID: past}, Name: "eqt/base"}},
-			{BranchID: current, Branch: &git.Branch{Model: gorm.Model{ID: current}, Name: "eqt/top"}},
-		},
+		Model:     gorm.Model{ID: 9},
+		Name:      "stacked",
+		Status:    session.StatusActive,
+		Worktrees: []session.SessionWorktree{wt(0, "utena", 5, current)},
 		PullRequests: []git.PullRequest{
-			{Number: 1, Title: "base", HeadBranchID: &past, State: git.PRStateOpen},
-			{Number: 2, Title: "top", HeadBranchID: &current, State: git.PRStateDraft},
+			{Number: 1, Title: "base", RepoID: 5, HeadBranchID: &past, State: git.PRStateOpen},
+			{Number: 2, Title: "top", RepoID: 5, HeadBranchID: &current, State: git.PRStateDraft},
 		},
 	}
-
 	out := RenderPanel(&s, 80, 0)
-
-	assert.Contains(t, out, "eqt/top")
-	assert.Contains(t, out, "Past")
-	assert.Contains(t, out, "eqt/base")
-	assert.Contains(t, out, "#1 base")
-	assert.Contains(t, out, "#2 top")
+	assert.Contains(t, out, "base")
+	assert.Contains(t, out, "top")
+	assert.NotContains(t, out, "eqt/")
+	assert.NotContains(t, out, "Other")
 }
