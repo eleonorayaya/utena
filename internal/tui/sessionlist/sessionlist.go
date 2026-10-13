@@ -34,6 +34,7 @@ type Model struct {
 	pendingRepairID  uint
 	statusMsg        string
 	prs              []git.PullRequest
+	prsByWorkspace   map[uint][]git.PullRequest
 	lastPRSessionID  uint
 	width            int
 	height           int
@@ -181,11 +182,9 @@ func (m *Model) maybeFetchPRs() tea.Cmd {
 		return nil
 	}
 	m.prs = nil
-	if !sel.IsMulti() && len(sel.Worktrees) > 0 && sel.Worktrees[0].Workspace != nil {
-		m.lastPRSessionID = sel.ID
-		return provider.FetchPRs(sel.Worktrees[0].Workspace.ID, "")
-	}
-	return nil
+	m.prsByWorkspace = make(map[uint][]git.PullRequest)
+	m.lastPRSessionID = sel.ID
+	return provider.FetchSessionPRs(sel)
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -203,10 +202,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, m.maybeFetchPRs()
 	case provider.PRsStateUpdatedMsg:
 		sel := m.selectedSession()
-		if sel != nil && len(sel.Worktrees) > 0 && sel.Worktrees[0].Workspace != nil &&
-			msg.WorkspaceID == sel.Worktrees[0].Workspace.ID {
-			m.prs = sel.FilterPRs(msg.PullRequests)
+		if sel == nil || sel.ID != m.lastPRSessionID || m.prsByWorkspace == nil {
+			return m, nil
 		}
+		m.prsByWorkspace[msg.WorkspaceID] = msg.PullRequests
+		m.prs = sel.CollectPRs(m.prsByWorkspace)
 		return m, nil
 	case provider.ErrMsg:
 		m.statusMsg = msg.Err.Error()

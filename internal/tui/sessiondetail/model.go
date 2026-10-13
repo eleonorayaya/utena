@@ -84,6 +84,7 @@ func prStateColor(state git.PRState) lipgloss.Color {
 type Model struct {
 	sess                   *session.Session
 	prs                    []git.PullRequest
+	prsByWorkspace         map[uint][]git.PullRequest
 	pendingDeleteID        uint
 	interactive            bool
 	blockerCursor          int
@@ -136,18 +137,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		s := msg.Session
 		m.sess = &s
 		m.prs = nil
+		m.prsByWorkspace = make(map[uint][]git.PullRequest)
 		m.pendingDeleteID = 0
 		m.interactive = true
 		m.blockerCursor = 0
 		m.pendingBlockerDeleteID = 0
-		if len(s.Worktrees) > 0 && s.Worktrees[0].Workspace != nil {
-			return m, provider.FetchPRs(s.Worktrees[0].Workspace.ID, "")
-		}
-		return m, nil
+		return m, provider.FetchSessionPRs(m.sess)
 	case provider.PRsStateUpdatedMsg:
-		if m.sess != nil && len(m.sess.Worktrees) > 0 && m.sess.Worktrees[0].Workspace != nil && msg.WorkspaceID == m.sess.Worktrees[0].Workspace.ID {
-			m.prs = m.sess.FilterPRs(msg.PullRequests)
+		if m.sess == nil || m.prsByWorkspace == nil {
+			return m, nil
 		}
+		m.prsByWorkspace[msg.WorkspaceID] = msg.PullRequests
+		m.prs = m.sess.CollectPRs(m.prsByWorkspace)
 		return m, nil
 	case provider.SessionsStateUpdatedMsg:
 		if m.sess == nil {

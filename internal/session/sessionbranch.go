@@ -82,3 +82,28 @@ func (s *Session) FilterPRs(prs []git.PullRequest) []git.PullRequest {
 	}
 	return out
 }
+
+func (s *Session) WorkspaceIDs() []uint {
+	seen := make(map[uint]struct{}, len(s.Worktrees))
+	out := make([]uint, 0, len(s.Worktrees))
+	for i := range s.Worktrees {
+		ws := s.Worktrees[i].Workspace
+		if ws == nil {
+			continue
+		}
+		if _, ok := seen[ws.ID]; ok {
+			continue
+		}
+		seen[ws.ID] = struct{}{}
+		out = append(out, ws.ID)
+	}
+	return out
+}
+
+func (s *Session) CollectPRs(byWorkspace map[uint][]git.PullRequest) []git.PullRequest {
+	var all []git.PullRequest
+	for _, id := range s.WorkspaceIDs() {
+		all = append(all, byWorkspace[id]...)
+	}
+	return s.FilterPRs(all)
+}

@@ -5,8 +5,33 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/git"
+	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
+
+func TestSession_CollectPRs_AcrossWorkspaces(t *testing.T) {
+	utenaBranch, dotfilesBranch, otherBranch := uint(1), uint(2), uint(3)
+	sess := Session{Worktrees: []SessionWorktree{
+		{Worktree: &git.Worktree{BranchID: utenaBranch}, Workspace: &workspace.Workspace{Model: gorm.Model{ID: 10}}},
+		{Worktree: &git.Worktree{BranchID: dotfilesBranch}, Workspace: &workspace.Workspace{Model: gorm.Model{ID: 20}}},
+		{Worktree: &git.Worktree{BranchID: 4}, Workspace: &workspace.Workspace{Model: gorm.Model{ID: 10}}},
+		{Worktree: &git.Worktree{BranchID: 5}},
+	}}
+	require.Equal(t, []uint{10, 20}, sess.WorkspaceIDs())
+
+	got := sess.CollectPRs(map[uint][]git.PullRequest{
+		10: {{Number: 116, HeadBranchID: &utenaBranch}, {Number: 1, HeadBranchID: &otherBranch}},
+		20: {{Number: 96, HeadBranchID: &dotfilesBranch}},
+		30: {{Number: 5, HeadBranchID: &utenaBranch}},
+	})
+
+	numbers := make([]int, 0, len(got))
+	for _, pr := range got {
+		numbers = append(numbers, pr.Number)
+	}
+	require.Equal(t, []int{116, 96}, numbers)
+}
 
 func TestSession_BranchIDs_UnionsCurrentAndHistory(t *testing.T) {
 	sess := Session{

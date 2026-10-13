@@ -7,10 +7,39 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestSessionList_LoadsPRsForMultiWorkspaceSession(t *testing.T) {
+	utenaBranch, dotfilesBranch := uint(1), uint(2)
+	sess := session.Session{
+		Model:  gorm.Model{ID: 7},
+		Name:   "multi",
+		Status: session.StatusActive,
+		Worktrees: []session.SessionWorktree{
+			{Worktree: &git.Worktree{BranchID: utenaBranch}, Workspace: &workspace.Workspace{Model: gorm.Model{ID: 10}}},
+			{Worktree: &git.Worktree{BranchID: dotfilesBranch}, Workspace: &workspace.Workspace{Model: gorm.Model{ID: 20}}},
+		},
+	}
+
+	m, cmd := New().Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{sess}})
+	require.NotNil(t, cmd)
+
+	m, _ = m.Update(provider.PRsStateUpdatedMsg{WorkspaceID: 10, PullRequests: []git.PullRequest{{Number: 116, HeadBranchID: &utenaBranch}}})
+	m, _ = m.Update(provider.PRsStateUpdatedMsg{WorkspaceID: 20, PullRequests: []git.PullRequest{{Number: 96, HeadBranchID: &dotfilesBranch}}})
+
+	numbers := make([]int, 0, len(m.prs))
+	for _, pr := range m.prs {
+		numbers = append(numbers, pr.Number)
+	}
+	assert.Equal(t, []int{116, 96}, numbers)
+}
 
 func msgTypeName(cmd tea.Cmd) string {
 	if cmd == nil {

@@ -11,10 +11,47 @@ import (
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func makeMultiWorkspaceSession(utenaBranch, dotfilesBranch uint) session.Session {
+	s := makeActiveSession()
+	s.Worktrees = []session.SessionWorktree{
+		{
+			Worktree:  &git.Worktree{BranchID: utenaBranch, Branch: &git.Branch{Model: gorm.Model{ID: utenaBranch}, Name: "eqt/x"}},
+			Workspace: &workspace.Workspace{Model: gorm.Model{ID: 10}, Name: "utena"},
+		},
+		{
+			Worktree:  &git.Worktree{BranchID: dotfilesBranch, Branch: &git.Branch{Model: gorm.Model{ID: dotfilesBranch}, Name: "eqt/x"}},
+			Workspace: &workspace.Workspace{Model: gorm.Model{ID: 20}, Name: "dotfiles"},
+		},
+	}
+	return s
+}
+
+func TestSessionDetail_ShowsPRsFromEveryWorkspace(t *testing.T) {
+	utenaBranch, dotfilesBranch := uint(1), uint(2)
+	m, cmd := New().Update(SelectMsg{Session: makeMultiWorkspaceSession(utenaBranch, dotfilesBranch)})
+	require.NotNil(t, cmd)
+
+	m, _ = m.Update(provider.PRsStateUpdatedMsg{WorkspaceID: 10, PullRequests: []git.PullRequest{
+		{Number: 116, Title: "utena pr", HeadBranchID: &utenaBranch, State: git.PRStateDraft},
+	}})
+	m, _ = m.Update(provider.PRsStateUpdatedMsg{WorkspaceID: 20, PullRequests: []git.PullRequest{
+		{Number: 96, Title: "dotfiles pr", HeadBranchID: &dotfilesBranch, State: git.PRStateDraft},
+	}})
+	m, _ = m.Update(provider.PRsStateUpdatedMsg{WorkspaceID: 30, PullRequests: []git.PullRequest{
+		{Number: 5, Title: "unrelated", HeadBranchID: &utenaBranch, State: git.PRStateOpen},
+	}})
+
+	out := m.View()
+	assert.Contains(t, out, "#116 utena pr")
+	assert.Contains(t, out, "#96 dotfiles pr")
+	assert.NotContains(t, out, "unrelated")
+}
 
 func makeActiveSession() session.Session {
 	return session.Session{
