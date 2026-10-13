@@ -1,6 +1,7 @@
 package sessiondetail
 
 import (
+	"fmt"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -11,6 +12,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
 
 type Model struct {
@@ -21,10 +23,25 @@ type Model struct {
 	pendingBlockerDeleteID uint
 	width                  int
 	height                 int
+	picker                 ui.PRPicker
+	statusMsg              string
+	statusKind             ui.StatusKind
 }
 
 func New() Model {
 	return Model{}
+}
+
+func (m *Model) setStatus(text string, kind ui.StatusKind) {
+	m.statusMsg = text
+	m.statusKind = kind
+}
+
+func (m Model) Status() ui.Status {
+	if m.picker.IsOpen() {
+		return ui.Status{Text: "↑/↓ choose · enter open · esc cancel", Kind: ui.StatusInfo}
+	}
+	return ui.Status{Text: m.statusMsg, Kind: m.statusKind}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
@@ -70,6 +87,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.interactive = true
 		m.blockerCursor = 0
 		m.pendingBlockerDeleteID = 0
+		m.picker = m.picker.Close()
+		m.setStatus("", ui.StatusInfo)
+		return m, nil
+	case ui.OpenURLFailedMsg:
+		m.setStatus("could not open PR: "+msg.Err.Error(), ui.StatusError)
 		return m, nil
 	case provider.SessionsStateUpdatedMsg:
 		if m.sess == nil {
@@ -94,6 +116,16 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.sess == nil {
 		return m, nil
 	}
+
+	if m.picker.IsOpen() {
+		var url string
+		m.picker, url = m.picker.Update(msg)
+		if url != "" {
+			return m, ui.OpenURL(url)
+		}
+		return m, nil
+	}
+	m.setStatus("", ui.StatusInfo)
 
 	pendingID := m.pendingDeleteID
 	m.pendingDeleteID = 0
@@ -141,6 +173,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, provider.DeleteBlocker(m.sess.ID, b.ID)
 		}
 		m.pendingBlockerDeleteID = b.ID
+		m.setStatus("press x again to delete this blocker", ui.StatusWarning)
 		return m, nil
 
 	case key.Matches(msg, keys.Activate):
@@ -148,6 +181,19 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, provider.ActivateSession(m.sess.ID)
+
+	case key.Matches(msg, keys.OpenPR):
+		prs := ui.OpenablePRs(m.sess.PullRequests)
+		switch len(prs) {
+		case 0:
+			m.setStatus("no open pull requests", ui.StatusInfo)
+			return m, nil
+		case 1:
+			return m, ui.OpenURL(prs[0].HTMLURL)
+		default:
+			m.picker = ui.NewPRPicker(prs)
+			return m, nil
+		}
 
 	case key.Matches(msg, keys.Archive):
 		if !m.sess.CanArchive() {
@@ -171,6 +217,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			)
 		}
 		m.pendingDeleteID = m.sess.ID
+		m.setStatus(fmt.Sprintf("press d again to delete %s (removes worktrees)", m.sess.DisplayLabel()), ui.StatusWarning)
 		return m, nil
 
 	case key.Matches(msg, keys.Repair):

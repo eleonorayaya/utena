@@ -108,7 +108,11 @@ func (m Model) View() string {
 		}
 	}
 
-	return ui.FitHeight(strings.Join(lines, "\n"), m.height)
+	body := strings.Join(lines, "\n")
+	if m.picker.IsOpen() && m.height > 0 {
+		body = ui.FitHeight(body, max(m.height-m.picker.Height(), 1)) + "\n" + m.picker.View(width)
+	}
+	return ui.FitHeight(body, m.height)
 }
 
 func titleLine(s session.Session, width int) string {
