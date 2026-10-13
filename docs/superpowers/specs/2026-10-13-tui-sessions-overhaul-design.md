@@ -182,7 +182,7 @@ Grouping and sorting live in pure functions in `sessionlist`, e.g. `groupSession
 
 ## Testing
 
-- Unit tests for `ui`: `ShortAgo` boundaries, `PRCounts`, `PRCountCell`, `Hyperlink` visible width, `Truncate`, `Row` column widths, `Footer` truncation and status replacement.
+- Unit tests for `ui`: `ShortAgo` boundaries, `PRCounts`, `PRCountSpans`, `Hyperlink` visible width, `Truncate`, `Row` column widths, `Footer` truncation and status replacement.
 - `sessionlist`:
   - section grouping and order for every Claude status, blocked, hidden, and attached
   - the cursor skips headers and follows the selected ID across a regroup
