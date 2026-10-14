@@ -57,3 +57,91 @@ func TestDB_PreMigrationErrorAbortsMigrate(t *testing.T) {
 	assert.ErrorIs(t, err, sentinel)
 	assert.False(t, database.Migrator().HasTable(&widget{}))
 }
+
+func TestDB_PreMigrationFailureRollsBackEarlierPreMigrations(t *testing.T) {
+	database := openTestDB(t)
+	require.NoError(t, database.Exec("CREATE TABLE legacy_widgets (id integer primary key, name text)").Error)
+	sentinel := errors.New("boom")
+
+	database.RegisterPreMigrations(
+		func(m gorm.Migrator) error {
+			return m.RenameTable("legacy_widgets", "widgets")
+		},
+		func(m gorm.Migrator) error {
+			return sentinel
+		},
+	)
+	database.RegisterModels(&widget{})
+
+	err := database.OnAppStart(context.Background())
+	require.ErrorIs(t, err, sentinel)
+	assert.True(t, database.Migrator().HasTable("legacy_widgets"))
+	assert.False(t, database.Migrator().HasTable("widgets"))
+}
+
+func TestDB_PreMigrationsRunInOrderAndStopOnError(t *testing.T) {
+	database := openTestDB(t)
+	sentinel := errors.New("boom")
+	var calls []string
+
+	database.RegisterPreMigrations(
+		func(m gorm.Migrator) error {
+			calls = append(calls, "first")
+			return nil
+		},
+		func(m gorm.Migrator) error {
+			calls = append(calls, "second")
+			return sentinel
+		},
+		func(m gorm.Migrator) error {
+			calls = append(calls, "third")
+			return nil
+		},
+	)
+
+	err := database.OnAppStart(context.Background())
+	require.ErrorIs(t, err, sentinel)
+	assert.Equal(t, []string{"first", "second"}, calls)
+}
+
+func TestDB_PreMigrationTableRecreateNestsInTransaction(t *testing.T) {
+	database := openTestDB(t)
+	require.NoError(t, database.Exec("CREATE TABLE `widgets` (`id` integer primary key, `name` text, `legacy_name` text, `obsolete` text)").Error)
+	require.NoError(t, database.Exec("INSERT INTO widgets (id, name, legacy_name, obsolete) VALUES (1, 'gear', 'old', 'x')").Error)
+
+	database.RegisterPreMigrations(func(m gorm.Migrator) error {
+		if err := m.RenameColumn(&widget{}, "legacy_name", "label"); err != nil {
+			return err
+		}
+		return m.DropColumn(&widget{}, "obsolete")
+	})
+	database.RegisterModels(&widget{})
+
+	require.NoError(t, database.OnAppStart(context.Background()))
+
+	assert.True(t, database.Migrator().HasColumn(&widget{}, "label"))
+	assert.False(t, database.Migrator().HasColumn(&widget{}, "legacy_name"))
+	assert.False(t, database.Migrator().HasColumn(&widget{}, "obsolete"))
+	var label string
+	require.NoError(t, database.Raw("SELECT label FROM widgets WHERE id = 1").Scan(&label).Error)
+	assert.Equal(t, "old", label)
+}
+
+func TestDB_PreMigrationRenameUpdatesForeignKeyReferences(t *testing.T) {
+	database := openTestDB(t)
+	require.NoError(t, database.Exec("CREATE TABLE legacy_parents (id integer primary key)").Error)
+	require.NoError(t, database.Exec("CREATE TABLE children (id integer primary key, parent_id integer REFERENCES legacy_parents(id))").Error)
+
+	database.RegisterPreMigrations(func(m gorm.Migrator) error {
+		return m.RenameTable("legacy_parents", "parents")
+	})
+
+	require.NoError(t, database.OnAppStart(context.Background()))
+
+	var fks []struct {
+		Table string
+	}
+	require.NoError(t, database.Raw("SELECT \"table\" FROM pragma_foreign_key_list('children')").Scan(&fks).Error)
+	require.Len(t, fks, 1)
+	assert.Equal(t, "parents", fks[0].Table)
+}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 
@@ -147,7 +148,15 @@ func (a *App) collectPreMigrations() []db.PreMigration {
 	var fns []db.PreMigration
 	for _, m := range a.modules() {
 		if pp, ok := m.module.(common.PreMigrationProvider); ok {
-			fns = append(fns, pp.PreMigrations()...)
+			for _, fn := range pp.PreMigrations() {
+				name := m.name
+				fns = append(fns, func(mig gorm.Migrator) error {
+					if err := fn(mig); err != nil {
+						return fmt.Errorf("%s: %w", name, err)
+					}
+					return nil
+				})
+			}
 		}
 	}
 	return fns

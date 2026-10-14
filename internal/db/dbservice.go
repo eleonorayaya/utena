@@ -66,9 +66,16 @@ func (d *DB) OnAppEnd(ctx context.Context) error {
 func (d *DB) Migrate(models ...any) error {
 	d.Exec("PRAGMA foreign_keys=OFF")
 	defer d.Exec("PRAGMA foreign_keys=ON")
-	for i, fn := range d.preMigrations {
-		if err := fn(d.Migrator()); err != nil {
-			return fmt.Errorf("pre-migration %d: %w", i, err)
+	if len(d.preMigrations) > 0 {
+		if err := d.Transaction(func(tx *gorm.DB) error {
+			for i, fn := range d.preMigrations {
+				if err := fn(tx.Migrator()); err != nil {
+					return fmt.Errorf("pre-migration %d: %w", i, err)
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 	return d.AutoMigrate(models...)
