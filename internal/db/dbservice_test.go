@@ -145,3 +145,28 @@ func TestDB_PreMigrationRenameUpdatesForeignKeyReferences(t *testing.T) {
 	require.Len(t, fks, 1)
 	assert.Equal(t, "parents", fks[0].Table)
 }
+
+func TestMigratorDB_ExecutesInsidePreMigrationTransaction(t *testing.T) {
+	database := openTestDB(t)
+	require.NoError(t, database.Exec("CREATE TABLE widgets (id integer primary key, name text)").Error)
+	require.NoError(t, database.Exec("INSERT INTO widgets (id, name) VALUES (1, 'old')").Error)
+	sentinel := errors.New("boom")
+
+	database.RegisterPreMigrations(
+		func(m gorm.Migrator) error {
+			tx, err := db.MigratorDB(m)
+			if err != nil {
+				return err
+			}
+			return tx.Exec("UPDATE widgets SET name = 'new' WHERE name = 'old'").Error
+		},
+		func(m gorm.Migrator) error {
+			return sentinel
+		},
+	)
+
+	require.ErrorIs(t, database.OnAppStart(context.Background()), sentinel)
+	var name string
+	require.NoError(t, database.Raw("SELECT name FROM widgets WHERE id = 1").Scan(&name).Error)
+	assert.Equal(t, "old", name)
+}

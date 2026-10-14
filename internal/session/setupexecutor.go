@@ -288,7 +288,7 @@ func (e *setupExecution) executeStep(ctx context.Context, def stepDef) (bool, er
 		return false, e.execInstallDeps(ctx, def)
 	case StepKindApplyClaude:
 		return false, e.execApplyClaude(ctx)
-	case StepKindSetupTmux:
+	case StepKindSetupMux:
 		if err := e.svc.setupMux(ctx, e.sess, e.muxName, e.sess.SessionRoot); err != nil {
 			return true, fmt.Errorf("mux setup: %w", err)
 		}

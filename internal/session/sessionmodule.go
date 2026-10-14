@@ -69,7 +69,41 @@ func (m *SessionModule) Models() []any {
 }
 
 func (m *SessionModule) PreMigrations() []db.PreMigration {
-	return []db.PreMigration{renameTmuxSessionColumn}
+	return []db.PreMigration{renameTmuxSessionColumn, dropTmuxSessionNameColumn, renameSetupTmuxSteps}
+}
+
+type legacySessionsTable struct {
+	TmuxSessionName string
+}
+
+func (legacySessionsTable) TableName() string { return "sessions" }
+
+func dropTmuxSessionNameColumn(mg gorm.Migrator) error {
+	if mg.HasIndex("sessions", "idx_sessions_tmux_session_name") {
+		if err := mg.DropIndex("sessions", "idx_sessions_tmux_session_name"); err != nil {
+			return err
+		}
+	}
+	if mg.HasColumn("sessions", "tmux_session_name") {
+		if err := mg.DropColumn(&legacySessionsTable{}, "tmux_session_name"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func renameSetupTmuxSteps(mg gorm.Migrator) error {
+	if !mg.HasTable("session_setup_steps") {
+		return nil
+	}
+	tx, err := db.MigratorDB(mg)
+	if err != nil {
+		return err
+	}
+	if err := tx.Exec("UPDATE session_setup_steps SET kind = ? WHERE kind = ?", string(StepKindSetupMux), "setup_tmux").Error; err != nil {
+		return err
+	}
+	return tx.Exec("UPDATE session_setup_steps SET label = ? WHERE label = ?", "Setup terminal session", "Setup tmux").Error
 }
 
 func renameTmuxSessionColumn(mg gorm.Migrator) error {

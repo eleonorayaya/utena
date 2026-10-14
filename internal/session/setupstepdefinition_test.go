@@ -21,13 +21,13 @@ func TestBuildSetupSteps_SingleWorkspaceNoConfig(t *testing.T) {
 		StepKindCreateSessionDir,
 		StepKindSetupWorktree,
 		StepKindApplyClaude,
-		StepKindSetupTmux,
+		StepKindSetupMux,
 	}, kinds(defs))
 
 	require.Nil(t, defs[0].DependsOnPos)
 	require.Equal(t, 0, *defs[1].DependsOnPos)
 	require.Nil(t, defs[2].DependsOnPos, "apply_claude has no explicit dependency")
-	require.Equal(t, 2, *defs[3].DependsOnPos, "setup_tmux depends on apply_claude")
+	require.Equal(t, 2, *defs[3].DependsOnPos, "setup_mux depends on apply_claude")
 }
 
 func TestBuildSetupSteps_CopyFilesChain(t *testing.T) {
@@ -45,7 +45,7 @@ func TestBuildSetupSteps_CopyFilesChain(t *testing.T) {
 		StepKindCopyFile,
 		StepKindCopyFile,
 		StepKindApplyClaude,
-		StepKindSetupTmux,
+		StepKindSetupMux,
 	}, kinds(defs))
 
 	require.Equal(t, 1, *defs[2].DependsOnPos, "first copy depends on setup_worktree")
@@ -69,7 +69,7 @@ func TestBuildSetupSteps_InstallDepsAfterCopy(t *testing.T) {
 		StepKindCopyFile,
 		StepKindInstallDeps,
 		StepKindApplyClaude,
-		StepKindSetupTmux,
+		StepKindSetupMux,
 	}, kinds(defs), "copy_file always emitted before install_deps regardless of config order")
 
 	require.Equal(t, 1, *defs[2].DependsOnPos, "copy depends on setup_worktree")
@@ -87,7 +87,7 @@ func TestBuildSetupSteps_MultiWorkspaceParallelChains(t *testing.T) {
 		StepKindSetupWorktree,
 		StepKindSetupWorktree,
 		StepKindApplyClaude,
-		StepKindSetupTmux,
+		StepKindSetupMux,
 	}, kinds(defs))
 
 	require.Equal(t, 0, *defs[1].DependsOnPos, "workspace a setup depends on session dir")

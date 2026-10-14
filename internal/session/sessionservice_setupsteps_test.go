@@ -42,7 +42,7 @@ func TestSessionService_SetupSteps_PrePopulated(t *testing.T) {
 		StepKindCreateSessionDir,
 		StepKindSetupWorktree,
 		StepKindApplyClaude,
-		StepKindSetupTmux,
+		StepKindSetupMux,
 	}, kinds)
 }
 

@@ -34,7 +34,7 @@ func TestSessionSetupStepStore_CreateAndList(t *testing.T) {
 
 func TestSessionSetupStepStore_Update(t *testing.T) {
 	store := newSetupStepStore(t)
-	step := &SessionSetupStep{SessionID: 1, Position: 0, Kind: StepKindSetupTmux, Label: "Setup tmux", Status: SetupStepPending}
+	step := &SessionSetupStep{SessionID: 1, Position: 0, Kind: StepKindSetupMux, Label: "Setup terminal session", Status: SetupStepPending}
 	require.NoError(t, store.Create([]*SessionSetupStep{step}))
 
 	step.Status = SetupStepFailed
