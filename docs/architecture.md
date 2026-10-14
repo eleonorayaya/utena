@@ -75,6 +75,21 @@ Flow:
 
 See: `internal/session/sessionservice.go`, `internal/mux/service.go`
 
+### Resource Usage (`utena top`)
+
+`GET /sessions/resources` reports CPU, memory and process count per multiplexer session.
+
+Flow:
+1. `mux.Service.ResourceUsage` lists every process once (`/bin/ps`, behind `mux.ProcessLister`)
+2. `Driver.PaneShells` says which pids are pane shells and which session each belongs to. The tuios driver checks the tuios daemon's children with `resolve-pane` and caches the answer per pid
+3. Each process is charged to its nearest pane-shell ancestor. CPU is the CPU-time delta since the previous sample (within a minute), else `ps` `%cpu`
+4. `SessionService.ResourceUsage` maps each mux session to its utena session, or marks it `unmanaged`
+5. `utena top` polls the endpoint (live Bubbletea view, or `--once` for TSV)
+
+Processes that leave the pane's process tree (daemonized and reparented to launchd) are not counted, nor is the tuios daemon itself.
+
+See: `internal/mux/resources.go`, `internal/tuios/driver.go`, `cmd/tui/top.go`
+
 ### Daemon → Claude (Session Events)
 
 At session start, the `utena-claude` plugin's monitor runs `utena monitor $UTENA_SESSION_ID`, which opens a websocket to `GET /monitor/ws?session_id=<id>` and echoes each frame to stdout. The daemon pushes one JSON text frame per event; Claude receives each stdout line as a notification.

@@ -31,6 +31,10 @@ Start your terminal with `utena attach` instead of `tuios attach`. The utena dae
 
 The tuios side (the `prefix+p` popup, the `custom/utena` dock cell running `utena status-line`, and an `after-attach` hook that keeps the attached session accurate when you switch with `Ctrl+B S`) is deployed from dotfiles: `programs/tuios/contents/config.toml`.
 
+#### Resource usage
+
+`utena top` shows live CPU, memory and process counts per session (`c`/`m`/`n` sort, `q` quits). `utena top --once` prints one tab-separated snapshot. Sessions tuios runs that utena doesn't manage are listed as `unmanaged`.
+
 #### Shell initialization
 
 Add to your `.zshrc` (or `.bashrc`):
