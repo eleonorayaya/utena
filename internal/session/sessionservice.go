@@ -183,8 +183,8 @@ func (s *SessionService) populateTmuxWindows(ctx context.Context, sess *Session)
 	}
 }
 
-func (s *SessionService) ListSessions(ctx context.Context) ([]Session, error) {
-	sessions, err := s.store.List()
+func (s *SessionService) ListSessions(ctx context.Context, statuses ...SessionStatus) ([]Session, error) {
+	sessions, err := s.store.List(statuses...)
 	if err != nil {
 		return nil, err
 	}

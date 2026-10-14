@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/go-chi/chi/v5"
@@ -32,13 +33,25 @@ func parseUintParam(r *http.Request, name string) (uint, error) {
 func (c *SessionController) ListSessions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	sessions, err := c.service.ListSessions(ctx)
+	sessions, err := c.service.ListSessions(ctx, parseStatusFilter(r)...)
 	if err != nil {
 		common.RenderError(w, r, err)
 		return
 	}
 
 	common.RenderResponse(w, r, NewSessionListResponse(sessions))
+}
+
+func parseStatusFilter(r *http.Request) []SessionStatus {
+	var statuses []SessionStatus
+	for _, value := range r.URL.Query()["status"] {
+		for raw := range strings.SplitSeq(value, ",") {
+			if status := strings.TrimSpace(raw); status != "" {
+				statuses = append(statuses, SessionStatus(status))
+			}
+		}
+	}
+	return statuses
 }
 
 func (c *SessionController) GetSessionByID(w http.ResponseWriter, r *http.Request) {

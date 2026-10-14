@@ -98,9 +98,13 @@ func (s *SessionStore) GetByID(id uint) (*Session, error) {
 	return &session, nil
 }
 
-func (s *SessionStore) List() ([]Session, error) {
+func (s *SessionStore) List(statuses ...SessionStatus) ([]Session, error) {
 	var sessions []Session
-	if err := s.loaded().Order("sessions.last_used_at DESC").Find(&sessions).Error; err != nil {
+	q := s.loaded()
+	if len(statuses) > 0 {
+		q = q.Where("sessions.status IN ?", statuses)
+	}
+	if err := q.Order("sessions.last_used_at DESC").Find(&sessions).Error; err != nil {
 		return nil, err
 	}
 	ptrs := make([]*Session, len(sessions))
