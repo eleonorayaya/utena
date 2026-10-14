@@ -10,6 +10,7 @@ Every domain is packaged as a module. A module:
 
 - Implements `common.Module`: `OnAppStart(ctx)`, `OnAppEnd(ctx)`, `Routes() chi.Router`
 - Implements `common.ModelProvider` if it owns GORM models: `Models() []any`
+- Implements `common.PreMigrationProvider` if it needs renames AutoMigrate can't do: `PreMigrations() []db.PreMigration` (idempotent; run in one transaction before AutoMigrate)
 - Exposes `RegisterJobs(jobs *jobs.JobService)` if it runs background tasks
 - Bundles its own Store, Service, Controller, and Router — nothing else reaches in
 
@@ -69,7 +70,7 @@ Each store defines its own filter type. Nil/zero fields are ignored.
 type SessionFilter struct {
     WorkspaceID     *uint
     BranchID        *uint
-    TmuxSessionID   *uint
+    MuxSessionID    *uint
     ExcludeStatuses []SessionStatus
 }
 ```
@@ -111,7 +112,7 @@ This applies without exception — including job tasks and background goroutines
 Cross-domain data access goes through the owning service. Services may hold other services as constructor dependencies.
 
 Current cross-service dependencies:
-- `SessionService` → `GitService`, `WorkspaceService`, `TmuxService`
+- `SessionService` → `GitService`, `WorkspaceService`, `mux.Service`
 - `WorkspaceService` → `GitService`
 
 When a direct dependency would create a cycle, use the event bus instead (see Pattern 7).
@@ -206,11 +207,11 @@ See: `internal/jobs/jobservice.go`
 
 ## 9. CLI Subprocess Wrappers
 
-External tools (git, tmux) are wrapped behind an interface with an `exec.CommandContext`-based implementation. The interface is the dependency — never the concrete struct.
+External tools are wrapped behind an interface — git with an `exec.CommandContext`-based implementation, tuios with a control-socket client implementing `mux.Driver`. The interface is the dependency — never the concrete struct.
 
 This keeps the wrapper's internals private and allows mock injection in tests without modifying production code.
 
-See: `internal/git/gitcli.go`, `internal/tmux/tuiosclient.go`
+See: `internal/git/gitcli.go`, `internal/tuios/driver.go`
 
 ---
 

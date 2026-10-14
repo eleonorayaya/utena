@@ -20,9 +20,9 @@ Utena consists of two main components, driving [tuios](https://tuios.dev):
 git (no dependencies)
 workspace (depends on: git)
     ↓
-session (depends on: workspace, git, tmux, eventbus)
+session (depends on: workspace, git, mux, eventbus)
     ↓
-tmux (depends on: eventbus)
+mux (depends on: eventbus; driven by tuios via mux.Driver)
     ↓
 monitor (depends on: session, eventbus)
 ```
@@ -34,14 +34,16 @@ monitor (depends on: session, eventbus)
 ### Event Flow
 
 ```
-tuios event stream → TmuxService → EventBus → SessionService
-SessionService → (direct calls) → TmuxService
+tuios event stream → tuios.Driver → mux.Service → EventBus → SessionService
+SessionService → (direct calls) → mux.Service → mux.Driver
 ```
 
 - tuios events (session created/closed) and `utena attach` client hooks (attached, detached, session changed) are published on the event bus and consumed by SessionService to update session state
-- SessionService calls TmuxService directly for session lifecycle operations (spawn, kill)
+- SessionService calls `mux.Service` directly for session lifecycle operations (spawn, kill)
 
-See: `internal/eventbus/events.go`, `internal/session/sessionservice.go`, `internal/tmux/tmuxservice.go`
+`internal/mux` never imports `internal/tuios`; only `internal/api/app.go` and `cmd/tui` do. Supporting another multiplexer means writing another `mux.Driver`. Tests use `mux.FakeDriver`.
+
+See: `internal/eventbus/events.go`, `internal/session/sessionservice.go`, `internal/mux/service.go`, `internal/mux/driver.go`
 
 ---
 
@@ -49,29 +51,29 @@ See: `internal/eventbus/events.go`, `internal/session/sessionservice.go`, `inter
 
 ### tuios → Daemon (State Sync)
 
-`TmuxService.followEvents` holds a `subscribe` connection on the tuios control socket.
+`mux.Service.followEvents` holds a `Driver.Subscribe`. The tuios driver keeps a `subscribe` connection on the tuios control socket and translates tuios events into `mux.Event`s (`Resync`, `SessionCreated`, `SessionClosed`, `WindowsChanged`).
 
 Flow:
-1. On every (re)subscribe, TmuxService resyncs `TmuxSession.Status` and window lists from `list-sessions`/`list-windows`
-2. `session-created`/`session-closed` update the record and publish on the event bus; a close of a record utena already marked inactive (its own kill) is not republished
+1. On every (re)subscribe the driver emits `Resync`, and `mux.Service` reloads `mux.Session.Status` and window lists via `ListSessions`/`ListWindows`
+2. `SessionCreated`/`SessionClosed` update the record and publish on the event bus; a close of a record utena already marked inactive (its own kill) is not republished
 3. Window events refresh that session's cached window list
 4. SessionService handler updates session state
 
 The daemon never starts tuios itself: a tuios daemon started from launchd would hand every pane, popup and hook launchd's minimal environment. Start tuios from a terminal with `utena attach`; until then, tuios calls fail and the event follower keeps retrying.
 
-See: `internal/tmux/tmuxservice.go`, `internal/tmux/tuiosclient.go`
+See: `internal/mux/service.go`, `internal/tuios/driver.go`
 
 ### Daemon → tuios (Session Lifecycle)
 
-SessionService calls TmuxService directly to manage tuios sessions.
+SessionService calls `mux.Service` directly to manage multiplexer sessions.
 
 Flow:
 1. HTTP POST `/sessions` creates new session record
-2. SessionService calls TmuxService to register a pending tmux session
-3. Background setup goroutine calls TmuxService to spawn the session
+2. SessionService calls `mux.Service.RegisterPending` to record a pending mux session
+3. Background setup goroutine calls `mux.Service` to spawn the session through the driver
 4. tuios session becomes active
 
-See: `internal/session/sessionservice.go`, `internal/tmux/tmuxservice.go`
+See: `internal/session/sessionservice.go`, `internal/mux/service.go`
 
 ### Daemon → Claude (Session Events)
 
@@ -96,6 +98,6 @@ Flow:
 2. SessionController returns current state
 3. TUI renders in terminal
 4. User selects session → TUI calls `PUT /sessions/{id}/activate` → `SessionActivated` is published
-5. `utena attach` (long-polling `GET /tmux/activations/next`) sends SIGTERM to its `tuios attach` child, which detaches, then attaches the new session
+5. `utena attach` (long-polling `GET /mux/activations/next`) sends SIGTERM to its `tuios attach` child, which detaches, then attaches the new session
 
 See: `internal/tui/provider/client.go`, `cmd/tui/attach.go`

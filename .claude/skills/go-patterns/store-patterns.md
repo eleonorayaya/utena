@@ -66,7 +66,7 @@ func (s *SessionStore) Add(session *Session) error {
 
 	if err := s.db.Omit("Workspace").Create(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueConstraintError(err) {
-			return fmt.Errorf("session '%s' already exists: %w", session.TmuxSessionName, ErrSessionAlreadyExists)
+			return fmt.Errorf("session '%s' already exists: %w", session.Name, ErrSessionAlreadyExists)
 		}
 		return err
 	}

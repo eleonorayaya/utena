@@ -22,13 +22,13 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 
 ### Component Communication
 
-1. **tuios → Daemon**: `TmuxService` holds a long-lived `subscribe` connection on the tuios socket. `session-created`/`session-closed` and window events update `TmuxSession` state and are republished on the eventbus. Every (re)subscribe resyncs from `list-sessions`/`list-windows`.
+1. **tuios → Daemon**: `mux.Service` holds a long-lived `Driver.Subscribe`; the tuios driver translates the tuios event stream into `mux.Event`s. Session created/closed and window events update `mux.Session` state and are republished on the eventbus (`mux.*` events). Every (re)subscribe emits `Resync`, which reloads from `ListSessions`/`ListWindows`.
 
-2. **TUI → Daemon**: The TUI makes HTTP requests to `http://localhost:3333/sessions`. Activating a session publishes `SessionActivated`; `utena attach` long-polls `GET /tmux/activations/next` and restarts its `tuios attach` child on the new session, reporting attach/detach via `PUT /tmux/hooks/{event}`
+2. **TUI → Daemon**: The TUI makes HTTP requests to `http://localhost:3333/sessions`. Activating a session publishes `SessionActivated`; `utena attach` long-polls `GET /mux/activations/next` and restarts its `tuios attach` child on the new session, reporting attach/detach via `PUT /mux/hooks/{event}`
 
 3. **Daemon API**: Uses chi router, serves on port 3333, mounts controllers:
    - `/sessions` - session management endpoints
-   - `/tmux` - client attach hooks, activation long-poll, session env lookup
+   - `/mux` - client attach hooks, activation long-poll, session env lookup
    - `/claude` - Claude session endpoints
    - `/workspaces` - workspace management endpoints
 
@@ -40,22 +40,23 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 - `internal/db/` - SQLite database via GORM (Database interface, migrations)
 - `internal/session/` - session controller logic
 - `internal/workspace/` - workspace discovery and management
-- `internal/tmux/` - tuios service, socket client (`tuiosclient.go`) and controller (package name kept from the tmux era)
+- `internal/mux/` - multiplexer-agnostic session domain: `mux.Session` model, store, service, `/mux` controller, `Driver` interface
+- `internal/tuios/` - `mux.Driver` over the tuios control socket, agent-pane tagging, tuios workspace CLI helpers
 - `internal/claude/` - Claude session management
 - `internal/tui/` - Bubbletea TUI application
 - `internal/common/` - shared utilities
 
 ### Persistence
 
-All domain data (workspaces, sessions, claude sessions) is stored in SQLite via GORM (`internal/db/`). The database file is created at `<configDir>/utena.db` with WAL mode. Each store takes a `db.Database` interface; tests use `db.OpenInMemory()` for in-memory SQLite. Workspace `config.json` (roots and discovered paths) remains file-based via `afero.Fs`.
+All domain data (workspaces, sessions, mux sessions, claude sessions) is stored in SQLite via GORM (`internal/db/`). The database file is created at `<configDir>/utena.db` with WAL mode. Each store takes a `db.Database` interface; tests use `db.OpenInMemory()` for in-memory SQLite. Workspace `config.json` (roots and discovered paths) remains file-based via `afero.Fs`.
 
 ### Key Patterns
 
-**Database Module** (internal/db/): `DatabaseModule` wraps the DB with lifecycle hooks. Starts before all other modules (runs migrations), shuts down last. Modules implement `common.ModelProvider` to register their GORM models.
+**Database Module** (internal/db/): `DatabaseModule` wraps the DB with lifecycle hooks. Starts before all other modules (runs migrations), shuts down last. Modules implement `common.ModelProvider` to register their GORM models, and optionally `common.PreMigrationProvider` (`PreMigrations()`) for table/column renames AutoMigrate can't do. Pre-migrations run in one transaction before AutoMigrate and must be idempotent.
 
 **Workspace Manager** (internal/workspace/workspace.go): Uses functional options pattern (`WithRootDir()`) to configure root directories for workspace discovery. Scans directories to find workspace folders.
 
-**Tmux Service** (internal/tmux/tmuxservice.go): Creates/kills tuios sessions for utena sessions and follows the tuios event stream to track their state. Uses the `tmuxRunner` interface (`tuiosRunner` in production, `MockRunner` in tests).
+**Multiplexer** (internal/mux/, internal/tuios/): `mux` owns the domain — `mux.Service` creates/kills multiplexer sessions for utena sessions, tracks their status and windows, and serves attach hooks and activations. It talks to the multiplexer only through the `mux.Driver` interface. `internal/tuios` is the production Driver (only `internal/api/app.go` and `cmd/tui` import it); tests use `mux.FakeDriver`. Supporting another multiplexer means writing another Driver.
 
 ## Dependencies
 

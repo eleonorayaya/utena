@@ -31,9 +31,9 @@ type SessionModule struct {
 	Router     *SessionRouter
 }
 
-func NewSessionModule(tmuxService *utmux.TmuxService, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string) *SessionModule {
+func NewSessionModule(muxService *mux.Service, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string) *SessionModule {
 	store := NewSessionStore(database)
-	service := NewSessionService(store, workspaceModule.Service, workspaceModule.GitService, tmuxService, bus, branchPrefix)
+	service := NewSessionService(store, workspaceModule.Service, workspaceModule.GitService, muxService, bus, branchPrefix)
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
@@ -103,7 +103,7 @@ The app collects models from all modules and registers them with the database be
 
 The app (`internal/api/app.go`) creates a `DatabaseModule` first, collects models from all domain modules, then starts everything in dependency order. The database starts before all other modules and shuts down last.
 
-Module startup order: database → workspace → session → tmux → others.
+Module startup order: database → git → mux → workspace → claude → session → others.
 Module shutdown order: reverse.
 
 ## Dependency Flow

@@ -43,8 +43,8 @@ Each test sets up its own database and data. Never rely on shared fixtures.
 func TestListSessions(t *testing.T) {
 	store, ws1ID, _ := setupSessionStore(t)
 
-	store.Add(&Session{TmuxSessionName: "s1", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: time.Now()})
-	store.Add(&Session{TmuxSessionName: "s2", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: time.Now()})
+	store.Add(&Session{Name: "s1", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: time.Now()})
+	store.Add(&Session{Name: "s2", WorkspaceID: ws1ID, Status: StatusReady, LastUsedAt: time.Now()})
 
 	sessions := store.List()
 	require.Len(t, sessions, 2)
@@ -104,7 +104,7 @@ Use `httptest` with the actual chi router to test the full request path:
 func TestSessionRouter_GetSessionByID(t *testing.T) {
 	router, sessionStore, _ := setupSessionRouter(t)
 
-	session := &Session{TmuxSessionName: "test", WorkspaceID: wsID, Status: StatusReady, LastUsedAt: time.Now()}
+	session := &Session{Name: "test", WorkspaceID: wsID, Status: StatusReady, LastUsedAt: time.Now()}
 	sessionStore.Add(session)
 
 	req := httptest.NewRequest("GET", fmt.Sprintf("/%d", session.ID), nil)
@@ -118,15 +118,15 @@ func TestSessionRouter_GetSessionByID(t *testing.T) {
 
 Note: with uint IDs, URL paths use numeric IDs (e.g., `/1`, `/2`), not string slugs.
 
-## Integration Tests with newApp
+## Integration Tests with buildApp
 
-For full-stack tests, use `newApp` with a mock `TmuxClient` and in-memory SQLite:
+For full-stack tests, use `buildApp` with a `mux.FakeDriver` and in-memory SQLite:
 
 ```go
-func setupTestApp(t *testing.T) (*App, *mockTmuxClient) {
+func setupTestApp(t *testing.T) (*App, *mux.FakeDriver) {
 	t.Helper()
-	mock := &mockTmuxClient{}
-	app := newApp(mock)
+	mock := mux.NewFakeDriver()
+	app := buildApp(gormDB, fs, cfg, mux.NewModuleWithDriver(mock, muxStore, bus), gitModule, bus)
 	app.OnAppStart(context.Background())
 	t.Cleanup(func() { app.OnAppEnd(context.Background()) })
 	return app, mock
@@ -147,10 +147,10 @@ func TestSessionStore_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			store.Add(&Session{
-				TmuxSessionName: fmt.Sprintf("session-%d", id),
-				WorkspaceID:     ws1ID,
-				Status:          StatusReady,
-				LastUsedAt:      time.Now(),
+				Name:        fmt.Sprintf("session-%d", id),
+				WorkspaceID: ws1ID,
+				Status:      StatusReady,
+				LastUsedAt:  time.Now(),
 			})
 		}(i)
 	}
