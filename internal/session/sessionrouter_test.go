@@ -11,13 +11,13 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
-	utmux "github.com/eleonorayaya/utena/internal/tmux"
+	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace.WorkspaceStore, *utmux.MockRunner, uint, uint) {
+func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace.WorkspaceStore, *mux.MockRunner, uint, uint) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -30,7 +30,7 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 	require.NoError(t, workspaceStore.Add(ws1))
 	require.NoError(t, workspaceStore.Add(ws2))
 
-	mock := utmux.NewMockRunner()
+	mock := mux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)

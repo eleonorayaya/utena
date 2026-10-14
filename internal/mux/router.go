@@ -1,20 +1,20 @@
-package tmux
+package mux
 
 import (
 	"github.com/go-chi/chi/v5"
 )
 
-type TmuxRouter struct {
-	controller *TmuxController
+type Router struct {
+	controller *Controller
 }
 
-func NewTmuxRouter(controller *TmuxController) *TmuxRouter {
-	return &TmuxRouter{
+func NewRouter(controller *Controller) *Router {
+	return &Router{
 		controller: controller,
 	}
 }
 
-func (tr *TmuxRouter) Routes() chi.Router {
+func (tr *Router) Routes() chi.Router {
 	r := chi.NewRouter()
 
 	r.Put("/hooks/{event}", tr.controller.HandleHook)

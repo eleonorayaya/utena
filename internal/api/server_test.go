@@ -16,8 +16,8 @@ import (
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
+	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/session"
-	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/afero"
@@ -60,7 +60,7 @@ func initApiTestRepo(t *testing.T) string {
 	return dir
 }
 
-func setupTestRouter(t *testing.T) (*App, chi.Router, *tmux.MockRunner, uint, uint) {
+func setupTestRouter(t *testing.T) (*App, chi.Router, *mux.MockRunner, uint, uint) {
 	t.Helper()
 
 	gormDB, err := db.OpenInMemorySQLite()
@@ -69,9 +69,9 @@ func setupTestRouter(t *testing.T) (*App, chi.Router, *tmux.MockRunner, uint, ui
 	cfg := Config{ConfigDir: "/config", SessionsRoot: t.TempDir()}
 	bus := eventbus.NewEventBus()
 	database := db.NewDB(gormDB)
-	mock := tmux.NewMockRunner()
-	tmuxStore := tmux.NewTmuxStore(database)
-	tmuxModule := tmux.NewTmuxModuleWithRunner(mock, tmuxStore, bus)
+	mock := mux.NewMockRunner()
+	tmuxStore := mux.NewStore(database)
+	tmuxModule := mux.NewModuleWithRunner(mock, tmuxStore, bus)
 	gitModule := git.NewGitModule(database, bus)
 	app := buildApp(gormDB, afero.NewMemMapFs(), cfg, tmuxModule, gitModule, bus)
 
@@ -253,7 +253,7 @@ func TestDaemon_TuiosSessionCreated(t *testing.T) {
 
 	waitForSessionStatus(t, router, createResp.ID, session.StatusActive, 5*time.Second)
 
-	require.NoError(t, app.Tmux.Service.HandleSessionCreated(context.Background(), "test-session"))
+	require.NoError(t, app.Mux.Service.HandleSessionCreated(context.Background(), "test-session"))
 
 	req := httptest.NewRequest("GET", "/sessions", nil)
 	w := httptest.NewRecorder()
@@ -286,7 +286,7 @@ func TestDaemon_TuiosSessionClosed(t *testing.T) {
 
 	waitForSessionStatus(t, router, createResp.ID, session.StatusActive, 5*time.Second)
 
-	require.NoError(t, app.Tmux.Service.HandleSessionClosed(context.Background(), "test-session"))
+	require.NoError(t, app.Mux.Service.HandleSessionClosed(context.Background(), "test-session"))
 
 	req := httptest.NewRequest("GET", "/sessions", nil)
 	w := httptest.NewRecorder()

@@ -13,13 +13,13 @@ import (
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/git"
-	utmux "github.com/eleonorayaya/utena/internal/tmux"
+	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
 func setupTestDB(t *testing.T) db.Database {
-	return testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &SessionWorktree{}, &SessionBranch{}, &claude.ClaudeSession{}, &SessionAction{}, &SessionSetupStep{}, &SessionBlocker{})
+	return testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &mux.Session{}, &Session{}, &SessionWorktree{}, &SessionBranch{}, &claude.ClaudeSession{}, &SessionAction{}, &SessionSetupStep{}, &SessionBlocker{})
 }
 
 func setupSessionStore(t *testing.T) (*SessionStore, uint, uint) {
@@ -385,9 +385,9 @@ func TestSessionStore_OnAppEnd(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *utmux.TmuxSession) {
+func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *mux.Session) {
 	t.Helper()
-	database := testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &utmux.TmuxSession{}, &Session{}, &SessionWorktree{}, &SessionBranch{}, &claude.ClaudeSession{}, &SessionAction{}, &SessionSetupStep{}, &SessionBlocker{})
+	database := testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &mux.Session{}, &Session{}, &SessionWorktree{}, &SessionBranch{}, &claude.ClaudeSession{}, &SessionAction{}, &SessionSetupStep{}, &SessionBlocker{})
 
 	repo := &git.Repo{Path: "/tmp/utena", FullName: "eleonorayaya/utena"}
 	database.Create(repo)
@@ -399,7 +399,7 @@ func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *u
 	branch := &git.Branch{Name: "feature-x", RepoID: repo.ID, ExistsLocal: true}
 	database.Create(branch)
 
-	ts := &utmux.TmuxSession{Name: "utena-feature-x", StartDir: "/tmp/utena", Status: utmux.TmuxStatusActive}
+	ts := &mux.Session{Name: "utena-feature-x", StartDir: "/tmp/utena", Status: mux.StatusActive}
 	database.Create(ts)
 
 	return database, ws.ID, branch, ts
@@ -427,7 +427,7 @@ func TestSessionStore_GetByID_LoadsWorktreeBranchAndTmuxSession(t *testing.T) {
 	require.Equal(t, "feature-x", retrieved.Worktrees[0].Worktree.Branch.Name)
 	require.NotNil(t, retrieved.TmuxSession)
 	require.Equal(t, "utena-feature-x", retrieved.TmuxSession.Name)
-	require.Equal(t, utmux.TmuxStatusActive, retrieved.TmuxSession.Status)
+	require.Equal(t, mux.StatusActive, retrieved.TmuxSession.Status)
 }
 
 func TestSessionStore_GetByBranchID(t *testing.T) {

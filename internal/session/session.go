@@ -9,7 +9,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
-	utmux "github.com/eleonorayaya/utena/internal/tmux"
+	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"gorm.io/gorm"
 )
@@ -50,7 +50,7 @@ type Session struct {
 	PullRequests   []git.PullRequest      `json:"pull_requests,omitempty" gorm:"-"`
 	TmuxSessionID  *uint                  `json:"tmux_session_id,omitempty" gorm:"uniqueIndex"`
 	StatusError    string                 `json:"status_error,omitempty"`
-	TmuxSession    *utmux.TmuxSession     `json:"tmux_session,omitempty" gorm:"foreignKey:TmuxSessionID"`
+	TmuxSession    *mux.Session           `json:"tmux_session,omitempty" gorm:"foreignKey:TmuxSessionID"`
 }
 
 var unwatchedStatuses = []SessionStatus{StatusDeleted, StatusArchived, StatusCompleted, StatusPending, StatusCreating}

@@ -1,4 +1,4 @@
-package tmux
+package mux
 
 import "net/http"
 

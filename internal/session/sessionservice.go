@@ -15,7 +15,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
-	utmux "github.com/eleonorayaya/utena/internal/tmux"
+	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	slogctx "github.com/veqryn/slog-context"
 )
@@ -75,7 +75,7 @@ type SessionService struct {
 	blockerStore         *SessionBlockerStore
 	workspaceService     *workspace.WorkspaceService
 	gitService           *git.GitService
-	tmuxService          *utmux.TmuxService
+	tmuxService          *mux.Service
 	eventBus             eventbus.EventBus
 	branchPrefix         string
 	configDir            string
@@ -83,7 +83,7 @@ type SessionService struct {
 	setupTimeout         time.Duration
 }
 
-func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, setupStepStore *SessionSetupStepStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *utmux.TmuxService, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
+func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, setupStepStore *SessionSetupStepStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *mux.Service, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
 	return &SessionService{
 		store:                store,
 		sessionWorktreeStore: sessionWorktreeStore,
@@ -927,17 +927,17 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName 
 		if err != nil {
 			return fmt.Errorf("failed to load tmux record: %v", err)
 		}
-		isFirstSpawn := record.Status == utmux.TmuxStatusPending
+		isFirstSpawn := record.Status == mux.StatusPending
 
 		if s.tmuxService.HasSession(tmuxName) {
 			slog.InfoContext(ctx, "setup tmux: reusing existing tmux process", "tmux", tmuxName)
-			if _, err := tracedOp(ctx, "tmux spawn-for-record", func() (*utmux.TmuxSession, error) {
+			if _, err := tracedOp(ctx, "tmux spawn-for-record", func() (*mux.Session, error) {
 				return s.tmuxService.SpawnForRecord(record.ID)
 			}, "tmux", tmuxName, "tmux_id", record.ID); err != nil {
 				return fmt.Errorf("failed to mark tmux active: %v", err)
 			}
 		} else {
-			if _, err := tracedOp(ctx, "tmux spawn-for-record", func() (*utmux.TmuxSession, error) {
+			if _, err := tracedOp(ctx, "tmux spawn-for-record", func() (*mux.Session, error) {
 				return s.tmuxService.SpawnForRecord(record.ID)
 			}, "tmux", tmuxName, "tmux_id", record.ID); err != nil {
 				return fmt.Errorf("failed to spawn tmux session: %v", err)
@@ -964,7 +964,7 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName 
 	}
 	env := map[string]string{EnvSessionID: fmt.Sprintf("%d", sess.ID)}
 
-	ts, err := tracedOp(ctx, "tmux new-session", func() (*utmux.TmuxSession, error) {
+	ts, err := tracedOp(ctx, "tmux new-session", func() (*mux.Session, error) {
 		return s.tmuxService.CreateSession(tmuxName, startDir, env)
 	}, "tmux", tmuxName, "start_dir", startDir)
 	if err != nil {
@@ -1523,7 +1523,7 @@ func (s *SessionService) reconcileLoadedSession(ctx context.Context, sess *Sessi
 	if sess.TmuxSessionID != nil {
 		ts, tsErr := s.tmuxService.GetSession(*sess.TmuxSessionID)
 		if tsErr == nil {
-			tmuxAlive = ts.Status == utmux.TmuxStatusActive
+			tmuxAlive = ts.Status == mux.StatusActive
 		}
 	}
 

@@ -12,20 +12,20 @@ import (
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
-	utmux "github.com/eleonorayaya/utena/internal/tmux"
+	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-func createTmuxService(t *testing.T, database db.Database, mock *utmux.MockRunner, bus eventbus.EventBus) *utmux.TmuxService {
+func createTmuxService(t *testing.T, database db.Database, mock *mux.MockRunner, bus eventbus.EventBus) *mux.Service {
 	t.Helper()
-	tmuxStore := utmux.NewTmuxStore(database)
-	module := utmux.NewTmuxModuleWithRunner(mock, tmuxStore, bus)
+	tmuxStore := mux.NewStore(database)
+	module := mux.NewModuleWithRunner(mock, tmuxStore, bus)
 	return module.Service
 }
 
-func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *utmux.MockRunner, uint, uint) {
+func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *mux.MockRunner, uint, uint) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -38,7 +38,7 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	require.NoError(t, workspaceStore.Add(ws1))
 	require.NoError(t, workspaceStore.Add(ws2))
 
-	mock := utmux.NewMockRunner()
+	mock := mux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
@@ -582,13 +582,13 @@ func initTestRepo(t *testing.T) string {
 	return dir
 }
 
-func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *utmux.MockRunner, uint) {
+func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *mux.MockRunner, uint) {
 	t.Helper()
 	service, sessionStore, mock, wsID, _, _ := setupWorktreeSessionServiceFull(t, repoPath, configDir)
 	return service, sessionStore, mock, wsID
 }
 
-func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *utmux.MockRunner, uint, db.Database, *git.GitService) {
+func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *mux.MockRunner, uint, db.Database, *git.GitService) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -602,7 +602,7 @@ func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir st
 	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true, RepoID: &repoID}
 	require.NoError(t, workspaceStore.Add(wsGit))
 
-	mock := utmux.NewMockRunner()
+	mock := mux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
@@ -640,7 +640,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	require.NotNil(t, finalSess.TmuxSessionID)
 	require.NotNil(t, finalSess.TmuxSession)
 	require.Equal(t, "my-feature", finalSess.TmuxSession.Name)
-	require.Equal(t, utmux.TmuxStatusActive, finalSess.TmuxSession.Status)
+	require.Equal(t, mux.StatusActive, finalSess.TmuxSession.Status)
 }
 
 func TestSessionService_CreateSession_EagerlyRegistersPendingTmuxRecord(t *testing.T) {
@@ -878,14 +878,14 @@ func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena", IsGitRepo: true}
 	require.NoError(t, workspaceStore.Add(ws))
-	mock := utmux.NewMockRunner()
+	mock := mux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	swtStore := NewSessionWorktreeStore(database)
 	service := NewSessionService(sessionStore, swtStore, NewDismissedPRStore(database), NewSessionActionStore(database), NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
 
-	ts := &utmux.TmuxSession{Name: "utena-session-1", StartDir: "/tmp/utena", Status: utmux.TmuxStatusActive}
+	ts := &mux.Session{Name: "utena-session-1", StartDir: "/tmp/utena", Status: mux.StatusActive}
 	require.NoError(t, database.Create(ts).Error)
 	session := &Session{
 		Name:          "session-1",
@@ -1147,7 +1147,7 @@ func TestSessionService_RepairSession_ClearsWarning(t *testing.T) {
 	require.Empty(t, retrieved.StatusError)
 }
 
-func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionService, *SessionStore, *utmux.MockRunner, uint, string) {
+func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionService, *SessionStore, *mux.MockRunner, uint, string) {
 	t.Helper()
 
 	repoPath := initTestRepo(t)
@@ -1166,7 +1166,7 @@ func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionSe
 	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true, IsBare: true, RepoID: &repoID}
 	require.NoError(t, workspaceStore.Add(wsGit))
 
-	mock := utmux.NewMockRunner()
+	mock := mux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)

@@ -1,4 +1,4 @@
-package tmux
+package mux
 
 import (
 	"context"
@@ -11,17 +11,17 @@ import (
 	"github.com/go-chi/render"
 )
 
-type TmuxController struct {
-	service *TmuxService
+type Controller struct {
+	service *Service
 }
 
-func NewTmuxController(service *TmuxService) *TmuxController {
-	return &TmuxController{
+func NewController(service *Service) *Controller {
+	return &Controller{
 		service: service,
 	}
 }
 
-func (c *TmuxController) HandleHook(w http.ResponseWriter, r *http.Request) {
+func (c *Controller) HandleHook(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	event := chi.URLParam(r, "event")
 
@@ -52,7 +52,7 @@ func (c *TmuxController) HandleHook(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, map[string]string{"status": "ok"})
 }
 
-func (c *TmuxController) HandleGetWindows(w http.ResponseWriter, r *http.Request) {
+func (c *Controller) HandleGetWindows(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sessionName := chi.URLParam(r, "sessionName")
 
@@ -60,7 +60,7 @@ func (c *TmuxController) HandleGetWindows(w http.ResponseWriter, r *http.Request
 	render.JSON(w, r, windows)
 }
 
-func (c *TmuxController) HandleGetSessionEnv(w http.ResponseWriter, r *http.Request) {
+func (c *Controller) HandleGetSessionEnv(w http.ResponseWriter, r *http.Request) {
 	value, ok := c.service.SessionEnv(chi.URLParam(r, "sessionName"), chi.URLParam(r, "key"))
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
@@ -69,7 +69,7 @@ func (c *TmuxController) HandleGetSessionEnv(w http.ResponseWriter, r *http.Requ
 	render.PlainText(w, r, value)
 }
 
-func (c *TmuxController) HandleNextActivation(w http.ResponseWriter, r *http.Request) {
+func (c *Controller) HandleNextActivation(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 50*time.Second)
 	defer cancel()
 

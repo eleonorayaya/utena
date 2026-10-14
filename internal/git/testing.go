@@ -7,7 +7,7 @@ import (
 )
 
 // MockGitHubClient is a GitHubClient for tests. It lives outside _test.go so
-// other packages' tests can use it too, the same way tmux.NewMockRunner does.
+// other packages' tests can use it too, the same way mux.NewMockRunner does.
 type MockGitHubClient struct {
 	RepoPRs        []*github.PullRequest
 	PRByNumber     map[int]*github.PullRequest

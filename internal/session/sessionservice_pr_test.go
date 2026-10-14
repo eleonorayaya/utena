@@ -15,7 +15,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
-	utmux "github.com/eleonorayaya/utena/internal/tmux"
+	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -60,7 +60,7 @@ func setupPRTestEnv(t *testing.T, gitOpts ...git.GitServiceOption) *prTestEnv {
 		&git.Branch{},
 		&git.Worktree{},
 		&git.PullRequest{},
-		&utmux.TmuxSession{},
+		&mux.Session{},
 		&Session{},
 		&SessionWorktree{},
 		&SessionBranch{},
@@ -99,7 +99,7 @@ func setupPRTestEnv(t *testing.T, gitOpts ...git.GitServiceOption) *prTestEnv {
 	branch := &git.Branch{Name: branchName, RepoID: repo.ID, ExistsLocal: false, ExistsRemote: true}
 	require.NoError(t, database.Create(branch).Error)
 
-	mock := utmux.NewMockRunner()
+	mock := mux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
@@ -512,7 +512,7 @@ func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
 	branch := &git.Branch{Name: branchName, RepoID: repo.ID, ExistsRemote: true}
 	require.NoError(t, database.Create(branch).Error)
 
-	mock := utmux.NewMockRunner()
+	mock := mux.NewMockRunner()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)

@@ -1,4 +1,4 @@
-package tmux
+package mux
 
 import (
 	"context"
@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTmuxService_LockNameSerializesSameName(t *testing.T) {
-	svc := &TmuxService{}
+func TestService_LockNameSerializesSameName(t *testing.T) {
+	svc := &Service{}
 
 	unlock1 := svc.lockName("foo")
 
@@ -39,8 +39,8 @@ func TestTmuxService_LockNameSerializesSameName(t *testing.T) {
 	}
 }
 
-func TestTmuxService_LockNameDoesNotBlockDifferentNames(t *testing.T) {
-	svc := &TmuxService{}
+func TestService_LockNameDoesNotBlockDifferentNames(t *testing.T) {
+	svc := &Service{}
 
 	unlockFoo := svc.lockName("foo")
 	defer unlockFoo()
@@ -59,13 +59,13 @@ func TestTmuxService_LockNameDoesNotBlockDifferentNames(t *testing.T) {
 	}
 }
 
-func TestTmuxService_ConcurrentKillCreateNoOverlap(t *testing.T) {
-	database := testdb.New(t, &TmuxSession{})
+func TestService_ConcurrentKillCreateNoOverlap(t *testing.T) {
+	database := testdb.New(t, &Session{})
 
 	bus := eventbus.NewEventBus()
 	mock := NewMockRunner()
-	store := NewTmuxStore(database)
-	svc := NewTmuxService(mock, store, bus)
+	store := NewStore(database)
+	svc := NewService(mock, store, bus)
 
 	var inFlight int32
 	var maxInFlight int32
@@ -111,25 +111,25 @@ func TestTmuxService_ConcurrentKillCreateNoOverlap(t *testing.T) {
 		"per-name lock should keep at most one tmux op in flight for the same name")
 }
 
-func newTestService(t *testing.T) *TmuxService {
+func newTestService(t *testing.T) *Service {
 	t.Helper()
-	database := testdb.New(t, &TmuxSession{})
-	store := NewTmuxStore(database)
-	return NewTmuxService(NewMockRunner(), store, eventbus.NewEventBus())
+	database := testdb.New(t, &Session{})
+	store := NewStore(database)
+	return NewService(NewMockRunner(), store, eventbus.NewEventBus())
 }
 
-func TestTmuxService_RegisterPending_CreatesPendingRecord(t *testing.T) {
+func TestService_RegisterPending_CreatesPendingRecord(t *testing.T) {
 	svc := newTestService(t)
 
 	ts, err := svc.RegisterPending("name", "/start", map[string]string{"FOO": "bar"})
 	require.NoError(t, err)
 	assert.Equal(t, "name", ts.Name)
 	assert.Equal(t, "/start", ts.StartDir)
-	assert.Equal(t, TmuxStatusPending, ts.Status)
+	assert.Equal(t, StatusPending, ts.Status)
 	assert.Equal(t, "bar", ts.Env["FOO"])
 }
 
-func TestTmuxService_RegisterPending_IdempotentOnPending(t *testing.T) {
+func TestService_RegisterPending_IdempotentOnPending(t *testing.T) {
 	svc := newTestService(t)
 
 	first, err := svc.RegisterPending("name", "/start", nil)
@@ -141,22 +141,22 @@ func TestTmuxService_RegisterPending_IdempotentOnPending(t *testing.T) {
 	assert.Equal(t, "/start", second.StartDir, "RegisterPending must not mutate StartDir on retry")
 }
 
-func TestTmuxService_RegisterPending_IdempotentOnInactive(t *testing.T) {
+func TestService_RegisterPending_IdempotentOnInactive(t *testing.T) {
 	svc := newTestService(t)
 
 	first, err := svc.RegisterPending("name", "/start", nil)
 	require.NoError(t, err)
 
-	first.Status = TmuxStatusInactive
+	first.Status = StatusInactive
 	require.NoError(t, svc.store.Update(first))
 
 	second, err := svc.RegisterPending("name", "/start", nil)
 	require.NoError(t, err)
 	assert.Equal(t, first.ID, second.ID)
-	assert.Equal(t, TmuxStatusInactive, second.Status, "RegisterPending must not flip an inactive record back to pending")
+	assert.Equal(t, StatusInactive, second.Status, "RegisterPending must not flip an inactive record back to pending")
 }
 
-func TestTmuxService_RegisterPending_AdoptsActiveRecord(t *testing.T) {
+func TestService_RegisterPending_AdoptsActiveRecord(t *testing.T) {
 	// When a tmux record exists in Active status (e.g. previous owner deleted
 	// itself without killing the tmux process, or the daemon was off and missed
 	// the close hook), RegisterPending returns the existing record so the new
@@ -167,16 +167,16 @@ func TestTmuxService_RegisterPending_AdoptsActiveRecord(t *testing.T) {
 	first, err := svc.RegisterPending("name", "/start", nil)
 	require.NoError(t, err)
 
-	first.Status = TmuxStatusActive
+	first.Status = StatusActive
 	require.NoError(t, svc.store.Update(first))
 
 	second, err := svc.RegisterPending("name", "/start", nil)
 	require.NoError(t, err)
 	assert.Equal(t, first.ID, second.ID, "adoption returns the same record")
-	assert.Equal(t, TmuxStatusActive, second.Status, "status preserved on adoption")
+	assert.Equal(t, StatusActive, second.Status, "status preserved on adoption")
 }
 
-func TestTmuxService_SpawnForRecord_TransitionsPendingToActive(t *testing.T) {
+func TestService_SpawnForRecord_TransitionsPendingToActive(t *testing.T) {
 	svc := newTestService(t)
 
 	ts, err := svc.RegisterPending("name", "/start", nil)
@@ -184,13 +184,13 @@ func TestTmuxService_SpawnForRecord_TransitionsPendingToActive(t *testing.T) {
 
 	spawned, err := svc.SpawnForRecord(ts.ID)
 	require.NoError(t, err)
-	assert.Equal(t, TmuxStatusActive, spawned.Status)
+	assert.Equal(t, StatusActive, spawned.Status)
 
 	mock := svc.runner.(*MockRunner)
 	assert.True(t, mock.HasSessionByName("name"))
 }
 
-func TestTmuxService_SpawnForRecord_DoubleSpawnIsSafe(t *testing.T) {
+func TestService_SpawnForRecord_DoubleSpawnIsSafe(t *testing.T) {
 	svc := newTestService(t)
 
 	ts, err := svc.RegisterPending("name", "/start", nil)
@@ -203,10 +203,10 @@ func TestTmuxService_SpawnForRecord_DoubleSpawnIsSafe(t *testing.T) {
 	require.NoError(t, err, "spawn should be idempotent if tmux process already exists by name")
 }
 
-func TestTmuxService_SessionClosedAfterUtenaKillIsNotPublished(t *testing.T) {
-	database := testdb.New(t, &TmuxSession{})
+func TestService_SessionClosedAfterUtenaKillIsNotPublished(t *testing.T) {
+	database := testdb.New(t, &Session{})
 	bus := eventbus.NewEventBus()
-	svc := NewTmuxService(NewMockRunner(), NewTmuxStore(database), bus)
+	svc := NewService(NewMockRunner(), NewStore(database), bus)
 
 	var published int32
 	bus.Subscribe(eventbus.TmuxSessionClosed, func(ctx context.Context, e eventbus.Event) error {
@@ -226,7 +226,7 @@ func TestTmuxService_SessionClosedAfterUtenaKillIsNotPublished(t *testing.T) {
 	assert.Equal(t, int32(1), atomic.LoadInt32(&published), "external close of an active session is published")
 }
 
-func TestTmuxService_WaitForActivationReceivesActivatedSession(t *testing.T) {
+func TestService_WaitForActivationReceivesActivatedSession(t *testing.T) {
 	svc := newTestService(t)
 	bus := svc.eventBus
 
@@ -248,7 +248,7 @@ func TestTmuxService_WaitForActivationReceivesActivatedSession(t *testing.T) {
 	assert.Equal(t, "work", <-got)
 }
 
-func TestTmuxService_WaitForActivationTimesOut(t *testing.T) {
+func TestService_WaitForActivationTimesOut(t *testing.T) {
 	svc := newTestService(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -258,9 +258,9 @@ func TestTmuxService_WaitForActivationTimesOut(t *testing.T) {
 	assert.Empty(t, svc.activationWaiters)
 }
 
-func TestTmuxService_AgentStateTagsPaneWithSessionName(t *testing.T) {
+func TestService_AgentStateTagsPaneWithSessionName(t *testing.T) {
 	runner := NewMockRunner()
-	svc := &TmuxService{runner: runner}
+	svc := &Service{runner: runner}
 
 	svc.handleTuiosEvent(context.Background(), tuiosEvent{Type: "agent-state", Session: "work", Window: "w1", State: "working"})
 	svc.handleTuiosEvent(context.Background(), tuiosEvent{Type: "agent-state", Session: "work", Window: "w2", State: "none"})
@@ -268,13 +268,13 @@ func TestTmuxService_AgentStateTagsPaneWithSessionName(t *testing.T) {
 	assert.Equal(t, []AgentMetaWrite{{SessionName: "work", WindowID: "w1", Meta: map[string]string{"session": "work"}}}, runner.MetaWrites())
 }
 
-func TestTmuxService_TagAgentPanesSkipsAlreadyTagged(t *testing.T) {
+func TestService_TagAgentPanesSkipsAlreadyTagged(t *testing.T) {
 	runner := NewMockRunner()
 	runner.Agents = []agentPane{
 		{Session: "work", WindowID: "w1", State: "idle", Meta: map[string]string{"session": "work"}},
 		{Session: "other", WindowID: "w2", State: "done"},
 	}
-	svc := &TmuxService{runner: runner}
+	svc := &Service{runner: runner}
 
 	svc.tagAgentPanes()
 

@@ -1,4 +1,4 @@
-package tmux
+package mux
 
 import (
 	"testing"
@@ -9,27 +9,27 @@ import (
 )
 
 func TestBackfillStatus_SetsInactiveOnFreshTableForEmptyStatus(t *testing.T) {
-	database := testdb.New(t, &TmuxSession{})
-	store := NewTmuxStore(database)
+	database := testdb.New(t, &Session{})
+	store := NewStore(database)
 
-	require.NoError(t, store.Add(&TmuxSession{Name: "fresh"}))
+	require.NoError(t, store.Add(&Session{Name: "fresh"}))
 
 	require.NoError(t, store.BackfillStatus())
 
 	got, err := store.GetByName("fresh")
 	require.NoError(t, err)
-	assert.Equal(t, TmuxStatusInactive, got.Status)
+	assert.Equal(t, StatusInactive, got.Status)
 }
 
 func TestBackfillStatus_PreservesExplicitStatus(t *testing.T) {
-	database := testdb.New(t, &TmuxSession{})
-	store := NewTmuxStore(database)
+	database := testdb.New(t, &Session{})
+	store := NewStore(database)
 
-	require.NoError(t, store.Add(&TmuxSession{Name: "alive", Status: TmuxStatusActive}))
+	require.NoError(t, store.Add(&Session{Name: "alive", Status: StatusActive}))
 
 	require.NoError(t, store.BackfillStatus())
 
 	got, err := store.GetByName("alive")
 	require.NoError(t, err)
-	assert.Equal(t, TmuxStatusActive, got.Status)
+	assert.Equal(t, StatusActive, got.Status)
 }

@@ -12,8 +12,8 @@ import (
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/jobs"
 	"github.com/eleonorayaya/utena/internal/monitor"
+	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/session"
-	"github.com/eleonorayaya/utena/internal/tmux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/afero"
@@ -25,7 +25,7 @@ type App struct {
 	Git       *git.GitModule
 	Workspace *workspace.WorkspaceModule
 	Session   *session.SessionModule
-	Tmux      *tmux.TmuxModule
+	Mux       *mux.Module
 	Claude    *claude.ClaudeModule
 	Jobs      *jobs.JobsModule
 	Monitor   *monitor.MonitorModule
@@ -43,7 +43,7 @@ func newApp(gormDB *gorm.DB, fs afero.Fs, cfg Config) *App {
 	return buildApp(gormDB, fs, cfg, nil, nil, nil)
 }
 
-func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxModule, gitMod *git.GitModule, bus eventbus.EventBus) *App {
+func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *mux.Module, gitMod *git.GitModule, bus eventbus.EventBus) *App {
 	if bus == nil {
 		bus = eventbus.NewEventBus()
 	}
@@ -57,7 +57,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxMod
 	}
 	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir, gitModule.Service)
 	if tmuxModule == nil {
-		tmuxModule = tmux.NewTmuxModule(bus, database)
+		tmuxModule = mux.NewModule(bus, database)
 	}
 	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir, cfg.SessionsRoot)
 
@@ -71,7 +71,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxMod
 		Git:       gitModule,
 		Workspace: workspaceModule,
 		Session:   sessionModule,
-		Tmux:      tmuxModule,
+		Mux:       tmuxModule,
 		Claude:    claude.NewClaudeModule(database),
 		Jobs:      jobsModule,
 		Monitor:   monitor.NewMonitorModule(bus, sessionModule.Service),
@@ -144,7 +144,7 @@ func (a *App) collectModels() []any {
 func (a *App) modules() []moduleEntry {
 	return []moduleEntry{
 		{"git", "/git", a.Git},
-		{"tmux", "/tmux", a.Tmux},
+		{"mux", "/tmux", a.Mux},
 		{"workspace", "/workspaces", a.Workspace},
 		{"claude", "/claude", a.Claude},
 		{"session", "/sessions", a.Session},
