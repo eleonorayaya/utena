@@ -86,6 +86,18 @@ func TestResourceSampler_ReusedPIDFallsBackToReportedPercent(t *testing.T) {
 	assert.InDelta(t, 2, usages[1].CPUPercent, 0.001)
 }
 
+func TestResourceSampler_StalePreviousSampleFallsBackToReportedPercent(t *testing.T) {
+	s, lister, _, now := newSamplerForTest(procTable(map[int]float64{202: 1}))
+	_, err := s.sample(context.Background())
+	require.NoError(t, err)
+
+	*now = now.Add(10 * time.Minute)
+	lister.SetProcesses(procTable(map[int]float64{202: 61}))
+	usages, err := s.sample(context.Background())
+	require.NoError(t, err)
+	assert.InDelta(t, 2, usages[1].CPUPercent, 0.001)
+}
+
 func TestResourceSampler_SurfacesListerError(t *testing.T) {
 	s, lister, _, _ := newSamplerForTest(nil)
 	lister.Err = errors.New("ps failed")

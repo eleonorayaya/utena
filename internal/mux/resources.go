@@ -14,6 +14,8 @@ type Usage struct {
 	Procs      int     `json:"procs"`
 }
 
+const maxCPUDeltaWindow = time.Minute
+
 type cpuSample struct {
 	cpuTime time.Duration
 	at      time.Time
@@ -47,7 +49,7 @@ func (s *resourceSampler) sample(ctx context.Context) ([]Usage, error) {
 	next := make(map[int]cpuSample, len(procs))
 	for _, p := range procs {
 		cpu[p.PID] = p.CPUPercent
-		if prev, ok := s.prev[p.PID]; ok && p.CPUTime >= prev.cpuTime && now.After(prev.at) {
+		if prev, ok := s.prev[p.PID]; ok && p.CPUTime >= prev.cpuTime && now.After(prev.at) && now.Sub(prev.at) <= maxCPUDeltaWindow {
 			cpu[p.PID] = 100 * float64(p.CPUTime-prev.cpuTime) / float64(now.Sub(prev.at))
 		}
 		next[p.PID] = cpuSample{cpuTime: p.CPUTime, at: now}

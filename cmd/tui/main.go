@@ -38,6 +38,7 @@ func main() {
 	rootCmd.AddCommand(attachCmd())
 	rootCmd.AddCommand(workspaceCmd())
 	rootCmd.AddCommand(hookCmd())
+	rootCmd.AddCommand(topCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
