@@ -199,6 +199,26 @@ func TestSessionStore_List(t *testing.T) {
 	require.Equal(t, "session-1", list[2].Name, "Oldest session should be last")
 }
 
+func TestSessionStore_List_FiltersByStatus(t *testing.T) {
+	store, _, _ := setupSessionStore(t)
+
+	require.NoError(t, store.Add(&Session{Name: "active", Status: StatusActive}))
+	require.NoError(t, store.Add(&Session{Name: "done", Status: StatusCompleted}))
+	require.NoError(t, store.Add(&Session{Name: "gone", Status: StatusDeleted}))
+
+	list, err := store.List(StatusActive, StatusCompleted)
+	require.NoError(t, err)
+	names := []string{}
+	for _, s := range list {
+		names = append(names, s.Name)
+	}
+	require.ElementsMatch(t, []string{"active", "done"}, names)
+
+	all, err := store.List()
+	require.NoError(t, err)
+	require.Len(t, all, 3)
+}
+
 func TestSessionStore_List_Empty(t *testing.T) {
 	store, _, _ := setupSessionStore(t)
 	list, _ := store.List()

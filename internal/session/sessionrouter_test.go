@@ -74,6 +74,31 @@ func TestSessionRouter_ListSessions(t *testing.T) {
 	require.True(t, names["session-2"])
 }
 
+func TestSessionRouter_ListSessions_StatusFilter(t *testing.T) {
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	now := time.Now()
+	addTestSession(t, sessionStore, swStore, &Session{Name: "live", Status: StatusActive, LastUsedAt: now}, ws1ID)
+	addTestSession(t, sessionStore, swStore, &Session{Name: "finished", Status: StatusCompleted, LastUsedAt: now}, ws1ID)
+	addTestSession(t, sessionStore, swStore, &Session{Name: "old", Status: StatusArchived, LastUsedAt: now}, ws1ID)
+
+	for _, query := range []string{"?status=active,completed", "?status=active&status=completed"} {
+		req := httptest.NewRequest("GET", "/"+query, nil)
+		w := httptest.NewRecorder()
+		router.Routes().ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var response SessionListResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		names := []string{}
+		for _, s := range response.Sessions {
+			names = append(names, s.Name)
+		}
+		require.ElementsMatch(t, []string{"live", "finished"}, names, query)
+	}
+}
+
 func TestSessionRouter_GetSessionByID(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 	swStore := NewSessionWorktreeStore(sessionStore.db)
