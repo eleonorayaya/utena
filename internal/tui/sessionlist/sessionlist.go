@@ -293,7 +293,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 					provider.RepairSession(id),
 					tea.Sequence(
 						router.NavigateTo(router.SessionProgressView),
-						sessionprogress.Start(id),
+						sessionprogress.StartRepair(id),
 					),
 				), true
 			}

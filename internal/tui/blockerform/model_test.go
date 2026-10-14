@@ -88,3 +88,24 @@ func TestBlockerForm_VimKeysTypeInTextFields(t *testing.T) {
 	assert.Equal(t, session.BlockerKindReview, m.kind())
 	assert.Equal(t, "hl", m.note.Value())
 }
+
+func TestBlockerForm_SubmitFromURLFieldAndErrorToFooter(t *testing.T) {
+	m := started(t)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = typeText(m, "https://example.com/pr/1")
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.Nil(t, cmd, "repeated submits are ignored")
+	m, _ = m.Update(provider.ErrMsg{Err: assert.AnError})
+	assert.Equal(t, assert.AnError.Error(), m.Status().Text)
+}
+
+func TestBlockerForm_FieldLabelsAligned(t *testing.T) {
+	m := started(t)
+	out := m.View()
+	assert.Contains(t, out, "▌ Kind  ● review")
+	assert.Contains(t, out, "  Note  ")
+	assert.Contains(t, out, "  URL   ")
+}

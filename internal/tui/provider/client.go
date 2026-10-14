@@ -13,7 +13,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
@@ -91,16 +90,6 @@ func (c *client) fetchWorkspaces() tea.Cmd {
 	}
 }
 
-type branchListResponse struct {
-	Branches      []string `json:"branches"`
-	CurrentBranch string   `json:"current_branch"`
-}
-
-type branchRefListResponse struct {
-	Branches      []git.BranchRef `json:"branches"`
-	CurrentBranch string          `json:"current_branch"`
-}
-
 type branchExistsResponse struct {
 	ExistsLocal  bool `json:"exists_local"`
 	ExistsRemote bool `json:"exists_remote"`
@@ -108,79 +97,92 @@ type branchExistsResponse struct {
 
 func (c *client) fetchBranches(workspaceID uint) tea.Cmd {
 	return func() tea.Msg {
+		fail := func(err error) tea.Msg {
+			return branchesLoadedMsg{BranchesLoadedMsg{WorkspaceID: workspaceID, Err: err}}
+		}
 		res, err := c.httpClient.Get(fmt.Sprintf("%s/workspaces/%d/branches", c.baseURL, workspaceID))
 		if err != nil {
 			log.Printf("[ERROR] fetch branches: %v", err)
-			return ErrMsg{err}
+			return fail(err)
 		}
 		defer res.Body.Close()
 
 		if res.StatusCode != http.StatusOK {
-			return parseAPIError(res, "fetch branches")
+			return fail(parseAPIError(res, "fetch branches").Err)
 		}
 
-		var resp branchListResponse
+		var resp workspace.BranchListResponse
 		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-			return ErrMsg{err}
+			return fail(err)
 		}
 
-		return branchesLoadedMsg{branches: resp.Branches}
+		return branchesLoadedMsg{BranchesLoadedMsg{
+			WorkspaceID:   workspaceID,
+			Branches:      resp.Branches,
+			CurrentBranch: resp.CurrentBranch,
+			DefaultBranch: resp.DefaultBranch,
+		}}
 	}
 }
 
 func (c *client) fetchOriginBranches(workspaceID uint) tea.Cmd {
 	return func() tea.Msg {
+		fail := func(err error) tea.Msg {
+			return branchesFetchedLoadedMsg{BranchesFetchedMsg{WorkspaceID: workspaceID, Err: err}}
+		}
 		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/workspaces/%d/branches/fetch", c.baseURL, workspaceID), nil)
 		if err != nil {
-			return branchesFetchedLoadedMsg{err: err}
+			return fail(err)
 		}
 
 		res, err := c.httpClient.Do(req)
 		if err != nil {
 			log.Printf("[ERROR] fetch origin branches: %v", err)
-			return branchesFetchedLoadedMsg{err: err}
+			return fail(err)
 		}
 		defer res.Body.Close()
 
 		if res.StatusCode != http.StatusOK {
-			apiErr := parseAPIError(res, "fetch origin branches")
-			return branchesFetchedLoadedMsg{err: apiErr.Err}
+			return fail(parseAPIError(res, "fetch origin branches").Err)
 		}
 
-		var resp branchRefListResponse
+		var resp workspace.BranchRefListResponse
 		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-			return branchesFetchedLoadedMsg{err: err}
+			return fail(err)
 		}
 
-		return branchesFetchedLoadedMsg{branches: resp.Branches}
+		return branchesFetchedLoadedMsg{BranchesFetchedMsg{WorkspaceID: workspaceID, Branches: resp.Branches, DefaultBranch: resp.DefaultBranch}}
 	}
 }
 
 func (c *client) checkBranchExists(workspaceID uint, name string) tea.Cmd {
 	return func() tea.Msg {
+		fail := func(err error) tea.Msg {
+			return branchExistsCheckedLoadedMsg{BranchExistsCheckedMsg{WorkspaceID: workspaceID, Name: name, Err: err}}
+		}
 		u := fmt.Sprintf("%s/workspaces/%d/branches/exists?name=%s", c.baseURL, workspaceID, url.QueryEscape(name))
 		res, err := c.httpClient.Get(u)
 		if err != nil {
 			log.Printf("[ERROR] check branch exists %q: %v", name, err)
-			return branchExistsCheckedLoadedMsg{name: name, err: err}
+			return fail(err)
 		}
 		defer res.Body.Close()
 
 		if res.StatusCode != http.StatusOK {
-			apiErr := parseAPIError(res, "check branch exists")
-			return branchExistsCheckedLoadedMsg{name: name, err: apiErr.Err}
+			return fail(parseAPIError(res, "check branch exists").Err)
 		}
 
 		var resp branchExistsResponse
 		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-			return branchExistsCheckedLoadedMsg{name: name, err: err}
+			return fail(err)
 		}
 
-		return branchExistsCheckedLoadedMsg{
-			name:         name,
-			existsLocal:  resp.ExistsLocal,
-			existsRemote: resp.ExistsRemote,
-		}
+		return branchExistsCheckedLoadedMsg{BranchExistsCheckedMsg{
+			WorkspaceID:  workspaceID,
+			Name:         name,
+			ExistsLocal:  resp.ExistsLocal,
+			ExistsRemote: resp.ExistsRemote,
+		}}
 	}
 }
 

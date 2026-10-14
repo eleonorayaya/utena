@@ -83,11 +83,13 @@ func (s *SetHiddenRequest) Bind(r *http.Request) error {
 type BranchListResponse struct {
 	Branches      []string `json:"branches"`
 	CurrentBranch string   `json:"current_branch"`
+	DefaultBranch string   `json:"default_branch"`
 }
 
 type BranchRefListResponse struct {
 	Branches      []git.BranchRef `json:"branches"`
 	CurrentBranch string          `json:"current_branch"`
+	DefaultBranch string          `json:"default_branch"`
 }
 
 type BranchExistsResponse struct {

@@ -2,48 +2,41 @@ package sessionprogress
 
 import (
 	"fmt"
-	"strings"
+	"slices"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
-	"github.com/eleonorayaya/utena/internal/tui/theme"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
-
-func titleStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
-func pendingStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(theme.Current.StatusPending)
-}
-func failedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
-func warningStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(theme.Current.AccentLavender)
-}
-func doneStyle() lipgloss.Style    { return lipgloss.NewStyle().Foreground(theme.Current.StatusReady) }
-func runningStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Primary) }
-func dimStyle() lipgloss.Style     { return lipgloss.NewStyle().Foreground(theme.Current.TextMuted) }
 
 type tickMsg time.Time
 
 type StartMsg struct {
 	SessionID uint
+	Repairing bool
 }
 
 func Start(sessionID uint) tea.Cmd {
 	return func() tea.Msg { return StartMsg{SessionID: sessionID} }
 }
 
+func StartRepair(sessionID uint) tea.Cmd {
+	return func() tea.Msg { return StartMsg{SessionID: sessionID, Repairing: true} }
+}
+
 type Model struct {
 	sessionID uint
+	repairing bool
 	session   *session.Session
 	spinner   spinner.Model
 	done      bool
-	err       error
+	err       string
 	warning   string
 	width     int
 	height    int
@@ -51,15 +44,14 @@ type Model struct {
 
 func New() Model {
 	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(theme.Current.Primary)
+	sp.Spinner = spinner.MiniDot
 	return Model{spinner: sp}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
 	m.session = nil
 	m.done = false
-	m.err = nil
+	m.err = ""
 	m.warning = ""
 	return m, m.spinner.Tick
 }
@@ -70,7 +62,22 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m Model) Keys() help.KeyMap {
-	return keys
+	k := keys
+	k.Repair.SetEnabled(m.done && (m.err != "" || m.warning != ""))
+	if m.warning != "" {
+		k.Back.SetHelp("esc", "open session")
+	}
+	return k
+}
+
+func (m Model) Status() ui.Status {
+	switch {
+	case m.err != "":
+		return ui.Status{Text: "✕ " + m.err, Kind: ui.StatusError}
+	case m.warning != "":
+		return ui.Status{Text: "⚠ " + m.warning, Kind: ui.StatusWarning}
+	}
+	return ui.Status{}
 }
 
 func tick() tea.Cmd {
@@ -87,9 +94,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case StartMsg:
 		m.sessionID = msg.SessionID
+		m.repairing = msg.Repairing
 		m.session = nil
 		m.done = false
-		m.err = nil
+		m.err = ""
 		m.warning = ""
 		return m, tea.Batch(provider.PollSession(m.sessionID), tick(), m.spinner.Tick)
 
@@ -118,42 +126,38 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.session = &s
 		switch s.Status {
 		case session.StatusActive:
+			m.done = true
 			if s.StatusError != "" {
-				m.done = true
 				m.warning = s.StatusError
 				return m, nil
 			}
-			m.done = true
 			return m, provider.ActivateSession(s.ID)
 		case session.StatusBroken:
 			m.done = true
-			errMsg := "session creation failed"
+			m.err = "session setup failed"
 			if s.StatusError != "" {
-				errMsg = s.StatusError
+				m.err = s.StatusError
 			}
-			m.err = fmt.Errorf("%s", errMsg)
 			return m, nil
 		}
 		return m, nil
 
 	case tea.KeyMsg:
-		if m.done {
-			if key.Matches(msg, keys.Back) {
-				if m.warning != "" {
-					return m, tea.Batch(router.Back(), provider.ActivateSession(m.sessionID))
-				}
-				return m, router.Back()
+		if !m.done {
+			return m, nil
+		}
+		if key.Matches(msg, keys.Back) {
+			if m.warning != "" {
+				return m, tea.Batch(router.Back(), provider.ActivateSession(m.sessionID))
 			}
-			if (m.err != nil || m.warning != "") && key.Matches(msg, keys.Repair) {
-				m.done = false
-				m.err = nil
-				m.warning = ""
-				return m, tea.Batch(
-					provider.RepairSession(m.sessionID),
-					provider.PollSession(m.sessionID),
-					tick(),
-				)
-			}
+			return m, router.Back()
+		}
+		if (m.err != "" || m.warning != "") && key.Matches(msg, keys.Repair) {
+			m.done = false
+			m.repairing = true
+			m.err = ""
+			m.warning = ""
+			return m, tea.Batch(provider.RepairSession(m.sessionID), provider.PollSession(m.sessionID), tick(), m.spinner.Tick)
 		}
 	}
 
@@ -169,64 +173,46 @@ func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m Model) View() string {
-	var b strings.Builder
-
-	name := fmt.Sprintf("%d", m.sessionID)
+func (m Model) title() string {
+	name := fmt.Sprintf("session %d", m.sessionID)
 	if m.session != nil && m.session.Name != "" {
 		name = m.session.Name
 	}
-	b.WriteString(titleStyle().Render("Creating session: " + name))
-	b.WriteString("\n\n")
-
-	if m.session == nil {
-		b.WriteString(m.spinner.View() + pendingStyle().Render(" Loading..."))
-		b.WriteString("\n")
-	} else if m.session.Status == session.StatusCreating {
-		if len(m.session.SetupSteps) == 0 {
-			b.WriteString(m.spinner.View() + pendingStyle().Render(" Setting up..."))
-			b.WriteString("\n")
-		} else {
-			b.WriteString(m.renderSteps())
-		}
+	if m.repairing {
+		return "Repairing " + name
 	}
-
-	if m.warning != "" {
-		b.WriteString("\n")
-		b.WriteString(warningStyle().Render("[!] " + m.warning))
-		b.WriteString("\n")
-		b.WriteString(pendingStyle().Render("  Session is active. Press esc to open it or r to retry setup."))
-		b.WriteString("\n")
-	}
-
-	if m.err != nil {
-		b.WriteString("\n")
-		b.WriteString(failedStyle().Render("Error: " + m.err.Error()))
-		b.WriteString("\n")
-	}
-
-	return b.String()
+	return "Creating " + name
 }
 
-func (m Model) renderSteps() string {
-	var b strings.Builder
-	for i := range m.session.SetupSteps {
-		step := m.session.SetupSteps[i]
-		switch step.Status {
-		case session.SetupStepRunning:
-			b.WriteString(runningStyle().Render(m.spinner.View() + " " + step.Label))
-		case session.SetupStepDone:
-			b.WriteString(doneStyle().Render("  ✓ " + step.Label))
-		case session.SetupStepFailed:
-			b.WriteString(failedStyle().Render("  ✗ " + step.Label))
-			if step.ErrorMsg != "" {
-				b.WriteString("\n")
-				b.WriteString(failedStyle().Render("    " + step.ErrorMsg))
-			}
-		default:
-			b.WriteString(dimStyle().Render("  ○ " + step.Label))
-		}
-		b.WriteString("\n")
+func stepState(s session.SetupStepStatus) ui.StepState {
+	switch s {
+	case session.SetupStepRunning:
+		return ui.StepRunning
+	case session.SetupStepDone:
+		return ui.StepDone
+	case session.SetupStepFailed:
+		return ui.StepFailed
+	default:
+		return ui.StepPending
 	}
-	return b.String()
+}
+
+func (m Model) steps() []ui.Step {
+	if m.session == nil || len(m.session.SetupSteps) == 0 {
+		if m.done {
+			return nil
+		}
+		return []ui.Step{{Label: "Setting up", State: ui.StepRunning}}
+	}
+	src := slices.Clone(m.session.SetupSteps)
+	slices.SortStableFunc(src, func(a, b session.SessionSetupStep) int { return a.Position - b.Position })
+	out := make([]ui.Step, len(src))
+	for i, s := range src {
+		out[i] = ui.Step{Label: s.Label, State: stepState(s.Status), Error: s.ErrorMsg}
+	}
+	return out
+}
+
+func (m Model) View() string {
+	return ui.FitHeight(ui.FormTitle(m.title())+"\n\n"+ui.StepList(m.steps(), m.spinner.View(), m.width), m.height)
 }

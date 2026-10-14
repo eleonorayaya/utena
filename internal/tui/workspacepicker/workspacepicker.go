@@ -1,77 +1,78 @@
 package workspacepicker
 
 import (
-	"github.com/charmbracelet/bubbles/help"
+	"fmt"
+	"slices"
+
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	ulist "github.com/eleonorayaya/utena/internal/tui/list"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
 type Model struct {
+	title             string
+	multi             bool
 	list              list.Model
 	workspaces        []workspace.Workspace
-	sortActiveFirst   bool
 	showHidden        bool
 	activeWorkspaceID uint
-	selected          map[uint]struct{}
-	selectionOrder    []uint
+	selected          []uint
+	width, height     int
 }
 
-func New(title string, sortActiveFirst bool) Model {
-	return Model{
-		list:            ulist.NewWithDelegate(title, compactPickerDelegate{}),
-		sortActiveFirst: sortActiveFirst,
-		selected:        make(map[uint]struct{}),
-	}
+func New(title string, multi bool) Model {
+	return Model{title: title, multi: multi, list: ui.NewList()}
+}
+
+func (m Model) Open(selected []uint) Model {
+	m.selected = slices.Clone(selected)
+	m.list.ResetFilter()
+	m.rebuildItems()
+	m.list.Select(0)
+	ui.SkipUnselectable(&m.list, 0)
+	return m
 }
 
 func (m *Model) SetSize(width, height int) {
-	m.list.SetWidth(width)
-	m.list.SetHeight(height)
+	m.width, m.height = width, height
+	m.list.SetSize(width, max(height-2, 1))
 }
 
-func (m Model) Init() (Model, tea.Cmd) {
-	return m, nil
+func (m Model) Filtering() bool {
+	return ui.FilterActive(m.list)
 }
 
-func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
-	m.list.SetWidth(msg.Width)
-	m.list.SetHeight(msg.Height)
-	return m, nil
+func (m Model) CapturesText() bool {
+	return m.list.FilterState() == list.Filtering
 }
 
-func (m Model) Keys() help.KeyMap {
-	return Keys
-}
-
-func (m *Model) rebuildItems() tea.Cmd {
-	workspaces := m.workspaces
-
-	if m.sortActiveFirst && m.activeWorkspaceID != 0 {
-		sorted := make([]workspace.Workspace, 0, len(workspaces))
-		var rest []workspace.Workspace
-		for _, ws := range workspaces {
-			if ws.ID == m.activeWorkspaceID {
-				sorted = append(sorted, ws)
-			} else {
-				rest = append(rest, ws)
+func sortWorkspaces(wss []workspace.Workspace, activeID uint) []workspace.Workspace {
+	out := slices.Clone(wss)
+	slices.SortStableFunc(out, func(a, b workspace.Workspace) int {
+		if (a.ID == activeID) != (b.ID == activeID) {
+			if a.ID == activeID {
+				return -1
 			}
+			return 1
 		}
-		workspaces = append(sorted, rest...)
-	}
+		return b.LastUsedAt.Compare(a.LastUsedAt)
+	})
+	return out
+}
 
-	items := make([]list.Item, 0, len(workspaces))
-	for _, ws := range workspaces {
+func (m *Model) rebuildItems() {
+	var items []list.Item
+	for _, ws := range sortWorkspaces(m.workspaces, m.activeWorkspaceID) {
 		if !m.showHidden && ws.IsHidden {
 			continue
 		}
-		_, isSelected := m.selected[ws.ID]
-		items = append(items, workspaceItem{workspace: ws, selected: isSelected})
+		items = append(items, workspaceItem{workspace: ws, multi: m.multi, checked: slices.Contains(m.selected, ws.ID)})
 	}
-	return m.list.SetItems(items)
+	m.list.SetItems(items)
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -79,90 +80,70 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case provider.WorkspacesStateUpdatedMsg:
 		m.activeWorkspaceID = msg.ActiveWorkspaceID
 		m.workspaces = msg.Workspaces
-		return m, m.rebuildItems()
-
+		m.rebuildItems()
+		return m, nil
 	case tea.KeyMsg:
-		var cmd tea.Cmd
-		var handled bool
-		m, cmd, handled = m.OnKeyMsg(msg)
-		if handled {
-			return m, cmd
+		if m.list.FilterState() != list.Filtering {
+			if mm, cmd, ok := m.onKey(msg); ok {
+				return mm, cmd
+			}
 		}
 	}
-
 	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
+	m.list, cmd = ui.UpdateList(m.list, msg)
 	return m, cmd
 }
 
-func (m Model) selectedWorkspaces() []workspace.Workspace {
-	if len(m.selectionOrder) == 0 {
-		return nil
-	}
-	byID := make(map[uint]workspace.Workspace, len(m.workspaces))
-	for _, ws := range m.workspaces {
-		byID[ws.ID] = ws
-	}
-	out := make([]workspace.Workspace, 0, len(m.selectionOrder))
-	for _, id := range m.selectionOrder {
-		if ws, ok := byID[id]; ok {
-			out = append(out, ws)
-		}
-	}
-	return out
+func (m Model) cursor() (workspace.Workspace, bool) {
+	item, ok := m.list.SelectedItem().(workspaceItem)
+	return item.workspace, ok
 }
 
-func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	if m.list.FilterState() == list.Filtering {
-		return m, nil, false
+func (m Model) byID(id uint) (workspace.Workspace, bool) {
+	for _, ws := range m.workspaces {
+		if ws.ID == id {
+			return ws, true
+		}
 	}
+	return workspace.Workspace{}, false
+}
+
+func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	switch {
-	case key.Matches(msg, Keys.Toggle):
-		if item, ok := m.list.SelectedItem().(workspaceItem); ok {
-			id := item.workspace.ID
-			if _, exists := m.selected[id]; exists {
-				delete(m.selected, id)
-				for i, sid := range m.selectionOrder {
-					if sid == id {
-						m.selectionOrder = append(m.selectionOrder[:i], m.selectionOrder[i+1:]...)
-						break
-					}
-				}
-			} else {
-				m.selected[id] = struct{}{}
-				m.selectionOrder = append(m.selectionOrder, id)
-			}
-			return m, m.rebuildItems(), true
-		}
-	case key.Matches(msg, Keys.Select):
-		var cursorWS *workspace.Workspace
-		if item, ok := m.list.SelectedItem().(workspaceItem); ok {
-			ws := item.workspace
-			cursorWS = &ws
-		}
-		if cursorWS != nil {
-			if _, exists := m.selected[cursorWS.ID]; !exists {
-				m.selected[cursorWS.ID] = struct{}{}
-				m.selectionOrder = append(m.selectionOrder, cursorWS.ID)
-			}
-		}
-		multi := m.selectedWorkspaces()
-		if len(multi) == 0 && cursorWS != nil {
-			multi = []workspace.Workspace{*cursorWS}
-		}
-		if len(multi) == 0 {
+	case m.multi && key.Matches(msg, Keys.Toggle):
+		ws, ok := m.cursor()
+		if !ok {
 			return m, nil, true
 		}
-		return m, func() tea.Msg {
-			return SelectedMsg{Workspace: multi[0], Workspaces: multi}
-		}, true
+		if i := slices.Index(m.selected, ws.ID); i >= 0 {
+			m.selected = slices.Delete(m.selected, i, i+1)
+		} else {
+			m.selected = append(m.selected, ws.ID)
+		}
+		m.rebuildItems()
+		return m, nil, true
+	case key.Matches(msg, Keys.Select):
+		var picked []workspace.Workspace
+		if m.multi {
+			for _, id := range m.selected {
+				if ws, ok := m.byID(id); ok {
+					picked = append(picked, ws)
+				}
+			}
+		}
+		if len(picked) == 0 {
+			if ws, ok := m.cursor(); ok {
+				picked = []workspace.Workspace{ws}
+			}
+		}
+		if len(picked) == 0 {
+			return m, nil, true
+		}
+		return m, func() tea.Msg { return SelectedMsg{Workspaces: picked} }, true
 	case key.Matches(msg, Keys.ToggleHidden):
 		m.showHidden = !m.showHidden
-		statusMsg := "showing all workspaces"
-		if !m.showHidden {
-			statusMsg = "hiding hidden workspaces"
-		}
-		return m, tea.Batch(m.rebuildItems(), m.list.NewStatusMessage(statusMsg)), true
+		m.rebuildItems()
+		return m, nil, true
 	case key.Matches(msg, Keys.AddDir):
 		return m, func() tea.Msg { return AddDirectoryMsg{} }, true
 	}
@@ -170,5 +151,13 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 }
 
 func (m Model) View() string {
-	return m.list.View()
+	title := ui.FormTitle(m.title)
+	if m.multi && len(m.selected) > 0 {
+		title += fg(theme.Current.TextMuted).Render(fmt.Sprintf("  %d selected", len(m.selected)))
+	}
+	body := ui.ListView(m.list)
+	if len(m.list.Items()) == 0 {
+		body = fg(theme.Current.TextMuted).Render("  No workspaces")
+	}
+	return ui.FitHeight(title+"\n\n"+body, m.height)
 }

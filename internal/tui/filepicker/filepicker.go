@@ -2,79 +2,179 @@ package filepicker
 
 import (
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 
-	bubblefp "github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
 
-type Model struct {
-	picker bubblefp.Model
-	width  int
-	height int
+type dirItem struct {
+	name string
 }
 
-func New() Model {
-	fp := bubblefp.New()
-	fp.DirAllowed = false
-	fp.FileAllowed = false
-	fp.ShowHidden = false
-	homeDir, _ := os.UserHomeDir()
-	fp.CurrentDirectory = homeDir
+func (i dirItem) FilterValue() string { return i.name }
 
-	return Model{
-		picker: fp,
+func (i dirItem) Cells(selected bool) []ui.Cell {
+	style := lipgloss.NewStyle().Foreground(theme.Current.Text)
+	if selected {
+		style = lipgloss.NewStyle().Foreground(theme.Current.TextEmphasis).Bold(true)
+	}
+	return []ui.Cell{
+		{Spans: []ui.Span{{Text: "▸", Style: lipgloss.NewStyle().Foreground(theme.Current.TextMuted)}}, Width: 2},
+		{Spans: []ui.Span{{Text: i.name, Style: style}}},
 	}
 }
 
-func (m *Model) SetSize(width, height int) {
-	m.width = width
-	m.height = height
-	m.picker.SetHeight(height)
+type Model struct {
+	dir        string
+	showHidden bool
+	list       list.Model
+	status     ui.Status
+	width      int
+	height     int
 }
 
-func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
-	m.width = msg.Width
-	m.height = msg.Height
-	m.picker.SetHeight(msg.Height - 4)
-	return m, nil
+func New() Model {
+	home, _ := os.UserHomeDir()
+	return NewAt(home)
+}
+
+func NewAt(dir string) Model {
+	return Model{dir: dir, list: ui.NewList()}
+}
+
+func (m *Model) SetSize(width, height int) {
+	m.width, m.height = width, height
+	m.list.SetSize(width, max(height-2, 1))
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
-	return m, m.picker.Init()
+	m.load("")
+	return m, nil
+}
+
+func (m Model) Dir() string {
+	return m.dir
 }
 
 func (m Model) Keys() help.KeyMap {
 	return Keys
 }
 
-func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	if msg, ok := msg.(tea.KeyMsg); ok {
-		m, cmd, handled := m.OnKeyMsg(msg)
-		if handled {
-			return m, cmd
+func (m Model) Status() ui.Status {
+	return m.status
+}
+
+func (m Model) Filtering() bool {
+	return ui.FilterActive(m.list)
+}
+
+func (m Model) CapturesText() bool {
+	return m.list.FilterState() == list.Filtering
+}
+
+func (m *Model) load(selectName string) {
+	m.list.ResetFilter()
+	entries, err := os.ReadDir(m.dir)
+	if err != nil {
+		m.status = ui.Status{Text: err.Error(), Kind: ui.StatusError}
+		m.list.SetItems(nil)
+		return
+	}
+	m.status = ui.Status{}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && e.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		if e.Type()&os.ModeSymlink != 0 {
+			if info, err := os.Stat(filepath.Join(m.dir, e.Name())); err != nil || !info.IsDir() {
+				continue
+			}
+		}
+		if !m.showHidden && strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	slices.SortFunc(names, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
+	items := make([]list.Item, len(names))
+	sel := 0
+	for i, n := range names {
+		items[i] = dirItem{name: n}
+		if n == selectName {
+			sel = i
 		}
 	}
+	m.list.SetItems(items)
+	m.list.Select(sel)
+}
 
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	if msg, ok := msg.(tea.KeyMsg); ok && m.list.FilterState() != list.Filtering {
+		if mm, cmd, handled := m.onKey(msg); handled {
+			return mm, cmd
+		}
+	}
 	var cmd tea.Cmd
-	m.picker, cmd = m.picker.Update(msg)
+	m.list, cmd = ui.UpdateList(m.list, msg)
 	return m, cmd
 }
 
-func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	if key.Matches(msg, Keys.SelectDir) {
-		return m, func() tea.Msg {
-			return DirectorySelectedMsg{Path: m.picker.CurrentDirectory}
-		}, true
-	}
-	if key.Matches(msg, Keys.ToggleHidden) {
-		m.picker.ShowHidden = !m.picker.ShowHidden
-		return m, m.picker.Init(), true
+func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch {
+	case key.Matches(msg, Keys.SelectDir):
+		dir := m.dir
+		return m, func() tea.Msg { return DirectorySelectedMsg{Path: dir} }, true
+	case key.Matches(msg, Keys.ToggleHidden):
+		m.showHidden = !m.showHidden
+		m.load("")
+		return m, nil, true
+	case key.Matches(msg, Keys.Up):
+		if m.list.FilterState() == list.FilterApplied && msg.String() == "backspace" {
+			return m, nil, false
+		}
+		parent := filepath.Dir(m.dir)
+		if parent == m.dir {
+			return m, nil, true
+		}
+		child := filepath.Base(m.dir)
+		m.dir = parent
+		m.load(child)
+		return m, nil, true
+	case key.Matches(msg, Keys.Open):
+		item, ok := m.list.SelectedItem().(dirItem)
+		if !ok {
+			return m, nil, true
+		}
+		m.dir = filepath.Join(m.dir, item.name)
+		m.load("")
+		return m, nil, true
 	}
 	return m, nil, false
 }
 
+func abbreviate(path string) string {
+	home, err := os.UserHomeDir()
+	if err == nil && strings.HasPrefix(path, home) {
+		return "~" + path[len(home):]
+	}
+	return path
+}
+
 func (m Model) View() string {
-	return m.picker.View()
+	muted := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
+	title := ui.FormTitle("Add directory") + "  " + muted.Render(abbreviate(m.dir))
+	body := ui.ListView(m.list)
+	if len(m.list.Items()) == 0 {
+		body = muted.Render("  No subdirectories — press s to select this one")
+	}
+	return ui.FitHeight(lipgloss.NewStyle().MaxWidth(max(m.width, 1)).Render(title)+"\n\n"+body, m.height)
 }

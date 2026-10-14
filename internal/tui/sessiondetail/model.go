@@ -234,7 +234,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		id := m.sess.ID
 		return m, tea.Sequence(
 			router.NavigateTo(router.SessionProgressView),
-			sessionprogress.Start(id),
+			sessionprogress.StartRepair(id),
 		)
 
 	case key.Matches(msg, keys.AddWorkspace):

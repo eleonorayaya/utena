@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -45,6 +46,10 @@ func (f Form) AtEnd() bool {
 	return f.focus == f.count-1
 }
 
+func InputWidth(formWidth, labelWidth int) int {
+	return max(formWidth-GutterWidth-labelWidth-1, 10)
+}
+
 func FormTitle(title string) string {
 	return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true).Render(title)
 }
@@ -58,6 +63,9 @@ func LabelWidth(fields []Field) int {
 }
 
 func (f Form) View(fields []Field, width int) string {
+	if width <= 0 {
+		width = math.MaxInt32
+	}
 	labelW := LabelWidth(fields)
 	indent := strings.Repeat(" ", GutterWidth+labelW)
 	labelStyle := fg(theme.Current.TextMuted)

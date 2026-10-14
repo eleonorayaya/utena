@@ -1,49 +1,53 @@
 package addworkspaceform
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/tui/branchfield"
 	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
-	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
-func errStyle() lipgloss.Style    { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
-func promptStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
-func pathStyle() lipgloss.Style   { return lipgloss.NewStyle().Foreground(theme.Current.Path) }
+const (
+	fieldWorkspace = iota
+	fieldBranch
+	fieldMode
+	fieldCount
+)
 
-type step int
+type overlay int
 
 const (
-	workspacePickerStep step = iota
-	branchPickerStep
-	branchModeStep
+	overlayNone overlay = iota
+	overlayWorkspace
+	overlayBranch
 )
 
 type Model struct {
-	activeStep      step
+	form            ui.Form
+	overlay         overlay
 	workspacePicker workspacepicker.Model
 	branchPicker    branchpicker.Model
 	sessionID       uint
-	selectedWS      *workspace.Workspace
-	pickedBranch    string
-	err             string
+	row             *branchfield.Row
+	mode            ui.Choice
+	status          ui.Status
+	submitting      bool
 	width, height   int
 }
 
 func New() Model {
 	return Model{
-		workspacePicker: workspacepicker.New("Select workspace to add", false),
-		branchPicker:    branchpicker.New(""),
+		form:            ui.NewForm("Add workspace", fieldCount),
+		workspacePicker: workspacepicker.New("Workspace to add", false),
+		branchPicker:    branchpicker.New(),
+		mode:            branchfield.NewModeChoice(),
 	}
 }
 
@@ -55,72 +59,27 @@ func Start(sessionID uint) tea.Cmd {
 	return func() tea.Msg { return StartMsg{SessionID: sessionID} }
 }
 
+func (m Model) reset() Model {
+	m.form = m.form.Focus(fieldMode)
+	m.row = nil
+	m.mode = branchfield.NewModeChoice()
+	m.status = ui.Status{}
+	m.submitting = false
+	m.overlay = overlayWorkspace
+	m.workspacePicker = m.workspacePicker.Open(nil)
+	return m
+}
+
 func (m Model) Init() (Model, tea.Cmd) {
-	m.activeStep = workspacePickerStep
+	m = m.reset()
 	m.sessionID = 0
-	m.selectedWS = nil
-	m.pickedBranch = ""
-	m.err = ""
 	return m, provider.FetchWorkspaces()
 }
 
 func (m *Model) SetSize(width, height int) {
-	m.width = width
-	m.height = height
+	m.width, m.height = width, height
 	m.workspacePicker.SetSize(width, height)
 	m.branchPicker.SetSize(width, height)
-}
-
-func (m Model) Keys() help.KeyMap {
-	switch m.activeStep {
-	case workspacePickerStep:
-		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, workspacepicker.Keys}}
-	case branchPickerStep:
-		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, branchpicker.Keys}}
-	default:
-		return formKeys
-	}
-}
-
-func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.SetSize(msg.Width, msg.Height)
-		return m, nil
-
-	case StartMsg:
-		m.sessionID = msg.SessionID
-		m.activeStep = workspacePickerStep
-		m.selectedWS = nil
-		m.pickedBranch = ""
-		m.err = ""
-		return m, provider.RequestWorkspacesState()
-
-	case provider.WorkspacesStateUpdatedMsg:
-		var cmd tea.Cmd
-		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
-		return m, cmd
-
-	case provider.ErrMsg:
-		m.err = msg.Err.Error()
-		return m, nil
-
-	case provider.WorkspaceAddedToSessionMsg:
-		return m, tea.Sequence(
-			router.NavigateTo(router.SessionProgressView),
-			sessionprogress.Start(msg.SessionID),
-		)
-	}
-
-	switch m.activeStep {
-	case workspacePickerStep:
-		return m.updateWorkspacePicker(msg)
-	case branchPickerStep:
-		return m.updateBranchPicker(msg)
-	case branchModeStep:
-		return m.updateBranchMode(msg)
-	}
-	return m, nil
 }
 
 func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
@@ -132,28 +91,116 @@ func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
+func (m Model) Keys() help.KeyMap {
+	switch m.overlay {
+	case overlayWorkspace:
+		return m.workspacePicker.Keys()
+	case overlayBranch:
+		return m.branchPicker.Keys()
+	}
+	k := formKeys
+	onMode := m.form.Focused() == fieldMode
+	k.Add.SetEnabled(onMode)
+	k.Edit.SetEnabled(!onMode)
+	return k
+}
+
+func (m Model) Status() ui.Status {
+	if m.overlay == overlayBranch {
+		if s := m.branchPicker.Status(); !s.Empty() {
+			return s
+		}
+	}
+	return m.status
+}
+
+func (m Model) CapturesText() bool {
+	switch m.overlay {
+	case overlayWorkspace:
+		return m.workspacePicker.CapturesText()
+	case overlayBranch:
+		return m.branchPicker.CapturesText()
+	}
+	return m.row != nil && m.row.Editing
+}
+
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m.OnWindowSizeMsg(msg)
+	case StartMsg:
+		m = m.reset()
+		m.sessionID = msg.SessionID
+		return m, provider.RequestWorkspacesState()
+	case provider.WorkspacesStateUpdatedMsg:
+		var cmd tea.Cmd
+		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
+		return m, cmd
+	case provider.BranchesLoadedMsg:
+		if m.row != nil && m.row.Workspace.ID == msg.WorkspaceID {
+			r := m.row.Loaded(msg)
+			m.row = &r
+		}
+		var cmd tea.Cmd
+		m.branchPicker, cmd = m.branchPicker.Update(msg)
+		return m, cmd
+	case provider.BranchesFetchedMsg:
+		var cmd tea.Cmd
+		m.branchPicker, cmd = m.branchPicker.Update(msg)
+		return m, cmd
+	case provider.BranchExistsCheckedMsg:
+		if m.row != nil {
+			r := m.row.Checked(msg)
+			m.row = &r
+		}
+		return m, nil
+	case provider.ErrMsg:
+		m.submitting = false
+		m.status = ui.Status{Text: msg.Err.Error(), Kind: ui.StatusError}
+		return m, nil
+	case provider.WorkspaceAddedToSessionMsg:
+		m.submitting = false
+		return m, tea.Sequence(router.NavigateTo(router.SessionProgressView), sessionprogress.Start(msg.SessionID))
+	}
+
+	switch m.overlay {
+	case overlayWorkspace:
+		return m.updateWorkspacePicker(msg)
+	case overlayBranch:
+		return m.updateBranchPicker(msg)
+	}
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		return m.onPageKey(keyMsg)
+	}
+	return m, nil
+}
+
 func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspacepicker.SelectedMsg:
-		ws := msg.Workspace
+		ws := msg.Workspaces[0]
 		if !ws.IsGitRepo {
-			m.err = "selected workspace is not a git repository"
+			m.status = ui.Status{Text: ws.Name + " is not a git repository", Kind: ui.StatusError}
 			return m, nil
 		}
-		m.selectedWS = &ws
-		m.err = ""
-		title := fmt.Sprintf("Select branch for %s", ws.Name)
-		m.branchPicker = branchpicker.New(title)
-		m.branchPicker.SetSize(m.width, m.height)
-		m.activeStep = branchPickerStep
+		m.overlay = overlayNone
+		m.status = ui.Status{}
+		m.form = m.form.Focus(fieldMode)
+		if m.row != nil && m.row.Workspace.ID == ws.ID {
+			return m, nil
+		}
+		r := branchfield.NewRow(ws)
+		m.row = &r
 		return m, provider.RequestBranches(ws.ID)
-
+	case workspacepicker.AddDirectoryMsg:
+		return m, nil
 	case tea.KeyMsg:
-		if key.Matches(msg, formKeys.Back) {
-			return m, router.Back()
+		if msg.Type == tea.KeyEsc && !m.workspacePicker.Filtering() {
+			m.overlay = overlayNone
+			m.status = ui.Status{}
+			return m, nil
 		}
 	}
-
 	var cmd tea.Cmd
 	m.workspacePicker, cmd = m.workspacePicker.Update(msg)
 	return m, cmd
@@ -162,92 +209,121 @@ func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case branchpicker.SelectedMsg:
-		m.pickedBranch = msg.Branch
-		m.activeStep = branchModeStep
+		r := m.row.Pick(msg.Branch)
+		m.row = &r
+		m.overlay = overlayNone
+		m.form = m.form.Focus(fieldBranch)
 		return m, nil
-
 	case branchpicker.FetchRequestedMsg:
-		var cmd tea.Cmd
-		m.branchPicker, cmd = m.branchPicker.Update(msg)
-		if m.selectedWS != nil {
-			return m, tea.Batch(cmd, provider.FetchOriginBranches(m.selectedWS.ID))
-		}
+		return m, provider.FetchOriginBranches(m.branchPicker.WorkspaceID())
+	case branchpicker.ManualEntryRequestedMsg:
+		m.overlay = overlayNone
+		m.form = m.form.Focus(fieldBranch)
+		r, cmd := m.row.StartManual()
+		m.row = &r
 		return m, cmd
-
-	case provider.BranchesFetchedMsg:
-		var cmd tea.Cmd
-		m.branchPicker, cmd = m.branchPicker.Update(msg)
-		return m, cmd
-
 	case tea.KeyMsg:
-		if key.Matches(msg, formKeys.Back) {
-			m.activeStep = workspacePickerStep
-			m.pickedBranch = ""
-			return m, provider.RequestWorkspacesState()
+		if msg.Type == tea.KeyEsc && !m.branchPicker.Filtering() {
+			m.overlay = overlayNone
+			return m, nil
 		}
 	}
-
 	var cmd tea.Cmd
 	m.branchPicker, cmd = m.branchPicker.Update(msg)
 	return m, cmd
 }
 
-func (m Model) updateBranchMode(msg tea.Msg) (Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
+func (m Model) openWorkspacePicker() Model {
+	var ids []uint
+	if m.row != nil {
+		ids = []uint{m.row.Workspace.ID}
 	}
-	switch keyMsg.String() {
-	case "n":
-		spec := provider.SessionWorkspaceSpec{WorkspaceID: m.selectedWS.ID, BaseBranch: m.pickedBranch}
-		return m, provider.AddWorkspaceToSession(m.sessionID, spec)
-	case "e":
-		spec := provider.SessionWorkspaceSpec{WorkspaceID: m.selectedWS.ID, Branch: m.pickedBranch}
-		return m, provider.AddWorkspaceToSession(m.sessionID, spec)
+	m.workspacePicker = m.workspacePicker.Open(ids)
+	m.overlay = overlayWorkspace
+	return m
+}
+
+func (m Model) onPageKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.row != nil && m.row.Editing {
+		r, cmd := m.row.UpdateManual(msg)
+		m.row = &r
+		return m, cmd
+	}
+	field := m.form.Focused()
+	switch msg.String() {
 	case "esc":
-		m.activeStep = branchPickerStep
-		if m.selectedWS != nil {
-			return m, provider.RequestBranches(m.selectedWS.ID)
-		}
+		return m, router.Back()
+	case "tab", "down":
+		m.form = m.form.Next()
 		return m, nil
+	case "shift+tab", "up":
+		m.form = m.form.Prev()
+		return m, nil
+	case "enter":
+		switch field {
+		case fieldWorkspace:
+			return m.openWorkspacePicker(), nil
+		case fieldBranch:
+			if m.row == nil {
+				return m.openWorkspacePicker(), nil
+			}
+			r := m.row
+			m.branchPicker = m.branchPicker.Open("Branch for "+r.Workspace.Name, r.Workspace.ID, r.Local, r.DefaultBranch, r.Branch)
+			m.overlay = overlayBranch
+			return m, nil
+		case fieldMode:
+			return m.submit()
+		}
+	}
+	if field == fieldMode {
+		m.mode, _ = m.mode.Update(msg)
 	}
 	return m, nil
 }
 
-func (m Model) View() string {
-	switch m.activeStep {
-	case branchPickerStep:
-		v := m.branchPicker.View()
-		if m.err != "" {
-			v += "\n" + errStyle().Render(m.err)
-		}
-		return v
-
-	case branchModeStep:
-		var b strings.Builder
-		wsName := ""
-		if m.selectedWS != nil {
-			wsName = m.selectedWS.Name
-		}
-		b.WriteString(promptStyle().Render("Workspace: ") + pathStyle().Render(wsName) + "\n")
-		b.WriteString(promptStyle().Render("Branch: ") + pathStyle().Render(m.pickedBranch) + "\n\n")
-		b.WriteString("  n  Create new branch from selected\n")
-		b.WriteString("  e  Use existing branch\n\n")
-		b.WriteString("  esc: back")
-		if m.err != "" {
-			b.WriteString("\n" + errStyle().Render(m.err))
-		}
-		return b.String()
-
-	default:
-		v := m.workspacePicker.View()
-		if m.err != "" {
-			v += "\n" + errStyle().Render(m.err)
-		}
-		return v
+func (m Model) submit() (Model, tea.Cmd) {
+	if m.submitting {
+		return m, nil
 	}
+	if m.row == nil {
+		m.status = ui.Status{Text: "pick a workspace first", Kind: ui.StatusError}
+		m.form = m.form.Focus(fieldWorkspace)
+		return m, nil
+	}
+	if m.row.Busy() {
+		m.status = ui.Status{Text: "waiting for branch info", Kind: ui.StatusWarning}
+		return m, nil
+	}
+	spec := provider.SessionWorkspaceSpec{WorkspaceID: m.row.Workspace.ID}
+	if branchfield.IsNewBranch(m.mode) {
+		spec.BaseBranch = m.row.Branch
+	} else {
+		spec.Branch = m.row.Branch
+	}
+	m.status = ui.Status{}
+	m.submitting = true
+	return m, provider.AddWorkspaceToSession(m.sessionID, spec)
 }
 
-func (m Model) CapturesText() bool {
-	return true
+func (m Model) View() string {
+	switch m.overlay {
+	case overlayWorkspace:
+		return ui.FitHeight(m.workspacePicker.View(), m.height)
+	case overlayBranch:
+		return ui.FitHeight(m.branchPicker.View(), m.height)
+	}
+	muted := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
+	focused := m.form.Focused()
+	wsValue := muted.Render("none — press enter to pick")
+	branchValue := muted.Render("—")
+	if m.row != nil {
+		wsValue = m.row.Workspace.Name
+		branchValue = m.row.BranchView()
+	}
+	fields := []ui.Field{
+		{Label: "Workspace", Value: wsValue},
+		{Label: "Branch", Value: branchValue},
+		{Label: "Mode", Value: m.mode.View(focused == fieldMode)},
+	}
+	return ui.FitHeight(m.form.View(fields, m.width), m.height)
 }

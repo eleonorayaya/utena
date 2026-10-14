@@ -1,165 +1,101 @@
 package sessionform
 
 import (
-	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tui/branchfield"
 	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
 	"github.com/eleonorayaya/utena/internal/tui/filepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
-func padToHeight(s string, h int) string {
-	if h <= 0 {
-		return s
-	}
-	n := strings.Count(s, "\n")
-	if n >= h {
-		return s
-	}
-	return s + strings.Repeat("\n", h-n)
-}
+const (
+	fieldWorkspaces = iota
+	fieldBranches
+	fieldMode
+	fieldName
+	fieldCount
+)
 
-func errStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
-func pathStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Path) }
-func formTitleStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Bold(true).Foreground(theme.Current.TextEmphasis)
-}
-func formRuleStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant)
-}
-func formSectionStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true)
-}
-func formLabelStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Width(14)
-}
-func formKeyStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true)
-}
-func formHintStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.Text) }
-
-type step int
+type overlay int
 
 const (
-	workspacePickerStep step = iota
-	filePickerStep
-	branchPickerStep
-	branchManualInputStep
-	branchModeStep
-	nameInputStep
+	overlayNone overlay = iota
+	overlayWorkspaces
+	overlayFiles
+	overlayBranch
 )
 
 type Model struct {
-	activeStep         step
-	workspacePicker    workspacepicker.Model
-	filePicker         filepicker.Model
-	branchPicker       branchpicker.Model
-	nameInput          textinput.Model
-	manualBranchInput  textinput.Model
-	selectedWorkspaces []workspace.Workspace
-	pickingForIndex    int
-	pickedBranches     []string
-	selectedDirPath    string
-	nameErr            string
-	manualBranchErr    string
-	pendingBranchCheck string
-	width, height      int
+	form            ui.Form
+	overlay         overlay
+	workspacePicker workspacepicker.Model
+	filePicker      filepicker.Model
+	branchPicker    branchpicker.Model
+	rows            []branchfield.Row
+	rowCursor       int
+	pickingRow      int
+	mode            ui.Choice
+	name            textinput.Model
+	nameErr         string
+	workspacesErr   string
+	status          ui.Status
+	submitting      bool
+	width, height   int
+}
+
+func newNameInput() textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.Width = 40
+	return ti
 }
 
 func New() Model {
 	return Model{
-		activeStep:        workspacePickerStep,
-		workspacePicker:   workspacepicker.New("Select workspaces", true),
-		branchPicker:      branchpicker.New(""),
-		nameInput:         textinput.New(),
-		manualBranchInput: textinput.New(),
+		form:            ui.NewForm("New session", fieldCount),
+		workspacePicker: workspacepicker.New("Workspaces", true),
+		branchPicker:    branchpicker.New(),
+		filePicker:      filepicker.New(),
+		mode:            branchfield.NewModeChoice(),
+		name:            newNameInput(),
 	}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
-	m.activeStep = workspacePickerStep
-	m.selectedWorkspaces = nil
-	m.pickingForIndex = 0
-	m.pickedBranches = nil
-	m.selectedDirPath = ""
+	m.form = m.form.Focus(fieldName)
+	m.rows = nil
+	m.rowCursor = 0
+	m.mode = branchfield.NewModeChoice()
+	m.name = newNameInput()
+	m.name.Width = ui.InputWidth(m.width, len("Workspaces")+2)
 	m.nameErr = ""
-	m.nameInput.SetValue("")
-	m.manualBranchErr = ""
-	m.manualBranchInput.SetValue("")
-	m.pendingBranchCheck = ""
-	return m, provider.FetchWorkspaces()
+	m.workspacesErr = ""
+	m.status = ui.Status{}
+	m.submitting = false
+	m.overlay = overlayWorkspaces
+	m.workspacePicker = m.workspacePicker.Open(nil)
+	return m, tea.Batch(provider.FetchWorkspaces(), provider.RequestWorkspacesState())
 }
 
 func (m *Model) SetSize(width, height int) {
-	m.width = width
-	m.height = height
+	m.width, m.height = width, height
+	m.name.Width = ui.InputWidth(width, len("Workspaces")+2)
 	m.workspacePicker.SetSize(width, height)
 	m.filePicker.SetSize(width, height)
 	m.branchPicker.SetSize(width, height)
-}
-
-func (m Model) Keys() help.KeyMap {
-	switch m.activeStep {
-	case workspacePickerStep:
-		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, workspacepicker.Keys}}
-	case filePickerStep:
-		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, filepicker.Keys}}
-	case branchPickerStep:
-		return mergedKeyMap{keymaps: []help.KeyMap{formKeys, branchpicker.Keys}}
-	case branchModeStep, branchManualInputStep:
-		return formKeys
-	default:
-		return formKeys
-	}
-}
-
-func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		return m.OnWindowSizeMsg(msg)
-	case provider.WorkspacesStateUpdatedMsg:
-		var cmd tea.Cmd
-		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
-		return m, cmd
-	case provider.ErrMsg:
-		m.nameErr = msg.Err.Error()
-		return m, nil
-	case provider.SessionCreatedMsg:
-		return m, tea.Sequence(
-			router.NavigateTo(router.SessionProgressView),
-			sessionprogress.Start(msg.ID),
-		)
-	case provider.BranchExistsCheckedMsg:
-		return m.onBranchExistsChecked(msg)
-	}
-
-	switch m.activeStep {
-	case workspacePickerStep:
-		return m.updateWorkspacePicker(msg)
-	case filePickerStep:
-		return m.updateFilePicker(msg)
-	case branchPickerStep:
-		return m.updateBranchPicker(msg)
-	case branchManualInputStep:
-		return m.updateBranchManualInput(msg)
-	case branchModeStep:
-		return m.updateBranchMode(msg)
-	case nameInputStep:
-		return m.updateNameInput(msg)
-	}
-	return m, nil
 }
 
 func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
@@ -171,55 +107,183 @@ func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m Model) currentWorkspace() workspace.Workspace {
-	if m.pickingForIndex < 0 || m.pickingForIndex >= len(m.selectedWorkspaces) {
-		return workspace.Workspace{}
+func (m Model) Keys() help.KeyMap {
+	switch m.overlay {
+	case overlayWorkspaces:
+		return m.workspacePicker.Keys()
+	case overlayFiles:
+		return m.filePicker.Keys()
+	case overlayBranch:
+		return m.branchPicker.Keys()
 	}
-	return m.selectedWorkspaces[m.pickingForIndex]
+	k := formKeys
+	onName := m.form.Focused() == fieldName
+	k.Create.SetEnabled(onName)
+	k.Edit.SetEnabled(!onName)
+	return k
 }
 
-func (m *Model) startBranchPicking(index int) tea.Cmd {
-	m.pickingForIndex = index
-	ws := m.selectedWorkspaces[index]
-	title := fmt.Sprintf("Select branch for %s (%d/%d)", ws.Name, index+1, len(m.selectedWorkspaces))
-	m.branchPicker = branchpicker.New(title)
-	m.branchPicker.SetSize(m.width, m.height)
-	m.activeStep = branchPickerStep
-	return provider.RequestBranches(ws.ID)
+func (m Model) Status() ui.Status {
+	switch m.overlay {
+	case overlayFiles:
+		if s := m.filePicker.Status(); !s.Empty() {
+			return s
+		}
+	case overlayBranch:
+		if s := m.branchPicker.Status(); !s.Empty() {
+			return s
+		}
+	}
+	return m.status
+}
+
+func (m Model) CapturesText() bool {
+	switch m.overlay {
+	case overlayWorkspaces:
+		return m.workspacePicker.CapturesText()
+	case overlayFiles:
+		return m.filePicker.CapturesText()
+	case overlayBranch:
+		return m.branchPicker.CapturesText()
+	}
+	return m.form.Focused() == fieldName || m.editingRow() >= 0
+}
+
+func (m Model) editingRow() int {
+	return slices.IndexFunc(m.rows, func(r branchfield.Row) bool { return r.Editing })
+}
+
+func (m Model) rowIndex(wsID uint) int {
+	return slices.IndexFunc(m.rows, func(r branchfield.Row) bool { return r.Workspace.ID == wsID })
+}
+
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m.OnWindowSizeMsg(msg)
+	case provider.WorkspacesStateUpdatedMsg:
+		var cmd tea.Cmd
+		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
+		return m, cmd
+	case provider.BranchesLoadedMsg:
+		if i := m.rowIndex(msg.WorkspaceID); i >= 0 {
+			m.rows[i] = m.rows[i].Loaded(msg)
+		}
+		var cmd tea.Cmd
+		m.branchPicker, cmd = m.branchPicker.Update(msg)
+		return m, cmd
+	case provider.BranchesFetchedMsg:
+		var cmd tea.Cmd
+		m.branchPicker, cmd = m.branchPicker.Update(msg)
+		return m, cmd
+	case provider.BranchExistsCheckedMsg:
+		if i := m.rowIndex(msg.WorkspaceID); i >= 0 {
+			m.rows[i] = m.rows[i].Checked(msg)
+		}
+		return m, nil
+	case provider.ErrMsg:
+		m.submitting = false
+		m.status = ui.Status{Text: msg.Err.Error(), Kind: ui.StatusError}
+		return m, nil
+	case provider.SessionCreatedMsg:
+		m.submitting = false
+		return m, tea.Sequence(router.NavigateTo(router.SessionProgressView), sessionprogress.Start(msg.ID))
+	}
+
+	switch m.overlay {
+	case overlayWorkspaces:
+		return m.updateWorkspacePicker(msg)
+	case overlayFiles:
+		return m.updateFilePicker(msg)
+	case overlayBranch:
+		return m.updateBranchPicker(msg)
+	}
+
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		return m.onPageKey(keyMsg)
+	}
+	if m.form.Focused() == fieldName {
+		var cmd tea.Cmd
+		m.name, cmd = m.name.Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m Model) openWorkspacePicker() Model {
+	ids := make([]uint, len(m.rows))
+	for i, r := range m.rows {
+		ids[i] = r.Workspace.ID
+	}
+	m.workspacePicker = m.workspacePicker.Open(ids)
+	m.overlay = overlayWorkspaces
+	m.status = ui.Status{}
+	return m
+}
+
+func (m Model) openBranchPicker(i int) Model {
+	r := m.rows[i]
+	m.pickingRow = i
+	m.branchPicker = m.branchPicker.Open("Branch for "+r.Workspace.Name, r.Workspace.ID, r.Local, r.DefaultBranch, r.Branch)
+	m.overlay = overlayBranch
+	return m
+}
+
+func (m Model) setRows(picked []workspace.Workspace) (Model, tea.Cmd) {
+	var rows []branchfield.Row
+	var cmds []tea.Cmd
+	for _, ws := range picked {
+		if i := m.rowIndex(ws.ID); i >= 0 {
+			rows = append(rows, m.rows[i])
+			continue
+		}
+		rows = append(rows, branchfield.NewRow(ws))
+		cmds = append(cmds, provider.RequestBranches(ws.ID))
+	}
+	m.rows = rows
+	m.rowCursor = min(m.rowCursor, max(len(rows)-1, 0))
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) focus(field int) (Model, tea.Cmd) {
+	m.form = m.form.Focus(field)
+	if field == fieldName {
+		return m, m.name.Focus()
+	}
+	m.name.Blur()
+	return m, nil
 }
 
 func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case workspacepicker.SelectedMsg:
-		picked := msg.Workspaces
-		if len(picked) == 0 {
-			picked = []workspace.Workspace{msg.Workspace}
-		}
-		for _, ws := range picked {
+		for _, ws := range msg.Workspaces {
 			if !ws.IsGitRepo {
-				m.nameErr = "selected workspace is not a git repository — sessions require a git workspace"
+				m.status = ui.Status{Text: ws.Name + " is not a git repository", Kind: ui.StatusError}
 				return m, nil
 			}
 		}
-		m.selectedWorkspaces = picked
-		m.pickedBranches = make([]string, len(picked))
-		m.nameErr = ""
-		return m, m.startBranchPicking(0)
-
+		m.overlay = overlayNone
+		m.workspacesErr = ""
+		m.status = ui.Status{}
+		var rowsCmd, focusCmd tea.Cmd
+		m, rowsCmd = m.setRows(msg.Workspaces)
+		m.name.Placeholder = defaultSessionName(msg.Workspaces[0].Name)
+		m, focusCmd = m.focus(fieldName)
+		return m, tea.Batch(rowsCmd, focusCmd)
 	case workspacepicker.AddDirectoryMsg:
-		m.activeStep = filePickerStep
 		m.filePicker = filepicker.New()
 		m.filePicker.SetSize(m.width, m.height)
-		var cmd tea.Cmd
-		m.filePicker, cmd = m.filePicker.Init()
-		return m, cmd
-
+		m.filePicker, _ = m.filePicker.Init()
+		m.overlay = overlayFiles
+		return m, nil
 	case tea.KeyMsg:
-		if key.Matches(msg, formKeys.Back) {
-			return m, router.Back()
+		if msg.Type == tea.KeyEsc && !m.workspacePicker.Filtering() {
+			m.overlay = overlayNone
+			m.status = ui.Status{}
+			return m, nil
 		}
 	}
-
 	var cmd tea.Cmd
 	m.workspacePicker, cmd = m.workspacePicker.Update(msg)
 	return m, cmd
@@ -228,17 +292,14 @@ func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) updateFilePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case filepicker.DirectorySelectedMsg:
-		m.selectedDirPath = msg.Path
-		m.activeStep = workspacePickerStep
+		m.overlay = overlayWorkspaces
 		return m, provider.AddWorkspace(msg.Path, true)
-
 	case tea.KeyMsg:
-		if key.Matches(msg, formKeys.Back) {
-			m.activeStep = workspacePickerStep
+		if msg.Type == tea.KeyEsc && !m.filePicker.Filtering() {
+			m.overlay = overlayWorkspaces
 			return m, nil
 		}
 	}
-
 	var cmd tea.Cmd
 	m.filePicker, cmd = m.filePicker.Update(msg)
 	return m, cmd
@@ -247,231 +308,180 @@ func (m Model) updateFilePicker(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case branchpicker.SelectedMsg:
-		m.pickedBranches[m.pickingForIndex] = msg.Branch
-		if m.pickingForIndex+1 < len(m.selectedWorkspaces) {
-			return m, m.startBranchPicking(m.pickingForIndex + 1)
-		}
-		m.activeStep = branchModeStep
-		return m, nil
-
+		m.rows[m.pickingRow] = m.rows[m.pickingRow].Pick(msg.Branch)
+		m.overlay = overlayNone
+		m.rowCursor = m.pickingRow
+		return m.focus(fieldBranches)
 	case branchpicker.FetchRequestedMsg:
-		var cmd tea.Cmd
-		m.branchPicker, cmd = m.branchPicker.Update(msg)
-		return m, tea.Batch(cmd, provider.FetchOriginBranches(m.currentWorkspace().ID))
-
+		return m, provider.FetchOriginBranches(m.branchPicker.WorkspaceID())
 	case branchpicker.ManualEntryRequestedMsg:
-		m.initManualBranchInput()
-		m.activeStep = branchManualInputStep
-		return m, m.manualBranchInput.Focus()
-
-	case provider.BranchesFetchedMsg:
+		m.overlay = overlayNone
+		m.rowCursor = m.pickingRow
+		m, _ = m.focus(fieldBranches)
 		var cmd tea.Cmd
-		m.branchPicker, cmd = m.branchPicker.Update(msg)
+		m.rows[m.pickingRow], cmd = m.rows[m.pickingRow].StartManual()
 		return m, cmd
-
 	case tea.KeyMsg:
-		if key.Matches(msg, formKeys.Back) {
-			if m.pickingForIndex == 0 {
-				m.activeStep = workspacePickerStep
-				m.pickedBranches = nil
-				return m, provider.RequestWorkspacesState()
-			}
-			return m, m.startBranchPicking(m.pickingForIndex - 1)
+		if msg.Type == tea.KeyEsc && !m.branchPicker.Filtering() {
+			m.overlay = overlayNone
+			return m, nil
 		}
 	}
-
 	var cmd tea.Cmd
 	m.branchPicker, cmd = m.branchPicker.Update(msg)
 	return m, cmd
 }
 
-func (m Model) updateBranchManualInput(msg tea.Msg) (Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, formKeys.Submit):
-			name := strings.TrimSpace(m.manualBranchInput.Value())
-			if name == "" {
-				m.manualBranchErr = "branch name required"
-				return m, nil
-			}
-			m.manualBranchErr = ""
-			m.pendingBranchCheck = name
-			return m, provider.CheckBranchExists(m.currentWorkspace().ID, name)
-		case key.Matches(msg, formKeys.Back):
-			m.activeStep = branchPickerStep
-			m.manualBranchErr = ""
-			m.pendingBranchCheck = ""
+func (m Model) onPageKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if i := m.editingRow(); i >= 0 {
+		var cmd tea.Cmd
+		m.rows[i], cmd = m.rows[i].UpdateManual(msg)
+		return m, cmd
+	}
+
+	field := m.form.Focused()
+	switch msg.String() {
+	case "esc":
+		return m, router.Back()
+	case "tab":
+		return m.focus(min(field+1, fieldCount-1))
+	case "shift+tab":
+		return m.focus(max(field-1, 0))
+	case "down":
+		if field == fieldBranches && m.rowCursor < len(m.rows)-1 {
+			m.rowCursor++
 			return m, nil
+		}
+		if field == fieldWorkspaces {
+			m.rowCursor = 0
+		}
+		return m.focus(min(field+1, fieldCount-1))
+	case "up":
+		if field == fieldBranches && m.rowCursor > 0 {
+			m.rowCursor--
+			return m, nil
+		}
+		if field == fieldMode {
+			m.rowCursor = max(len(m.rows)-1, 0)
+		}
+		return m.focus(max(field-1, 0))
+	case "enter":
+		switch field {
+		case fieldWorkspaces:
+			return m.openWorkspacePicker(), nil
+		case fieldBranches:
+			if len(m.rows) == 0 {
+				return m.openWorkspacePicker(), nil
+			}
+			return m.openBranchPicker(m.rowCursor), nil
+		case fieldMode:
+			m.mode, _ = m.mode.Update(tea.KeyMsg{Type: tea.KeySpace})
+			return m, nil
+		case fieldName:
+			return m.submit()
 		}
 	}
 
-	var cmd tea.Cmd
-	m.manualBranchInput, cmd = m.manualBranchInput.Update(msg)
-	return m, cmd
-}
-
-func (m Model) onBranchExistsChecked(msg provider.BranchExistsCheckedMsg) (Model, tea.Cmd) {
-	if m.activeStep != branchManualInputStep || m.pendingBranchCheck == "" || msg.Name != m.pendingBranchCheck {
+	switch field {
+	case fieldMode:
+		m.mode, _ = m.mode.Update(msg)
 		return m, nil
+	case fieldName:
+		var cmd tea.Cmd
+		m.name, cmd = m.name.Update(msg)
+		m.nameErr = ""
+		return m, cmd
 	}
-	m.pendingBranchCheck = ""
-	if msg.Err != nil {
-		m.manualBranchErr = msg.Err.Error()
-		return m, nil
-	}
-	if !msg.ExistsLocal && !msg.ExistsRemote {
-		m.manualBranchErr = "branch not found: " + msg.Name
-		return m, nil
-	}
-	m.manualBranchErr = ""
-	m.pickedBranches[m.pickingForIndex] = msg.Name
-	if m.pickingForIndex+1 < len(m.selectedWorkspaces) {
-		return m, m.startBranchPicking(m.pickingForIndex + 1)
-	}
-	m.activeStep = branchModeStep
 	return m, nil
 }
 
-func (m Model) updateBranchMode(msg tea.Msg) (Model, tea.Cmd) {
-	if msg, ok := msg.(tea.KeyMsg); ok {
-		switch msg.String() {
-		case "n":
-			m.activeStep = nameInputStep
-			m.initNameInput()
-			return m, m.nameInput.Focus()
-		case "e":
-			return m, provider.CreateSession("", buildSpecs(m.selectedWorkspaces, m.pickedBranches, false))
-		case "esc":
-			return m, m.startBranchPicking(len(m.selectedWorkspaces) - 1)
-		}
+func (m Model) submit() (Model, tea.Cmd) {
+	if m.submitting {
+		return m, nil
 	}
-	return m, nil
-}
-
-func (m Model) updateNameInput(msg tea.Msg) (Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, formKeys.Submit):
-			name := m.nameInput.Value()
-			if name == "" {
-				name = m.nameInput.Placeholder
-			}
-			if err := session.ValidateSessionName(name); err != nil {
-				m.nameErr = err.Error()
-				return m, nil
-			}
-			return m, provider.CreateSession(name, buildSpecs(m.selectedWorkspaces, m.pickedBranches, true))
-		case key.Matches(msg, formKeys.Back):
-			m.activeStep = branchModeStep
-			m.nameErr = ""
+	if len(m.rows) == 0 {
+		m.workspacesErr = "pick at least one workspace"
+		return m.focus(fieldWorkspaces)
+	}
+	for _, r := range m.rows {
+		if r.Busy() {
+			m.status = ui.Status{Text: "waiting for branch info", Kind: ui.StatusWarning}
 			return m, nil
 		}
 	}
-
-	var cmd tea.Cmd
-	m.nameInput, cmd = m.nameInput.Update(msg)
-	return m, cmd
-}
-
-func (m *Model) initNameInput() {
-	ti := textinput.New()
-	ti.Prompt = "Session name: "
-	if len(m.selectedWorkspaces) > 0 {
-		ti.Placeholder = defaultSessionName(m.selectedWorkspaces[0].Name)
+	isNew := branchfield.IsNewBranch(m.mode)
+	name := strings.TrimSpace(m.name.Value())
+	if name == "" && isNew {
+		name = m.name.Placeholder
 	}
-	m.nameInput = ti
+	if name != "" {
+		if err := session.ValidateSessionName(name); err != nil {
+			m.nameErr = err.Error()
+			return m, nil
+		}
+	}
 	m.nameErr = ""
+	m.status = ui.Status{}
+	m.submitting = true
+	return m, provider.CreateSession(name, buildSpecs(m.rows, isNew))
 }
 
-func (m *Model) initManualBranchInput() {
-	ti := textinput.New()
-	ti.Prompt = "Branch name: "
-	m.manualBranchInput = ti
-	m.manualBranchErr = ""
-	m.pendingBranchCheck = ""
-}
-
-func (m Model) View() string {
-	switch m.activeStep {
-	case filePickerStep:
-		return padToHeight(strings.TrimRight(m.filePicker.View(), "\n"), m.height-1)
-	case branchPickerStep:
-		return padToHeight(strings.TrimRight(m.branchPicker.View(), "\n"), m.height-1)
-	case branchManualInputStep:
-		var b strings.Builder
-		ws := m.currentWorkspace()
-		fmt.Fprintf(&b, "Enter a branch name for %s (local or remote)\n\n", pathStyle().Render(ws.Name))
-		b.WriteString(m.manualBranchInput.View())
-		if m.pendingBranchCheck != "" {
-			b.WriteString("\n\nchecking…")
+func buildSpecs(rows []branchfield.Row, isNew bool) []provider.SessionWorkspaceSpec {
+	out := make([]provider.SessionWorkspaceSpec, len(rows))
+	for i, r := range rows {
+		out[i].WorkspaceID = r.Workspace.ID
+		if isNew {
+			out[i].BaseBranch = r.Branch
+		} else {
+			out[i].Branch = r.Branch
 		}
-		if m.manualBranchErr != "" {
-			b.WriteString("\n" + errStyle().Render(m.manualBranchErr))
-		}
-		return padToHeight(b.String(), m.height-1)
-	case branchModeStep:
-		var b strings.Builder
-		ruleW := m.width
-		if ruleW < 1 {
-			ruleW = 40
-		}
-		b.WriteString(formTitleStyle().Render("New Session"))
-		b.WriteString("\n")
-		b.WriteString(formRuleStyle().Render(strings.Repeat("─", ruleW)))
-		b.WriteString("\n\n")
-		b.WriteString(formSectionStyle().Render("⎇ Branches") + "\n")
-		for i, ws := range m.selectedWorkspaces {
-			b.WriteString(formLabelStyle().Render(ws.Name) + pathStyle().Render(m.pickedBranches[i]) + "\n")
-		}
-		b.WriteString("\n" + formSectionStyle().Render("Mode") + "\n")
-		b.WriteString(formKeyStyle().Render("n") + "  " + formHintStyle().Render("create new branch from picked") + "\n")
-		b.WriteString(formKeyStyle().Render("e") + "  " + formHintStyle().Render("use existing branches as-is") + "\n")
-		b.WriteString(formKeyStyle().Render("esc") + "  " + formHintStyle().Render("back") + "\n")
-		return padToHeight(b.String(), m.height-1)
-	case nameInputStep:
-		var b strings.Builder
-		ruleW := m.width
-		if ruleW < 1 {
-			ruleW = 40
-		}
-		b.WriteString(formTitleStyle().Render("New Session"))
-		b.WriteString("\n")
-		b.WriteString(formRuleStyle().Render(strings.Repeat("─", ruleW)))
-		b.WriteString("\n\n")
-		b.WriteString(formSectionStyle().Render("⎇ Branches") + "\n")
-		for i, ws := range m.selectedWorkspaces {
-			b.WriteString(formLabelStyle().Render(ws.Name) + pathStyle().Render(m.pickedBranches[i]) + "\n")
-		}
-		b.WriteString("\n")
-		b.WriteString(m.nameInput.View())
-		if m.nameErr != "" {
-			b.WriteString("\n" + errStyle().Render(m.nameErr))
-		}
-		return padToHeight(b.String(), m.height-1)
-	default:
-		return padToHeight(strings.TrimRight(m.workspacePicker.View(), "\n"), m.height-1)
 	}
+	return out
 }
 
 func defaultSessionName(workspaceName string) string {
 	return strings.ToLower(strings.ReplaceAll(workspaceName, " ", "-"))
 }
 
-func buildSpecs(wss []workspace.Workspace, branches []string, isNew bool) []provider.SessionWorkspaceSpec {
-	out := make([]provider.SessionWorkspaceSpec, len(wss))
-	for i, ws := range wss {
-		out[i].WorkspaceID = ws.ID
-		if isNew {
-			out[i].BaseBranch = branches[i]
-		} else {
-			out[i].Branch = branches[i]
-		}
+func (m Model) fields() []ui.Field {
+	muted := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
+	focused := m.form.Focused()
+
+	names := make([]string, len(m.rows))
+	for i, r := range m.rows {
+		names[i] = r.Workspace.Name
 	}
-	return out
+	wsValue := strings.Join(names, ", ")
+	if wsValue == "" {
+		wsValue = muted.Render("none — press enter to pick")
+	}
+
+	branches := branchfield.RowsView(m.rows, m.rowCursor, focused == fieldBranches, max(m.width/3, 8))
+	if branches == "" {
+		branches = muted.Render("—")
+	}
+
+	nameHint := ""
+	if !branchfield.IsNewBranch(m.mode) {
+		nameHint = "optional — derived from the branch when empty"
+	}
+
+	return []ui.Field{
+		{Label: "Workspaces", Value: wsValue, Error: m.workspacesErr},
+		{Label: "Branches", Value: branches},
+		{Label: "Mode", Value: m.mode.View(focused == fieldMode)},
+		{Label: "Name", Value: m.name.View(), Error: m.nameErr, Hint: nameHint},
+	}
 }
 
-func (m Model) CapturesText() bool {
-	return true
+func (m Model) View() string {
+	switch m.overlay {
+	case overlayWorkspaces:
+		return ui.FitHeight(m.workspacePicker.View(), m.height)
+	case overlayFiles:
+		return ui.FitHeight(m.filePicker.View(), m.height)
+	case overlayBranch:
+		return ui.FitHeight(m.branchPicker.View(), m.height)
+	}
+	return ui.FitHeight(m.form.View(m.fields(), m.width), m.height)
 }

@@ -42,15 +42,17 @@ func TestApp_QuestionMarkTogglesFullHelp(t *testing.T) {
 }
 
 func TestApp_QuestionMarkIsTypedInTextForms(t *testing.T) {
-	a := sized(t, router.SessionFormView, 120, 30)
+	a := sized(t, router.WorkspaceCloneFormView, 120, 30)
 	m, _ := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	assert.False(t, m.(App).help.full)
 }
 
-func TestApp_QuestionMarkIsTypedInAddWorkspaceForm(t *testing.T) {
-	a := sized(t, router.AddWorkspaceFormView, 120, 30)
-	m, _ := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
-	assert.False(t, m.(App).help.full)
+func TestApp_QuestionMarkOpensHelpInFormPickers(t *testing.T) {
+	for _, v := range []router.View{router.SessionFormView, router.AddWorkspaceFormView} {
+		a := sized(t, v, 120, 30)
+		m, _ := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+		assert.True(t, m.(App).help.full, "view %v", v)
+	}
 }
 
 func TestApp_TinySplitWindowDoesNotPanic(t *testing.T) {

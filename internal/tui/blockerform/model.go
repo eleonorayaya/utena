@@ -7,11 +7,10 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
-	"github.com/eleonorayaya/utena/internal/tui/theme"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
 
 const (
@@ -22,14 +21,15 @@ const (
 )
 
 type Model struct {
-	sessionID uint
-	kindIdx   int
-	focus     int
-	note      textinput.Model
-	url       textinput.Model
-	err       string
-	width     int
-	height    int
+	sessionID  uint
+	form       ui.Form
+	kindChoice ui.Choice
+	note       textinput.Model
+	url        textinput.Model
+	status     ui.Status
+	submitting bool
+	width      int
+	height     int
 }
 
 type StartMsg struct {
@@ -40,16 +40,26 @@ func Start(sessionID uint) tea.Cmd {
 	return func() tea.Msg { return StartMsg{SessionID: sessionID} }
 }
 
+func kindOptions() []string {
+	out := make([]string, len(session.BlockerKinds))
+	for i, k := range session.BlockerKinds {
+		out[i] = string(k)
+	}
+	return out
+}
+
 func New() Model {
 	note := textinput.New()
-	note.Prompt = "Note: "
-	note.Placeholder = "optional — what are you waiting on?"
+	note.Prompt = ""
+	note.Placeholder = "what are you waiting on?"
+	note.Width = 40
 
 	url := textinput.New()
-	url.Prompt = "URL:  "
-	url.Placeholder = "optional — PR or Slack link"
+	url.Prompt = ""
+	url.Placeholder = "PR or Slack link"
+	url.Width = 40
 
-	return Model{note: note, url: url}
+	return Model{form: ui.NewForm("Add blocker", fieldCount), kindChoice: ui.Choice{Options: kindOptions()}, note: note, url: url}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
@@ -59,9 +69,10 @@ func (m Model) Init() (Model, tea.Cmd) {
 }
 
 func (m *Model) reset() {
-	m.kindIdx = 0
-	m.focus = kindField
-	m.err = ""
+	m.form = m.form.Focus(kindField)
+	m.kindChoice.Selected = 0
+	m.status = ui.Status{}
+	m.submitting = false
 	m.note.SetValue("")
 	m.url.SetValue("")
 	m.note.Blur()
@@ -69,38 +80,49 @@ func (m *Model) reset() {
 }
 
 func (m Model) Keys() help.KeyMap {
-	return keys
+	k := keys
+	k.Kind.SetEnabled(m.form.Focused() == kindField)
+	return k
+}
+
+func (m Model) Status() ui.Status {
+	return m.status
 }
 
 func (m Model) kind() session.BlockerKind {
-	return session.BlockerKinds[m.kindIdx]
+	return session.BlockerKinds[m.kindChoice.Selected]
 }
 
-func (m *Model) setFocus(f int) {
-	m.focus = (f + fieldCount) % fieldCount
+func (m *Model) setFocus(f int) tea.Cmd {
+	m.form = m.form.Focus(f)
 	m.note.Blur()
 	m.url.Blur()
-	switch m.focus {
+	switch m.form.Focused() {
 	case noteField:
-		m.note.Focus()
+		return m.note.Focus()
 	case urlField:
-		m.url.Focus()
+		return m.url.Focus()
 	}
+	return nil
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.note.Width = ui.InputWidth(msg.Width, len("Note")+2)
+		m.url.Width = m.note.Width
 		return m, nil
 	case StartMsg:
 		m.sessionID = msg.SessionID
 		m.reset()
 		return m, nil
 	case provider.BlockerAddedMsg:
+		m.submitting = false
 		return m, router.Back()
 	case provider.ErrMsg:
-		m.err = msg.Err.Error()
+		m.submitting = false
+		m.status = ui.Status{Text: msg.Err.Error(), Kind: ui.StatusError}
 		return m, nil
 	case tea.KeyMsg:
 		return m.onKey(msg)
@@ -113,65 +135,40 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.Back):
 		return m, router.Back()
 	case key.Matches(msg, keys.Submit):
-		if m.sessionID == 0 {
+		if m.sessionID == 0 || m.submitting {
 			return m, nil
 		}
+		m.submitting = true
+		m.status = ui.Status{}
 		return m, provider.AddBlocker(m.sessionID, m.kind(),
 			strings.TrimSpace(m.note.Value()), strings.TrimSpace(m.url.Value()))
 	case key.Matches(msg, keys.Next):
-		m.setFocus(m.focus + 1)
-		return m, nil
+		return m, m.setFocus(m.form.Focused() + 1)
 	case key.Matches(msg, keys.Prev):
-		m.setFocus(m.focus - 1)
-		return m, nil
-	}
-
-	if m.focus == kindField {
-		n := len(session.BlockerKinds)
-		switch {
-		case key.Matches(msg, keys.KindNext):
-			m.kindIdx = (m.kindIdx + 1) % n
-		case key.Matches(msg, keys.KindPrev):
-			m.kindIdx = (m.kindIdx - 1 + n) % n
-		}
-		return m, nil
+		return m, m.setFocus(m.form.Focused() - 1)
 	}
 
 	var cmd tea.Cmd
-	if m.focus == noteField {
+	switch m.form.Focused() {
+	case kindField:
+		m.kindChoice, _ = m.kindChoice.Update(msg)
+	case noteField:
 		m.note, cmd = m.note.Update(msg)
-	} else {
+	case urlField:
 		m.url, cmd = m.url.Update(msg)
 	}
 	return m, cmd
 }
 
 func (m Model) View() string {
-	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true).Render("Add blocker"))
-	b.WriteString("\n\n")
-
-	var kinds []string
-	for i, k := range session.BlockerKinds {
-		style := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
-		if i == m.kindIdx {
-			style = lipgloss.NewStyle().Foreground(theme.Current.TextEmphasis).Bold(true)
-			if m.focus == kindField {
-				style = style.Underline(true)
-			}
-		}
-		kinds = append(kinds, style.Render(string(k)))
+	fields := []ui.Field{
+		{Label: "Kind", Value: m.kindChoice.View(m.form.Focused() == kindField)},
+		{Label: "Note", Value: m.note.View()},
+		{Label: "URL", Value: m.url.View()},
 	}
-	b.WriteString("Kind: " + strings.Join(kinds, "  ") + "\n")
-	b.WriteString(m.note.View() + "\n")
-	b.WriteString(m.url.View() + "\n")
-
-	if m.err != "" {
-		b.WriteString("\n" + lipgloss.NewStyle().Foreground(theme.Current.Error).Render(m.err) + "\n")
-	}
-	return b.String()
+	return ui.FitHeight(m.form.View(fields, m.width), m.height)
 }
 
 func (m Model) CapturesText() bool {
-	return true
+	return m.form.Focused() != kindField
 }

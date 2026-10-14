@@ -7,25 +7,29 @@ import (
 
 type keyMap struct {
 	CloneFromURL key.Binding
-	Delete       key.Binding
+	Migrate      key.Binding
 	Hide         key.Binding
+	Delete       key.Binding
 	ToggleHidden key.Binding
+	Filter       key.Binding
 	Back         key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.CloneFromURL, k.Hide, k.ToggleHidden, k.Delete, k.Back}
+	return []key.Binding{k.CloneFromURL, k.Migrate, k.Hide, k.Delete}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.CloneFromURL, k.Hide, k.ToggleHidden, k.Delete, k.Back}}
+	return [][]key.Binding{{k.CloneFromURL, k.Migrate, k.Hide, k.Delete, k.ToggleHidden, k.Filter, k.Back}}
 }
 
 var keys = keyMap{
-	CloneFromURL: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clone from URL")),
-	Delete:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+	CloneFromURL: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clone")),
+	Migrate:      key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "migrate")),
 	Hide:         key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "hide")),
+	Delete:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 	ToggleHidden: key.NewBinding(key.WithKeys("."), key.WithHelp(".", "show hidden")),
+	Filter:       key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 	Back:         key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 }
 

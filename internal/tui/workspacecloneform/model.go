@@ -1,7 +1,6 @@
 package workspacecloneform
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -14,71 +13,84 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
 
-func titleStyle() lipgloss.Style { return lipgloss.NewStyle().Bold(true) }
-func errStyle() lipgloss.Style   { return lipgloss.NewStyle().Foreground(theme.Current.Error) }
-func pathStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(theme.Current.Path) }
-func pendingStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(theme.Current.StatusPending)
-}
-func helpStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.Current.StatusPending) }
-
-type focusTarget int
-
 const (
-	focusURL focusTarget = iota
-	focusDirName
+	urlField = iota
+	dirField
+	rootField
 )
 
 type Model struct {
+	form         ui.Form
 	urlInput     textinput.Model
 	dirNameInput textinput.Model
 	roots        []string
 	rootsLoaded  bool
 	rootsErr     error
-	rootIndex    int
-	focus        focusTarget
+	root         ui.Choice
 	cloning      bool
-	errMsg       string
+	urlErr       string
+	status       ui.Status
 	width        int
 	height       int
 }
 
 func New() Model {
 	url := textinput.New()
-	url.Prompt = "Clone URL: "
+	url.Prompt = ""
 	url.Placeholder = "git@github.com:org/repo.git"
 	url.CharLimit = 512
+	url.Width = 40
 
 	dirName := textinput.New()
-	dirName.Prompt = "Directory name (optional): "
+	dirName.Prompt = ""
 	dirName.Placeholder = "derived from URL"
 	dirName.CharLimit = 128
+	dirName.Width = 40
 
-	return Model{urlInput: url, dirNameInput: dirName}
+	return Model{form: ui.NewForm("Clone workspace", 2), urlInput: url, dirNameInput: dirName}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
 	m.urlInput.SetValue("")
 	m.dirNameInput.SetValue("")
+	m.dirNameInput.Blur()
 	m.roots = nil
 	m.rootsLoaded = false
 	m.rootsErr = nil
-	m.rootIndex = 0
-	m.focus = focusURL
+	m.root = ui.Choice{}
+	m.form = ui.NewForm("Clone workspace", 2)
 	m.cloning = false
-	m.errMsg = ""
+	m.urlErr = ""
+	m.status = ui.Status{}
 	return m, tea.Batch(m.urlInput.Focus(), provider.FetchWorkspaceRoots())
 }
 
 func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
+	m.urlInput.Width = ui.InputWidth(width, len("Directory")+2)
+	m.dirNameInput.Width = m.urlInput.Width
 }
 
 func (m Model) Keys() help.KeyMap {
-	return keys
+	k := keys
+	k.Root.SetEnabled(m.form.Focused() == rootField)
+	return k
+}
+
+func (m Model) Status() ui.Status {
+	switch {
+	case m.cloning:
+		return ui.Status{Text: "cloning…"}
+	case m.rootsErr != nil:
+		return ui.Status{Text: "failed to load roots: " + m.rootsErr.Error(), Kind: ui.StatusError}
+	case m.rootsLoaded && len(m.roots) == 0:
+		return ui.Status{Text: "no workspace roots configured — add one to ~/.config/utena/config.json first", Kind: ui.StatusError}
+	}
+	return m.status
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -94,19 +106,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.roots = msg.Roots
-		if m.rootIndex >= len(m.roots) {
-			m.rootIndex = 0
+		m.root = ui.Choice{Options: m.roots}
+		fields := 2
+		if len(m.roots) > 1 {
+			fields = 3
 		}
+		focus := m.form.Focused()
+		m.form = ui.NewForm("Clone workspace", fields).Focus(focus)
 		return m, nil
 
 	case provider.WorkspaceClonedMsg:
 		m.cloning = false
 		if msg.Err != nil {
-			m.errMsg = msg.Err.Error()
+			m.urlErr = msg.Err.Error()
 			return m, nil
 		}
-		// The workspace now exists in the "cloning" state; the list view shows
-		// its progress. Return there.
 		return m, router.Back()
 
 	case tea.KeyMsg:
@@ -126,19 +140,13 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Submit):
 		return m.submit()
-	case key.Matches(msg, keys.NextField), key.Matches(msg, keys.PrevField):
-		var cmd tea.Cmd
-		m, cmd = m.toggleFocus()
-		return m, cmd
-	case key.Matches(msg, keys.NextRoot):
-		if len(m.roots) > 1 {
-			m.rootIndex = (m.rootIndex + 1) % len(m.roots)
-		}
-		return m, nil
-	case key.Matches(msg, keys.PrevRoot):
-		if len(m.roots) > 1 {
-			m.rootIndex = (m.rootIndex - 1 + len(m.roots)) % len(m.roots)
-		}
+	case key.Matches(msg, keys.NextField):
+		return m.setFocus(m.form.Focused() + 1)
+	case key.Matches(msg, keys.PrevField):
+		return m.setFocus(m.form.Focused() - 1)
+	}
+	if m.form.Focused() == rootField {
+		m.root, _ = m.root.Update(msg)
 		return m, nil
 	}
 	return m.routeInput(msg)
@@ -146,85 +154,65 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) routeInput(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
-	switch m.focus {
-	case focusURL:
+	switch m.form.Focused() {
+	case urlField:
 		m.urlInput, cmd = m.urlInput.Update(msg)
-	case focusDirName:
+		if _, ok := msg.(tea.KeyMsg); ok {
+			m.urlErr = ""
+		}
+	case dirField:
 		m.dirNameInput, cmd = m.dirNameInput.Update(msg)
 	}
 	return m, cmd
 }
 
-func (m Model) toggleFocus() (Model, tea.Cmd) {
-	if m.focus == focusURL {
-		m.focus = focusDirName
-		m.urlInput.Blur()
+func (m Model) setFocus(f int) (Model, tea.Cmd) {
+	m.form = m.form.Focus(f)
+	m.urlInput.Blur()
+	m.dirNameInput.Blur()
+	switch m.form.Focused() {
+	case urlField:
+		return m, m.urlInput.Focus()
+	case dirField:
 		return m, m.dirNameInput.Focus()
 	}
-	m.focus = focusURL
-	m.dirNameInput.Blur()
-	return m, m.urlInput.Focus()
+	return m, nil
 }
 
 func (m Model) submit() (Model, tea.Cmd) {
 	url := strings.TrimSpace(m.urlInput.Value())
 	if url == "" {
-		m.errMsg = "clone URL is required"
+		m.urlErr = "clone URL is required"
 		return m, nil
 	}
 	if !m.rootsLoaded {
-		m.errMsg = "still loading workspace roots…"
+		m.status = ui.Status{Text: "still loading workspace roots…", Kind: ui.StatusWarning}
 		return m, nil
 	}
 	if len(m.roots) == 0 {
-		m.errMsg = "no workspace roots configured — add one to ~/.config/utena/config.json first"
 		return m, nil
 	}
-	rootPath := m.roots[m.rootIndex]
 	dirName := strings.TrimSpace(m.dirNameInput.Value())
-	m.errMsg = ""
+	m.urlErr = ""
+	m.status = ui.Status{}
 	m.cloning = true
-	return m, provider.CloneWorkspace(url, rootPath, dirName)
+	return m, provider.CloneWorkspace(url, m.root.Value(), dirName)
 }
 
 func (m Model) View() string {
-	var b strings.Builder
-	b.WriteString(titleStyle().Render("Clone workspace from URL"))
-	b.WriteString("\n\n")
-	b.WriteString(m.urlInput.View())
-	b.WriteString("\n")
-	b.WriteString(m.dirNameInput.View())
-	b.WriteString("\n\n")
-
-	switch {
-	case !m.rootsLoaded:
-		b.WriteString(pendingStyle().Render("Loading workspace roots…"))
-	case m.rootsErr != nil:
-		b.WriteString(errStyle().Render("Failed to load roots: " + m.rootsErr.Error()))
-	case len(m.roots) == 0:
-		b.WriteString(errStyle().Render("No workspace roots configured — add one to ~/.config/utena/config.json first"))
-	case len(m.roots) == 1:
-		b.WriteString("Target root: " + pathStyle().Render(m.roots[0]))
-		b.WriteString("\nWill clone into: " + pathStyle().Render(m.targetPreview(m.roots[0])))
-	default:
-		fmt.Fprintf(&b, "Target root (ctrl+n / ctrl+p to switch, %d/%d): ", m.rootIndex+1, len(m.roots))
-		b.WriteString(pathStyle().Render(m.roots[m.rootIndex]))
-		b.WriteString("\nWill clone into: " + pathStyle().Render(m.targetPreview(m.roots[m.rootIndex])))
+	fields := []ui.Field{
+		{Label: "URL", Value: m.urlInput.View(), Error: m.urlErr},
+		{Label: "Directory", Value: m.dirNameInput.View()},
 	}
-
-	if m.cloning {
-		b.WriteString("\n\n")
-		b.WriteString(pendingStyle().Render("Starting clone…"))
+	if len(m.roots) > 1 {
+		fields = append(fields, ui.Field{Label: "Root", Value: m.root.View(m.form.Focused() == rootField)})
 	}
-
-	if m.errMsg != "" {
-		b.WriteString("\n\n")
-		b.WriteString(errStyle().Render(m.errMsg))
+	out := m.form.View(fields, m.width)
+	if root := m.root.Value(); root != "" {
+		indent := strings.Repeat(" ", ui.GutterWidth+ui.LabelWidth(fields))
+		out += "\n\n" + indent + lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("→ "+m.targetPreview(root))
 	}
-
-	b.WriteString("\n\n")
-	b.WriteString(helpStyle().Render("tab/shift+tab switch fields · enter clone · esc back"))
-	return b.String()
+	return ui.FitHeight(out, m.height)
 }
 
 func (m Model) targetPreview(rootPath string) string {
@@ -251,5 +239,5 @@ func derivedName(url string) string {
 }
 
 func (m Model) CapturesText() bool {
-	return true
+	return m.form.Focused() != rootField
 }

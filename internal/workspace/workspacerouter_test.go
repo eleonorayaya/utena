@@ -182,6 +182,33 @@ func TestWorkspaceRouter_ListBranches(t *testing.T) {
 	require.Equal(t, "main", response.Branches[0])
 }
 
+func TestWorkspaceRouter_ListBranchesIncludesDefaultBranch(t *testing.T) {
+	repoPath := initTestRepo(t)
+	for _, args := range [][]string{
+		{"update-ref", "refs/remotes/origin/develop", "HEAD"},
+		{"symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"},
+	} {
+		out, err := exec.Command("git", append([]string{"-C", repoPath}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+
+	database := testdb.New(t, &Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
+	store := NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
+	ws := &Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true}
+	require.NoError(t, store.Add(ws))
+	gitService := git.NewGitService(database)
+	router := NewWorkspaceRouter(NewWorkspaceController(NewWorkspaceService(store, gitService), store, gitService))
+
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf("/%d/branches", ws.ID), nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response BranchListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Equal(t, "develop", response.DefaultBranch)
+	require.Equal(t, "main", response.CurrentBranch)
+}
+
 func TestWorkspaceRouter_SetWorkspaceHidden(t *testing.T) {
 	router, store := setupWorkspaceRouter(t)
 

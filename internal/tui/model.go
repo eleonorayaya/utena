@@ -3,12 +3,9 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/tui/addworkspaceform"
-	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
-	"github.com/eleonorayaya/utena/internal/tui/filepicker"
 	"github.com/eleonorayaya/utena/internal/tui/sessionform"
 	"github.com/eleonorayaya/utena/internal/tui/sessionlist"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
-	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 )
 
 type ViewModel[T any] interface {
@@ -21,8 +18,5 @@ var (
 	_ ViewModel[sessionlist.Model]      = sessionlist.Model{}
 	_ ViewModel[sessionform.Model]      = sessionform.Model{}
 	_ ViewModel[sessionprogress.Model]  = sessionprogress.Model{}
-	_ ViewModel[workspacepicker.Model]  = workspacepicker.Model{}
-	_ ViewModel[branchpicker.Model]     = branchpicker.Model{}
-	_ ViewModel[filepicker.Model]       = filepicker.Model{}
 	_ ViewModel[addworkspaceform.Model] = addworkspaceform.Model{}
 )

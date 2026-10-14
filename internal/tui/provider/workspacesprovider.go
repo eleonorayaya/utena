@@ -14,17 +14,24 @@ type WorkspacesStateUpdatedMsg struct {
 }
 
 type BranchesLoadedMsg struct {
-	Branches []string
+	WorkspaceID   uint
+	Branches      []string
+	CurrentBranch string
+	DefaultBranch string
+	Err           error
 }
 
 type BranchRef = git.BranchRef
 
 type BranchesFetchedMsg struct {
-	Branches []BranchRef
-	Err      error
+	WorkspaceID   uint
+	Branches      []BranchRef
+	DefaultBranch string
+	Err           error
 }
 
 type BranchExistsCheckedMsg struct {
+	WorkspaceID  uint
 	Name         string
 	ExistsLocal  bool
 	ExistsRemote bool
@@ -106,17 +113,9 @@ type checkBranchExistsIntentMsg struct {
 	name        string
 }
 
-type branchesFetchedLoadedMsg struct {
-	branches []BranchRef
-	err      error
-}
+type branchesFetchedLoadedMsg struct{ BranchesFetchedMsg }
 
-type branchExistsCheckedLoadedMsg struct {
-	name         string
-	existsLocal  bool
-	existsRemote bool
-	err          error
-}
+type branchExistsCheckedLoadedMsg struct{ BranchExistsCheckedMsg }
 
 type deleteWorkspaceIntentMsg struct {
 	id uint
@@ -158,9 +157,7 @@ type workspacesLoadedMsg struct {
 	workspaces []workspace.Workspace
 }
 
-type branchesLoadedMsg struct {
-	branches []string
-}
+type branchesLoadedMsg struct{ BranchesLoadedMsg }
 
 type workspaceDeletedMsg struct{}
 type workspaceHiddenToggledMsg struct{}
@@ -173,7 +170,6 @@ type migrateWorkspaceToBareIntentMsg struct {
 type workspacesProvider struct {
 	client            *client
 	workspaces        []workspace.Workspace
-	branches          []string
 	activeWorkspaceID uint
 	polling           bool
 }
@@ -237,9 +233,8 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 		return p, p.emitState()
 
 	case branchesLoadedMsg:
-		p.branches = msg.branches
-		branches := p.branches
-		return p, func() tea.Msg { return BranchesLoadedMsg{Branches: branches} }
+		out := msg.BranchesLoadedMsg
+		return p, func() tea.Msg { return out }
 
 	case requestBranchesMsg:
 		return p, p.client.fetchBranches(msg.workspaceID)
@@ -248,21 +243,15 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 		return p, p.client.fetchOriginBranches(msg.workspaceID)
 
 	case branchesFetchedLoadedMsg:
-		branches := msg.branches
-		err := msg.err
-		return p, func() tea.Msg { return BranchesFetchedMsg{Branches: branches, Err: err} }
+		out := msg.BranchesFetchedMsg
+		return p, func() tea.Msg { return out }
 
 	case checkBranchExistsIntentMsg:
 		return p, p.client.checkBranchExists(msg.workspaceID, msg.name)
 
 	case branchExistsCheckedLoadedMsg:
-		name := msg.name
-		existsLocal := msg.existsLocal
-		existsRemote := msg.existsRemote
-		err := msg.err
-		return p, func() tea.Msg {
-			return BranchExistsCheckedMsg{Name: name, ExistsLocal: existsLocal, ExistsRemote: existsRemote, Err: err}
-		}
+		out := msg.BranchExistsCheckedMsg
+		return p, func() tea.Msg { return out }
 
 	case setActiveWorkspaceMsg:
 		p.activeWorkspaceID = msg.workspaceID

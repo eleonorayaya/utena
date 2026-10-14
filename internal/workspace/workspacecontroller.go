@@ -197,7 +197,7 @@ func (c *WorkspaceController) ListBranches(w http.ResponseWriter, r *http.Reques
 		currentBranch = ""
 	}
 
-	render.JSON(w, r, BranchListResponse{Branches: branches, CurrentBranch: currentBranch})
+	render.JSON(w, r, BranchListResponse{Branches: branches, CurrentBranch: currentBranch, DefaultBranch: c.gitService.DefaultBranch(ctx, ws.Path)})
 }
 
 func (c *WorkspaceController) FetchAndListBranches(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +236,7 @@ func (c *WorkspaceController) FetchAndListBranches(w http.ResponseWriter, r *htt
 		currentBranch = ""
 	}
 
-	render.JSON(w, r, BranchRefListResponse{Branches: branches, CurrentBranch: currentBranch})
+	render.JSON(w, r, BranchRefListResponse{Branches: branches, CurrentBranch: currentBranch, DefaultBranch: c.gitService.DefaultBranch(ctx, ws.Path)})
 }
 
 func (c *WorkspaceController) CheckBranchExists(w http.ResponseWriter, r *http.Request) {

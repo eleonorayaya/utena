@@ -4,73 +4,69 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
+	"github.com/stretchr/testify/assert"
+	"gorm.io/gorm"
 )
 
-func creatingModelWithSteps(steps []session.SessionSetupStep) Model {
-	m := New()
-	m.session = &session.Session{
-		Name:       "demo",
-		Status:     session.StatusCreating,
-		SetupSteps: steps,
-	}
+func polled(t *testing.T, start tea.Msg, s session.Session) Model {
+	t.Helper()
+	m, _ := New().Init()
+	m.SetSize(60, 20)
+	m, _ = m.Update(start)
+	m, _ = m.Update(provider.SessionPolledMsg{Session: s})
 	return m
 }
 
-func TestRenderSteps_AllStatuses(t *testing.T) {
-	m := creatingModelWithSteps([]session.SessionSetupStep{
-		{Label: "Create session directory", Status: session.SetupStepDone},
-		{Label: "Setup workspace: api", Status: session.SetupStepRunning},
-		{Label: "Install dependencies: web", Status: session.SetupStepPending},
-		{Label: "Copy .env.example → .env", Status: session.SetupStepFailed, ErrorMsg: "source not found"},
-	})
-
-	out := m.renderSteps()
-
-	for _, label := range []string{
-		"Create session directory",
-		"Setup workspace: api",
-		"Install dependencies: web",
-		"Copy .env.example → .env",
-	} {
-		if !strings.Contains(out, label) {
-			t.Errorf("expected rendered steps to contain %q\n%s", label, out)
-		}
-	}
-
-	if !strings.Contains(out, "✓") {
-		t.Errorf("expected a done glyph (✓):\n%s", out)
-	}
-	if !strings.Contains(out, "✗") {
-		t.Errorf("expected a failed glyph (✗):\n%s", out)
-	}
-	if !strings.Contains(out, "○") {
-		t.Errorf("expected a pending glyph (○):\n%s", out)
-	}
-	if !strings.Contains(out, "source not found") {
-		t.Errorf("expected failed step error message to render:\n%s", out)
-	}
+func demo(status session.SessionStatus, steps ...session.SessionSetupStep) session.Session {
+	return session.Session{Model: gorm.Model{ID: 7}, Name: "demo", Status: status, SetupSteps: steps}
 }
 
-func TestView_StepsRenderedDuringCreating(t *testing.T) {
-	m := creatingModelWithSteps([]session.SessionSetupStep{
-		{Label: "Create session directory", Status: session.SetupStepDone},
-	})
-
-	out := m.View()
-	if !strings.Contains(out, "Create session directory") {
-		t.Errorf("expected View to render the step checklist:\n%s", out)
-	}
-	if strings.Contains(out, "Setting up...") {
-		t.Errorf("expected View NOT to fall back to the spinner when steps exist:\n%s", out)
-	}
+func TestView_TitleCreatingVsRepairing(t *testing.T) {
+	m := polled(t, StartMsg{SessionID: 7}, demo(session.StatusCreating))
+	assert.True(t, strings.HasPrefix(m.View(), "Creating demo") || strings.Contains(m.View(), "Creating demo"))
+	m = polled(t, StartMsg{SessionID: 7, Repairing: true}, demo(session.StatusCreating))
+	assert.Contains(t, m.View(), "Repairing demo")
 }
 
-func TestView_FallsBackToSpinnerWithoutSteps(t *testing.T) {
-	m := creatingModelWithSteps(nil)
+func TestView_StepsInPositionOrderWithGlyphs(t *testing.T) {
+	m := polled(t, StartMsg{SessionID: 7}, demo(session.StatusCreating,
+		session.SessionSetupStep{Position: 2, Label: "Start tuios session", Status: session.SetupStepPending},
+		session.SessionSetupStep{Position: 0, Label: "Fetch api", Status: session.SetupStepDone},
+		session.SessionSetupStep{Position: 1, Label: "Create worktree", Status: session.SetupStepFailed, ErrorMsg: "dirty tree"},
+	))
+	lines := strings.Split(m.View(), "\n")
+	assert.Equal(t, "  ✓ Fetch api", lines[2])
+	assert.Equal(t, "  ✕ Create worktree", lines[3])
+	assert.Equal(t, "    dirty tree", lines[4])
+	assert.Equal(t, "  · Start tuios session", lines[5])
+}
 
-	out := m.View()
-	if !strings.Contains(out, "Setting up...") {
-		t.Errorf("expected spinner fallback for sessions without steps:\n%s", out)
-	}
+func TestView_SettingUpBeforeSteps(t *testing.T) {
+	m := polled(t, StartMsg{SessionID: 7}, demo(session.StatusCreating))
+	assert.Contains(t, m.View(), "Setting up")
+}
+
+func TestStatus_WarningAndErrorGoToFooter(t *testing.T) {
+	s := demo(session.StatusActive)
+	s.StatusError = "copy .env failed"
+	m := polled(t, StartMsg{SessionID: 7}, s)
+	assert.Equal(t, ui.Status{Text: "⚠ copy .env failed", Kind: ui.StatusWarning}, m.Status())
+	assert.NotContains(t, m.View(), "copy .env failed")
+
+	b := demo(session.StatusBroken)
+	b.StatusError = "boom"
+	m = polled(t, StartMsg{SessionID: 7}, b)
+	assert.Equal(t, ui.Status{Text: "✕ boom", Kind: ui.StatusError}, m.Status())
+}
+
+func TestKeys_RetryOnlyWhenRelevant(t *testing.T) {
+	m := polled(t, StartMsg{SessionID: 7}, demo(session.StatusCreating))
+	assert.False(t, m.Keys().ShortHelp()[0].Enabled())
+	b := demo(session.StatusBroken)
+	m = polled(t, StartMsg{SessionID: 7}, b)
+	assert.True(t, m.Keys().ShortHelp()[0].Enabled())
 }

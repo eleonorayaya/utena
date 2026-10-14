@@ -1,88 +1,279 @@
 package sessionform
 
 import (
+	"errors"
+	"reflect"
+	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 	"github.com/eleonorayaya/utena/internal/workspace"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestForm_SingleWorkspaceFlow_RetainsSelectionAndBranch(t *testing.T) {
-	m := New()
-	m.SetSize(80, 24)
-	m, _ = m.Init()
-
-	ws := workspace.Workspace{Name: "test", Path: "/tmp/test", IsGitRepo: true}
-	ws.ID = 42
-	m, _ = m.Update(provider.WorkspacesStateUpdatedMsg{Workspaces: []workspace.Workspace{ws}})
-
-	m, _ = m.Update(workspacepicker.SelectedMsg{
-		Workspace:  ws,
-		Workspaces: []workspace.Workspace{ws},
-	})
-	require.Equal(t, []workspace.Workspace{ws}, m.selectedWorkspaces)
-	require.Equal(t, branchPickerStep, m.activeStep)
-	require.Equal(t, 0, m.pickingForIndex)
-
-	m, _ = m.Update(branchpicker.SelectedMsg{Branch: "main"})
-	require.Equal(t, branchModeStep, m.activeStep)
-	require.Equal(t, []string{"main"}, m.pickedBranches)
-
-	specs := buildSpecs(m.selectedWorkspaces, m.pickedBranches, true)
-	require.Equal(t, []provider.SessionWorkspaceSpec{{WorkspaceID: 42, BaseBranch: "main"}}, specs)
+func gitWS(id uint, name string) workspace.Workspace {
+	ws := workspace.Workspace{Name: name, Path: "/tmp/" + name, IsGitRepo: true}
+	ws.ID = id
+	return ws
 }
 
-func TestForm_MultiWorkspaceFlow_IteratesBranchPickerPerWorkspace(t *testing.T) {
-	m := New()
-	m.SetSize(80, 24)
-	m, _ = m.Init()
-
-	ws1 := workspace.Workspace{Name: "a", Path: "/tmp/a", IsGitRepo: true}
-	ws1.ID = 10
-	ws2 := workspace.Workspace{Name: "b", Path: "/tmp/b", IsGitRepo: true}
-	ws2.ID = 20
-	m, _ = m.Update(provider.WorkspacesStateUpdatedMsg{Workspaces: []workspace.Workspace{ws1, ws2}})
-
-	m, _ = m.Update(workspacepicker.SelectedMsg{
-		Workspace:  ws1,
-		Workspaces: []workspace.Workspace{ws1, ws2},
-	})
-	require.Equal(t, branchPickerStep, m.activeStep)
-	require.Equal(t, 0, m.pickingForIndex)
-
-	m, _ = m.Update(branchpicker.SelectedMsg{Branch: "main"})
-	require.Equal(t, branchPickerStep, m.activeStep, "should still be picking, now for ws2")
-	require.Equal(t, 1, m.pickingForIndex)
-
-	m, _ = m.Update(branchpicker.SelectedMsg{Branch: "develop"})
-	require.Equal(t, branchModeStep, m.activeStep)
-	require.Equal(t, []string{"main", "develop"}, m.pickedBranches)
-
-	specs := buildSpecs(m.selectedWorkspaces, m.pickedBranches, false)
-	require.Equal(t, []provider.SessionWorkspaceSpec{
-		{WorkspaceID: 10, Branch: "main"},
-		{WorkspaceID: 20, Branch: "develop"},
-	}, specs)
+func press(s string) tea.KeyMsg {
+	switch s {
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyMsg{Type: tea.KeyShiftTab}
+	case "up":
+		return tea.KeyMsg{Type: tea.KeyUp}
+	case "down":
+		return tea.KeyMsg{Type: tea.KeyDown}
+	case "right":
+		return tea.KeyMsg{Type: tea.KeyRight}
+	}
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
-func TestForm_ReInitAfterPreviousCreate_ResetsState(t *testing.T) {
+func msgTypes(cmd tea.Cmd) []string {
+	if cmd == nil {
+		return nil
+	}
+	switch m := cmd().(type) {
+	case tea.BatchMsg:
+		var out []string
+		for _, c := range m {
+			out = append(out, msgTypes(c)...)
+		}
+		return out
+	case nil:
+		return nil
+	default:
+		return []string{reflect.TypeOf(m).String()}
+	}
+}
+
+func started(t *testing.T, wss ...workspace.Workspace) Model {
+	t.Helper()
 	m := New()
-	m.SetSize(80, 24)
+	m.SetSize(100, 30)
 	m, _ = m.Init()
+	m, _ = m.Update(provider.WorkspacesStateUpdatedMsg{Workspaces: wss})
+	return m
+}
 
-	wsA := workspace.Workspace{Name: "first", Path: "/tmp/a", IsGitRepo: true}
-	wsA.ID = 1
-	m, _ = m.Update(provider.WorkspacesStateUpdatedMsg{Workspaces: []workspace.Workspace{wsA}})
-	m, _ = m.Update(workspacepicker.SelectedMsg{Workspace: wsA, Workspaces: []workspace.Workspace{wsA}})
-	m, _ = m.Update(branchpicker.SelectedMsg{Branch: "main"})
-	require.Equal(t, []string{"main"}, m.pickedBranches)
+func picked(t *testing.T, wss ...workspace.Workspace) (Model, tea.Cmd) {
+	t.Helper()
+	m := started(t, wss...)
+	return m.Update(workspacepicker.SelectedMsg{Workspaces: wss})
+}
 
+func loaded(m Model, id uint, def string, branches ...string) Model {
+	m, _ = m.Update(provider.BranchesLoadedMsg{WorkspaceID: id, Branches: branches, DefaultBranch: def})
+	return m
+}
+
+func TestForm_OpensIntoWorkspacePickerAndReturnsToName(t *testing.T) {
+	m := started(t, gitWS(1, "api"), gitWS(2, "web"))
+	assert.Equal(t, overlayWorkspaces, m.overlay)
+	assert.Contains(t, m.View(), "Workspaces")
+
+	m, cmd := m.Update(workspacepicker.SelectedMsg{Workspaces: []workspace.Workspace{gitWS(1, "api"), gitWS(2, "web")}})
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.Equal(t, fieldName, m.form.Focused())
+	assert.Equal(t, 2, strings.Count(strings.Join(msgTypes(cmd), " "), "provider.requestBranchesMsg"))
+	assert.True(t, m.CapturesText())
+}
+
+func TestForm_RowsDefaultToResolvedBranchAndShowLoading(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"), gitWS(2, "web"))
+	assert.Contains(t, m.View(), "…")
+	m = loaded(m, 1, "develop", "main", "develop")
+	m = loaded(m, 2, "", "trunk")
+	assert.Equal(t, "develop", m.rows[0].Branch)
+	assert.Equal(t, "trunk", m.rows[1].Branch)
+	assert.NotContains(t, m.View(), "…")
+}
+
+func TestForm_ChangingWorkspacesKeepsExistingPicks(t *testing.T) {
+	api, web, data := gitWS(1, "api"), gitWS(2, "web"), gitWS(3, "data")
+	m, _ := picked(t, api, web)
+	m = loaded(m, 1, "main", "main", "feature")
+	m.rows[0] = m.rows[0].Pick("feature")
+
+	m = m.openWorkspacePicker()
+	assert.Contains(t, m.View(), "[x] api")
+	m, cmd := m.Update(workspacepicker.SelectedMsg{Workspaces: []workspace.Workspace{api, data}})
+	require.Len(t, m.rows, 2)
+	assert.Equal(t, "feature", m.rows[0].Branch)
+	assert.Equal(t, uint(3), m.rows[1].Workspace.ID)
+	assert.Equal(t, 1, strings.Count(strings.Join(msgTypes(cmd), " "), "provider.requestBranchesMsg"))
+}
+
+func TestForm_SubmitBlockedWhileBranchesLoad(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m, cmd := m.Update(press("enter"))
+	assert.Nil(t, cmd)
+	assert.Equal(t, "waiting for branch info", m.Status().Text)
+}
+
+func TestForm_EnterOnNameCreatesSession(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = loaded(m, 1, "main", "main")
+	for _, r := range "my-feature" {
+		m, _ = m.Update(press(string(r)))
+	}
+	m, cmd := m.Update(press("enter"))
+	assert.Equal(t, []string{"provider.createSessionIntentMsg"}, msgTypes(cmd))
+	assert.True(t, m.submitting)
+	_, cmd = m.Update(press("enter"))
+	assert.Nil(t, cmd, "repeated submits are ignored")
+	assert.Equal(t, []provider.SessionWorkspaceSpec{{WorkspaceID: 1, BaseBranch: "main"}}, buildSpecs(m.rows, true))
+}
+
+func TestForm_UseExistingModeSendsBranch(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = loaded(m, 1, "main", "main")
+	m, _ = m.Update(press("shift+tab"))
+	assert.Equal(t, fieldMode, m.form.Focused())
+	m, _ = m.Update(press("right"))
+	assert.Equal(t, "use existing", m.mode.Value())
+	assert.Equal(t, []provider.SessionWorkspaceSpec{{WorkspaceID: 1, Branch: "main"}}, buildSpecs(m.rows, false))
+}
+
+func TestForm_InvalidNameErrorShowsUnderName(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = loaded(m, 1, "main", "main")
+	for _, r := range "bad name!" {
+		m, _ = m.Update(press(string(r)))
+	}
+	m, cmd := m.Update(press("enter"))
+	assert.Nil(t, cmd)
+	assert.NotEmpty(t, m.nameErr)
+	lines := strings.Split(m.View(), "\n")
+	nameLine := -1
+	for i, l := range lines {
+		if strings.Contains(l, "Name") {
+			nameLine = i
+		}
+	}
+	require.GreaterOrEqual(t, nameLine, 0)
+	assert.Contains(t, lines[nameLine+1], "contains invalid characters")
+}
+
+func TestForm_EscFromPickerReturnsToPageAndEscOnPageGoesBack(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m, _ = m.Update(press("shift+tab"))
+	m, _ = m.Update(press("shift+tab"))
+	assert.Equal(t, fieldBranches, m.form.Focused())
+	m, _ = m.Update(press("enter"))
+	assert.Equal(t, overlayBranch, m.overlay)
+	m, cmd := m.Update(press("esc"))
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.Nil(t, cmd)
+
+	_, cmd = m.Update(press("esc"))
+	require.NotNil(t, cmd)
+	assert.IsType(t, router.BackMsg{}, cmd())
+}
+
+func TestForm_BranchPickerSelectionUpdatesRow(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"), gitWS(2, "web"))
+	m = loaded(m, 1, "main", "main", "feature")
+	m = loaded(m, 2, "main", "main")
+	m, _ = m.Update(press("shift+tab"))
+	m, _ = m.Update(press("shift+tab"))
+	m, _ = m.Update(press("enter"))
+	require.Equal(t, overlayBranch, m.overlay)
+	m, _ = m.Update(branchpicker.SelectedMsg{Branch: "feature"})
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.Equal(t, "feature", m.rows[0].Branch)
+	assert.False(t, m.rows[0].IsDefault())
+}
+
+func TestForm_BranchRowsNavigateBeforeLeavingField(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"), gitWS(2, "web"), gitWS(3, "data"))
+	m, _ = m.Update(press("up"))
+	m, _ = m.Update(press("up"))
+	assert.Equal(t, fieldBranches, m.form.Focused())
+	assert.Equal(t, 2, m.rowCursor)
+	m, _ = m.Update(press("up"))
+	m, _ = m.Update(press("up"))
+	assert.Equal(t, 0, m.rowCursor)
+	assert.Equal(t, fieldBranches, m.form.Focused())
+	m, _ = m.Update(press("up"))
+	assert.Equal(t, fieldWorkspaces, m.form.Focused())
+}
+
+func TestForm_ManualBranchNotFoundShowsUnderRow(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = loaded(m, 1, "main", "main")
+	m.pickingRow = 0
+	m.overlay = overlayBranch
+	m, _ = m.Update(branchpicker.ManualEntryRequestedMsg{})
+	require.True(t, m.rows[0].Editing)
+	assert.True(t, m.CapturesText())
+	for _, r := range "nope" {
+		m, _ = m.Update(press(string(r)))
+	}
+	m, cmd := m.Update(press("enter"))
+	assert.Equal(t, []string{"provider.checkBranchExistsIntentMsg"}, msgTypes(cmd))
+	m, _ = m.Update(provider.BranchExistsCheckedMsg{WorkspaceID: 1, Name: "nope"})
+	assert.Contains(t, m.View(), "✕ branch not found: nope")
+	assert.True(t, m.rows[0].Editing)
+}
+
+func TestForm_BranchFetchErrorShowsUnderRow(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m, _ = m.Update(provider.BranchesLoadedMsg{WorkspaceID: 1, Err: errors.New("boom")})
+	assert.Contains(t, m.View(), "✕ boom")
+	assert.Equal(t, "main", m.rows[0].Branch)
+}
+
+func TestForm_NonGitWorkspaceKeepsPickerOpen(t *testing.T) {
+	m := started(t)
+	plain := workspace.Workspace{Name: "notes"}
+	m, _ = m.Update(workspacepicker.SelectedMsg{Workspaces: []workspace.Workspace{plain}})
+	assert.Equal(t, overlayWorkspaces, m.overlay)
+	assert.Contains(t, m.Status().Text, "not a git repository")
+}
+
+func TestForm_LinesFitWidthWithManyLongWorkspaces(t *testing.T) {
+	long := strings.Repeat("very-long-workspace-name-", 4)
+	wss := []workspace.Workspace{gitWS(1, long+"a"), gitWS(2, long+"b"), gitWS(3, "c"), gitWS(4, "d")}
+	for _, w := range []int{40, 80, 200} {
+		m := New()
+		m.SetSize(w, 24)
+		m, _ = m.Init()
+		m, _ = m.Update(provider.WorkspacesStateUpdatedMsg{Workspaces: wss})
+		for _, v := range []string{m.View()} {
+			for _, l := range strings.Split(v, "\n") {
+				assert.LessOrEqual(t, lipgloss.Width(l), w, "picker %d: %q", w, l)
+			}
+		}
+		m, _ = m.Update(workspacepicker.SelectedMsg{Workspaces: wss})
+		for i, ws := range wss {
+			m = loaded(m, ws.ID, strings.Repeat("feature/branch-", i+3))
+		}
+		out := m.View()
+		assert.Equal(t, 24, len(strings.Split(out, "\n")))
+		for _, l := range strings.Split(out, "\n") {
+			assert.LessOrEqual(t, lipgloss.Width(l), w, "page %d: %q", w, l)
+		}
+	}
+}
+
+func TestForm_ReInitResetsState(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
 	m, _ = m.Init()
-	require.Nil(t, m.selectedWorkspaces, "Init must reset selectedWorkspaces")
-	require.Nil(t, m.pickedBranches, "Init must reset pickedBranches")
-	require.Equal(t, 0, m.pickingForIndex)
-	require.Equal(t, workspacePickerStep, m.activeStep)
+	assert.Nil(t, m.rows)
+	assert.Equal(t, overlayWorkspaces, m.overlay)
 }

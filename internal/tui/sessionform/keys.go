@@ -5,40 +5,31 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 )
 
-type mergedKeyMap struct {
-	keymaps []help.KeyMap
+type keyMap struct {
+	Next   key.Binding
+	Prev   key.Binding
+	Edit   key.Binding
+	Create key.Binding
+	Cancel key.Binding
 }
 
-func (m mergedKeyMap) ShortHelp() []key.Binding {
-	var bindings []key.Binding
-	for _, km := range m.keymaps {
-		bindings = append(bindings, km.ShortHelp()...)
+func (k keyMap) ShortHelp() []key.Binding {
+	if k.Create.Enabled() {
+		return []key.Binding{k.Create, k.Next, k.Cancel}
 	}
-	return bindings
+	return []key.Binding{k.Next, k.Edit, k.Cancel}
 }
 
-func (m mergedKeyMap) FullHelp() [][]key.Binding {
-	var groups [][]key.Binding
-	for _, km := range m.keymaps {
-		groups = append(groups, km.FullHelp()...)
-	}
-	return groups
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{{k.Next, k.Prev, k.Edit, k.Create, k.Cancel}}
 }
 
-type formKeyMap struct {
-	Submit key.Binding
-	Back   key.Binding
+var formKeys = keyMap{
+	Next:   key.NewBinding(key.WithKeys("tab", "down"), key.WithHelp("tab", "next")),
+	Prev:   key.NewBinding(key.WithKeys("shift+tab", "up"), key.WithHelp("shift+tab", "previous")),
+	Edit:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "edit")),
+	Create: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "create")),
+	Cancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 }
 
-func (k formKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Submit, k.Back}
-}
-
-func (k formKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Submit, k.Back}}
-}
-
-var formKeys = formKeyMap{
-	Submit: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "create")),
-	Back:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
-}
+var _ help.KeyMap = formKeys

@@ -3,45 +3,33 @@ package addworkspaceform
 import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
-	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 )
 
-type formKeyMap struct {
-	Back key.Binding
+type keyMap struct {
+	Next   key.Binding
+	Prev   key.Binding
+	Edit   key.Binding
+	Add    key.Binding
+	Cancel key.Binding
 }
 
-func (k formKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Back}
-}
-
-func (k formKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Back}}
-}
-
-var formKeys = formKeyMap{
-	Back: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
-}
-
-type mergedKeyMap struct {
-	keymaps []help.KeyMap
-}
-
-func (m mergedKeyMap) ShortHelp() []key.Binding {
-	var out []key.Binding
-	for _, km := range m.keymaps {
-		out = append(out, km.ShortHelp()...)
+func (k keyMap) ShortHelp() []key.Binding {
+	if k.Add.Enabled() {
+		return []key.Binding{k.Add, k.Prev, k.Cancel}
 	}
-	return out
+	return []key.Binding{k.Next, k.Edit, k.Cancel}
 }
 
-func (m mergedKeyMap) FullHelp() [][]key.Binding {
-	var out [][]key.Binding
-	for _, km := range m.keymaps {
-		out = append(out, km.FullHelp()...)
-	}
-	return out
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{{k.Next, k.Prev, k.Edit, k.Add, k.Cancel}}
+}
+
+var formKeys = keyMap{
+	Next:   key.NewBinding(key.WithKeys("tab", "down"), key.WithHelp("tab", "next")),
+	Prev:   key.NewBinding(key.WithKeys("shift+tab", "up"), key.WithHelp("shift+tab", "previous")),
+	Edit:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "edit")),
+	Add:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "add")),
+	Cancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 }
 
 var _ help.KeyMap = formKeys
-var _ help.KeyMap = mergedKeyMap{keymaps: []help.KeyMap{formKeys, workspacepicker.Keys, branchpicker.Keys}}
