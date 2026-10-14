@@ -109,6 +109,11 @@ GORM `AutoMigrate` would create an empty `mux_sessions` table and a new
 - Modules opt in through a new optional interface in `internal/common`,
   `PreMigrationProvider { PreMigrations() []func(gorm.Migrator) error }`,
   registered in `app.go` next to `ModelProvider`.
+- Implementation note: the signature became `db.PreMigration func(tx *gorm.DB) error`.
+  Pre-migrations need the transaction itself for data `UPDATE`s, and they reach
+  schema operations through `tx.Migrator()`. All pre-migrations run in one
+  transaction, with a `foreign_key_check` gate before commit, and
+  `sqlite_sequence` is preserved across GORM's table rebuilds.
 - `mux.Module`: if `tmux_sessions` exists and `mux_sessions` does not, rename
   the table. SQLite keeps index names across a table rename, so also drop
   `idx_tmux_sessions_name`, `idx_tmux_sessions_status` and

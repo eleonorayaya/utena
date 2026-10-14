@@ -17,11 +17,7 @@ type Module struct {
 }
 
 func NewModule(driver Driver, bus eventbus.EventBus, database db.Database) *Module {
-	store := NewStore(database)
-	service := NewService(driver, store, bus)
-	controller := NewController(service)
-	router := NewRouter(controller)
-	return &Module{Service: service, Controller: controller, Router: router}
+	return NewModuleWithDriver(driver, NewStore(database), bus)
 }
 
 func NewModuleWithDriver(driver Driver, store *Store, bus eventbus.EventBus) *Module {

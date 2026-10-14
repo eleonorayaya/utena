@@ -187,7 +187,6 @@ type foreignKeyViolation struct {
 	Table  string
 	Rowid  *int64
 	Parent string
-	Fkid   int
 }
 
 func foreignKeyViolations(tx *gorm.DB) ([]foreignKeyViolation, error) {
