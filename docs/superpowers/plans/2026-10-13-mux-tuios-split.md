@@ -511,6 +511,16 @@ sqlite3 "$SMOKE/utena.db"  "select name from sqlite_master where sql like '%tmux
 
 Expected: the counts match and the last query is empty.
 
+Also diff the before and after copies on all of these:
+- `pragma_table_info` for every table
+- row counts for every table
+- every index in `sqlite_master`, especially any index on `sessions` that the
+  current model doesn't declare
+- `PRAGMA foreign_key_check`
+- `sqlite_sequence`, where each `seq` must be at least its old value
+
+Expected: the only differences are the intended renames and drops.
+
 **Step 3:** Report results. Do **not** run `task daemon:install` yet. The user
 deploys the daemon, TUI and the dotfiles `after-attach` change
 (`dotfiles/programs/tuios/contents/config.toml`, already edited and
