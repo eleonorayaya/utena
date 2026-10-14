@@ -66,51 +66,38 @@ func (d *DB) OnAppEnd(ctx context.Context) error {
 }
 
 func (d *DB) Migrate(models ...any) error {
-	if err := d.Exec("PRAGMA foreign_keys=OFF").Error; err != nil {
+	return d.DB.Connection(func(conn *gorm.DB) error {
+		return d.migrate(conn.Session(&gorm.Session{NewDB: true}), models)
+	})
+}
+
+func (d *DB) migrate(conn *gorm.DB, models []any) error {
+	if err := conn.Exec("PRAGMA foreign_keys=OFF").Error; err != nil {
 		return fmt.Errorf("disable foreign keys: %w", err)
 	}
-	defer d.Exec("PRAGMA foreign_keys=ON")
-	seqs, err := snapshotSequences(d.DB)
+	defer conn.Exec("PRAGMA foreign_keys=ON")
+	seqs, err := snapshotSequences(conn)
 	if err != nil {
 		return err
 	}
-	baseline, err := foreignKeyViolations(d.DB)
+	baseline, err := foreignKeyViolations(conn)
 	if err != nil {
 		return err
 	}
 	if len(baseline) > 0 {
 		slog.Warn("database has pre-existing foreign key violations", "violations", describeViolations(baseline))
 	}
-	if len(d.preMigrations) > 0 {
-		if err := d.Transaction(func(tx *gorm.DB) error {
-			if err := requireForeignKeysOff(tx); err != nil {
-				return err
-			}
-			for i, fn := range d.preMigrations {
-				if err := fn(tx); err != nil {
-					return fmt.Errorf("pre-migration %d: %w", i, err)
-				}
-			}
-			fresh, err := newForeignKeyViolations(tx, baseline)
-			if err != nil {
-				return err
-			}
-			if len(fresh) > 0 {
-				return fmt.Errorf("after pre-migrations: foreign key violations: %s", describeViolations(fresh))
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
+	if err := d.runPreMigrations(conn, baseline); err != nil {
+		return err
 	}
-	migrateErr := d.AutoMigrate(models...)
-	if err := restoreSequences(d.DB, seqs); err != nil {
+	migrateErr := conn.AutoMigrate(models...)
+	if err := restoreSequences(conn, seqs); err != nil {
 		return errors.Join(migrateErr, err)
 	}
 	if migrateErr != nil {
 		return migrateErr
 	}
-	fresh, err := newForeignKeyViolations(d.DB, baseline)
+	fresh, err := newForeignKeyViolations(conn, baseline)
 	if err != nil {
 		slog.Error("foreign key check after auto-migrate failed", "error", err)
 		return nil
@@ -121,23 +108,54 @@ func (d *DB) Migrate(models ...any) error {
 	return nil
 }
 
+func (d *DB) runPreMigrations(conn *gorm.DB, baseline []foreignKeyViolation) error {
+	if len(d.preMigrations) == 0 {
+		return nil
+	}
+	return conn.Transaction(func(tx *gorm.DB) error {
+		for _, fn := range d.preMigrations {
+			if err := fn(tx); err != nil {
+				return err
+			}
+		}
+		fresh, err := newForeignKeyViolations(tx, baseline)
+		if err != nil {
+			return err
+		}
+		if len(fresh) > 0 {
+			return fmt.Errorf("after pre-migrations: foreign key violations: %s", describeViolations(fresh))
+		}
+		return nil
+	})
+}
+
+func DropIndexesIfExist(m gorm.Migrator, table string, names ...string) error {
+	for _, name := range names {
+		if !m.HasIndex(table, name) {
+			continue
+		}
+		if err := m.DropIndex(table, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func DropConstraintIfExists(m gorm.Migrator, table, name string) error {
+	if !m.HasConstraint(table, name) {
+		return nil
+	}
+	return m.DropConstraint(table, name)
+}
+
 type sequence struct {
 	Name string
 	Seq  int64
 }
 
-func hasTable(tx *gorm.DB, name string) (bool, error) {
-	var count int64
-	if err := tx.Raw("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?", name).Scan(&count).Error; err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
 func snapshotSequences(tx *gorm.DB) ([]sequence, error) {
-	ok, err := hasTable(tx, "sqlite_sequence")
-	if err != nil || !ok {
-		return nil, err
+	if !tx.Migrator().HasTable("sqlite_sequence") {
+		return nil, nil
 	}
 	var seqs []sequence
 	if err := tx.Raw("SELECT name, seq FROM sqlite_sequence").Scan(&seqs).Error; err != nil {
@@ -148,37 +166,15 @@ func snapshotSequences(tx *gorm.DB) ([]sequence, error) {
 
 func restoreSequences(tx *gorm.DB, seqs []sequence) error {
 	for _, s := range seqs {
-		exists, err := hasTable(tx, s.Name)
-		if err != nil {
-			return err
-		}
-		if !exists {
+		if !tx.Migrator().HasTable(s.Name) {
 			continue
 		}
-		var rows int64
-		if err := tx.Raw("SELECT count(*) FROM sqlite_sequence WHERE name = ?", s.Name).Scan(&rows).Error; err != nil {
+		if err := tx.Exec("UPDATE sqlite_sequence SET seq = ? WHERE name = ? AND seq < ?", s.Seq, s.Name, s.Seq).Error; err != nil {
 			return fmt.Errorf("restore sqlite_sequence for %s: %w", s.Name, err)
 		}
-		q := "UPDATE sqlite_sequence SET seq = ? WHERE name = ? AND seq < ?"
-		args := []any{s.Seq, s.Name, s.Seq}
-		if rows == 0 {
-			q = "INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)"
-			args = []any{s.Name, s.Seq}
-		}
-		if err := tx.Exec(q, args...).Error; err != nil {
+		if err := tx.Exec("INSERT INTO sqlite_sequence (name, seq) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = ?)", s.Name, s.Seq, s.Name).Error; err != nil {
 			return fmt.Errorf("restore sqlite_sequence for %s: %w", s.Name, err)
 		}
-	}
-	return nil
-}
-
-func requireForeignKeysOff(tx *gorm.DB) error {
-	var enabled int
-	if err := tx.Raw("PRAGMA foreign_keys").Scan(&enabled).Error; err != nil {
-		return fmt.Errorf("read foreign_keys pragma: %w", err)
-	}
-	if enabled != 0 {
-		return fmt.Errorf("foreign keys must be off during pre-migrations")
 	}
 	return nil
 }
@@ -197,21 +193,21 @@ func foreignKeyViolations(tx *gorm.DB) ([]foreignKeyViolation, error) {
 	return violations, nil
 }
 
-func violationKey(v foreignKeyViolation) string {
+func rowidString(v foreignKeyViolation) string {
 	if v.Rowid == nil {
-		return v.Table + ":?"
+		return "?"
 	}
-	return fmt.Sprintf("%s:%d", v.Table, *v.Rowid)
+	return fmt.Sprintf("%d", *v.Rowid)
+}
+
+func violationKey(v foreignKeyViolation) string {
+	return v.Table + ":" + rowidString(v)
 }
 
 func describeViolations(violations []foreignKeyViolation) string {
 	parts := make([]string, 0, len(violations))
 	for _, v := range violations {
-		rowid := "?"
-		if v.Rowid != nil {
-			rowid = fmt.Sprintf("%d", *v.Rowid)
-		}
-		parts = append(parts, fmt.Sprintf("%s rowid %s -> %s", v.Table, rowid, v.Parent))
+		parts = append(parts, fmt.Sprintf("%s rowid %s -> %s", v.Table, rowidString(v), v.Parent))
 	}
 	return strings.Join(parts, "; ")
 }

@@ -12,8 +12,6 @@ import (
 	"github.com/eleonorayaya/utena/internal/eventbus"
 )
 
-var ErrNotAvailable = errors.New("terminal multiplexer is not available")
-
 type Service struct {
 	driver            Driver
 	store             *Store
@@ -47,9 +45,7 @@ func (t *Service) OnAppStart(ctx context.Context) error {
 	if err := t.store.BackfillStatus(); err != nil {
 		slog.WarnContext(ctx, "mux: backfill status from is_alive failed", "error", err)
 	}
-	if t.driver != nil {
-		go t.followEvents(ctx)
-	}
+	go t.followEvents(ctx)
 	return nil
 }
 
@@ -176,19 +172,9 @@ func (t *Service) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
-// RegisterPending inserts a Session record in the pending state without
-// spawning a mux session. It is idempotent: if a record with that name already
-// exists in pending or inactive status, the existing record is returned. If a
-// record exists in active status, ErrSessionAlreadyExists is returned —
-// the caller should not be re-registering an active session.
 func (t *Service) RegisterPending(name, startDir string, env map[string]string) (*Session, error) {
 	defer t.lockName(name)()
 	if existing, err := t.store.GetByName(name); err == nil {
-		// Adopt whatever's there. The session.Session.MuxSessionID unique constraint
-		// will reject the caller's link if another session already owns this
-		// mux record — that's where real conflicts surface. If the previous
-		// owner was deleted, its FK was nil'd and the record is unclaimed; the
-		// new session adopts the running mux session cleanly.
 		return existing, nil
 	} else if !errors.Is(err, ErrSessionNotFound) {
 		return nil, err
@@ -215,14 +201,7 @@ func (t *Service) RegisterPending(name, startDir string, env map[string]string) 
 	return ts, nil
 }
 
-// SpawnForRecord spawns the mux session for an existing record and transitions
-// it to active. The driver NewSession failure does not delete the record —
-// callers can retry. Idempotent for the (rare) case the mux session already
-// exists by name: the record is just transitioned to active.
 func (t *Service) SpawnForRecord(id uint) (*Session, error) {
-	if t.driver == nil {
-		return nil, ErrNotAvailable
-	}
 	ts, err := t.store.GetByID(id)
 	if err != nil {
 		return nil, err
@@ -241,9 +220,6 @@ func (t *Service) SpawnForRecord(id uint) (*Session, error) {
 }
 
 func (t *Service) CreateSession(name, startDir string, env map[string]string) (*Session, error) {
-	if t.driver == nil {
-		return nil, ErrNotAvailable
-	}
 	defer t.lockName(name)()
 	if err := t.driver.NewSession(name, startDir, env); err != nil {
 		return nil, err
@@ -274,9 +250,6 @@ func (t *Service) CreateSession(name, startDir string, env map[string]string) (*
 }
 
 func (t *Service) KillSession(id uint) error {
-	if t.driver == nil {
-		return ErrNotAvailable
-	}
 	ts, err := t.store.GetByID(id)
 	if err != nil {
 		return err
@@ -291,9 +264,6 @@ func (t *Service) KillSession(id uint) error {
 }
 
 func (t *Service) HasSession(name string) bool {
-	if t.driver == nil {
-		return false
-	}
 	return t.driver.HasSession(name)
 }
 
@@ -393,9 +363,6 @@ func (t *Service) HandleClientDetached(ctx context.Context, name string) error {
 }
 
 func (t *Service) SpawnWindow(sessionName, startDir, command string) error {
-	if t.driver == nil {
-		return ErrNotAvailable
-	}
 	var env map[string]string
 	if ts, err := t.store.GetByName(sessionName); err == nil {
 		env = ts.Env

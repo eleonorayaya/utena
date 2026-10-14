@@ -111,15 +111,15 @@ func TestService_ConcurrentKillCreateNoOverlap(t *testing.T) {
 		"per-name lock should keep at most one mux op in flight for the same name")
 }
 
-func newTestService(t *testing.T) *Service {
+func newTestService(t *testing.T) (*Service, *FakeDriver) {
 	t.Helper()
 	database := testdb.New(t, &Session{})
-	store := NewStore(database)
-	return NewService(NewFakeDriver(), store, eventbus.NewEventBus())
+	driver := NewFakeDriver()
+	return NewService(driver, NewStore(database), eventbus.NewEventBus()), driver
 }
 
 func TestService_RegisterPending_CreatesPendingRecord(t *testing.T) {
-	svc := newTestService(t)
+	svc, _ := newTestService(t)
 
 	ts, err := svc.RegisterPending("name", "/start", map[string]string{"FOO": "bar"})
 	require.NoError(t, err)
@@ -130,7 +130,7 @@ func TestService_RegisterPending_CreatesPendingRecord(t *testing.T) {
 }
 
 func TestService_RegisterPending_IdempotentOnPending(t *testing.T) {
-	svc := newTestService(t)
+	svc, _ := newTestService(t)
 
 	first, err := svc.RegisterPending("name", "/start", nil)
 	require.NoError(t, err)
@@ -142,7 +142,7 @@ func TestService_RegisterPending_IdempotentOnPending(t *testing.T) {
 }
 
 func TestService_RegisterPending_IdempotentOnInactive(t *testing.T) {
-	svc := newTestService(t)
+	svc, _ := newTestService(t)
 
 	first, err := svc.RegisterPending("name", "/start", nil)
 	require.NoError(t, err)
@@ -157,12 +157,7 @@ func TestService_RegisterPending_IdempotentOnInactive(t *testing.T) {
 }
 
 func TestService_RegisterPending_AdoptsActiveRecord(t *testing.T) {
-	// When a mux record exists in Active status (e.g. previous owner deleted
-	// itself without killing the mux session, or the daemon was off and missed
-	// the close hook), RegisterPending returns the existing record so the new
-	// owner can adopt it. Real "another session is already linked" conflicts
-	// are caught at the caller's session.Session.MuxSessionID unique-constraint write.
-	svc := newTestService(t)
+	svc, _ := newTestService(t)
 
 	first, err := svc.RegisterPending("name", "/start", nil)
 	require.NoError(t, err)
@@ -177,7 +172,7 @@ func TestService_RegisterPending_AdoptsActiveRecord(t *testing.T) {
 }
 
 func TestService_SpawnForRecord_TransitionsPendingToActive(t *testing.T) {
-	svc := newTestService(t)
+	svc, driver := newTestService(t)
 
 	ts, err := svc.RegisterPending("name", "/start", nil)
 	require.NoError(t, err)
@@ -186,12 +181,11 @@ func TestService_SpawnForRecord_TransitionsPendingToActive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusActive, spawned.Status)
 
-	mock := svc.driver.(*FakeDriver)
-	assert.True(t, mock.HasSessionByName("name"))
+	assert.True(t, driver.HasSession("name"))
 }
 
 func TestService_SpawnForRecord_DoubleSpawnIsSafe(t *testing.T) {
-	svc := newTestService(t)
+	svc, _ := newTestService(t)
 
 	ts, err := svc.RegisterPending("name", "/start", nil)
 	require.NoError(t, err)
@@ -227,7 +221,7 @@ func TestService_SessionClosedAfterUtenaKillIsNotPublished(t *testing.T) {
 }
 
 func TestService_WaitForActivationReceivesActivatedSession(t *testing.T) {
-	svc := newTestService(t)
+	svc, _ := newTestService(t)
 	bus := svc.eventBus
 
 	got := make(chan string, 1)
@@ -249,7 +243,7 @@ func TestService_WaitForActivationReceivesActivatedSession(t *testing.T) {
 }
 
 func TestService_WaitForActivationTimesOut(t *testing.T) {
-	svc := newTestService(t)
+	svc, _ := newTestService(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
@@ -260,14 +254,11 @@ func TestService_WaitForActivationTimesOut(t *testing.T) {
 
 func startFollowing(t *testing.T) (*Service, *FakeDriver, eventbus.EventBus) {
 	t.Helper()
-	database := testdb.New(t, &Session{})
-	bus := eventbus.NewEventBus()
-	driver := NewFakeDriver()
-	svc := NewService(driver, NewStore(database), bus)
+	svc, driver := newTestService(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go svc.followEvents(ctx)
-	return svc, driver, bus
+	return svc, driver, svc.eventBus
 }
 
 func emit(t *testing.T, driver *FakeDriver, ev Event) {

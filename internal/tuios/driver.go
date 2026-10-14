@@ -22,7 +22,6 @@ type tuiosEvent struct {
 	Session string `json:"session"`
 	Window  string `json:"window"`
 	State   string `json:"state"`
-	Reason  string `json:"reason"`
 }
 
 type agentPane struct {
@@ -31,8 +30,6 @@ type agentPane struct {
 	State    string            `json:"state"`
 	Meta     map[string]string `json:"meta"`
 }
-
-const tuiosEventSubscribed = "subscribed"
 
 const agentSessionMetaKey = "session"
 
@@ -260,7 +257,8 @@ func (d *Driver) Subscribe(ctx context.Context, onEvent func(mux.Event)) error {
 	if ack.Error != nil {
 		return ack.Error
 	}
-	d.translate(tuiosEvent{Type: tuiosEventSubscribed}, onEvent)
+	d.tagAgentPanes()
+	onEvent(mux.Event{Type: mux.EventResync})
 
 	for scanner.Scan() {
 		var ev tuiosEvent
@@ -278,7 +276,7 @@ func (d *Driver) Subscribe(ctx context.Context, onEvent func(mux.Event)) error {
 
 func (d *Driver) translate(ev tuiosEvent, onEvent func(mux.Event)) {
 	switch ev.Type {
-	case tuiosEventSubscribed, "gap":
+	case "gap":
 		d.tagAgentPanes()
 		onEvent(mux.Event{Type: mux.EventResync})
 	case "session-created":

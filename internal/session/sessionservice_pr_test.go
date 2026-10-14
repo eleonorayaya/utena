@@ -554,7 +554,7 @@ func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
 	require.True(t, info.IsDir())
 
 	muxName := SanitizeMuxName(sess.Name)
-	require.True(t, mock.HasSessionByName(muxName), "mux session %s should exist", muxName)
+	require.True(t, mock.HasSession(muxName), "mux session %s should exist", muxName)
 	ts, err := muxService.GetSessionByName(muxName)
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(service.sessionsRoot, sess.Name), ts.StartDir, "mux session should start at the session root")

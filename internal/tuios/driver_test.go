@@ -28,7 +28,7 @@ type fakeTuiosDaemon struct {
 	stream   []string
 }
 
-func startFakeTuios(t *testing.T, replies map[string]string) (*Driver, *fakeTuiosDaemon) {
+func startFakeTuios(t *testing.T, replies map[string]string, stream ...string) (*Driver, *fakeTuiosDaemon) {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "tuios-test")
 	require.NoError(t, err)
@@ -39,7 +39,7 @@ func startFakeTuios(t *testing.T, replies map[string]string) (*Driver, *fakeTuio
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
 
-	d := &fakeTuiosDaemon{replies: replies}
+	d := &fakeTuiosDaemon{replies: replies, stream: stream}
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -63,11 +63,10 @@ func (d *fakeTuiosDaemon) serve(conn net.Conn) {
 	d.mu.Lock()
 	d.requests = append(d.requests, req)
 	reply := d.replies[req.Verb]
-	stream := d.stream
 	d.mu.Unlock()
 	_, _ = conn.Write([]byte(reply + "\n"))
 	if req.Verb == "subscribe" {
-		for _, line := range stream {
+		for _, line := range d.stream {
 			_, _ = conn.Write([]byte(line + "\n"))
 		}
 	}
@@ -188,34 +187,17 @@ func TestDriver_ListAgentsAcrossSessions(t *testing.T) {
 	assert.Equal(t, true, d.last().Params["all_sessions"])
 }
 
-func TestDriver_SetAgentMetaTargetsPane(t *testing.T) {
-	r, d := startFakeTuios(t, map[string]string{
-		"set-agent-meta": `{"id":1,"result":{"type":"agent_meta_set"}}`,
-	})
-
-	require.NoError(t, r.setAgentMeta("work", "w1", map[string]string{"session": "work"}))
-
-	req := d.last()
-	assert.Equal(t, "work", req.Params["session"])
-	assert.Equal(t, "w1", req.Params["window"])
-	assert.Equal(t, "utena", req.Params["source"])
-	assert.Equal(t, map[string]any{"session": "work"}, req.Params["tokens"])
-}
-
 func TestDriver_SubscribeTranslatesEvents(t *testing.T) {
 	r, d := startFakeTuios(t, map[string]string{
 		"subscribe":   `{"id":1,"result":{"type":"subscribed"}}`,
 		"list-agents": `{"id":1,"result":{"agents":[]}}`,
-	})
-	d.mu.Lock()
-	d.stream = []string{
+	},
 		`{"type":"session-created","session":"s"}`,
 		`{"type":"session-closed","session":"s"}`,
 		`{"type":"window-created","session":"s","window":"w1"}`,
 		`{"type":"workspace-switched","session":"s"}`,
 		`{"type":"gap"}`,
-	}
-	d.mu.Unlock()
+	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

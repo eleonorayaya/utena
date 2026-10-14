@@ -13,8 +13,7 @@ func TestModule_Models(t *testing.T) {
 
 	bus := eventbus.NewEventBus()
 	mock := NewFakeDriver()
-	store := NewStore(database)
-	module := NewModuleWithDriver(mock, store, bus)
+	module := NewModule(mock, bus, database)
 
 	models := module.Models()
 	require.Len(t, models, 1)
@@ -25,8 +24,7 @@ func TestModule_InitializesWithoutError(t *testing.T) {
 
 	bus := eventbus.NewEventBus()
 	mock := NewFakeDriver()
-	store := NewStore(database)
-	module := NewModuleWithDriver(mock, store, bus)
+	module := NewModule(mock, bus, database)
 
 	require.NotNil(t, module.Service)
 	require.NotNil(t, module.Controller)

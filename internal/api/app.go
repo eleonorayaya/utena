@@ -149,10 +149,9 @@ func (a *App) collectPreMigrations() []db.PreMigration {
 	for _, m := range a.modules() {
 		if pp, ok := m.module.(common.PreMigrationProvider); ok {
 			for _, fn := range pp.PreMigrations() {
-				name := m.name
 				fns = append(fns, func(tx *gorm.DB) error {
 					if err := fn(tx); err != nil {
-						return fmt.Errorf("%s: %w", name, err)
+						return fmt.Errorf("%s: %w", m.name, err)
 					}
 					return nil
 				})

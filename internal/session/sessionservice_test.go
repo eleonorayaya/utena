@@ -20,9 +20,7 @@ import (
 
 func createMuxService(t *testing.T, database db.Database, mock *mux.FakeDriver, bus eventbus.EventBus) *mux.Service {
 	t.Helper()
-	muxStore := mux.NewStore(database)
-	module := mux.NewModuleWithDriver(mock, muxStore, bus)
-	return module.Service
+	return mux.NewModule(mock, bus, database).Service
 }
 
 func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *mux.FakeDriver, uint, uint) {
@@ -633,7 +631,7 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, info.IsDir())
 
-	require.True(t, mock.HasSessionByName("my-feature"))
+	require.True(t, mock.HasSession("my-feature"))
 
 	finalSess, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
@@ -704,13 +702,13 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusBroken, retrieved.Status)
 	require.Contains(t, retrieved.StatusError, "branch")
-	require.False(t, mock.HasSessionByName("my-feature"))
+	require.False(t, mock.HasSession("my-feature"))
 }
 
 func TestSessionService_ActivateSession_TouchesWorkspace(t *testing.T) {
 	service, sessionStore, workspaceStore, muxDriver, ws1ID, _ := setupSessionService(t)
 
-	muxDriver.Sessions["utena-session-1"] = true
+	require.NoError(t, muxDriver.NewSession("utena-session-1", "", nil))
 	session := &Session{
 		Name:       "session-1",
 		Status:     StatusActive,
@@ -791,7 +789,7 @@ func TestSessionService_ActivateSession_PendingPR_CreatesWorktree(t *testing.T) 
 	require.True(t, info.IsDir())
 
 	muxName := fmt.Sprintf("git-repo-%s", branchName)
-	require.True(t, mock.HasSessionByName(muxName), "mux session %q not created", muxName)
+	require.True(t, mock.HasSession(muxName), "mux session %q not created", muxName)
 	ts, err := service.muxService.GetSessionByName(muxName)
 	require.NoError(t, err)
 	require.Equal(t, worktreePath, ts.StartDir, "mux session start dir should be the worktree, not the repo root")
@@ -816,7 +814,7 @@ func TestSessionService_ActivateSession_RecreatesMissingMux(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusActive, result.Status)
 	require.True(t, result.IsAttached)
-	require.True(t, muxDriver.HasSessionByName("utena-session-1"))
+	require.True(t, muxDriver.HasSession("utena-session-1"))
 }
 
 func TestSessionService_ActivateSession_ReactivatesArchived(t *testing.T) {
@@ -833,20 +831,20 @@ func TestSessionService_ActivateSession_ReactivatesArchived(t *testing.T) {
 	require.NoError(t, err)
 	session.MuxSessionID = &muxRecord.ID
 	require.NoError(t, sessionStore.Update(session))
-	muxDriver.Sessions[muxName] = true
+	require.NoError(t, muxDriver.NewSession(muxName, "", nil))
 
 	ctx := context.Background()
 	archived, err := service.ArchiveSession(ctx, session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusArchived, archived.Status)
 	require.Nil(t, archived.MuxSessionID, "archive should release the mux record claim")
-	require.False(t, muxDriver.HasSessionByName(muxName), "archive should kill the mux session")
+	require.False(t, muxDriver.HasSession(muxName), "archive should kill the mux session")
 
 	result, err := service.ActivateSession(ctx, session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusActive, result.Status)
 	require.True(t, result.IsAttached)
-	require.True(t, muxDriver.HasSessionByName(muxName), "reactivation should recreate the mux session")
+	require.True(t, muxDriver.HasSession(muxName), "reactivation should recreate the mux session")
 	require.NotNil(t, result.MuxSession)
 	require.Equal(t, muxName, result.MuxSession.Name, "response must carry the recreated mux name for switch-client")
 }
@@ -854,7 +852,7 @@ func TestSessionService_ActivateSession_ReactivatesArchived(t *testing.T) {
 func TestSessionService_RefreshSession_DetectsMissingMux(t *testing.T) {
 	service, sessionStore, _, muxDriver, ws1ID, _ := setupSessionService(t)
 
-	muxDriver.Sessions["utena-session-1"] = true
+	require.NoError(t, muxDriver.NewSession("utena-session-1", "", nil))
 	session := &Session{
 		Name:       "session-1",
 		Status:     StatusActive,
@@ -904,7 +902,7 @@ func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 func TestSessionService_RepairSession_NotBroken(t *testing.T) {
 	service, sessionStore, _, muxDriver, ws1ID, _ := setupSessionService(t)
 
-	muxDriver.Sessions["utena-session-1"] = true
+	require.NoError(t, muxDriver.NewSession("utena-session-1", "", nil))
 	session := &Session{
 		Name:       "session-1",
 		Status:     StatusActive,
@@ -921,7 +919,7 @@ func TestSessionService_RepairSession_NotBroken(t *testing.T) {
 func TestSessionService_Reconcile_MarksMissingMuxBroken(t *testing.T) {
 	service, sessionStore, _, muxDriver, ws1ID, _ := setupSessionService(t)
 
-	muxDriver.Sessions["utena-session-1"] = true
+	require.NoError(t, muxDriver.NewSession("utena-session-1", "", nil))
 	session := &Session{
 		Name:       "session-1",
 		Status:     StatusActive,
@@ -1037,7 +1035,7 @@ func TestSessionService_WorktreeInit_FailingScriptContinues(t *testing.T) {
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusActive, retrieved.Status)
-	require.True(t, mock.HasSessionByName("fail-init"))
+	require.True(t, mock.HasSession("fail-init"))
 }
 
 func TestSessionService_WorktreeInit_MissingScriptsSkipped(t *testing.T) {

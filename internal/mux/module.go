@@ -17,11 +17,7 @@ type Module struct {
 }
 
 func NewModule(driver Driver, bus eventbus.EventBus, database db.Database) *Module {
-	return NewModuleWithDriver(driver, NewStore(database), bus)
-}
-
-func NewModuleWithDriver(driver Driver, store *Store, bus eventbus.EventBus) *Module {
-	service := NewService(driver, store, bus)
+	service := NewService(driver, NewStore(database), bus)
 	controller := NewController(service)
 	router := NewRouter(controller)
 	return &Module{Service: service, Controller: controller, Router: router}
@@ -60,12 +56,5 @@ func renameTmuxSessionsTable(tx *gorm.DB) error {
 	if !mg.HasTable("mux_sessions") {
 		return nil
 	}
-	for _, idx := range []string{"idx_tmux_sessions_name", "idx_tmux_sessions_status", "idx_tmux_sessions_deleted_at"} {
-		if mg.HasIndex("mux_sessions", idx) {
-			if err := mg.DropIndex("mux_sessions", idx); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return db.DropIndexesIfExist(mg, "mux_sessions", "idx_tmux_sessions_name", "idx_tmux_sessions_status", "idx_tmux_sessions_deleted_at")
 }

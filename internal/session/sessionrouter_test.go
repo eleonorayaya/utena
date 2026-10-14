@@ -256,7 +256,7 @@ func TestSessionRouter_RepairSession_NotFound(t *testing.T) {
 func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
 	router, sessionStore, _, muxDriver, _, _ := setupSessionRouter(t)
 
-	muxDriver.Sessions["utena-alive-session"] = true
+	require.NoError(t, muxDriver.NewSession("utena-alive-session", "", nil))
 	session := &Session{
 		Name:       "alive-session",
 		Status:     StatusActive,

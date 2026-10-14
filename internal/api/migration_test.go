@@ -79,17 +79,6 @@ type sqliteObject struct {
 	Name string
 }
 
-func sqliteNames(t *testing.T, gormDB *gorm.DB) map[string]string {
-	t.Helper()
-	var objs []sqliteObject
-	require.NoError(t, gormDB.Raw("SELECT type, name FROM sqlite_master").Scan(&objs).Error)
-	names := make(map[string]string, len(objs))
-	for _, o := range objs {
-		names[o.Name] = o.Type
-	}
-	return names
-}
-
 func tableSQL(t *testing.T, gormDB *gorm.DB, table string) string {
 	t.Helper()
 	var sql string
@@ -116,7 +105,7 @@ func assertNoTmuxSchema(t *testing.T, gormDB *gorm.DB) {
 	var leftovers []sqliteObject
 	require.NoError(t, gormDB.Raw("SELECT type, name FROM sqlite_master WHERE sql LIKE '%tmux%' OR name LIKE '%tmux%'").Scan(&leftovers).Error)
 	assert.Empty(t, leftovers)
-	if _, ok := sqliteNames(t, gormDB)["sqlite_sequence"]; ok {
+	if gormDB.Migrator().HasTable("sqlite_sequence") {
 		var seqs []string
 		require.NoError(t, gormDB.Raw("SELECT name FROM sqlite_sequence WHERE name LIKE '%tmux%'").Scan(&seqs).Error)
 		assert.Empty(t, seqs)
@@ -172,6 +161,26 @@ func openFileSQLite(t *testing.T) *gorm.DB {
 	return gormDB
 }
 
+func newMigrationApp(t *testing.T, gormDB *gorm.DB) *App {
+	t.Helper()
+	return newApp(gormDB, afero.NewMemMapFs(), Config{ConfigDir: "/config", SessionsRoot: t.TempDir()})
+}
+
+func migrateLegacy(t *testing.T, gormDB *gorm.DB) *App {
+	t.Helper()
+	app := newMigrationApp(t, gormDB)
+	require.NoError(t, app.DB.OnAppStart(context.Background()))
+	return app
+}
+
+func seedLegacySession(t *testing.T, gormDB *gorm.DB) {
+	t.Helper()
+	require.NoError(t, gormDB.AutoMigrate(legacyModels...))
+	tmuxRow := &legacyTmuxSession{Name: "work", Status: "active"}
+	require.NoError(t, gormDB.Create(tmuxRow).Error)
+	require.NoError(t, gormDB.Create(&legacySession{Name: "s1", TmuxSessionID: &tmuxRow.ID}).Error)
+}
+
 func TestMigration_LegacyTmuxSchema_InMemory(t *testing.T) {
 	gormDB, err := db.OpenInMemorySQLite()
 	require.NoError(t, err)
@@ -187,7 +196,6 @@ func TestMigration_LegacyTmuxSchema_File(t *testing.T) {
 }
 
 func runLegacyMigration(t *testing.T, gormDB *gorm.DB) {
-	ctx := context.Background()
 	require.NoError(t, gormDB.AutoMigrate(legacyModels...))
 
 	repo := &git.Repo{Path: "/src/repo", FullName: "test/repo"}
@@ -230,16 +238,17 @@ func runLegacyMigration(t *testing.T, gormDB *gorm.DB) {
 	require.Equal(t, uint(3), deleted.ID)
 	require.NoError(t, gormDB.Unscoped().Delete(deleted).Error)
 
-	before := sqliteNames(t, gormDB)
-	for _, name := range []string{"tmux_sessions", "idx_tmux_sessions_name", "idx_tmux_sessions_deleted_at", "idx_tmux_sessions_status", "idx_sessions_tmux_session_id", "idx_sessions_tmux_session_name"} {
-		assert.Contains(t, before, name)
+	require.True(t, gormDB.Migrator().HasTable("tmux_sessions"))
+	for _, idx := range []string{"idx_tmux_sessions_name", "idx_tmux_sessions_deleted_at", "idx_tmux_sessions_status"} {
+		assert.True(t, gormDB.Migrator().HasIndex("tmux_sessions", idx), idx)
+	}
+	for _, idx := range []string{"idx_sessions_tmux_session_id", "idx_sessions_tmux_session_name"} {
+		assert.True(t, gormDB.Migrator().HasIndex("sessions", idx), idx)
 	}
 	assert.Contains(t, tableSQL(t, gormDB, "sessions"), "fk_sessions_tmux_session")
 	assert.Contains(t, tableSQL(t, gormDB, "session_actions"), "fk_sessions_session_actions")
 
-	cfg := Config{ConfigDir: "/config", SessionsRoot: t.TempDir()}
-	app := newApp(gormDB, afero.NewMemMapFs(), cfg)
-	require.NoError(t, app.DB.OnAppStart(ctx))
+	app := migrateLegacy(t, gormDB)
 
 	sess, err := app.Session.Store.GetByID(sessRow.ID)
 	require.NoError(t, err)
@@ -274,11 +283,7 @@ func runLegacyMigration(t *testing.T, gormDB *gorm.DB) {
 	assert.Equal(t, session.StepKindSetupMux, sess.SetupSteps[1].Kind)
 	assert.Equal(t, "Setup terminal session", sess.SetupSteps[1].Label)
 	assert.Equal(t, session.SetupStepDone, sess.SetupSteps[1].Status)
-	assert.False(t, gormDB.Migrator().HasColumn("sessions", "tmux_session_name"))
-	var sessionColumns []string
-	require.NoError(t, gormDB.Raw("SELECT name FROM pragma_table_info('sessions')").Scan(&sessionColumns).Error)
-	assert.NotContains(t, sessionColumns, "tmux_session_name")
-	assert.Contains(t, sessionColumns, "mux_session_id")
+	assert.True(t, gormDB.Migrator().HasColumn("sessions", "mux_session_id"))
 
 	assertNoTmuxSchema(t, gormDB)
 
@@ -322,7 +327,7 @@ func runLegacyMigration(t *testing.T, gormDB *gorm.DB) {
 		"session_branches":    1,
 	}, counts)
 
-	require.NoError(t, app.DB.OnAppStart(ctx))
+	require.NoError(t, app.DB.OnAppStart(context.Background()))
 	assert.Equal(t, schema, schemaSnapshot(t, gormDB))
 	for table, n := range counts {
 		assert.Equal(t, n, rowCount(t, gormDB, table), table)
@@ -334,37 +339,28 @@ func runLegacyMigration(t *testing.T, gormDB *gorm.DB) {
 }
 
 func TestMigration_FreshDB(t *testing.T) {
-	ctx := context.Background()
 	gormDB, err := db.OpenInMemorySQLite()
 	require.NoError(t, err)
 
-	cfg := Config{ConfigDir: "/config", SessionsRoot: t.TempDir()}
-	app := newApp(gormDB, afero.NewMemMapFs(), cfg)
-	require.NoError(t, app.DB.OnAppStart(ctx))
+	app := migrateLegacy(t, gormDB)
 
-	assert.Contains(t, sqliteNames(t, gormDB), "mux_sessions")
+	assert.True(t, gormDB.Migrator().HasTable("mux_sessions"))
 	assertNoTmuxSchema(t, gormDB)
 	assert.Equal(t, []fkInfo{{From: "mux_session_id", Table: "mux_sessions", To: "id"}}, foreignKeysOf(t, gormDB, "sessions"))
 
 	schema := schemaSnapshot(t, gormDB)
-	require.NoError(t, app.DB.OnAppStart(ctx))
+	require.NoError(t, app.DB.OnAppStart(context.Background()))
 	assert.Equal(t, schema, schemaSnapshot(t, gormDB))
 }
 
 func TestMigration_HealsPartiallyRenamedSchema(t *testing.T) {
-	ctx := context.Background()
 	gormDB, err := db.OpenInMemorySQLite()
 	require.NoError(t, err)
-	require.NoError(t, gormDB.AutoMigrate(legacyModels...))
-	tmuxRow := &legacyTmuxSession{Name: "work", Status: "active"}
-	require.NoError(t, gormDB.Create(tmuxRow).Error)
-	require.NoError(t, gormDB.Create(&legacySession{Name: "s1", TmuxSessionID: &tmuxRow.ID}).Error)
+	seedLegacySession(t, gormDB)
 	require.NoError(t, gormDB.Migrator().RenameTable("tmux_sessions", "mux_sessions"))
 	require.NoError(t, gormDB.Migrator().RenameColumn("sessions", "tmux_session_id", "mux_session_id"))
 
-	cfg := Config{ConfigDir: "/config", SessionsRoot: t.TempDir()}
-	app := newApp(gormDB, afero.NewMemMapFs(), cfg)
-	require.NoError(t, app.DB.OnAppStart(ctx))
+	app := migrateLegacy(t, gormDB)
 
 	assertNoTmuxSchema(t, gormDB)
 	assert.Equal(t, []fkInfo{{From: "mux_session_id", Table: "mux_sessions", To: "id"}}, foreignKeysOf(t, gormDB, "sessions"))
@@ -379,31 +375,23 @@ func TestMigration_RefusesWhenBothTablesExist(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, gormDB.AutoMigrate(&legacyTmuxSession{}, &mux.Session{}))
 
-	cfg := Config{ConfigDir: "/config", SessionsRoot: t.TempDir()}
-	app := newApp(gormDB, afero.NewMemMapFs(), cfg)
-	err = app.DB.OnAppStart(context.Background())
+	err = newMigrationApp(t, gormDB).DB.OnAppStart(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mux:")
-	assert.Contains(t, sqliteNames(t, gormDB), "tmux_sessions")
+	assert.True(t, gormDB.Migrator().HasTable("tmux_sessions"))
 }
 
 func TestMigration_RefusesWhenBothSessionColumnsExist(t *testing.T) {
 	gormDB, err := db.OpenInMemorySQLite()
 	require.NoError(t, err)
-	require.NoError(t, gormDB.AutoMigrate(legacyModels...))
-	tmuxRow := &legacyTmuxSession{Name: "work", Status: "active"}
-	require.NoError(t, gormDB.Create(tmuxRow).Error)
-	require.NoError(t, gormDB.Create(&legacySession{Name: "s1", TmuxSessionID: &tmuxRow.ID}).Error)
+	seedLegacySession(t, gormDB)
 	require.NoError(t, gormDB.Exec("ALTER TABLE `sessions` ADD COLUMN `mux_session_id` integer").Error)
 
-	cfg := Config{ConfigDir: "/config", SessionsRoot: t.TempDir()}
-	app := newApp(gormDB, afero.NewMemMapFs(), cfg)
-	err = app.DB.OnAppStart(context.Background())
+	err = newMigrationApp(t, gormDB).DB.OnAppStart(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "session:")
 	assert.Contains(t, err.Error(), "both tmux_session_id and mux_session_id")
-	names := sqliteNames(t, gormDB)
-	assert.Contains(t, names, "tmux_sessions")
-	assert.NotContains(t, names, "mux_sessions")
+	assert.True(t, gormDB.Migrator().HasTable("tmux_sessions"))
+	assert.False(t, gormDB.Migrator().HasTable("mux_sessions"))
 	assert.Contains(t, tableSQL(t, gormDB, "sessions"), "fk_sessions_tmux_session")
 }

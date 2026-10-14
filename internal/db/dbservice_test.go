@@ -19,18 +19,9 @@ type widget struct {
 	Name string
 }
 
-func openTestDB(t *testing.T) *db.DB {
-	t.Helper()
-	database, err := db.OpenInMemory()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = database.Close() })
-	return database
-}
-
 func TestDB_PreMigrationsRunBeforeAutoMigrate(t *testing.T) {
-	database := openTestDB(t)
-	require.NoError(t, database.Exec("CREATE TABLE legacy_widgets (id integer primary key, name text)").Error)
-	require.NoError(t, database.Exec("INSERT INTO legacy_widgets (id, name) VALUES (1, 'gear')").Error)
+	database := db.OpenTestDB(t)
+	db.MustExec(t, database, "CREATE TABLE legacy_widgets (id integer primary key, name text)", "INSERT INTO legacy_widgets (id, name) VALUES (1, 'gear')")
 
 	database.RegisterPreMigrations(func(tx *gorm.DB) error {
 		return tx.Migrator().RenameTable("legacy_widgets", "widgets")
@@ -39,14 +30,12 @@ func TestDB_PreMigrationsRunBeforeAutoMigrate(t *testing.T) {
 
 	require.NoError(t, database.OnAppStart(context.Background()))
 
-	var count int64
-	require.NoError(t, database.Raw("SELECT count(*) FROM widgets").Scan(&count).Error)
-	assert.Equal(t, int64(1), count)
+	assert.Equal(t, int64(1), db.CountRows(t, database, "widgets"))
 	assert.False(t, database.Migrator().HasTable("legacy_widgets"))
 }
 
 func TestDB_PreMigrationErrorAbortsMigrate(t *testing.T) {
-	database := openTestDB(t)
+	database := db.OpenTestDB(t)
 	sentinel := errors.New("boom")
 
 	database.RegisterPreMigrations(func(tx *gorm.DB) error {
@@ -61,8 +50,8 @@ func TestDB_PreMigrationErrorAbortsMigrate(t *testing.T) {
 }
 
 func TestDB_PreMigrationFailureRollsBackEarlierPreMigrations(t *testing.T) {
-	database := openTestDB(t)
-	require.NoError(t, database.Exec("CREATE TABLE legacy_widgets (id integer primary key, name text)").Error)
+	database := db.OpenTestDB(t)
+	db.MustExec(t, database, "CREATE TABLE legacy_widgets (id integer primary key, name text)")
 	sentinel := errors.New("boom")
 
 	database.RegisterPreMigrations(
@@ -82,7 +71,7 @@ func TestDB_PreMigrationFailureRollsBackEarlierPreMigrations(t *testing.T) {
 }
 
 func TestDB_PreMigrationsRunInOrderAndStopOnError(t *testing.T) {
-	database := openTestDB(t)
+	database := db.OpenTestDB(t)
 	sentinel := errors.New("boom")
 	var calls []string
 
@@ -107,9 +96,8 @@ func TestDB_PreMigrationsRunInOrderAndStopOnError(t *testing.T) {
 }
 
 func TestDB_PreMigrationTableRecreateNestsInTransaction(t *testing.T) {
-	database := openTestDB(t)
-	require.NoError(t, database.Exec("CREATE TABLE `widgets` (`id` integer primary key, `name` text, `legacy_name` text, `obsolete` text)").Error)
-	require.NoError(t, database.Exec("INSERT INTO widgets (id, name, legacy_name, obsolete) VALUES (1, 'gear', 'old', 'x')").Error)
+	database := db.OpenTestDB(t)
+	db.MustExec(t, database, "CREATE TABLE `widgets` (`id` integer primary key, `name` text, `legacy_name` text, `obsolete` text)", "INSERT INTO widgets (id, name, legacy_name, obsolete) VALUES (1, 'gear', 'old', 'x')")
 
 	database.RegisterPreMigrations(func(tx *gorm.DB) error {
 		if err := tx.Migrator().RenameColumn(&widget{}, "legacy_name", "label"); err != nil {
@@ -130,9 +118,8 @@ func TestDB_PreMigrationTableRecreateNestsInTransaction(t *testing.T) {
 }
 
 func TestDB_PreMigrationRenameUpdatesForeignKeyReferences(t *testing.T) {
-	database := openTestDB(t)
-	require.NoError(t, database.Exec("CREATE TABLE legacy_parents (id integer primary key)").Error)
-	require.NoError(t, database.Exec("CREATE TABLE children (id integer primary key, parent_id integer REFERENCES legacy_parents(id))").Error)
+	database := db.OpenTestDB(t)
+	db.MustExec(t, database, "CREATE TABLE legacy_parents (id integer primary key)", "CREATE TABLE children (id integer primary key, parent_id integer REFERENCES legacy_parents(id))")
 
 	database.RegisterPreMigrations(func(tx *gorm.DB) error {
 		return tx.Migrator().RenameTable("legacy_parents", "parents")
@@ -149,9 +136,8 @@ func TestDB_PreMigrationRenameUpdatesForeignKeyReferences(t *testing.T) {
 }
 
 func TestDB_PreMigrationExecRolledBackOnLaterFailure(t *testing.T) {
-	database := openTestDB(t)
-	require.NoError(t, database.Exec("CREATE TABLE widgets (id integer primary key, name text)").Error)
-	require.NoError(t, database.Exec("INSERT INTO widgets (id, name) VALUES (1, 'old')").Error)
+	database := db.OpenTestDB(t)
+	db.MustExec(t, database, "CREATE TABLE widgets (id integer primary key, name text)", "INSERT INTO widgets (id, name) VALUES (1, 'old')")
 	sentinel := errors.New("boom")
 
 	database.RegisterPreMigrations(
@@ -170,12 +156,12 @@ func TestDB_PreMigrationExecRolledBackOnLaterFailure(t *testing.T) {
 }
 
 func TestDB_MigratePreservesAutoincrementAcrossTableRebuild(t *testing.T) {
-	database := openTestDB(t)
-	require.NoError(t, database.Exec("CREATE TABLE `widgets` (`id` integer PRIMARY KEY AUTOINCREMENT, `name` text, `obsolete` text)").Error)
+	database := db.OpenTestDB(t)
+	db.MustExec(t, database, "CREATE TABLE `widgets` (`id` integer PRIMARY KEY AUTOINCREMENT, `name` text, `obsolete` text)")
 	for _, name := range []string{"a", "b", "c"} {
 		require.NoError(t, database.Exec("INSERT INTO widgets (name) VALUES (?)", name).Error)
 	}
-	require.NoError(t, database.Exec("DELETE FROM widgets WHERE id = 3").Error)
+	db.MustExec(t, database, "DELETE FROM widgets WHERE id = 3")
 
 	database.RegisterPreMigrations(func(tx *gorm.DB) error {
 		return tx.Migrator().DropColumn(&widget{}, "obsolete")
@@ -190,10 +176,8 @@ func TestDB_MigratePreservesAutoincrementAcrossTableRebuild(t *testing.T) {
 }
 
 func TestDB_MigrateRestoresVanishedSequenceRow(t *testing.T) {
-	database := openTestDB(t)
-	require.NoError(t, database.Exec("CREATE TABLE `widgets` (`id` integer PRIMARY KEY AUTOINCREMENT, `name` text, `obsolete` text)").Error)
-	require.NoError(t, database.Exec("INSERT INTO widgets (name) VALUES ('a')").Error)
-	require.NoError(t, database.Exec("DELETE FROM widgets").Error)
+	database := db.OpenTestDB(t)
+	db.MustExec(t, database, "CREATE TABLE `widgets` (`id` integer PRIMARY KEY AUTOINCREMENT, `name` text, `obsolete` text)", "INSERT INTO widgets (name) VALUES ('a')", "DELETE FROM widgets")
 
 	database.RegisterPreMigrations(func(tx *gorm.DB) error {
 		return tx.Migrator().DropColumn(&widget{}, "obsolete")
@@ -206,10 +190,8 @@ func TestDB_MigrateRestoresVanishedSequenceRow(t *testing.T) {
 }
 
 func TestDB_PreMigrationForeignKeyViolationRollsBack(t *testing.T) {
-	database := openTestDB(t)
-	require.NoError(t, database.Exec("CREATE TABLE parents (id integer primary key)").Error)
-	require.NoError(t, database.Exec("CREATE TABLE children (id integer primary key, parent_id integer REFERENCES parents(id))").Error)
-	require.NoError(t, database.Exec("CREATE TABLE marks (id integer primary key)").Error)
+	database := db.OpenTestDB(t)
+	db.MustExec(t, database, db.ParentsDDL, db.ChildrenDDL, "CREATE TABLE marks (id integer primary key)")
 
 	database.RegisterPreMigrations(func(tx *gorm.DB) error {
 		if err := tx.Exec("INSERT INTO marks (id) VALUES (1)").Error; err != nil {
@@ -221,20 +203,13 @@ func TestDB_PreMigrationForeignKeyViolationRollsBack(t *testing.T) {
 	err := database.OnAppStart(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "foreign key violations")
-	var count int64
-	require.NoError(t, database.Raw("SELECT count(*) FROM children").Scan(&count).Error)
-	assert.Zero(t, count)
-	require.NoError(t, database.Raw("SELECT count(*) FROM marks").Scan(&count).Error)
-	assert.Zero(t, count)
+	assert.Zero(t, db.CountRows(t, database, "children"))
+	assert.Zero(t, db.CountRows(t, database, "marks"))
 }
 
 func TestDB_MigrateToleratesPreexistingForeignKeyViolations(t *testing.T) {
-	database := openTestDB(t)
-	require.NoError(t, database.Exec("PRAGMA foreign_keys=OFF").Error)
-	require.NoError(t, database.Exec("CREATE TABLE parents (id integer primary key)").Error)
-	require.NoError(t, database.Exec("CREATE TABLE children (id integer primary key, parent_id integer REFERENCES parents(id))").Error)
-	require.NoError(t, database.Exec("INSERT INTO children (id, parent_id) VALUES (1, 99)").Error)
-	require.NoError(t, database.Exec("PRAGMA foreign_keys=ON").Error)
+	database := db.OpenTestDB(t)
+	db.MustExec(t, database, "PRAGMA foreign_keys=OFF", db.ParentsDDL, db.ChildrenDDL, "INSERT INTO children (id, parent_id) VALUES (1, 99)", "PRAGMA foreign_keys=ON")
 
 	database.RegisterPreMigrations(func(tx *gorm.DB) error {
 		return tx.Exec("UPDATE children SET parent_id = 99 WHERE id = 1").Error
@@ -242,9 +217,7 @@ func TestDB_MigrateToleratesPreexistingForeignKeyViolations(t *testing.T) {
 	database.RegisterModels(&widget{})
 	require.NoError(t, database.OnAppStart(context.Background()))
 
-	var count int64
-	require.NoError(t, database.Raw("SELECT count(*) FROM children").Scan(&count).Error)
-	assert.Equal(t, int64(1), count)
+	assert.Equal(t, int64(1), db.CountRows(t, database, "children"))
 }
 
 type gadget struct {
@@ -263,9 +236,8 @@ func TestDB_MigrateLogsForeignKeyViolationsAfterAutoMigrate(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	database := openTestDB(t)
-	require.NoError(t, database.Exec("CREATE TABLE `parts` (`id` integer PRIMARY KEY AUTOINCREMENT, `gadget_id` integer)").Error)
-	require.NoError(t, database.Exec("INSERT INTO parts (id, gadget_id) VALUES (1, 99)").Error)
+	database := db.OpenTestDB(t)
+	db.MustExec(t, database, "CREATE TABLE `parts` (`id` integer PRIMARY KEY AUTOINCREMENT, `gadget_id` integer)", "INSERT INTO parts (id, gadget_id) VALUES (1, 99)")
 
 	database.RegisterModels(&gadget{}, &part{})
 	require.NoError(t, database.OnAppStart(context.Background()))

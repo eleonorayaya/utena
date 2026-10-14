@@ -76,8 +76,7 @@ func setupTestRouterWithBus(t *testing.T) (*App, chi.Router, *mux.FakeDriver, ui
 	bus := eventbus.NewEventBus()
 	database := db.NewDB(gormDB)
 	mock := mux.NewFakeDriver()
-	muxStore := mux.NewStore(database)
-	muxModule := mux.NewModuleWithDriver(mock, muxStore, bus)
+	muxModule := mux.NewModule(mock, bus, database)
 	gitModule := git.NewGitModule(database, bus)
 	app := buildApp(gormDB, afero.NewMemMapFs(), cfg, muxModule, gitModule, bus)
 
@@ -335,7 +334,7 @@ func TestDaemon_RepairSession_AfterMuxFailure(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Equal(t, session.StatusActive, response.Status)
-	require.True(t, mock.HasSessionByName("repair-me"))
+	require.True(t, mock.HasSession("repair-me"))
 }
 
 func startMigrateAndWait(t *testing.T, router http.Handler, wsID uint) {

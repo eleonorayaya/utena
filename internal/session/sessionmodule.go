@@ -72,25 +72,15 @@ func (m *SessionModule) PreMigrations() []db.PreMigration {
 	return []db.PreMigration{renameTmuxSessionColumn, dropTmuxSessionNameColumn, renameSetupTmuxSteps}
 }
 
-type legacySessionsTable struct {
-	TmuxSessionName string
-}
-
-func (legacySessionsTable) TableName() string { return "sessions" }
-
 func dropTmuxSessionNameColumn(tx *gorm.DB) error {
 	mg := tx.Migrator()
-	if mg.HasIndex("sessions", "idx_sessions_tmux_session_name") {
-		if err := mg.DropIndex("sessions", "idx_sessions_tmux_session_name"); err != nil {
-			return err
-		}
+	if err := db.DropIndexesIfExist(mg, "sessions", "idx_sessions_tmux_session_name"); err != nil {
+		return err
 	}
-	if mg.HasColumn("sessions", "tmux_session_name") {
-		if err := mg.DropColumn(&legacySessionsTable{}, "tmux_session_name"); err != nil {
-			return err
-		}
+	if !mg.HasColumn("sessions", "tmux_session_name") {
+		return nil
 	}
-	return nil
+	return tx.Exec("ALTER TABLE sessions DROP COLUMN tmux_session_name").Error
 }
 
 func renameSetupTmuxSteps(tx *gorm.DB) error {
@@ -105,15 +95,11 @@ func renameSetupTmuxSteps(tx *gorm.DB) error {
 
 func renameTmuxSessionColumn(tx *gorm.DB) error {
 	mg := tx.Migrator()
-	if mg.HasConstraint("sessions", "fk_sessions_tmux_session") {
-		if err := mg.DropConstraint("sessions", "fk_sessions_tmux_session"); err != nil {
-			return err
-		}
+	if err := db.DropConstraintIfExists(mg, "sessions", "fk_sessions_tmux_session"); err != nil {
+		return err
 	}
-	if mg.HasIndex("sessions", "idx_sessions_tmux_session_id") {
-		if err := mg.DropIndex("sessions", "idx_sessions_tmux_session_id"); err != nil {
-			return err
-		}
+	if err := db.DropIndexesIfExist(mg, "sessions", "idx_sessions_tmux_session_id"); err != nil {
+		return err
 	}
 	if mg.HasColumn("sessions", "tmux_session_id") {
 		if mg.HasColumn("sessions", "mux_session_id") {
