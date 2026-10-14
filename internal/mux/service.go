@@ -184,7 +184,7 @@ func (t *Service) OnAppEnd(ctx context.Context) error {
 func (t *Service) RegisterPending(name, startDir string, env map[string]string) (*Session, error) {
 	defer t.lockName(name)()
 	if existing, err := t.store.GetByName(name); err == nil {
-		// Adopt whatever's there. The session.Session.TmuxSessionID unique constraint
+		// Adopt whatever's there. The session.Session.MuxSessionID unique constraint
 		// will reject the caller's link if another session already owns this
 		// mux record — that's where real conflicts surface. If the previous
 		// owner was deleted, its FK was nil'd and the record is unclaimed; the

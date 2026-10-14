@@ -98,12 +98,12 @@ func (s *Store) Update(session *Session) error {
 // is_alive column may not exist; we tolerate the error).
 func (s *Store) BackfillStatus() error {
 	hasIsAlive := false
-	if err := s.db.Exec("SELECT is_alive FROM tmux_sessions LIMIT 1").Error; err == nil {
+	if err := s.db.Exec("SELECT is_alive FROM mux_sessions LIMIT 1").Error; err == nil {
 		hasIsAlive = true
 	}
 	if hasIsAlive {
 		if err := s.db.Exec(
-			"UPDATE tmux_sessions SET status = CASE WHEN is_alive THEN ? ELSE ? END WHERE status IS NULL OR status = ''",
+			"UPDATE mux_sessions SET status = CASE WHEN is_alive THEN ? ELSE ? END WHERE status IS NULL OR status = ''",
 			string(StatusActive), string(StatusInactive),
 		).Error; err != nil {
 			return err
@@ -111,7 +111,7 @@ func (s *Store) BackfillStatus() error {
 		return nil
 	}
 	return s.db.Exec(
-		"UPDATE tmux_sessions SET status = ? WHERE status IS NULL OR status = ''",
+		"UPDATE mux_sessions SET status = ? WHERE status IS NULL OR status = ''",
 		string(StatusInactive),
 	).Error
 }

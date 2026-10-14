@@ -24,7 +24,7 @@ func NewSessionStore(database db.Database) *SessionStore {
 
 func (s *SessionStore) loaded() *gorm.DB {
 	return s.db.
-		Joins("TmuxSession").
+		Joins("MuxSession").
 		Preload("ClaudeSessions").
 		Preload("SessionActions").
 		Preload("SetupSteps", func(db *gorm.DB) *gorm.DB {
@@ -149,7 +149,7 @@ func (s *SessionStore) Add(session *Session) error {
 		return errors.New("session cannot be nil")
 	}
 
-	if err := s.db.Omit("ClaudeSessions", "TmuxSession").Create(session).Error; err != nil {
+	if err := s.db.Omit("ClaudeSessions", "MuxSession").Create(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return common.WrapConflict(sessionConflictMessage(session), ErrSessionAlreadyExists)
 		}
@@ -174,7 +174,7 @@ func (s *SessionStore) Update(session *Session) error {
 		return err
 	}
 
-	if err := s.db.Omit("ClaudeSessions", "TmuxSession").Save(session).Error; err != nil {
+	if err := s.db.Omit("ClaudeSessions", "MuxSession").Save(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return common.WrapConflict(sessionConflictMessage(session), ErrSessionAlreadyExists)
 		}
@@ -185,10 +185,10 @@ func (s *SessionStore) Update(session *Session) error {
 
 // sessionConflictMessage produces a friendly message for a unique-constraint
 // violation on the Session table. The only user-visible unique index is on
-// TmuxSessionID (one Session per tmux record).
+// MuxSessionID (one Session per mux record).
 func sessionConflictMessage(session *Session) string {
-	if session.TmuxSessionID != nil {
-		return fmt.Sprintf("session %q already claims this tmux record — kill the existing session first", session.Name)
+	if session.MuxSessionID != nil {
+		return fmt.Sprintf("session %q already claims this mux record — kill the existing session first", session.Name)
 	}
 	return fmt.Sprintf("session %q already exists", session.Name)
 }
@@ -269,9 +269,9 @@ func (s *SessionStore) GetByBranchID(branchID uint) (*Session, error) {
 	return &session, nil
 }
 
-func (s *SessionStore) GetByTmuxSessionID(tmuxSessionID uint) (*Session, error) {
+func (s *SessionStore) GetByMuxSessionID(muxSessionID uint) (*Session, error) {
 	var session Session
-	if err := s.loaded().First(&session, "sessions.tmux_session_id = ?", tmuxSessionID).Error; err != nil {
+	if err := s.loaded().First(&session, "sessions.mux_session_id = ?", muxSessionID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSessionNotFound
 		}

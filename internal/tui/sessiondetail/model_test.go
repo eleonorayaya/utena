@@ -69,7 +69,7 @@ func makeBrokenSession() session.Session {
 		Model:       gorm.Model{ID: 2},
 		Name:        "broken",
 		Status:      session.StatusBroken,
-		StatusError: "tmux setup failed",
+		StatusError: "mux setup failed",
 	}
 }
 

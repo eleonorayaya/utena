@@ -132,13 +132,13 @@ func setupTwoRepoSessionService(t *testing.T) (*SessionService, *SessionStore, *
 	require.NoError(t, workspaceStore.Add(ws2))
 
 	mock := mux.NewFakeDriver()
-	tmuxService := createTmuxService(t, database, mock, bus)
+	muxService := createMuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", t.TempDir(), t.TempDir())
 
 	return service, sessionStore, mock, ws1.ID, ws2.ID
 }

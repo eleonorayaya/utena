@@ -32,4 +32,4 @@ type Session struct {
 func (t *Session) GetStatus() SessionStatus  { return t.Status }
 func (t *Session) SetStatus(s SessionStatus) { t.Status = s }
 
-func (Session) TableName() string { return "tmux_sessions" }
+func (Session) TableName() string { return "mux_sessions" }

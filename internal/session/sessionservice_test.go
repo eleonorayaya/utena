@@ -18,10 +18,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createTmuxService(t *testing.T, database db.Database, mock *mux.FakeDriver, bus eventbus.EventBus) *mux.Service {
+func createMuxService(t *testing.T, database db.Database, mock *mux.FakeDriver, bus eventbus.EventBus) *mux.Service {
 	t.Helper()
-	tmuxStore := mux.NewStore(database)
-	module := mux.NewModuleWithDriver(mock, tmuxStore, bus)
+	muxStore := mux.NewStore(database)
+	module := mux.NewModuleWithDriver(mock, muxStore, bus)
 	return module.Service
 }
 
@@ -39,7 +39,7 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	require.NoError(t, workspaceStore.Add(ws2))
 
 	mock := mux.NewFakeDriver()
-	tmuxService := createTmuxService(t, database, mock, bus)
+	muxService := createMuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)
@@ -47,7 +47,7 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
 	configDir := t.TempDir()
 	sessionsRoot := t.TempDir()
-	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", configDir, sessionsRoot)
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", configDir, sessionsRoot)
 	return service, sessionStore, workspaceStore, mock, ws1.ID, ws2.ID
 }
 
@@ -603,13 +603,13 @@ func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir st
 	require.NoError(t, workspaceStore.Add(wsGit))
 
 	mock := mux.NewFakeDriver()
-	tmuxService := createTmuxService(t, database, mock, bus)
+	muxService := createMuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", configDir, t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", configDir, t.TempDir())
 	return service, sessionStore, mock, wsGit.ID, database, gitService
 }
 
@@ -637,13 +637,13 @@ func TestSessionService_CreateSession_WithWorktree(t *testing.T) {
 
 	finalSess, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
-	require.NotNil(t, finalSess.TmuxSessionID)
-	require.NotNil(t, finalSess.TmuxSession)
-	require.Equal(t, "my-feature", finalSess.TmuxSession.Name)
-	require.Equal(t, mux.StatusActive, finalSess.TmuxSession.Status)
+	require.NotNil(t, finalSess.MuxSessionID)
+	require.NotNil(t, finalSess.MuxSession)
+	require.Equal(t, "my-feature", finalSess.MuxSession.Name)
+	require.Equal(t, mux.StatusActive, finalSess.MuxSession.Status)
 }
 
-func TestSessionService_CreateSession_EagerlyRegistersPendingTmuxRecord(t *testing.T) {
+func TestSessionService_CreateSession_EagerlyRegistersPendingMuxRecord(t *testing.T) {
 	repoPath := initTestRepo(t)
 	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
 
@@ -660,9 +660,9 @@ func TestSessionService_CreateSession_EagerlyRegistersPendingTmuxRecord(t *testi
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
-	require.NotNil(t, retrieved.TmuxSessionID, "TmuxSessionID should be linked synchronously by CreateSession")
-	require.NotNil(t, retrieved.TmuxSession)
-	require.Equal(t, "eager", retrieved.TmuxSession.Name)
+	require.NotNil(t, retrieved.MuxSessionID, "MuxSessionID should be linked synchronously by CreateSession")
+	require.NotNil(t, retrieved.MuxSession)
+	require.Equal(t, "eager", retrieved.MuxSession.Name)
 }
 
 func TestSessionService_CreateSession_TimesOut(t *testing.T) {
@@ -708,9 +708,9 @@ func TestSessionService_CreateSession_WithWorktree_InvalidBranch(t *testing.T) {
 }
 
 func TestSessionService_ActivateSession_TouchesWorkspace(t *testing.T) {
-	service, sessionStore, workspaceStore, tmux, ws1ID, _ := setupSessionService(t)
+	service, sessionStore, workspaceStore, muxDriver, ws1ID, _ := setupSessionService(t)
 
-	tmux.Sessions["utena-session-1"] = true
+	muxDriver.Sessions["utena-session-1"] = true
 	session := &Session{
 		Name:       "session-1",
 		Status:     StatusActive,
@@ -775,9 +775,9 @@ func TestSessionService_ActivateSession_PendingPR_CreatesWorktree(t *testing.T) 
 	}
 	require.NoError(t, gitDB.Create(wt).Error)
 	require.NoError(t, service.sessionWorktreeStore.Add(&SessionWorktree{SessionID: pending.ID, WorktreeID: wt.ID, Position: 0}))
-	tmuxRecord, err := service.tmuxService.RegisterPending(fmt.Sprintf("git-repo-%s", branchName), worktreePathPinned, nil)
+	muxRecord, err := service.muxService.RegisterPending(fmt.Sprintf("git-repo-%s", branchName), worktreePathPinned, nil)
 	require.NoError(t, err)
-	pending.TmuxSessionID = &tmuxRecord.ID
+	pending.MuxSessionID = &muxRecord.ID
 	require.NoError(t, sessionStore.Update(pending))
 
 	ctx := context.Background()
@@ -790,15 +790,15 @@ func TestSessionService_ActivateSession_PendingPR_CreatesWorktree(t *testing.T) 
 	require.NoError(t, err, "expected worktree at %s", worktreePath)
 	require.True(t, info.IsDir())
 
-	tmuxName := fmt.Sprintf("git-repo-%s", branchName)
-	require.True(t, mock.HasSessionByName(tmuxName), "tmux session %q not created", tmuxName)
-	ts, err := service.tmuxService.GetSessionByName(tmuxName)
+	muxName := fmt.Sprintf("git-repo-%s", branchName)
+	require.True(t, mock.HasSessionByName(muxName), "mux session %q not created", muxName)
+	ts, err := service.muxService.GetSessionByName(muxName)
 	require.NoError(t, err)
-	require.Equal(t, worktreePath, ts.StartDir, "tmux session start dir should be the worktree, not the repo root")
+	require.Equal(t, worktreePath, ts.StartDir, "mux session start dir should be the worktree, not the repo root")
 }
 
-func TestSessionService_ActivateSession_RecreatesMissingTmux(t *testing.T) {
-	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
+func TestSessionService_ActivateSession_RecreatesMissingMux(t *testing.T) {
+	service, sessionStore, _, muxDriver, ws1ID, _ := setupSessionService(t)
 
 	session := &Session{
 		Name:       "session-1",
@@ -806,9 +806,9 @@ func TestSessionService_ActivateSession_RecreatesMissingTmux(t *testing.T) {
 		LastUsedAt: time.Now(),
 	}
 	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
-	tmuxRecord, err := service.tmuxService.RegisterPending("utena-session-1", "/tmp/utena", nil)
+	muxRecord, err := service.muxService.RegisterPending("utena-session-1", "/tmp/utena", nil)
 	require.NoError(t, err)
-	session.TmuxSessionID = &tmuxRecord.ID
+	session.MuxSessionID = &muxRecord.ID
 	require.NoError(t, sessionStore.Update(session))
 
 	ctx := context.Background()
@@ -816,11 +816,11 @@ func TestSessionService_ActivateSession_RecreatesMissingTmux(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusActive, result.Status)
 	require.True(t, result.IsAttached)
-	require.True(t, tmux.HasSessionByName("utena-session-1"))
+	require.True(t, muxDriver.HasSessionByName("utena-session-1"))
 }
 
 func TestSessionService_ActivateSession_ReactivatesArchived(t *testing.T) {
-	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
+	service, sessionStore, _, muxDriver, ws1ID, _ := setupSessionService(t)
 
 	session := &Session{
 		Name:       "session-1",
@@ -828,33 +828,33 @@ func TestSessionService_ActivateSession_ReactivatesArchived(t *testing.T) {
 		LastUsedAt: time.Now(),
 	}
 	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
-	tmuxName := SanitizeTmuxName(session.Name)
-	tmuxRecord, err := service.tmuxService.RegisterPending(tmuxName, "/tmp/utena", nil)
+	muxName := SanitizeMuxName(session.Name)
+	muxRecord, err := service.muxService.RegisterPending(muxName, "/tmp/utena", nil)
 	require.NoError(t, err)
-	session.TmuxSessionID = &tmuxRecord.ID
+	session.MuxSessionID = &muxRecord.ID
 	require.NoError(t, sessionStore.Update(session))
-	tmux.Sessions[tmuxName] = true
+	muxDriver.Sessions[muxName] = true
 
 	ctx := context.Background()
 	archived, err := service.ArchiveSession(ctx, session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusArchived, archived.Status)
-	require.Nil(t, archived.TmuxSessionID, "archive should release the tmux record claim")
-	require.False(t, tmux.HasSessionByName(tmuxName), "archive should kill the tmux session")
+	require.Nil(t, archived.MuxSessionID, "archive should release the mux record claim")
+	require.False(t, muxDriver.HasSessionByName(muxName), "archive should kill the mux session")
 
 	result, err := service.ActivateSession(ctx, session.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusActive, result.Status)
 	require.True(t, result.IsAttached)
-	require.True(t, tmux.HasSessionByName(tmuxName), "reactivation should recreate the tmux session")
-	require.NotNil(t, result.TmuxSession)
-	require.Equal(t, tmuxName, result.TmuxSession.Name, "response must carry the recreated tmux name for switch-client")
+	require.True(t, muxDriver.HasSessionByName(muxName), "reactivation should recreate the mux session")
+	require.NotNil(t, result.MuxSession)
+	require.Equal(t, muxName, result.MuxSession.Name, "response must carry the recreated mux name for switch-client")
 }
 
-func TestSessionService_RefreshSession_DetectsMissingTmux(t *testing.T) {
-	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
+func TestSessionService_RefreshSession_DetectsMissingMux(t *testing.T) {
+	service, sessionStore, _, muxDriver, ws1ID, _ := setupSessionService(t)
 
-	tmux.Sessions["utena-session-1"] = true
+	muxDriver.Sessions["utena-session-1"] = true
 	session := &Session{
 		Name:       "session-1",
 		Status:     StatusActive,
@@ -863,8 +863,8 @@ func TestSessionService_RefreshSession_DetectsMissingTmux(t *testing.T) {
 	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	ctx := context.Background()
-	tmux.RemoveSession("utena-session-1")
-	require.NoError(t, service.tmuxService.HandleSessionClosed(ctx, "utena-session-1"))
+	muxDriver.RemoveSession("utena-session-1")
+	require.NoError(t, service.muxService.HandleSessionClosed(ctx, "utena-session-1"))
 
 	refreshed, err := service.RefreshSession(ctx, session.ID)
 	require.NoError(t, err)
@@ -879,19 +879,19 @@ func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena", IsGitRepo: true}
 	require.NoError(t, workspaceStore.Add(ws))
 	mock := mux.NewFakeDriver()
-	tmuxService := createTmuxService(t, database, mock, bus)
+	muxService := createMuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	swtStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, swtStore, NewDismissedPRStore(database), NewSessionActionStore(database), NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	service := NewSessionService(sessionStore, swtStore, NewDismissedPRStore(database), NewSessionActionStore(database), NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", t.TempDir(), t.TempDir())
 
 	ts := &mux.Session{Name: "utena-session-1", StartDir: "/tmp/utena", Status: mux.StatusActive}
 	require.NoError(t, database.Create(ts).Error)
 	session := &Session{
-		Name:          "session-1",
-		Status:        StatusActive,
-		TmuxSessionID: &ts.ID,
-		LastUsedAt:    time.Now(),
+		Name:         "session-1",
+		Status:       StatusActive,
+		MuxSessionID: &ts.ID,
+		LastUsedAt:   time.Now(),
 	}
 	addTestSession(t, sessionStore, swtStore, session, ws.ID)
 
@@ -902,9 +902,9 @@ func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 }
 
 func TestSessionService_RepairSession_NotBroken(t *testing.T) {
-	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
+	service, sessionStore, _, muxDriver, ws1ID, _ := setupSessionService(t)
 
-	tmux.Sessions["utena-session-1"] = true
+	muxDriver.Sessions["utena-session-1"] = true
 	session := &Session{
 		Name:       "session-1",
 		Status:     StatusActive,
@@ -918,10 +918,10 @@ func TestSessionService_RepairSession_NotBroken(t *testing.T) {
 	require.ErrorIs(t, err, ErrSessionNotBroken)
 }
 
-func TestSessionService_Reconcile_MarksMissingTmuxBroken(t *testing.T) {
-	service, sessionStore, _, tmux, ws1ID, _ := setupSessionService(t)
+func TestSessionService_Reconcile_MarksMissingMuxBroken(t *testing.T) {
+	service, sessionStore, _, muxDriver, ws1ID, _ := setupSessionService(t)
 
-	tmux.Sessions["utena-session-1"] = true
+	muxDriver.Sessions["utena-session-1"] = true
 	session := &Session{
 		Name:       "session-1",
 		Status:     StatusActive,
@@ -930,12 +930,12 @@ func TestSessionService_Reconcile_MarksMissingTmuxBroken(t *testing.T) {
 	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	ctx := context.Background()
-	tmux.RemoveSession("utena-session-1")
-	require.NoError(t, service.tmuxService.HandleSessionClosed(ctx, "utena-session-1"))
+	muxDriver.RemoveSession("utena-session-1")
+	require.NoError(t, service.muxService.HandleSessionClosed(ctx, "utena-session-1"))
 
 	sessions, err := sessionStore.List()
 	require.NoError(t, err)
-	service.reconcileTmuxState(ctx, sessions)
+	service.reconcileMuxState(ctx, sessions)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
@@ -955,7 +955,7 @@ func TestSessionService_Reconcile_SkipsDeleted(t *testing.T) {
 	ctx := context.Background()
 	sessions, err := sessionStore.List()
 	require.NoError(t, err)
-	service.reconcileTmuxState(ctx, sessions)
+	service.reconcileMuxState(ctx, sessions)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
 	require.NoError(t, err)
@@ -1167,12 +1167,12 @@ func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionSe
 	require.NoError(t, workspaceStore.Add(wsGit))
 
 	mock := mux.NewFakeDriver()
-	tmuxService := createTmuxService(t, database, mock, bus)
+	muxService := createMuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", configDir, t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", configDir, t.TempDir())
 	return service, sessionStore, mock, wsGit.ID, repoPath
 }
 

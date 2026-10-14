@@ -75,7 +75,7 @@ type SessionService struct {
 	blockerStore         *SessionBlockerStore
 	workspaceService     *workspace.WorkspaceService
 	gitService           *git.GitService
-	tmuxService          *mux.Service
+	muxService           *mux.Service
 	eventBus             eventbus.EventBus
 	branchPrefix         string
 	configDir            string
@@ -83,7 +83,7 @@ type SessionService struct {
 	setupTimeout         time.Duration
 }
 
-func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, setupStepStore *SessionSetupStepStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, tmuxService *mux.Service, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
+func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, setupStepStore *SessionSetupStepStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, muxService *mux.Service, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
 	return &SessionService{
 		store:                store,
 		sessionWorktreeStore: sessionWorktreeStore,
@@ -94,7 +94,7 @@ func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktre
 		blockerStore:         NewSessionBlockerStore(store.db),
 		workspaceService:     workspaceService,
 		gitService:           gitService,
-		tmuxService:          tmuxService,
+		muxService:           muxService,
 		eventBus:             bus,
 		branchPrefix:         branchPrefix,
 		configDir:            configDir,
@@ -118,7 +118,7 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.markOrphanedSessionsBroken(sessions)
 	s.markLegacyLayoutSessionsBroken(sessions)
 	s.recoverStuckCreatingSessions(sessions)
-	s.reconcileTmuxState(ctx, sessions)
+	s.reconcileMuxState(ctx, sessions)
 	s.syncWatchedSessionBranches(ctx, sessions)
 	return nil
 }
@@ -177,9 +177,9 @@ func (s *SessionService) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
-func (s *SessionService) populateTmuxWindows(ctx context.Context, sess *Session) {
-	if sess.TmuxSession != nil {
-		sess.TmuxSession.Windows = s.tmuxService.GetWindows(ctx, sess.TmuxSession.Name)
+func (s *SessionService) populateMuxWindows(ctx context.Context, sess *Session) {
+	if sess.MuxSession != nil {
+		sess.MuxSession.Windows = s.muxService.GetWindows(ctx, sess.MuxSession.Name)
 	}
 }
 
@@ -189,7 +189,7 @@ func (s *SessionService) ListSessions(ctx context.Context, statuses ...SessionSt
 		return nil, err
 	}
 	for i := range sessions {
-		s.populateTmuxWindows(ctx, &sessions[i])
+		s.populateMuxWindows(ctx, &sessions[i])
 	}
 	s.attachPullRequests(sessions)
 	return sessions, nil
@@ -230,7 +230,7 @@ func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceI
 		return nil, err
 	}
 	for i := range sessions {
-		s.populateTmuxWindows(ctx, &sessions[i])
+		s.populateMuxWindows(ctx, &sessions[i])
 	}
 	s.attachPullRequests(sessions)
 	return sessions, nil
@@ -241,17 +241,17 @@ func (s *SessionService) GetSession(ctx context.Context, id uint) (*Session, err
 	if err != nil {
 		return nil, err
 	}
-	s.populateTmuxWindows(ctx, sess)
+	s.populateMuxWindows(ctx, sess)
 	sess.PullRequests = s.gitService.GetPRsForBranches(sess.BranchIDs())
 	return sess, nil
 }
 
-func (s *SessionService) findSessionByTmuxName(tmuxName string) (*Session, error) {
-	ts, err := s.tmuxService.GetSessionByName(tmuxName)
+func (s *SessionService) findSessionByMuxName(muxName string) (*Session, error) {
+	ts, err := s.muxService.GetSessionByName(muxName)
 	if err != nil {
 		return nil, err
 	}
-	return s.store.GetByTmuxSessionID(ts.ID)
+	return s.store.GetByMuxSessionID(ts.ID)
 }
 
 type CreateSessionInput struct {
@@ -408,19 +408,19 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		}
 	}
 
-	tmuxName := SanitizeTmuxName(name)
-	tmuxEnv := map[string]string{EnvSessionID: fmt.Sprintf("%d", sess.ID)}
-	tmuxRecord, err := s.tmuxService.RegisterPending(tmuxName, sessionRoot, tmuxEnv)
+	muxName := SanitizeMuxName(name)
+	muxEnv := map[string]string{EnvSessionID: fmt.Sprintf("%d", sess.ID)}
+	muxRecord, err := s.muxService.RegisterPending(muxName, sessionRoot, muxEnv)
 	if err != nil {
 		if delErr := s.store.Delete(sess.ID); delErr != nil {
-			slog.WarnContext(ctx, "failed to roll back session after tmux registration failure", "session", sess.ID, "error", delErr)
+			slog.WarnContext(ctx, "failed to roll back session after mux registration failure", "session", sess.ID, "error", delErr)
 		}
-		slog.WarnContext(ctx, "tmux registration failed; session root preserved", "path", sessionRoot, "error", err)
-		return nil, fmt.Errorf("register tmux session %q: %w", tmuxName, err)
+		slog.WarnContext(ctx, "mux registration failed; session root preserved", "path", sessionRoot, "error", err)
+		return nil, fmt.Errorf("register mux session %q: %w", muxName, err)
 	}
-	sess.TmuxSessionID = &tmuxRecord.ID
+	sess.MuxSessionID = &muxRecord.ID
 	if err := s.store.Update(sess); err != nil {
-		return nil, fmt.Errorf("persist tmux session id: %w", err)
+		return nil, fmt.Errorf("persist mux session id: %w", err)
 	}
 
 	for _, a := range assigned {
@@ -435,7 +435,7 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		slog.WarnContext(ctx, "failed to pre-create setup steps", "session", sess.ID, "error", err)
 	}
 
-	go s.runSetup(sess.ID, tmuxName, input.Workspaces)
+	go s.runSetup(sess.ID, muxName, input.Workspaces)
 
 	return sess, nil
 }
@@ -757,7 +757,7 @@ func (s *SessionService) setupSingleWorktree(ctx context.Context, sess *Session,
 	return worktreeSetupResult{swt: swt, wt: wt, ws: ws, branch: branch, worktreePath: wt.Path, created: created, warning: warning}, nil
 }
 
-func (s *SessionService) runSetup(sessionID uint, tmuxName string, specs []WorkspaceBranchSpec) {
+func (s *SessionService) runSetup(sessionID uint, muxName string, specs []WorkspaceBranchSpec) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.setupTimeout)
 	defer cancel()
 
@@ -777,7 +777,7 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, specs []Works
 		"session_root", sess.SessionRoot,
 		"workspace_count", len(sess.Worktrees),
 	)
-	slog.InfoContext(ctx, "session setup: start", "tmux", tmuxName, "timeout", s.setupTimeout)
+	slog.InfoContext(ctx, "session setup: start", "mux", muxName, "timeout", s.setupTimeout)
 	setupStart := time.Now()
 	defer func() {
 		slog.InfoContext(ctx, "session setup: done", "status", sess.Status, "duration_ms", time.Since(setupStart).Milliseconds())
@@ -831,7 +831,7 @@ func (s *SessionService) runSetup(sessionID uint, tmuxName string, specs []Works
 	executor := &setupExecution{
 		svc:       s,
 		sess:      sess,
-		tmuxName:  tmuxName,
+		muxName:   muxName,
 		execSteps: execSteps,
 		orderedWS: orderedWS,
 		specByWS:  specByWS,
@@ -921,40 +921,40 @@ func (s *SessionService) setupBranch(ctx context.Context, ws *workspace.Workspac
 	return nil
 }
 
-func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName string, sessionRoot string) error {
-	if sess.TmuxSessionID != nil {
-		record, err := s.tmuxService.GetSession(*sess.TmuxSessionID)
+func (s *SessionService) setupMux(ctx context.Context, sess *Session, muxName string, sessionRoot string) error {
+	if sess.MuxSessionID != nil {
+		record, err := s.muxService.GetSession(*sess.MuxSessionID)
 		if err != nil {
-			return fmt.Errorf("failed to load tmux record: %v", err)
+			return fmt.Errorf("failed to load mux record: %v", err)
 		}
 		isFirstSpawn := record.Status == mux.StatusPending
 
-		if s.tmuxService.HasSession(tmuxName) {
-			slog.InfoContext(ctx, "setup tmux: reusing existing tmux process", "tmux", tmuxName)
-			if _, err := tracedOp(ctx, "tmux spawn-for-record", func() (*mux.Session, error) {
-				return s.tmuxService.SpawnForRecord(record.ID)
-			}, "tmux", tmuxName, "tmux_id", record.ID); err != nil {
-				return fmt.Errorf("failed to mark tmux active: %v", err)
+		if s.muxService.HasSession(muxName) {
+			slog.InfoContext(ctx, "setup mux: reusing existing mux process", "mux", muxName)
+			if _, err := tracedOp(ctx, "mux spawn-for-record", func() (*mux.Session, error) {
+				return s.muxService.SpawnForRecord(record.ID)
+			}, "mux", muxName, "mux_id", record.ID); err != nil {
+				return fmt.Errorf("failed to mark mux active: %v", err)
 			}
 		} else {
-			if _, err := tracedOp(ctx, "tmux spawn-for-record", func() (*mux.Session, error) {
-				return s.tmuxService.SpawnForRecord(record.ID)
-			}, "tmux", tmuxName, "tmux_id", record.ID); err != nil {
-				return fmt.Errorf("failed to spawn tmux session: %v", err)
+			if _, err := tracedOp(ctx, "mux spawn-for-record", func() (*mux.Session, error) {
+				return s.muxService.SpawnForRecord(record.ID)
+			}, "mux", muxName, "mux_id", record.ID); err != nil {
+				return fmt.Errorf("failed to spawn mux session: %v", err)
 			}
 		}
 
 		if isFirstSpawn {
-			s.dispatchOnCreateActions(ctx, sess, tmuxName, record.StartDir)
+			s.dispatchOnCreateActions(ctx, sess, muxName, record.StartDir)
 		}
 		return nil
 	}
 
-	if s.tmuxService.HasSession(tmuxName) {
-		if ts, err := s.tmuxService.GetSessionByName(tmuxName); err == nil {
-			sess.TmuxSessionID = &ts.ID
+	if s.muxService.HasSession(muxName) {
+		if ts, err := s.muxService.GetSessionByName(muxName); err == nil {
+			sess.MuxSessionID = &ts.ID
 		}
-		slog.InfoContext(ctx, "setup tmux: reusing existing session", "tmux", tmuxName)
+		slog.InfoContext(ctx, "setup mux: reusing existing session", "mux", muxName)
 		return nil
 	}
 
@@ -964,25 +964,25 @@ func (s *SessionService) setupTmux(ctx context.Context, sess *Session, tmuxName 
 	}
 	env := map[string]string{EnvSessionID: fmt.Sprintf("%d", sess.ID)}
 
-	ts, err := tracedOp(ctx, "tmux new-session", func() (*mux.Session, error) {
-		return s.tmuxService.CreateSession(tmuxName, startDir, env)
-	}, "tmux", tmuxName, "start_dir", startDir)
+	ts, err := tracedOp(ctx, "mux new-session", func() (*mux.Session, error) {
+		return s.muxService.CreateSession(muxName, startDir, env)
+	}, "mux", muxName, "start_dir", startDir)
 	if err != nil {
-		if !s.tmuxService.HasSession(tmuxName) {
-			return fmt.Errorf("failed to create tmux session: %v", err)
+		if !s.muxService.HasSession(muxName) {
+			return fmt.Errorf("failed to create mux session: %v", err)
 		}
-		ts, err = s.tmuxService.GetOrTrackSession(tmuxName, startDir, env)
+		ts, err = s.muxService.GetOrTrackSession(muxName, startDir, env)
 		if err != nil {
-			return fmt.Errorf("failed to create tmux session: %v", err)
+			return fmt.Errorf("failed to create mux session: %v", err)
 		}
 	} else {
-		s.dispatchOnCreateActions(ctx, sess, tmuxName, startDir)
+		s.dispatchOnCreateActions(ctx, sess, muxName, startDir)
 	}
-	sess.TmuxSessionID = &ts.ID
+	sess.MuxSessionID = &ts.ID
 	return nil
 }
 
-func (s *SessionService) dispatchOnCreateActions(ctx context.Context, sess *Session, tmuxName, startDir string) {
+func (s *SessionService) dispatchOnCreateActions(ctx context.Context, sess *Session, muxName, startDir string) {
 	actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to load session actions", "session", sess.ID, "error", err)
@@ -991,8 +991,8 @@ func (s *SessionService) dispatchOnCreateActions(ctx context.Context, sess *Sess
 	if len(actions) == 0 {
 		return
 	}
-	slog.InfoContext(ctx, "setup tmux: dispatching on-create actions", "tmux", tmuxName, "count", len(actions))
-	go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
+	slog.InfoContext(ctx, "setup mux: dispatching on-create actions", "mux", muxName, "count", len(actions))
+	go executeSessionActions(actions, s.muxService, s.sessionActionStore, muxName, startDir)
 }
 
 func (s *SessionService) runScript(ctx context.Context, path string, workDir string, env []string) error {
@@ -1043,10 +1043,10 @@ func (s *SessionService) RepairSession(_ context.Context, id uint) (*Session, er
 		return nil, fmt.Errorf("failed to mark session for repair: %w", err)
 	}
 
-	if sess.TmuxSession == nil || sess.TmuxSession.Name == "" {
-		return nil, common.NewInvalidRequest("session has no tmux record name; please recreate")
+	if sess.MuxSession == nil || sess.MuxSession.Name == "" {
+		return nil, common.NewInvalidRequest("session has no mux record name; please recreate")
 	}
-	tmuxName := sess.TmuxSession.Name
+	muxName := sess.MuxSession.Name
 
 	wsCache := make(map[uint]*workspace.Workspace)
 	specs := make([]WorkspaceBranchSpec, 0, len(sess.Worktrees))
@@ -1061,7 +1061,7 @@ func (s *SessionService) RepairSession(_ context.Context, id uint) (*Session, er
 		}
 		specs = append(specs, WorkspaceBranchSpec{WorkspaceID: ws.ID, Branch: wt.Branch.Name})
 	}
-	go s.runSetup(sess.ID, tmuxName, specs)
+	go s.runSetup(sess.ID, muxName, specs)
 	return sess, nil
 }
 
@@ -1087,35 +1087,35 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 	s.ensureSessionWorktrees(ctx, session)
 	s.SyncSessionBranches(ctx, session)
 
-	tmuxName := SanitizeTmuxName(session.Name)
-	if session.TmuxSessionID != nil && session.TmuxSession != nil && session.TmuxSession.Name != "" {
-		tmuxName = session.TmuxSession.Name
+	muxName := SanitizeMuxName(session.Name)
+	if session.MuxSessionID != nil && session.MuxSession != nil && session.MuxSession.Name != "" {
+		muxName = session.MuxSession.Name
 	}
-	if tmuxName == "" {
-		return nil, fmt.Errorf("session has no tmux record; please repair")
+	if muxName == "" {
+		return nil, fmt.Errorf("session has no mux record; please repair")
 	}
 
-	if !s.tmuxService.HasSession(tmuxName) {
+	if !s.muxService.HasSession(muxName) {
 		startDir := session.SessionRoot
 		env := map[string]string{"UTENA_SESSION_ID": fmt.Sprintf("%d", session.ID)}
-		ts, createErr := s.tmuxService.CreateSession(tmuxName, startDir, env)
+		ts, createErr := s.muxService.CreateSession(muxName, startDir, env)
 		if createErr != nil {
-			if !s.tmuxService.HasSession(tmuxName) {
-				return nil, fmt.Errorf("failed to revive tmux session: %w", createErr)
+			if !s.muxService.HasSession(muxName) {
+				return nil, fmt.Errorf("failed to revive mux session: %w", createErr)
 			}
-			ts, createErr = s.tmuxService.GetOrTrackSession(tmuxName, startDir, env)
+			ts, createErr = s.muxService.GetOrTrackSession(muxName, startDir, env)
 			if createErr != nil {
-				return nil, fmt.Errorf("failed to revive tmux session: %w", createErr)
+				return nil, fmt.Errorf("failed to revive mux session: %w", createErr)
 			}
 		} else {
 			if actions, err := s.sessionActionStore.ListBySessionIDAndTrigger(session.ID, TriggerOnCreate); err != nil {
 				slog.Warn("failed to load session actions", "session", session.ID, "error", err)
 			} else if len(actions) > 0 {
-				go executeSessionActions(actions, s.tmuxService, s.sessionActionStore, tmuxName, startDir)
+				go executeSessionActions(actions, s.muxService, s.sessionActionStore, muxName, startDir)
 			}
 		}
-		session.TmuxSessionID = &ts.ID
-		session.TmuxSession = ts
+		session.MuxSessionID = &ts.ID
+		session.MuxSession = ts
 		session.Status = StatusActive
 		session.StatusError = ""
 	}
@@ -1153,7 +1153,7 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 
 	if err := s.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionActivated,
-		Data: eventbus.SessionActivatedEvent{SessionName: tmuxName},
+		Data: eventbus.SessionActivatedEvent{SessionName: muxName},
 	}); err != nil {
 		slog.Warn("failed to publish session activated event", "session", session.ID, "error", err)
 	}
@@ -1206,15 +1206,15 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 	return nil
 }
 
-// cleanupSessionResources tears down every on-disk and tmux resource a session
+// cleanupSessionResources tears down every on-disk and mux resource a session
 // owns, continuing past individual failures so a single stuck resource doesn't
 // strand the rest of the cleanup.
 func (s *SessionService) cleanupSessionResources(ctx context.Context, session *Session, deleteBranch bool) {
-	if session.TmuxSessionID != nil {
-		if err := s.tmuxService.KillSession(*session.TmuxSessionID); err != nil {
-			slog.Warn("failed to kill tmux session", "error", err)
+	if session.MuxSessionID != nil {
+		if err := s.muxService.KillSession(*session.MuxSessionID); err != nil {
+			slog.Warn("failed to kill mux session", "error", err)
 		}
-		session.TmuxSessionID = nil
+		session.MuxSessionID = nil
 	}
 
 	wsCache := make(map[uint]*workspace.Workspace)
@@ -1355,14 +1355,14 @@ func (s *SessionService) handleMuxSessionCreated(ctx context.Context, event even
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByTmuxName(data.SessionName)
+	sess, err := s.findSessionByMuxName(data.SessionName)
 	if err != nil {
-		slog.Debug("session not found for session-created hook", "tmux_name", data.SessionName, "error", err)
+		slog.Debug("session not found for session-created hook", "mux_name", data.SessionName, "error", err)
 		return nil
 	}
 
 	if _, err := s.RefreshSession(ctx, sess.ID); err != nil {
-		slog.Warn("failed to refresh session after tmux create", "session", sess.ID, "error", err)
+		slog.Warn("failed to refresh session after mux create", "session", sess.ID, "error", err)
 	}
 	return nil
 }
@@ -1373,9 +1373,9 @@ func (s *SessionService) handleMuxSessionClosed(ctx context.Context, event event
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByTmuxName(data.SessionName)
+	sess, err := s.findSessionByMuxName(data.SessionName)
 	if err != nil {
-		slog.Debug("session not found for session-closed hook", "tmux_name", data.SessionName, "error", err)
+		slog.Debug("session not found for session-closed hook", "mux_name", data.SessionName, "error", err)
 		return nil
 	}
 
@@ -1403,9 +1403,9 @@ func (s *SessionService) handleMuxClientSessionChanged(ctx context.Context, even
 		}
 	}
 
-	sess, err := s.findSessionByTmuxName(data.SessionName)
+	sess, err := s.findSessionByMuxName(data.SessionName)
 	if err != nil {
-		slog.Debug("session not found for client-session-changed hook", "tmux_name", data.SessionName, "error", err)
+		slog.Debug("session not found for client-session-changed hook", "mux_name", data.SessionName, "error", err)
 		return nil
 	}
 
@@ -1420,9 +1420,9 @@ func (s *SessionService) handleMuxClientAttached(ctx context.Context, event even
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByTmuxName(data.SessionName)
+	sess, err := s.findSessionByMuxName(data.SessionName)
 	if err != nil {
-		slog.Debug("session not found for client-attached hook", "tmux_name", data.SessionName, "error", err)
+		slog.Debug("session not found for client-attached hook", "mux_name", data.SessionName, "error", err)
 		return nil
 	}
 
@@ -1437,9 +1437,9 @@ func (s *SessionService) handleMuxClientDetached(ctx context.Context, event even
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByTmuxName(data.SessionName)
+	sess, err := s.findSessionByMuxName(data.SessionName)
 	if err != nil {
-		slog.Debug("session not found for client-detached hook", "tmux_name", data.SessionName, "error", err)
+		slog.Debug("session not found for client-detached hook", "mux_name", data.SessionName, "error", err)
 		return nil
 	}
 
@@ -1447,7 +1447,7 @@ func (s *SessionService) handleMuxClientDetached(ctx context.Context, event even
 	return s.store.Update(sess)
 }
 
-func (s *SessionService) reconcileTmuxState(ctx context.Context, sessions []Session) {
+func (s *SessionService) reconcileMuxState(ctx context.Context, sessions []Session) {
 	for i := range sessions {
 		sess := &sessions[i]
 		if sess.Status == StatusDeleted {
@@ -1468,11 +1468,11 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 		return nil, fmt.Errorf("cannot archive session in status %s", sess.Status)
 	}
 
-	if sess.TmuxSessionID != nil {
-		if err := s.tmuxService.KillSession(*sess.TmuxSessionID); err != nil {
-			slog.Warn("failed to kill tmux session during archive", "session", sess.ID, "error", err)
+	if sess.MuxSessionID != nil {
+		if err := s.muxService.KillSession(*sess.MuxSessionID); err != nil {
+			slog.Warn("failed to kill mux session during archive", "session", sess.ID, "error", err)
 		}
-		sess.TmuxSessionID = nil
+		sess.MuxSessionID = nil
 	}
 
 	sess.Status = StatusArchived
@@ -1519,11 +1519,11 @@ func (s *SessionService) reconcileLoadedSession(ctx context.Context, sess *Sessi
 		return sess, nil
 	}
 
-	tmuxAlive := false
-	if sess.TmuxSessionID != nil {
-		ts, tsErr := s.tmuxService.GetSession(*sess.TmuxSessionID)
+	muxAlive := false
+	if sess.MuxSessionID != nil {
+		ts, tsErr := s.muxService.GetSession(*sess.MuxSessionID)
 		if tsErr == nil {
-			tmuxAlive = ts.Status == mux.StatusActive
+			muxAlive = ts.Status == mux.StatusActive
 		}
 	}
 
@@ -1536,7 +1536,7 @@ func (s *SessionService) reconcileLoadedSession(ctx context.Context, sess *Sessi
 	if !gitHealthy {
 		sess.Status = StatusBroken
 		sess.StatusError = gitUnhealthyError
-	} else if !tmuxAlive {
+	} else if !muxAlive {
 		if sess.Status == StatusActive || canRecoverFromBroken {
 			sess.Status = StatusInactive
 			sess.StatusError = ""

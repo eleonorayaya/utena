@@ -111,11 +111,11 @@ func TestExecuteSessionActions_SpawnError_PersistsError(t *testing.T) {
 	}
 	require.NoError(t, store.Add(action))
 
-	spawner := &fakeSpawner{err: errors.New("tmux unavailable")}
+	spawner := &fakeSpawner{err: errors.New("mux unavailable")}
 	executeSessionActions([]SessionAction{*action}, spawner, store, "my-session", "/workspace")
 
 	actions, _ := store.ListBySessionIDAndTrigger(sess.ID, TriggerOnCreate)
-	require.Contains(t, actions[0].Error, "tmux unavailable")
+	require.Contains(t, actions[0].Error, "mux unavailable")
 }
 
 func TestExecuteSessionActions_UnknownType_Skipped(t *testing.T) {
@@ -146,7 +146,7 @@ func TestExecuteSessionActions_SpawnError_DoesNotPanic(t *testing.T) {
 	}
 	require.NoError(t, store.Add(action))
 
-	spawner := &fakeSpawner{err: errors.New("tmux unavailable")}
+	spawner := &fakeSpawner{err: errors.New("mux unavailable")}
 	require.NotPanics(t, func() {
 		executeSessionActions([]SessionAction{*action}, spawner, store, "my-session", "/workspace")
 	})

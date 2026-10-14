@@ -2,10 +2,12 @@ package mux
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/go-chi/chi/v5"
+	"gorm.io/gorm"
 )
 
 type Module struct {
@@ -43,4 +45,30 @@ func (m *Module) Routes() chi.Router {
 
 func (m *Module) Models() []any {
 	return []any{&Session{}}
+}
+
+func (m *Module) PreMigrations() []db.PreMigration {
+	return []db.PreMigration{renameTmuxSessionsTable}
+}
+
+func renameTmuxSessionsTable(mg gorm.Migrator) error {
+	if mg.HasTable("tmux_sessions") {
+		if mg.HasTable("mux_sessions") {
+			return fmt.Errorf("both tmux_sessions and mux_sessions tables exist")
+		}
+		if err := mg.RenameTable("tmux_sessions", "mux_sessions"); err != nil {
+			return err
+		}
+	}
+	if !mg.HasTable("mux_sessions") {
+		return nil
+	}
+	for _, idx := range []string{"idx_tmux_sessions_name", "idx_tmux_sessions_status", "idx_tmux_sessions_deleted_at"} {
+		if mg.HasIndex("mux_sessions", idx) {
+			if err := mg.DropIndex("mux_sessions", idx); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

@@ -48,9 +48,9 @@ type Session struct {
 	Blockers       []SessionBlocker       `json:"blockers,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	Branches       []SessionBranch        `json:"branches,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	PullRequests   []git.PullRequest      `json:"pull_requests,omitempty" gorm:"-"`
-	TmuxSessionID  *uint                  `json:"tmux_session_id,omitempty" gorm:"uniqueIndex"`
+	MuxSessionID   *uint                  `json:"mux_session_id,omitempty" gorm:"uniqueIndex"`
 	StatusError    string                 `json:"status_error,omitempty"`
-	TmuxSession    *mux.Session           `json:"tmux_session,omitempty" gorm:"foreignKey:TmuxSessionID"`
+	MuxSession     *mux.Session           `json:"mux_session,omitempty" gorm:"foreignKey:MuxSessionID"`
 }
 
 var unwatchedStatuses = []SessionStatus{StatusDeleted, StatusArchived, StatusCompleted, StatusPending, StatusCreating}
@@ -155,7 +155,7 @@ func (s *Session) WorkspaceDisplay() string {
 	}
 }
 
-func SanitizeTmuxName(name string) string {
+func SanitizeMuxName(name string) string {
 	r := strings.NewReplacer(
 		" ", "-",
 		".", "_",

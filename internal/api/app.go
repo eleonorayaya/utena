@@ -45,7 +45,7 @@ func newApp(gormDB *gorm.DB, fs afero.Fs, cfg Config) *App {
 	return buildApp(gormDB, fs, cfg, nil, nil, nil)
 }
 
-func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *mux.Module, gitMod *git.GitModule, bus eventbus.EventBus) *App {
+func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, gitMod *git.GitModule, bus eventbus.EventBus) *App {
 	if bus == nil {
 		bus = eventbus.NewEventBus()
 	}
@@ -58,10 +58,10 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *mux.Module, 
 		gitModule = git.NewGitModule(database, bus)
 	}
 	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir, gitModule.Service)
-	if tmuxModule == nil {
-		tmuxModule = mux.NewModule(tuios.NewDriver(), bus, database)
+	if muxModule == nil {
+		muxModule = mux.NewModule(tuios.NewDriver(), bus, database)
 	}
-	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir, cfg.SessionsRoot)
+	sessionModule := session.NewSessionModule(muxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir, cfg.SessionsRoot)
 
 	jobsModule := jobs.NewJobsModule()
 	gitModule.RegisterJobs(jobsModule.Service)
@@ -73,7 +73,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *mux.Module, 
 		Git:       gitModule,
 		Workspace: workspaceModule,
 		Session:   sessionModule,
-		Mux:       tmuxModule,
+		Mux:       muxModule,
 		Claude:    claude.NewClaudeModule(database),
 		Jobs:      jobsModule,
 		Monitor:   monitor.NewMonitorModule(bus, sessionModule.Service),

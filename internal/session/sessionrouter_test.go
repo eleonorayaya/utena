@@ -31,13 +31,13 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 	require.NoError(t, workspaceStore.Add(ws2))
 
 	mock := mux.NewFakeDriver()
-	tmuxService := createTmuxService(t, database, mock, bus)
+	muxService := createMuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
-	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, tmuxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", t.TempDir(), t.TempDir())
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
@@ -254,9 +254,9 @@ func TestSessionRouter_RepairSession_NotFound(t *testing.T) {
 }
 
 func TestSessionRouter_RepairSession_NotBroken(t *testing.T) {
-	router, sessionStore, _, tmux, _, _ := setupSessionRouter(t)
+	router, sessionStore, _, muxDriver, _, _ := setupSessionRouter(t)
 
-	tmux.Sessions["utena-alive-session"] = true
+	muxDriver.Sessions["utena-alive-session"] = true
 	session := &Session{
 		Name:       "alive-session",
 		Status:     StatusActive,

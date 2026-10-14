@@ -12,6 +12,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
+	"gorm.io/gorm"
 )
 
 type SessionModule struct {
@@ -21,13 +22,13 @@ type SessionModule struct {
 	Router     *SessionRouter
 }
 
-func NewSessionModule(tmuxService *mux.Service, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string, configDir string, sessionsRoot string) *SessionModule {
+func NewSessionModule(muxService *mux.Service, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string, configDir string, sessionsRoot string) *SessionModule {
 	store := NewSessionStore(database)
 	dismissedPRStore := NewDismissedPRStore(database)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
 	setupStepStore := NewSessionSetupStepStore(database)
-	service := NewSessionService(store, sessionWorktreeStore, dismissedPRStore, sessionActionStore, setupStepStore, workspaceModule.Service, workspaceModule.GitService, tmuxService, bus, branchPrefix, configDir, sessionsRoot)
+	service := NewSessionService(store, sessionWorktreeStore, dismissedPRStore, sessionActionStore, setupStepStore, workspaceModule.Service, workspaceModule.GitService, muxService, bus, branchPrefix, configDir, sessionsRoot)
 	controller := NewSessionController(service)
 	router := NewSessionRouter(controller)
 
@@ -65,6 +66,32 @@ func (m *SessionModule) OnAppEnd(ctx context.Context) error {
 
 func (m *SessionModule) Models() []any {
 	return []any{&Session{}, &SessionWorktree{}, &SessionBranch{}, &DismissedPR{}, &SessionAction{}, &SessionSetupStep{}, &SessionBlocker{}}
+}
+
+func (m *SessionModule) PreMigrations() []db.PreMigration {
+	return []db.PreMigration{renameTmuxSessionColumn}
+}
+
+func renameTmuxSessionColumn(mg gorm.Migrator) error {
+	if mg.HasConstraint("sessions", "fk_sessions_tmux_session") {
+		if err := mg.DropConstraint("sessions", "fk_sessions_tmux_session"); err != nil {
+			return err
+		}
+	}
+	if mg.HasIndex("sessions", "idx_sessions_tmux_session_id") {
+		if err := mg.DropIndex("sessions", "idx_sessions_tmux_session_id"); err != nil {
+			return err
+		}
+	}
+	if mg.HasColumn("sessions", "tmux_session_id") {
+		if mg.HasColumn("sessions", "mux_session_id") {
+			return fmt.Errorf("sessions has both tmux_session_id and mux_session_id columns")
+		}
+		if err := mg.RenameColumn("sessions", "tmux_session_id", "mux_session_id"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *SessionModule) Routes() chi.Router {

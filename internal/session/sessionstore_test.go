@@ -130,12 +130,12 @@ func TestSessionStore_Add_NilSession(t *testing.T) {
 	require.Contains(t, err.Error(), "cannot be nil")
 }
 
-func TestSessionStore_Add_DuplicateTmuxSessionID(t *testing.T) {
-	database, _, _, ts := setupTestDBWithGitAndTmux(t)
+func TestSessionStore_Add_DuplicateMuxSessionID(t *testing.T) {
+	database, _, _, ts := setupTestDBWithGitAndMux(t)
 	store := NewSessionStore(database)
 
-	session1 := &Session{Name: "session-1", TmuxSessionID: &ts.ID, LastUsedAt: time.Now()}
-	session2 := &Session{Name: "session-2", TmuxSessionID: &ts.ID, LastUsedAt: time.Now()}
+	session1 := &Session{Name: "session-1", MuxSessionID: &ts.ID, LastUsedAt: time.Now()}
+	session2 := &Session{Name: "session-2", MuxSessionID: &ts.ID, LastUsedAt: time.Now()}
 
 	err := store.Add(session1)
 	require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestSessionStore_Add_DuplicateTmuxSessionID(t *testing.T) {
 	require.Equal(t, common.CategoryConflict, appErr.Category)
 	require.Contains(t, err.Error(), "session")
 	require.Contains(t, err.Error(), `"session-2"`)
-	require.Contains(t, err.Error(), "tmux record")
+	require.Contains(t, err.Error(), "mux record")
 }
 
 func TestSessionStore_GetByID(t *testing.T) {
@@ -385,7 +385,7 @@ func TestSessionStore_OnAppEnd(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *mux.Session) {
+func setupTestDBWithGitAndMux(t *testing.T) (db.Database, uint, *git.Branch, *mux.Session) {
 	t.Helper()
 	database := testdb.New(t, &workspace.Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{}, &mux.Session{}, &Session{}, &SessionWorktree{}, &SessionBranch{}, &claude.ClaudeSession{}, &SessionAction{}, &SessionSetupStep{}, &SessionBlocker{})
 
@@ -405,16 +405,16 @@ func setupTestDBWithGitAndTmux(t *testing.T) (db.Database, uint, *git.Branch, *m
 	return database, ws.ID, branch, ts
 }
 
-func TestSessionStore_GetByID_LoadsWorktreeBranchAndTmuxSession(t *testing.T) {
-	database, wsID, branch, ts := setupTestDBWithGitAndTmux(t)
+func TestSessionStore_GetByID_LoadsWorktreeBranchAndMuxSession(t *testing.T) {
+	database, wsID, branch, ts := setupTestDBWithGitAndMux(t)
 	store := NewSessionStore(database)
 	swtStore := NewSessionWorktreeStore(database)
 
 	session := &Session{
-		Name:          "utena-feature-x",
-		TmuxSessionID: &ts.ID,
-		Status:        StatusActive,
-		LastUsedAt:    time.Now(),
+		Name:         "utena-feature-x",
+		MuxSessionID: &ts.ID,
+		Status:       StatusActive,
+		LastUsedAt:   time.Now(),
 	}
 	require.NoError(t, store.Add(session))
 	attachExistingWorktree(t, database, swtStore, session.ID, wsID, branch, "/tmp/utena/worktree-1", 0)
@@ -425,21 +425,21 @@ func TestSessionStore_GetByID_LoadsWorktreeBranchAndTmuxSession(t *testing.T) {
 	require.NotNil(t, retrieved.Worktrees[0].Worktree)
 	require.NotNil(t, retrieved.Worktrees[0].Worktree.Branch)
 	require.Equal(t, "feature-x", retrieved.Worktrees[0].Worktree.Branch.Name)
-	require.NotNil(t, retrieved.TmuxSession)
-	require.Equal(t, "utena-feature-x", retrieved.TmuxSession.Name)
-	require.Equal(t, mux.StatusActive, retrieved.TmuxSession.Status)
+	require.NotNil(t, retrieved.MuxSession)
+	require.Equal(t, "utena-feature-x", retrieved.MuxSession.Name)
+	require.Equal(t, mux.StatusActive, retrieved.MuxSession.Status)
 }
 
 func TestSessionStore_GetByBranchID(t *testing.T) {
-	database, wsID, branch, ts := setupTestDBWithGitAndTmux(t)
+	database, wsID, branch, ts := setupTestDBWithGitAndMux(t)
 	store := NewSessionStore(database)
 	swtStore := NewSessionWorktreeStore(database)
 
 	session := &Session{
-		Name:          "utena-feature-x",
-		TmuxSessionID: &ts.ID,
-		Status:        StatusActive,
-		LastUsedAt:    time.Now(),
+		Name:         "utena-feature-x",
+		MuxSessionID: &ts.ID,
+		Status:       StatusActive,
+		LastUsedAt:   time.Now(),
 	}
 	require.NoError(t, store.Add(session))
 	attachExistingWorktree(t, database, swtStore, session.ID, wsID, branch, "/tmp/utena/worktree-by-branch", 0)
@@ -459,28 +459,28 @@ func TestSessionStore_GetByBranchID_NotFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrSessionNotFound)
 }
 
-func TestSessionStore_GetByTmuxSessionID(t *testing.T) {
-	database, _, _, ts := setupTestDBWithGitAndTmux(t)
+func TestSessionStore_GetByMuxSessionID(t *testing.T) {
+	database, _, _, ts := setupTestDBWithGitAndMux(t)
 	store := NewSessionStore(database)
 
 	session := &Session{
-		Name:          "utena-feature-x",
-		TmuxSessionID: &ts.ID,
-		Status:        StatusActive,
-		LastUsedAt:    time.Now(),
+		Name:         "utena-feature-x",
+		MuxSessionID: &ts.ID,
+		Status:       StatusActive,
+		LastUsedAt:   time.Now(),
 	}
 	require.NoError(t, store.Add(session))
 
-	retrieved, err := store.GetByTmuxSessionID(ts.ID)
+	retrieved, err := store.GetByMuxSessionID(ts.ID)
 	require.NoError(t, err)
 	require.Equal(t, session.ID, retrieved.ID)
-	require.NotNil(t, retrieved.TmuxSession)
-	require.Equal(t, "utena-feature-x", retrieved.TmuxSession.Name)
+	require.NotNil(t, retrieved.MuxSession)
+	require.Equal(t, "utena-feature-x", retrieved.MuxSession.Name)
 }
 
-func TestSessionStore_GetByTmuxSessionID_NotFound(t *testing.T) {
+func TestSessionStore_GetByMuxSessionID_NotFound(t *testing.T) {
 	store, _, _ := setupSessionStore(t)
-	_, err := store.GetByTmuxSessionID(99999)
+	_, err := store.GetByMuxSessionID(99999)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrSessionNotFound)
 }
@@ -497,21 +497,21 @@ func TestSessionStore_NullableForeignKeys(t *testing.T) {
 
 	retrieved, err := store.GetByID(session.ID)
 	require.NoError(t, err)
-	require.Nil(t, retrieved.TmuxSessionID)
+	require.Nil(t, retrieved.MuxSessionID)
 	require.Empty(t, retrieved.Worktrees)
-	require.Zero(t, retrieved.TmuxSession.ID)
+	require.Zero(t, retrieved.MuxSession.ID)
 }
 
 func TestSessionStore_List_LoadsNewRelationships(t *testing.T) {
-	database, wsID, branch, ts := setupTestDBWithGitAndTmux(t)
+	database, wsID, branch, ts := setupTestDBWithGitAndMux(t)
 	store := NewSessionStore(database)
 	swtStore := NewSessionWorktreeStore(database)
 
 	session1 := &Session{
-		Name:          "utena-feature-x",
-		TmuxSessionID: &ts.ID,
-		Status:        StatusActive,
-		LastUsedAt:    time.Now(),
+		Name:         "utena-feature-x",
+		MuxSessionID: &ts.ID,
+		Status:       StatusActive,
+		LastUsedAt:   time.Now(),
 	}
 	session2 := &Session{
 		Name:       "utena-no-fk",
@@ -528,11 +528,11 @@ func TestSessionStore_List_LoadsNewRelationships(t *testing.T) {
 	require.Len(t, list[0].Worktrees, 1)
 	require.NotNil(t, list[0].Worktrees[0].Worktree.Branch)
 	require.Equal(t, "feature-x", list[0].Worktrees[0].Worktree.Branch.Name)
-	require.NotNil(t, list[0].TmuxSession)
-	require.Equal(t, "utena-feature-x", list[0].TmuxSession.Name)
+	require.NotNil(t, list[0].MuxSession)
+	require.Equal(t, "utena-feature-x", list[0].MuxSession.Name)
 
 	require.Empty(t, list[1].Worktrees)
-	require.Zero(t, list[1].TmuxSession.ID)
+	require.Zero(t, list[1].MuxSession.ID)
 }
 
 func TestSessionStore_StatusError(t *testing.T) {

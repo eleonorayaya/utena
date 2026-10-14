@@ -378,8 +378,8 @@ func sessionDisplayName(s session.Session) string {
 	if s.Name != "" {
 		return s.Name
 	}
-	if s.TmuxSession != nil && s.TmuxSession.Name != "" {
-		return s.TmuxSession.Name
+	if s.MuxSession != nil && s.MuxSession.Name != "" {
+		return s.MuxSession.Name
 	}
 	return fmt.Sprintf("%d", s.ID)
 }

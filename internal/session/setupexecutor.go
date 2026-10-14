@@ -133,7 +133,7 @@ type execStep struct {
 type setupExecution struct {
 	svc       *SessionService
 	sess      *Session
-	tmuxName  string
+	muxName   string
 	execSteps []execStep
 	orderedWS []stepWorkspace
 	specByWS  map[uint]WorkspaceBranchSpec
@@ -289,8 +289,8 @@ func (e *setupExecution) executeStep(ctx context.Context, def stepDef) (bool, er
 	case StepKindApplyClaude:
 		return false, e.execApplyClaude(ctx)
 	case StepKindSetupTmux:
-		if err := e.svc.setupTmux(ctx, e.sess, e.tmuxName, e.sess.SessionRoot); err != nil {
-			return true, fmt.Errorf("tmux setup: %w", err)
+		if err := e.svc.setupMux(ctx, e.sess, e.muxName, e.sess.SessionRoot); err != nil {
+			return true, fmt.Errorf("mux setup: %w", err)
 		}
 		return false, nil
 	}

@@ -161,7 +161,7 @@ func TestService_RegisterPending_AdoptsActiveRecord(t *testing.T) {
 	// itself without killing the mux session, or the daemon was off and missed
 	// the close hook), RegisterPending returns the existing record so the new
 	// owner can adopt it. Real "another session is already linked" conflicts
-	// are caught at the caller's session.Session.TmuxSessionID unique-constraint write.
+	// are caught at the caller's session.Session.MuxSessionID unique-constraint write.
 	svc := newTestService(t)
 
 	first, err := svc.RegisterPending("name", "/start", nil)

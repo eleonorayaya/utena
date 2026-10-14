@@ -64,7 +64,7 @@ func TestSessionBranchStore_AddIsIdempotent(t *testing.T) {
 }
 
 func TestSessionStore_LoadsBranchesAndFindsSessionByHistoryBranch(t *testing.T) {
-	database, wsID, branch, _ := setupTestDBWithGitAndTmux(t)
+	database, wsID, branch, _ := setupTestDBWithGitAndMux(t)
 	store := NewSessionStore(database)
 	swtStore := NewSessionWorktreeStore(database)
 
@@ -88,7 +88,7 @@ func TestSessionStore_LoadsBranchesAndFindsSessionByHistoryBranch(t *testing.T) 
 
 func newSharedBranchFixture(t *testing.T) (*SessionStore, *SessionWorktreeStore, *SessionBranchStore, uint, *git.Branch, func(sess *Session)) {
 	t.Helper()
-	database, wsID, branch, _ := setupTestDBWithGitAndTmux(t)
+	database, wsID, branch, _ := setupTestDBWithGitAndMux(t)
 	store := NewSessionStore(database)
 	swtStore := NewSessionWorktreeStore(database)
 	sbStore := NewSessionBranchStore(database)

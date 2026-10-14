@@ -76,10 +76,10 @@ func setupTestRouterWithBus(t *testing.T) (*App, chi.Router, *mux.FakeDriver, ui
 	bus := eventbus.NewEventBus()
 	database := db.NewDB(gormDB)
 	mock := mux.NewFakeDriver()
-	tmuxStore := mux.NewStore(database)
-	tmuxModule := mux.NewModuleWithDriver(mock, tmuxStore, bus)
+	muxStore := mux.NewStore(database)
+	muxModule := mux.NewModuleWithDriver(mock, muxStore, bus)
 	gitModule := git.NewGitModule(database, bus)
-	app := buildApp(gormDB, afero.NewMemMapFs(), cfg, tmuxModule, gitModule, bus)
+	app := buildApp(gormDB, afero.NewMemMapFs(), cfg, muxModule, gitModule, bus)
 
 	err = app.OnStart(context.Background())
 	require.NoError(t, err)
@@ -195,13 +195,13 @@ func TestDaemon_CreateAndGetSession(t *testing.T) {
 	var response session.SessionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	require.NotNil(t, response.TmuxSessionID)
+	require.NotNil(t, response.MuxSessionID)
 	require.Equal(t, session.StatusActive, response.Status)
 }
 
-func TestDaemon_CreateSession_TmuxFails(t *testing.T) {
+func TestDaemon_CreateSession_MuxFails(t *testing.T) {
 	_, router, mock, ws1ID, _ := setupTestRouter(t)
-	mock.SetCreateErr(fmt.Errorf("tmux server not running"))
+	mock.SetCreateErr(fmt.Errorf("mux server not running"))
 
 	body := fmt.Sprintf(`{"name":"fail-session","workspaces":[{"workspace_id":%d,"base_branch":"main"}]}`, ws1ID)
 	createResp := createSessionViaAPI(t, router, body)
@@ -216,7 +216,7 @@ func TestDaemon_CreateSession_TmuxFails(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Equal(t, session.StatusBroken, response.Status)
-	require.Contains(t, response.StatusError, "tmux")
+	require.Contains(t, response.StatusError, "mux")
 }
 
 func TestDaemon_ListSessions(t *testing.T) {
@@ -270,14 +270,14 @@ func TestDaemon_TuiosSessionCreated(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sessionsResponse.Sessions, 1)
 
-	sess := findSessionByTmuxName(sessionsResponse.Sessions, "test-session")
+	sess := findSessionByMuxName(sessionsResponse.Sessions, "test-session")
 	require.NotNil(t, sess)
 	require.Equal(t, session.StatusActive, sess.Status)
 }
 
-func findSessionByTmuxName(sessions []*session.SessionResponse, tmuxName string) *session.SessionResponse {
+func findSessionByMuxName(sessions []*session.SessionResponse, muxName string) *session.SessionResponse {
 	for _, s := range sessions {
-		if s.TmuxSession != nil && s.TmuxSession.Name == tmuxName {
+		if s.MuxSession != nil && s.MuxSession.Name == muxName {
 			return s
 		}
 	}
@@ -303,15 +303,15 @@ func TestDaemon_TuiosSessionClosed(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sessionsResponse.Sessions, 1)
 
-	sess := findSessionByTmuxName(sessionsResponse.Sessions, "test-session")
+	sess := findSessionByMuxName(sessionsResponse.Sessions, "test-session")
 	require.NotNil(t, sess)
 	require.Equal(t, session.StatusBroken, sess.Status)
 	require.False(t, sess.IsAttached)
 }
 
-func TestDaemon_RepairSession_AfterTmuxFailure(t *testing.T) {
+func TestDaemon_RepairSession_AfterMuxFailure(t *testing.T) {
 	_, router, mock, ws1ID, _ := setupTestRouter(t)
-	mock.SetCreateErr(fmt.Errorf("tmux down"))
+	mock.SetCreateErr(fmt.Errorf("mux down"))
 
 	body := fmt.Sprintf(`{"name":"repair-me","workspaces":[{"workspace_id":%d,"base_branch":"main"}]}`, ws1ID)
 	createResp := createSessionViaAPI(t, router, body)
