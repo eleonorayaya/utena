@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"gorm.io/gorm"
@@ -31,9 +32,12 @@ type Database interface {
 	Close() error
 }
 
+type PreMigration func(m gorm.Migrator) error
+
 type DB struct {
 	*gorm.DB
-	models []any
+	models        []any
+	preMigrations []PreMigration
 }
 
 func NewDB(gormDB *gorm.DB) *DB {
@@ -44,8 +48,12 @@ func (d *DB) RegisterModels(models ...any) {
 	d.models = append(d.models, models...)
 }
 
+func (d *DB) RegisterPreMigrations(fns ...PreMigration) {
+	d.preMigrations = append(d.preMigrations, fns...)
+}
+
 func (d *DB) OnAppStart(ctx context.Context) error {
-	if len(d.models) > 0 {
+	if len(d.models) > 0 || len(d.preMigrations) > 0 {
 		return d.Migrate(d.models...)
 	}
 	return nil
@@ -58,6 +66,11 @@ func (d *DB) OnAppEnd(ctx context.Context) error {
 func (d *DB) Migrate(models ...any) error {
 	d.Exec("PRAGMA foreign_keys=OFF")
 	defer d.Exec("PRAGMA foreign_keys=ON")
+	for i, fn := range d.preMigrations {
+		if err := fn(d.Migrator()); err != nil {
+			return fmt.Errorf("pre-migration %d: %w", i, err)
+		}
+	}
 	return d.AutoMigrate(models...)
 }
 

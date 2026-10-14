@@ -79,6 +79,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *mux.Module, 
 	}
 
 	database.RegisterModels(app.collectModels()...)
+	database.RegisterPreMigrations(app.collectPreMigrations()...)
 
 	return app
 }
@@ -140,6 +141,16 @@ func (a *App) collectModels() []any {
 		}
 	}
 	return models
+}
+
+func (a *App) collectPreMigrations() []db.PreMigration {
+	var fns []db.PreMigration
+	for _, m := range a.modules() {
+		if pp, ok := m.module.(common.PreMigrationProvider); ok {
+			fns = append(fns, pp.PreMigrations()...)
+		}
+	}
+	return fns
 }
 
 func (a *App) modules() []moduleEntry {

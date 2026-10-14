@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/eleonorayaya/utena/internal/db"
 )
 
 type Module interface {
@@ -14,4 +16,8 @@ type Module interface {
 
 type ModelProvider interface {
 	Models() []any
+}
+
+type PreMigrationProvider interface {
+	PreMigrations() []db.PreMigration
 }
