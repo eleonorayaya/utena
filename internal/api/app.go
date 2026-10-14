@@ -145,7 +145,7 @@ func (a *App) collectModels() []any {
 func (a *App) modules() []moduleEntry {
 	return []moduleEntry{
 		{"git", "/git", a.Git},
-		{"mux", "/tmux", a.Mux},
+		{"mux", "/mux", a.Mux},
 		{"workspace", "/workspaces", a.Workspace},
 		{"claude", "/claude", a.Claude},
 		{"session", "/sessions", a.Session},

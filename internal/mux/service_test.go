@@ -209,7 +209,7 @@ func TestService_SessionClosedAfterUtenaKillIsNotPublished(t *testing.T) {
 	svc := NewService(NewFakeDriver(), NewStore(database), bus)
 
 	var published int32
-	bus.Subscribe(eventbus.TmuxSessionClosed, func(ctx context.Context, e eventbus.Event) error {
+	bus.Subscribe(eventbus.MuxSessionClosed, func(ctx context.Context, e eventbus.Event) error {
 		atomic.AddInt32(&published, 1)
 		return nil
 	})
@@ -300,8 +300,8 @@ func TestService_SessionCreatedActivatesPublishesAndRefreshesWindows(t *testing.
 	svc, driver, bus := startFollowing(t)
 
 	var published []string
-	bus.Subscribe(eventbus.TmuxSessionCreated, func(ctx context.Context, e eventbus.Event) error {
-		published = append(published, e.Data.(eventbus.TmuxHookEvent).TmuxSessionName)
+	bus.Subscribe(eventbus.MuxSessionCreated, func(ctx context.Context, e eventbus.Event) error {
+		published = append(published, e.Data.(eventbus.MuxHookEvent).SessionName)
 		return nil
 	})
 	require.NoError(t, svc.store.Add(&Session{Name: "work", Status: StatusPending}))

@@ -390,3 +390,24 @@ func TestDaemon_MigrateToBare_DetachesLinkedSessions(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, sess.Worktrees, "migrated repo should leave the session with no remaining worktrees")
 }
+
+func TestDaemon_MuxRoutes(t *testing.T) {
+	_, router, _, _, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("PUT", "/mux/hooks/client-attached", bytes.NewReader([]byte(`{"session_name":"x"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	req = httptest.NewRequest("GET", "/mux/sessions/nope/env/K", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNotFound, w.Code)
+
+	req = httptest.NewRequest("PUT", "/tmux/hooks/client-attached", bytes.NewReader([]byte(`{"session_name":"x"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNotFound, w.Code)
+}

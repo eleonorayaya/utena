@@ -87,7 +87,7 @@ func attachUntilSwitch(ctx context.Context, port, target string) (string, error)
 }
 
 func nextActivation(ctx context.Context, port string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://localhost:%s/tmux/activations/next", port), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://localhost:%s/mux/activations/next", port), nil)
 	if err != nil {
 		return "", err
 	}
@@ -115,7 +115,7 @@ func nextActivation(ctx context.Context, port string) (string, error) {
 func postClientHook(port, event, sessionName string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	putJSON(ctx, fmt.Sprintf("http://localhost:%s/tmux/hooks/%s", port, event), map[string]string{"session_name": sessionName})
+	putJSON(ctx, fmt.Sprintf("http://localhost:%s/mux/hooks/%s", port, event), map[string]string{"session_name": sessionName})
 }
 
 func putJSON(ctx context.Context, url string, payload any) {

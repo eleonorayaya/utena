@@ -1,19 +1,19 @@
 package eventbus
 
 const (
-	TmuxSessionCreated       = "tmux.session_created"
-	TmuxSessionClosed        = "tmux.session_closed"
-	TmuxClientSessionChanged = "tmux.client_session_changed"
-	TmuxClientAttached       = "tmux.client_attached"
-	TmuxClientDetached       = "tmux.client_detached"
+	MuxSessionCreated       = "mux.session_created"
+	MuxSessionClosed        = "mux.session_closed"
+	MuxClientSessionChanged = "mux.client_session_changed"
+	MuxClientAttached       = "mux.client_attached"
+	MuxClientDetached       = "mux.client_detached"
 
 	SessionActivated = "session.activated"
 
 	SessionNotification = "session.notification"
 )
 
-type TmuxHookEvent struct {
-	TmuxSessionName string
+type MuxHookEvent struct {
+	SessionName string
 }
 
 type SessionActivatedEvent struct {

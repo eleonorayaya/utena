@@ -334,30 +334,30 @@ func (t *Service) GetOrTrackSession(name, startDir string, env map[string]string
 	return ts, nil
 }
 
-func (t *Service) HandleSessionCreated(ctx context.Context, tmuxName string) error {
-	t.setStatus(tmuxName, StatusActive)
+func (t *Service) HandleSessionCreated(ctx context.Context, name string) error {
+	t.setStatus(name, StatusActive)
 	return t.eventBus.Publish(ctx, eventbus.Event{
-		Type: eventbus.TmuxSessionCreated,
-		Data: eventbus.TmuxHookEvent{TmuxSessionName: tmuxName},
+		Type: eventbus.MuxSessionCreated,
+		Data: eventbus.MuxHookEvent{SessionName: name},
 	})
 }
 
-func (t *Service) HandleSessionClosed(ctx context.Context, tmuxName string) error {
+func (t *Service) HandleSessionClosed(ctx context.Context, name string) error {
 	t.windowsMu.Lock()
-	delete(t.windowsBySession, tmuxName)
+	delete(t.windowsBySession, name)
 	t.windowsMu.Unlock()
-	if prev, found := t.setStatus(tmuxName, StatusInactive); found && prev != StatusActive {
+	if prev, found := t.setStatus(name, StatusInactive); found && prev != StatusActive {
 		return nil
 	}
 	return t.eventBus.Publish(ctx, eventbus.Event{
-		Type: eventbus.TmuxSessionClosed,
-		Data: eventbus.TmuxHookEvent{TmuxSessionName: tmuxName},
+		Type: eventbus.MuxSessionClosed,
+		Data: eventbus.MuxHookEvent{SessionName: name},
 	})
 }
 
-func (t *Service) setStatus(tmuxName string, status SessionStatus) (SessionStatus, bool) {
-	defer t.lockName(tmuxName)()
-	ts, err := t.store.GetByName(tmuxName)
+func (t *Service) setStatus(name string, status SessionStatus) (SessionStatus, bool) {
+	defer t.lockName(name)()
+	ts, err := t.store.GetByName(name)
 	if err != nil {
 		return "", false
 	}
@@ -365,30 +365,30 @@ func (t *Service) setStatus(tmuxName string, status SessionStatus) (SessionStatu
 	if prev != status {
 		ts.Status = status
 		if err := t.store.Update(ts); err != nil {
-			slog.Warn("failed to update mux session status", "mux", tmuxName, "status", status, "error", err)
+			slog.Warn("failed to update mux session status", "mux", name, "status", status, "error", err)
 		}
 	}
 	return prev, true
 }
 
-func (t *Service) HandleClientSessionChanged(ctx context.Context, tmuxName string) error {
+func (t *Service) HandleClientSessionChanged(ctx context.Context, name string) error {
 	return t.eventBus.Publish(ctx, eventbus.Event{
-		Type: eventbus.TmuxClientSessionChanged,
-		Data: eventbus.TmuxHookEvent{TmuxSessionName: tmuxName},
+		Type: eventbus.MuxClientSessionChanged,
+		Data: eventbus.MuxHookEvent{SessionName: name},
 	})
 }
 
-func (t *Service) HandleClientAttached(ctx context.Context, tmuxName string) error {
+func (t *Service) HandleClientAttached(ctx context.Context, name string) error {
 	return t.eventBus.Publish(ctx, eventbus.Event{
-		Type: eventbus.TmuxClientAttached,
-		Data: eventbus.TmuxHookEvent{TmuxSessionName: tmuxName},
+		Type: eventbus.MuxClientAttached,
+		Data: eventbus.MuxHookEvent{SessionName: name},
 	})
 }
 
-func (t *Service) HandleClientDetached(ctx context.Context, tmuxName string) error {
+func (t *Service) HandleClientDetached(ctx context.Context, name string) error {
 	return t.eventBus.Publish(ctx, eventbus.Event{
-		Type: eventbus.TmuxClientDetached,
-		Data: eventbus.TmuxHookEvent{TmuxSessionName: tmuxName},
+		Type: eventbus.MuxClientDetached,
+		Data: eventbus.MuxHookEvent{SessionName: name},
 	})
 }
 
@@ -403,8 +403,8 @@ func (t *Service) SpawnWindow(sessionName, startDir, command string) error {
 	return t.driver.NewWindow(sessionName, startDir, command, env)
 }
 
-func (t *Service) GetWindows(ctx context.Context, tmuxName string) []Window {
+func (t *Service) GetWindows(ctx context.Context, name string) []Window {
 	t.windowsMu.RLock()
 	defer t.windowsMu.RUnlock()
-	return t.windowsBySession[tmuxName]
+	return t.windowsBySession[name]
 }

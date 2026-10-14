@@ -104,11 +104,11 @@ func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktre
 }
 
 func (s *SessionService) OnAppStart(ctx context.Context) error {
-	s.eventBus.Subscribe(eventbus.TmuxSessionCreated, s.handleTmuxSessionCreated)
-	s.eventBus.Subscribe(eventbus.TmuxSessionClosed, s.handleTmuxSessionClosed)
-	s.eventBus.Subscribe(eventbus.TmuxClientSessionChanged, s.handleTmuxClientSessionChanged)
-	s.eventBus.Subscribe(eventbus.TmuxClientAttached, s.handleTmuxClientAttached)
-	s.eventBus.Subscribe(eventbus.TmuxClientDetached, s.handleTmuxClientDetached)
+	s.eventBus.Subscribe(eventbus.MuxSessionCreated, s.handleMuxSessionCreated)
+	s.eventBus.Subscribe(eventbus.MuxSessionClosed, s.handleMuxSessionClosed)
+	s.eventBus.Subscribe(eventbus.MuxClientSessionChanged, s.handleMuxClientSessionChanged)
+	s.eventBus.Subscribe(eventbus.MuxClientAttached, s.handleMuxClientAttached)
+	s.eventBus.Subscribe(eventbus.MuxClientDetached, s.handleMuxClientDetached)
 	s.eventBus.Subscribe(git.EventPRUpdated, s.handlePRUpdated)
 	sessions, err := s.store.List()
 	if err != nil {
@@ -1349,15 +1349,15 @@ func (s *SessionService) nameFromBranch(branchName string) string {
 	return stripped
 }
 
-func (s *SessionService) handleTmuxSessionCreated(ctx context.Context, event eventbus.Event) error {
-	data, ok := event.Data.(eventbus.TmuxHookEvent)
+func (s *SessionService) handleMuxSessionCreated(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(eventbus.MuxHookEvent)
 	if !ok {
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByTmuxName(data.TmuxSessionName)
+	sess, err := s.findSessionByTmuxName(data.SessionName)
 	if err != nil {
-		slog.Debug("session not found for session-created hook", "tmux_name", data.TmuxSessionName, "error", err)
+		slog.Debug("session not found for session-created hook", "tmux_name", data.SessionName, "error", err)
 		return nil
 	}
 
@@ -1367,15 +1367,15 @@ func (s *SessionService) handleTmuxSessionCreated(ctx context.Context, event eve
 	return nil
 }
 
-func (s *SessionService) handleTmuxSessionClosed(ctx context.Context, event eventbus.Event) error {
-	data, ok := event.Data.(eventbus.TmuxHookEvent)
+func (s *SessionService) handleMuxSessionClosed(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(eventbus.MuxHookEvent)
 	if !ok {
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByTmuxName(data.TmuxSessionName)
+	sess, err := s.findSessionByTmuxName(data.SessionName)
 	if err != nil {
-		slog.Debug("session not found for session-closed hook", "tmux_name", data.TmuxSessionName, "error", err)
+		slog.Debug("session not found for session-closed hook", "tmux_name", data.SessionName, "error", err)
 		return nil
 	}
 
@@ -1384,8 +1384,8 @@ func (s *SessionService) handleTmuxSessionClosed(ctx context.Context, event even
 	return s.store.Update(sess)
 }
 
-func (s *SessionService) handleTmuxClientSessionChanged(ctx context.Context, event eventbus.Event) error {
-	data, ok := event.Data.(eventbus.TmuxHookEvent)
+func (s *SessionService) handleMuxClientSessionChanged(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(eventbus.MuxHookEvent)
 	if !ok {
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
@@ -1403,9 +1403,9 @@ func (s *SessionService) handleTmuxClientSessionChanged(ctx context.Context, eve
 		}
 	}
 
-	sess, err := s.findSessionByTmuxName(data.TmuxSessionName)
+	sess, err := s.findSessionByTmuxName(data.SessionName)
 	if err != nil {
-		slog.Debug("session not found for client-session-changed hook", "tmux_name", data.TmuxSessionName, "error", err)
+		slog.Debug("session not found for client-session-changed hook", "tmux_name", data.SessionName, "error", err)
 		return nil
 	}
 
@@ -1414,15 +1414,15 @@ func (s *SessionService) handleTmuxClientSessionChanged(ctx context.Context, eve
 	return s.store.Update(sess)
 }
 
-func (s *SessionService) handleTmuxClientAttached(ctx context.Context, event eventbus.Event) error {
-	data, ok := event.Data.(eventbus.TmuxHookEvent)
+func (s *SessionService) handleMuxClientAttached(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(eventbus.MuxHookEvent)
 	if !ok {
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByTmuxName(data.TmuxSessionName)
+	sess, err := s.findSessionByTmuxName(data.SessionName)
 	if err != nil {
-		slog.Debug("session not found for client-attached hook", "tmux_name", data.TmuxSessionName, "error", err)
+		slog.Debug("session not found for client-attached hook", "tmux_name", data.SessionName, "error", err)
 		return nil
 	}
 
@@ -1431,15 +1431,15 @@ func (s *SessionService) handleTmuxClientAttached(ctx context.Context, event eve
 	return s.store.Update(sess)
 }
 
-func (s *SessionService) handleTmuxClientDetached(ctx context.Context, event eventbus.Event) error {
-	data, ok := event.Data.(eventbus.TmuxHookEvent)
+func (s *SessionService) handleMuxClientDetached(ctx context.Context, event eventbus.Event) error {
+	data, ok := event.Data.(eventbus.MuxHookEvent)
 	if !ok {
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByTmuxName(data.TmuxSessionName)
+	sess, err := s.findSessionByTmuxName(data.SessionName)
 	if err != nil {
-		slog.Debug("session not found for client-detached hook", "tmux_name", data.TmuxSessionName, "error", err)
+		slog.Debug("session not found for client-detached hook", "tmux_name", data.SessionName, "error", err)
 		return nil
 	}
 
