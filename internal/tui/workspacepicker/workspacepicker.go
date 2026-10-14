@@ -16,6 +16,7 @@ import (
 type Model struct {
 	title             string
 	multi             bool
+	noAddDir          bool
 	list              list.Model
 	workspaces        []workspace.Workspace
 	showHidden        bool
@@ -26,6 +27,11 @@ type Model struct {
 
 func New(title string, multi bool) Model {
 	return Model{title: title, multi: multi, list: ui.NewList()}
+}
+
+func (m Model) WithoutAddDir() Model {
+	m.noAddDir = true
+	return m
 }
 
 func (m Model) Open(selected []uint) Model {
@@ -72,7 +78,7 @@ func (m *Model) rebuildItems() {
 		}
 		items = append(items, workspaceItem{workspace: ws, multi: m.multi, checked: slices.Contains(m.selected, ws.ID)})
 	}
-	m.list.SetItems(items)
+	ui.SetItems(&m.list, items)
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -144,7 +150,7 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.showHidden = !m.showHidden
 		m.rebuildItems()
 		return m, nil, true
-	case key.Matches(msg, Keys.AddDir):
+	case !m.noAddDir && key.Matches(msg, Keys.AddDir):
 		return m, func() tea.Msg { return AddDirectoryMsg{} }, true
 	}
 	return m, nil, false
@@ -155,6 +161,7 @@ func (m Model) View() string {
 	if m.multi && len(m.selected) > 0 {
 		title += fg(theme.Current.TextMuted).Render(fmt.Sprintf("  %d selected", len(m.selected)))
 	}
+	title = ui.Clamp(title, m.width)
 	body := ui.ListView(m.list)
 	if len(m.list.Items()) == 0 {
 		body = fg(theme.Current.TextMuted).Render("  No workspaces")

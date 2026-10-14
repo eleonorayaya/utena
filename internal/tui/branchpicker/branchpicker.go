@@ -22,18 +22,18 @@ type Model struct {
 	defaultBranch string
 	fetching      bool
 	status        ui.Status
-	height        int
+	width, height int
 }
 
 func New() Model {
 	return Model{list: ui.NewList()}
 }
 
-func (m Model) Open(title string, workspaceID uint, local []string, defaultBranch string, current string) Model {
+func (m Model) Open(title string, workspaceID uint, local, remote []string, defaultBranch string, current string) Model {
 	m.title = title
 	m.workspaceID = workspaceID
 	m.local = local
-	m.remote = nil
+	m.remote = remote
 	m.defaultBranch = defaultBranch
 	m.fetching = false
 	m.status = ui.Status{}
@@ -44,7 +44,7 @@ func (m Model) Open(title string, workspaceID uint, local []string, defaultBranc
 }
 
 func (m *Model) SetSize(width, height int) {
-	m.height = height
+	m.width, m.height = width, height
 	m.list.SetSize(width, max(height-2, 1))
 }
 
@@ -89,18 +89,14 @@ func (m *Model) rebuildItems() {
 			items = append(items, branchItem{name: b, isDefault: b == m.defaultBranch})
 		}
 	}
-	m.list.SetItems(items)
+	ui.SetItems(&m.list, items)
 }
 
 func (m *Model) selectBranch(name string) {
-	for i, it := range m.list.Items() {
-		if b, ok := it.(branchItem); ok && b.name == name {
-			m.list.Select(i)
-			return
-		}
-	}
-	m.list.Select(0)
-	ui.SkipUnselectable(&m.list, 0)
+	ui.SelectWhere(&m.list, func(it list.Item) bool {
+		b, ok := it.(branchItem)
+		return ok && b.name == name
+	})
 }
 
 func (m Model) selected() string {
@@ -185,5 +181,5 @@ func (m Model) View() string {
 	if len(m.local)+len(m.remote) == 0 {
 		body = lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("  No branches — press r to fetch or n to type one")
 	}
-	return ui.FitHeight(ui.FormTitle(m.title)+"\n\n"+body, m.height)
+	return ui.FitHeight(ui.Clamp(ui.FormTitle(m.title), m.width)+"\n\n"+body, m.height)
 }

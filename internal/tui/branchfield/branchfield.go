@@ -42,6 +42,7 @@ type Row struct {
 	Loading       bool
 	Err           string
 	Local         []string
+	Remote        []string
 	Current       string
 	DefaultBranch string
 	Editing       bool
@@ -72,6 +73,24 @@ func (r Row) Loaded(msg provider.BranchesLoadedMsg) Row {
 	r.DefaultBranch = msg.DefaultBranch
 	if !r.Picked {
 		r.Branch = ResolveDefault(msg.DefaultBranch, msg.CurrentBranch, msg.Branches)
+	}
+	return r
+}
+
+func (r Row) Fetched(msg provider.BranchesFetchedMsg) Row {
+	if msg.WorkspaceID != r.Workspace.ID || msg.Err != nil {
+		return r
+	}
+	r.Local, r.Remote = nil, nil
+	for _, b := range msg.Branches {
+		if b.Remote {
+			r.Remote = append(r.Remote, b.Name)
+		} else {
+			r.Local = append(r.Local, b.Name)
+		}
+	}
+	if msg.DefaultBranch != "" {
+		r.DefaultBranch = msg.DefaultBranch
 	}
 	return r
 }

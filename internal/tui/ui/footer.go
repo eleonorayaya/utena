@@ -84,6 +84,13 @@ func Footer(bindings []key.Binding, status Status, width int, showMore bool) str
 	return clampWidth(strings.Join(parts, fg(theme.Current.TextMuted).Render(footerSep)), width)
 }
 
+func Clamp(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	return clampWidth(s, width)
+}
+
 func clampWidth(s string, width int) string {
 	if width <= 0 {
 		return ""

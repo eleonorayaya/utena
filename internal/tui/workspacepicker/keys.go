@@ -34,5 +34,6 @@ var Keys = keyMap{
 func (m Model) Keys() help.KeyMap {
 	k := Keys
 	k.Toggle.SetEnabled(m.multi)
+	k.AddDir.SetEnabled(!m.noAddDir)
 	return k
 }

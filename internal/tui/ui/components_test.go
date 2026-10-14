@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type testRow struct{ name string }
@@ -156,4 +157,36 @@ func TestStepList_GlyphsAndFailedError(t *testing.T) {
 		{Label: "Later", State: StepPending},
 	}, "◌", 40)
 	assert.Equal(t, []string{"  ✓ Fetch", "  ◌ Worktree", "  ✕ Start", "    boom", "  · Later"}, strings.Split(out, "\n"))
+}
+
+func TestList_SetItemsWhileFilteredKeepsMatchesAndSelection(t *testing.T) {
+	l := sizedList([]list.Item{SectionItem{Title: "A", Count: 3}, testRow{"alpha"}, testRow{"beta"}, testRow{"betamax"}}, 30, 8)
+	l = feed(l, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	for _, r := range "bet" {
+		l = feed(l, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	l = feed(l, tea.KeyMsg{Type: tea.KeyEnter})
+	l = down(l)
+	assert.Equal(t, "betamax", l.SelectedItem().(testRow).name)
+
+	SetItems(&l, []list.Item{SectionItem{Title: "A", Count: 4}, testRow{"alpha"}, testRow{"beta"}, testRow{"betamax"}, testRow{"gamma"}})
+	SelectWhere(&l, func(it list.Item) bool { r, ok := it.(testRow); return ok && r.name == "betamax" })
+	assert.Len(t, l.VisibleItems(), 2)
+	assert.Equal(t, "betamax", l.SelectedItem().(testRow).name)
+}
+
+func TestList_FilteringHighlightsFirstMatchWhenListStartsWithHeader(t *testing.T) {
+	l := sizedList([]list.Item{SectionItem{Title: "A", Count: 2}, testRow{"alpha"}, testRow{"zeta"}}, 30, 8)
+	l = feed(l, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	for _, r := range "zeta" {
+		l = feed(l, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	l = feed(l, tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, l.SelectedItem())
+	assert.Equal(t, "zeta", l.SelectedItem().(testRow).name)
+}
+
+func TestClamp(t *testing.T) {
+	assert.Equal(t, 5, lipgloss.Width(Clamp(strings.Repeat("x", 20), 5)))
+	assert.Equal(t, "abc", Clamp("abc", 0))
 }

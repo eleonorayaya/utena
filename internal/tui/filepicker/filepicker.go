@@ -85,7 +85,7 @@ func (m *Model) load(selectName string) {
 	entries, err := os.ReadDir(m.dir)
 	if err != nil {
 		m.status = ui.Status{Text: err.Error(), Kind: ui.StatusError}
-		m.list.SetItems(nil)
+		ui.SetItems(&m.list, nil)
 		return
 	}
 	m.status = ui.Status{}
@@ -113,7 +113,7 @@ func (m *Model) load(selectName string) {
 			sel = i
 		}
 	}
-	m.list.SetItems(items)
+	ui.SetItems(&m.list, items)
 	m.list.Select(sel)
 }
 

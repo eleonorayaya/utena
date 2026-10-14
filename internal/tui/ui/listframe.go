@@ -47,8 +47,35 @@ func ListView(l list.Model) string {
 func UpdateList(l list.Model, msg tea.Msg) (list.Model, tea.Cmd) {
 	prev := l.Index()
 	l, cmd := l.Update(msg)
+	if _, ok := msg.(list.FilterMatchesMsg); ok {
+		l.Select(0)
+		prev = 0
+	}
 	SkipUnselectable(&l, prev)
 	return l, cmd
+}
+
+func SetItems(l *list.Model, items []list.Item) {
+	cmd := l.SetItems(items)
+	if cmd == nil {
+		return
+	}
+	if msg, ok := cmd().(list.FilterMatchesMsg); ok {
+		*l, _ = l.Update(msg)
+	}
+}
+
+func SelectWhere(l *list.Model, match func(list.Item) bool) bool {
+	for i, it := range l.VisibleItems() {
+		if match(it) {
+			l.Select(i)
+			return true
+		}
+	}
+	idx := min(l.Index(), max(len(l.VisibleItems())-1, 0))
+	l.Select(idx)
+	SkipUnselectable(l, idx)
+	return false
 }
 
 func SkipUnselectable(l *list.Model, prev int) {

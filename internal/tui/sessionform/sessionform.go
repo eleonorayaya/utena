@@ -173,6 +173,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.branchPicker, cmd = m.branchPicker.Update(msg)
 		return m, cmd
 	case provider.BranchesFetchedMsg:
+		if i := m.rowIndex(msg.WorkspaceID); i >= 0 {
+			m.rows[i] = m.rows[i].Fetched(msg)
+		}
 		var cmd tea.Cmd
 		m.branchPicker, cmd = m.branchPicker.Update(msg)
 		return m, cmd
@@ -224,7 +227,7 @@ func (m Model) openWorkspacePicker() Model {
 func (m Model) openBranchPicker(i int) Model {
 	r := m.rows[i]
 	m.pickingRow = i
-	m.branchPicker = m.branchPicker.Open("Branch for "+r.Workspace.Name, r.Workspace.ID, r.Local, r.DefaultBranch, r.Branch)
+	m.branchPicker = m.branchPicker.Open("Branch for "+r.Workspace.Name, r.Workspace.ID, r.Local, r.Remote, r.DefaultBranch, r.Branch)
 	m.overlay = overlayBranch
 	return m
 }
@@ -281,7 +284,10 @@ func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Type == tea.KeyEsc && !m.workspacePicker.Filtering() {
 			m.overlay = overlayNone
 			m.status = ui.Status{}
-			return m, nil
+			if len(m.rows) == 0 {
+				return m.focus(fieldWorkspaces)
+			}
+			return m.focus(m.form.Focused())
 		}
 	}
 	var cmd tea.Cmd

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/git"
@@ -138,4 +139,45 @@ func TestWorkspaceList_ShortHelp(t *testing.T) {
 		got = append(got, b.Help().Key+" "+b.Help().Desc)
 	}
 	assert.Equal(t, []string{"c clone", "m migrate", "h hide", "d delete"}, got)
+}
+
+func TestWorkspaceList_RefreshWhileFilteredKeepsMatches(t *testing.T) {
+	wss := []workspace.Workspace{ws(1, "web", time.Hour), ws(2, "data", 2*time.Hour), ws(3, "webhooks", 3*time.Hour)}
+	m := listOf(t, 70, 10, wss...)
+	m, _ = m.Update(runes("/"))
+	m = typeFilter(m, "hooks")
+	m, _ = m.Update(provider.WorkspacesStateUpdatedMsg{Workspaces: wss})
+	out := m.View()
+	assert.Contains(t, out, "webhooks")
+	assert.NotContains(t, out, "No items")
+	assert.Contains(t, out, "/srv/webhooks")
+}
+
+func typeFilter(m Model, s string) Model {
+	for _, r := range s {
+		var cmd tea.Cmd
+		m, cmd = m.Update(runes(string(r)))
+		for _, msg := range drain(cmd) {
+			if fm, ok := msg.(list.FilterMatchesMsg); ok {
+				m, _ = m.Update(fm)
+			}
+		}
+	}
+	return m
+}
+
+func drain(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	switch m := cmd().(type) {
+	case tea.BatchMsg:
+		var out []tea.Msg
+		for _, c := range m {
+			out = append(out, drain(c)...)
+		}
+		return out
+	default:
+		return []tea.Msg{m}
+	}
 }

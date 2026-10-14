@@ -87,7 +87,7 @@ func (m *Model) rebuildItems() {
 			items = append(items, workspaceItem{workspace: ws, repoW: repoW})
 		}
 	}
-	m.list.SetItems(items)
+	ui.SetItems(&m.list, items)
 	m.selectID(cur)
 }
 
@@ -105,14 +105,10 @@ func (m Model) selectedID() uint {
 }
 
 func (m *Model) selectID(id uint) {
-	for i, it := range m.list.Items() {
-		if w, ok := it.(workspaceItem); ok && w.workspace.ID == id {
-			m.list.Select(i)
-			return
-		}
-	}
-	idx := m.list.Index()
-	ui.SkipUnselectable(&m.list, idx)
+	ui.SelectWhere(&m.list, func(it list.Item) bool {
+		w, ok := it.(workspaceItem)
+		return ok && w.workspace.ID == id
+	})
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {

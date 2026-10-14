@@ -68,3 +68,16 @@ func TestAddWorkspace_NonGitStaysInPicker(t *testing.T) {
 	assert.Equal(t, overlayWorkspace, m.overlay)
 	assert.Contains(t, m.Status().Text, "not a git repository")
 }
+
+func TestAddWorkspace_PickerDoesNotOfferAddDir(t *testing.T) {
+	m := started(t)
+	for _, b := range m.Keys().ShortHelp() {
+		if b.Help().Key == "a" {
+			assert.False(t, b.Enabled())
+		}
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	if cmd != nil {
+		assert.NotEqual(t, workspacepicker.AddDirectoryMsg{}, cmd())
+	}
+}

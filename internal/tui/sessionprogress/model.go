@@ -214,5 +214,5 @@ func (m Model) steps() []ui.Step {
 }
 
 func (m Model) View() string {
-	return ui.FitHeight(ui.FormTitle(m.title())+"\n\n"+ui.StepList(m.steps(), m.spinner.View(), m.width), m.height)
+	return ui.FitHeight(ui.Clamp(ui.FormTitle(m.title()), m.width)+"\n\n"+ui.StepList(m.steps(), m.spinner.View(), m.width), m.height)
 }

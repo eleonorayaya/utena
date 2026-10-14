@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/lipgloss"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/stretchr/testify/assert"
@@ -12,7 +15,7 @@ import (
 func opened() Model {
 	m := New()
 	m.SetSize(40, 12)
-	return m.Open("Branch for web", 5, []string{"zeta", "main", "alpha"}, "main", "main")
+	return m.Open("Branch for web", 5, []string{"zeta", "main", "alpha"}, nil, "main", "main")
 }
 
 func TestBranchPicker_LocalSectionSortedWithDefaultMarker(t *testing.T) {
@@ -51,4 +54,58 @@ func TestBranchPicker_EnterSelectsSkippingHeaders(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	assert.Equal(t, SelectedMsg{Branch: "alpha"}, cmd())
+}
+
+func feed(m Model, msg tea.Msg) Model {
+	m, cmd := m.Update(msg)
+	for cmd != nil {
+		out := cmd()
+		cmd = nil
+		switch o := out.(type) {
+		case list.FilterMatchesMsg:
+			m, _ = m.Update(o)
+		case tea.BatchMsg:
+			for _, c := range o {
+				if fm, ok := c().(list.FilterMatchesMsg); ok {
+					m, _ = m.Update(fm)
+				}
+			}
+		}
+	}
+	return m
+}
+
+func TestBranchPicker_FilterSelectsFirstMatchUnderHeader(t *testing.T) {
+	m := opened()
+	m = feed(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	for _, r := range "zeta" {
+		m = feed(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	m = feed(m, tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if assert.NotNil(t, cmd) {
+		assert.Equal(t, SelectedMsg{Branch: "zeta"}, cmd())
+	}
+}
+
+func TestBranchPicker_FetchWhileFilteredKeepsMatches(t *testing.T) {
+	m := opened()
+	m = feed(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	for _, r := range "ze" {
+		m = feed(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	m = feed(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = m.Update(provider.BranchesFetchedMsg{WorkspaceID: 5, Branches: []provider.BranchRef{{Name: "zeta"}, {Name: "zebra", Remote: true}}})
+	out := m.View()
+	assert.Contains(t, out, "zeta")
+	assert.Contains(t, out, "zebra")
+}
+
+func TestBranchPicker_LongTitleFitsWidth(t *testing.T) {
+	m := New()
+	m.SetSize(20, 8)
+	m = m.Open("Branch for "+strings.Repeat("long-name-", 6), 1, []string{"main"}, nil, "main", "main")
+	for _, l := range strings.Split(m.View(), "\n") {
+		assert.LessOrEqual(t, lipgloss.Width(l), 20)
+	}
 }

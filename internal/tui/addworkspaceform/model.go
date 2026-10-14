@@ -45,7 +45,7 @@ type Model struct {
 func New() Model {
 	return Model{
 		form:            ui.NewForm("Add workspace", fieldCount),
-		workspacePicker: workspacepicker.New("Workspace to add", false),
+		workspacePicker: workspacepicker.New("Workspace to add", false).WithoutAddDir(),
 		branchPicker:    branchpicker.New(),
 		mode:            branchfield.NewModeChoice(),
 	}
@@ -145,6 +145,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.branchPicker, cmd = m.branchPicker.Update(msg)
 		return m, cmd
 	case provider.BranchesFetchedMsg:
+		if m.row != nil && m.row.Workspace.ID == msg.WorkspaceID {
+			r := m.row.Fetched(msg)
+			m.row = &r
+		}
 		var cmd tea.Cmd
 		m.branchPicker, cmd = m.branchPicker.Update(msg)
 		return m, cmd
@@ -192,8 +196,6 @@ func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 		r := branchfield.NewRow(ws)
 		m.row = &r
 		return m, provider.RequestBranches(ws.ID)
-	case workspacepicker.AddDirectoryMsg:
-		return m, nil
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyEsc && !m.workspacePicker.Filtering() {
 			m.overlay = overlayNone
@@ -268,7 +270,7 @@ func (m Model) onPageKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				return m.openWorkspacePicker(), nil
 			}
 			r := m.row
-			m.branchPicker = m.branchPicker.Open("Branch for "+r.Workspace.Name, r.Workspace.ID, r.Local, r.DefaultBranch, r.Branch)
+			m.branchPicker = m.branchPicker.Open("Branch for "+r.Workspace.Name, r.Workspace.ID, r.Local, r.Remote, r.DefaultBranch, r.Branch)
 			m.overlay = overlayBranch
 			return m, nil
 		case fieldMode:

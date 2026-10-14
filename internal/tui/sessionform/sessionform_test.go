@@ -277,3 +277,20 @@ func TestForm_ReInitResetsState(t *testing.T) {
 	assert.Nil(t, m.rows)
 	assert.Equal(t, overlayWorkspaces, m.overlay)
 }
+
+func TestForm_EscFromInitialPickerFocusesWorkspaces(t *testing.T) {
+	m := started(t, gitWS(1, "api"))
+	m, _ = m.Update(press("esc"))
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.Equal(t, fieldWorkspaces, m.form.Focused())
+	assert.False(t, m.CapturesText())
+}
+
+func TestForm_FetchedRemoteBranchesSurviveReopen(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = loaded(m, 1, "main", "main")
+	m, _ = m.Update(provider.BranchesFetchedMsg{WorkspaceID: 1, Branches: []provider.BranchRef{{Name: "main"}, {Name: "remote-only", Remote: true}}})
+	assert.Equal(t, []string{"remote-only"}, m.rows[0].Remote)
+	m = m.openBranchPicker(0)
+	assert.Contains(t, m.View(), "remote-only")
+}

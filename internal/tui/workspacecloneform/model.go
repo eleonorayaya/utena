@@ -210,7 +210,7 @@ func (m Model) View() string {
 	out := m.form.View(fields, m.width)
 	if root := m.root.Value(); root != "" {
 		indent := strings.Repeat(" ", ui.GutterWidth+ui.LabelWidth(fields))
-		out += "\n\n" + indent + lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("→ "+m.targetPreview(root))
+		out += "\n\n" + ui.Clamp(indent+lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("→ "+m.targetPreview(root)), m.width)
 	}
 	return ui.FitHeight(out, m.height)
 }
