@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -33,15 +32,7 @@ type Database interface {
 	Close() error
 }
 
-type PreMigration func(m gorm.Migrator) error
-
-func MigratorDB(m gorm.Migrator) (*gorm.DB, error) {
-	sm, ok := m.(sqlite.Migrator)
-	if !ok {
-		return nil, fmt.Errorf("unsupported migrator %T", m)
-	}
-	return sm.DB, nil
-}
+type PreMigration func(tx *gorm.DB) error
 
 type DB struct {
 	*gorm.DB
@@ -78,7 +69,7 @@ func (d *DB) Migrate(models ...any) error {
 	if len(d.preMigrations) > 0 {
 		if err := d.Transaction(func(tx *gorm.DB) error {
 			for i, fn := range d.preMigrations {
-				if err := fn(tx.Migrator()); err != nil {
+				if err := fn(tx); err != nil {
 					return fmt.Errorf("pre-migration %d: %w", i, err)
 				}
 			}

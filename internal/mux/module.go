@@ -51,7 +51,8 @@ func (m *Module) PreMigrations() []db.PreMigration {
 	return []db.PreMigration{renameTmuxSessionsTable}
 }
 
-func renameTmuxSessionsTable(mg gorm.Migrator) error {
+func renameTmuxSessionsTable(tx *gorm.DB) error {
+	mg := tx.Migrator()
 	if mg.HasTable("tmux_sessions") {
 		if mg.HasTable("mux_sessions") {
 			return fmt.Errorf("both tmux_sessions and mux_sessions tables exist")

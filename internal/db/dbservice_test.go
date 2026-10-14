@@ -30,8 +30,8 @@ func TestDB_PreMigrationsRunBeforeAutoMigrate(t *testing.T) {
 	require.NoError(t, database.Exec("CREATE TABLE legacy_widgets (id integer primary key, name text)").Error)
 	require.NoError(t, database.Exec("INSERT INTO legacy_widgets (id, name) VALUES (1, 'gear')").Error)
 
-	database.RegisterPreMigrations(func(m gorm.Migrator) error {
-		return m.RenameTable("legacy_widgets", "widgets")
+	database.RegisterPreMigrations(func(tx *gorm.DB) error {
+		return tx.Migrator().RenameTable("legacy_widgets", "widgets")
 	})
 	database.RegisterModels(&widget{})
 
@@ -47,7 +47,7 @@ func TestDB_PreMigrationErrorAbortsMigrate(t *testing.T) {
 	database := openTestDB(t)
 	sentinel := errors.New("boom")
 
-	database.RegisterPreMigrations(func(m gorm.Migrator) error {
+	database.RegisterPreMigrations(func(tx *gorm.DB) error {
 		return sentinel
 	})
 	database.RegisterModels(&widget{})
@@ -64,10 +64,10 @@ func TestDB_PreMigrationFailureRollsBackEarlierPreMigrations(t *testing.T) {
 	sentinel := errors.New("boom")
 
 	database.RegisterPreMigrations(
-		func(m gorm.Migrator) error {
-			return m.RenameTable("legacy_widgets", "widgets")
+		func(tx *gorm.DB) error {
+			return tx.Migrator().RenameTable("legacy_widgets", "widgets")
 		},
-		func(m gorm.Migrator) error {
+		func(tx *gorm.DB) error {
 			return sentinel
 		},
 	)
@@ -85,15 +85,15 @@ func TestDB_PreMigrationsRunInOrderAndStopOnError(t *testing.T) {
 	var calls []string
 
 	database.RegisterPreMigrations(
-		func(m gorm.Migrator) error {
+		func(tx *gorm.DB) error {
 			calls = append(calls, "first")
 			return nil
 		},
-		func(m gorm.Migrator) error {
+		func(tx *gorm.DB) error {
 			calls = append(calls, "second")
 			return sentinel
 		},
-		func(m gorm.Migrator) error {
+		func(tx *gorm.DB) error {
 			calls = append(calls, "third")
 			return nil
 		},
@@ -109,11 +109,11 @@ func TestDB_PreMigrationTableRecreateNestsInTransaction(t *testing.T) {
 	require.NoError(t, database.Exec("CREATE TABLE `widgets` (`id` integer primary key, `name` text, `legacy_name` text, `obsolete` text)").Error)
 	require.NoError(t, database.Exec("INSERT INTO widgets (id, name, legacy_name, obsolete) VALUES (1, 'gear', 'old', 'x')").Error)
 
-	database.RegisterPreMigrations(func(m gorm.Migrator) error {
-		if err := m.RenameColumn(&widget{}, "legacy_name", "label"); err != nil {
+	database.RegisterPreMigrations(func(tx *gorm.DB) error {
+		if err := tx.Migrator().RenameColumn(&widget{}, "legacy_name", "label"); err != nil {
 			return err
 		}
-		return m.DropColumn(&widget{}, "obsolete")
+		return tx.Migrator().DropColumn(&widget{}, "obsolete")
 	})
 	database.RegisterModels(&widget{})
 
@@ -132,8 +132,8 @@ func TestDB_PreMigrationRenameUpdatesForeignKeyReferences(t *testing.T) {
 	require.NoError(t, database.Exec("CREATE TABLE legacy_parents (id integer primary key)").Error)
 	require.NoError(t, database.Exec("CREATE TABLE children (id integer primary key, parent_id integer REFERENCES legacy_parents(id))").Error)
 
-	database.RegisterPreMigrations(func(m gorm.Migrator) error {
-		return m.RenameTable("legacy_parents", "parents")
+	database.RegisterPreMigrations(func(tx *gorm.DB) error {
+		return tx.Migrator().RenameTable("legacy_parents", "parents")
 	})
 
 	require.NoError(t, database.OnAppStart(context.Background()))
@@ -146,21 +146,17 @@ func TestDB_PreMigrationRenameUpdatesForeignKeyReferences(t *testing.T) {
 	assert.Equal(t, "parents", fks[0].Table)
 }
 
-func TestMigratorDB_ExecutesInsidePreMigrationTransaction(t *testing.T) {
+func TestDB_PreMigrationExecRolledBackOnLaterFailure(t *testing.T) {
 	database := openTestDB(t)
 	require.NoError(t, database.Exec("CREATE TABLE widgets (id integer primary key, name text)").Error)
 	require.NoError(t, database.Exec("INSERT INTO widgets (id, name) VALUES (1, 'old')").Error)
 	sentinel := errors.New("boom")
 
 	database.RegisterPreMigrations(
-		func(m gorm.Migrator) error {
-			tx, err := db.MigratorDB(m)
-			if err != nil {
-				return err
-			}
+		func(tx *gorm.DB) error {
 			return tx.Exec("UPDATE widgets SET name = 'new' WHERE name = 'old'").Error
 		},
-		func(m gorm.Migrator) error {
+		func(tx *gorm.DB) error {
 			return sentinel
 		},
 	)

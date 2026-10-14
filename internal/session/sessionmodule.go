@@ -78,7 +78,8 @@ type legacySessionsTable struct {
 
 func (legacySessionsTable) TableName() string { return "sessions" }
 
-func dropTmuxSessionNameColumn(mg gorm.Migrator) error {
+func dropTmuxSessionNameColumn(tx *gorm.DB) error {
+	mg := tx.Migrator()
 	if mg.HasIndex("sessions", "idx_sessions_tmux_session_name") {
 		if err := mg.DropIndex("sessions", "idx_sessions_tmux_session_name"); err != nil {
 			return err
@@ -92,13 +93,9 @@ func dropTmuxSessionNameColumn(mg gorm.Migrator) error {
 	return nil
 }
 
-func renameSetupTmuxSteps(mg gorm.Migrator) error {
-	if !mg.HasTable("session_setup_steps") {
+func renameSetupTmuxSteps(tx *gorm.DB) error {
+	if !tx.Migrator().HasTable("session_setup_steps") {
 		return nil
-	}
-	tx, err := db.MigratorDB(mg)
-	if err != nil {
-		return err
 	}
 	if err := tx.Exec("UPDATE session_setup_steps SET kind = ? WHERE kind = ?", string(StepKindSetupMux), "setup_tmux").Error; err != nil {
 		return err
@@ -106,7 +103,8 @@ func renameSetupTmuxSteps(mg gorm.Migrator) error {
 	return tx.Exec("UPDATE session_setup_steps SET label = ? WHERE label = ?", "Setup terminal session", "Setup tmux").Error
 }
 
-func renameTmuxSessionColumn(mg gorm.Migrator) error {
+func renameTmuxSessionColumn(tx *gorm.DB) error {
+	mg := tx.Migrator()
 	if mg.HasConstraint("sessions", "fk_sessions_tmux_session") {
 		if err := mg.DropConstraint("sessions", "fk_sessions_tmux_session"); err != nil {
 			return err
