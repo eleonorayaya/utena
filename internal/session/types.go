@@ -51,7 +51,6 @@ type WorkspaceBranchSpec struct {
 type CreateSessionRequest struct {
 	Name       string                `json:"name,omitempty"`
 	Workspaces []WorkspaceBranchSpec `json:"workspaces"`
-	TodoID     *uint                 `json:"todo_id,omitempty"`
 }
 
 func (c *CreateSessionRequest) Bind(r *http.Request) error {

@@ -56,5 +56,5 @@ In dotfiles, `programs/tuios/contents/config.toml` binds tuios `prefix+t` to `ut
 ## Testing
 
 - `task test` and `task lint` pass. Tests belonging to deleted packages are deleted with them. Tests elsewhere that build sessions with `TodoID` are updated.
-- `grep -rni "todo\|statusview\|debugview\|workspacedetail\|prlist" internal cmd` returns no matches.
+- `grep -rni "todo\|statusview\|debugview\|workspacedetail\|prlist" internal cmd` matches only the daemon's workspace PR endpoint (`PRListResponse`, kept) and the legacy-schema migration test.
 - The daemon starts against an existing database that still has the `todos` table and `todo_id` column. Covered by a migration test that creates the old `sessions` schema with a `todo_id` column, inserts a row, and runs `Migrate` on the session models.

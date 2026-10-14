@@ -257,7 +257,6 @@ func (s *SessionService) findSessionByTmuxName(tmuxName string) (*Session, error
 type CreateSessionInput struct {
 	Name       string
 	Workspaces []WorkspaceBranchSpec
-	TodoID     *uint
 	Actions    []*SessionAction
 }
 
@@ -383,7 +382,6 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 
 	sess := &Session{
 		Name:        name,
-		TodoID:      input.TodoID,
 		Status:      StatusCreating,
 		LastUsedAt:  time.Now(),
 		SessionRoot: sessionRoot,

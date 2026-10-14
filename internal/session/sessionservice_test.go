@@ -67,7 +67,6 @@ func createSessionLegacy(ctx context.Context, service *SessionService, sess *Ses
 	created, err := service.CreateSession(ctx, CreateSessionInput{
 		Name:       name,
 		Workspaces: []WorkspaceBranchSpec{spec},
-		TodoID:     sess.TodoID,
 		Actions:    actions,
 	})
 	if err != nil {

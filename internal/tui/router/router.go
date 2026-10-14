@@ -2,7 +2,6 @@ package router
 
 import (
 	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
@@ -29,11 +28,6 @@ func (r Router) Update(msg tea.Msg) (Router, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return r.OnWindowSizeMsg(msg)
-	case tea.KeyMsg:
-		r, cmd, handled := r.OnKeyMsg(msg)
-		if handled {
-			return r, cmd
-		}
 	case NavigateToMsg:
 		return r.navigateTo(msg.Target)
 	case BackMsg:
@@ -42,15 +36,6 @@ func (r Router) Update(msg tea.Msg) (Router, tea.Cmd) {
 
 	cmd := r.views[r.activeView].Update(msg)
 	return r, cmd
-}
-
-func (r Router) OnKeyMsg(msg tea.KeyMsg) (Router, tea.Cmd, bool) {
-	if key.Matches(msg, routerKeys.Debug) && r.activeView != DebugView {
-		r.viewStack = append(r.viewStack, r.activeView)
-		r.activeView = DebugView
-		return r, nil, true
-	}
-	return r, nil, false
 }
 
 func (r Router) navigateTo(target View) (Router, tea.Cmd) {
@@ -81,7 +66,7 @@ func (r Router) View() string {
 }
 
 func (r Router) Keys() help.KeyMap {
-	return mergedKeyMap{keymaps: []help.KeyMap{routerKeys, r.views[r.activeView].Keys()}}
+	return r.views[r.activeView].Keys()
 }
 
 func (r Router) Status() ui.Status {

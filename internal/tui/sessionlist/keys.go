@@ -15,7 +15,6 @@ type keyMap struct {
 	Block        key.Binding
 	New          key.Binding
 	Info         key.Binding
-	Todos        key.Binding
 	Workspaces   key.Binding
 	ToggleHidden key.Binding
 	Quit         key.Binding
@@ -29,7 +28,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Select, k.Info, k.OpenPR},
 		{k.New, k.Block, k.Archive, k.Delete},
-		{k.Todos, k.Workspaces, k.ToggleHidden, k.Quit},
+		{k.Workspaces, k.ToggleHidden, k.Quit},
 	}
 }
 
@@ -43,7 +42,6 @@ var keys = keyMap{
 	Block:        key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "block")),
 	New:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
 	Info:         key.NewBinding(key.WithKeys("i", "right"), key.WithHelp("i/→", "details")),
-	Todos:        key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "todos")),
 	Workspaces:   key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "workspaces")),
 	ToggleHidden: key.NewBinding(key.WithKeys("."), key.WithHelp(".", "hidden")),
 	Quit:         key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),

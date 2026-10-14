@@ -32,9 +32,6 @@ func main() {
 	rootCmd.Flags().String("port", defaultPort, "daemon port")
 
 	rootCmd.AddCommand(shellInitCmd())
-	rootCmd.AddCommand(todosCmd())
-	rootCmd.AddCommand(newTaskCmd())
-	rootCmd.AddCommand(statusCmd())
 	rootCmd.AddCommand(sessionsCmd())
 	rootCmd.AddCommand(statusLineCmd())
 	rootCmd.AddCommand(monitorCmd())
@@ -47,7 +44,7 @@ func main() {
 	}
 }
 
-func setupLogging() string {
+func setupLogging() {
 	logfilePath := os.Getenv("BUBBLETEA_LOG")
 	if logfilePath == "" {
 		if err := os.MkdirAll(defaultLogDir, 0755); err != nil {
@@ -58,8 +55,6 @@ func setupLogging() string {
 	if _, err := tea.LogToFile(logfilePath, "utena"); err != nil {
 		log.Fatal(err)
 	}
-	resolvedLogPath, _ := filepath.Abs(logfilePath)
-	return resolvedLogPath
 }
 
 func loadTheme() {
@@ -75,10 +70,10 @@ func loadTheme() {
 
 func runTUI(cmd *cobra.Command, args []string) error {
 	port, _ := cmd.Flags().GetString("port")
-	resolvedLogPath := setupLogging()
+	setupLogging()
 	loadTheme()
 
-	p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, router.SessionListView))
+	p := tea.NewProgram(tui.NewApp(port, router.SessionListView))
 	_, err := p.Run()
 	closeOwnPopup()
 	return err
@@ -92,71 +87,6 @@ func closeOwnPopup() {
 	if err := tmux.CloseWindow(os.Getenv("TUIOS_SESSION"), window); err != nil {
 		log.Printf("[ERROR] close popup window: %v", err)
 	}
-}
-
-func todosCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:          "todos",
-		Short:        "Open todo list",
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			port, _ := cmd.Root().Flags().GetString("port")
-			resolvedLogPath := setupLogging()
-			loadTheme()
-
-			p := tea.NewProgram(tui.NewApp(resolvedLogPath, port, router.TodoListView))
-			if _, err := p.Run(); err != nil {
-				return err
-			}
-			return nil
-		},
-	}
-	return cmd
-}
-
-func newTaskCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:          "new-task",
-		Short:        "Open new task form with current workspace preselected",
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			port, _ := cmd.Root().Flags().GetString("port")
-			resolvedLogPath := setupLogging()
-			loadTheme()
-
-			p := tea.NewProgram(tui.NewApp(
-				resolvedLogPath, port, router.TodoListView,
-				tui.WithNavigateTo(router.TodoFormView),
-			))
-			_, err := p.Run()
-			closeOwnPopup()
-			return err
-		},
-	}
-	return cmd
-}
-
-func statusCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:          "status",
-		Short:        "Open status bar view",
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			port, _ := cmd.Root().Flags().GetString("port")
-			resolvedLogPath := setupLogging()
-			loadTheme()
-
-			p := tea.NewProgram(
-				tui.NewApp(resolvedLogPath, port, router.StatusView),
-				tea.WithReportFocus(),
-			)
-			if _, err := p.Run(); err != nil {
-				return err
-			}
-			return nil
-		},
-	}
-	return cmd
 }
 
 func shellInitCmd() *cobra.Command {

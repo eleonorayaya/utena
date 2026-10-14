@@ -36,17 +36,6 @@ func CreateSession(name string, specs []SessionWorkspaceSpec) tea.Cmd {
 	}
 }
 
-func CreateSessionFromTodo(name string, workspaceID uint, todoID uint) tea.Cmd {
-	specs := []SessionWorkspaceSpec{{WorkspaceID: workspaceID, BaseBranch: "main"}}
-	return func() tea.Msg {
-		return createSessionIntentMsg{
-			name:   name,
-			specs:  specs,
-			todoID: &todoID,
-		}
-	}
-}
-
 func RepairSession(id uint) tea.Cmd {
 	return func() tea.Msg { return repairSessionIntentMsg{id: id} }
 }
@@ -79,9 +68,8 @@ type activateSessionMsg struct {
 }
 
 type createSessionIntentMsg struct {
-	name   string
-	specs  []SessionWorkspaceSpec
-	todoID *uint
+	name  string
+	specs []SessionWorkspaceSpec
 }
 
 type repairSessionIntentMsg struct {
@@ -215,7 +203,7 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, p.client.fetchSessions()
 
 	case createSessionIntentMsg:
-		return p, p.client.createSession(msg.name, msg.specs, msg.todoID)
+		return p, p.client.createSession(msg.name, msg.specs)
 
 	case SessionCreatedMsg:
 		return p, p.client.fetchSessions()

@@ -269,9 +269,6 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	case key.Matches(msg, keys.New):
 		return m, router.NavigateTo(router.SessionFormView), true
 
-	case key.Matches(msg, keys.Todos):
-		return m, router.NavigateTo(router.TodoListView), true
-
 	case key.Matches(msg, keys.Workspaces):
 		return m, router.NavigateTo(router.WorkspaceListView), true
 

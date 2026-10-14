@@ -11,7 +11,6 @@ import (
 	ulist "github.com/eleonorayaya/utena/internal/tui/list"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
-	"github.com/eleonorayaya/utena/internal/tui/workspacedetail"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
@@ -84,15 +83,6 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.pendingDeleteID = 0
 	}
 	switch {
-	case key.Matches(msg, keys.Select):
-		item, ok := m.list.SelectedItem().(workspaceItem)
-		if !ok {
-			return m, nil, false
-		}
-		return m, tea.Sequence(
-			router.NavigateTo(router.WorkspaceDetailView),
-			workspacedetail.Select(item.workspace),
-		), true
 	case key.Matches(msg, keys.Hide):
 		item, ok := m.list.SelectedItem().(workspaceItem)
 		if !ok {

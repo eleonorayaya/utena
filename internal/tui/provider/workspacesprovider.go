@@ -51,15 +51,6 @@ func CheckBranchExists(workspaceID uint, name string) tea.Cmd {
 	return func() tea.Msg { return checkBranchExistsIntentMsg{workspaceID: workspaceID, name: name} }
 }
 
-type PRsStateUpdatedMsg struct {
-	PullRequests []git.PullRequest
-	WorkspaceID  uint
-}
-
-func FetchPRs(workspaceID uint, state string) tea.Cmd {
-	return func() tea.Msg { return fetchPRsIntentMsg{workspaceID: workspaceID, state: state} }
-}
-
 func DeleteWorkspace(id uint) tea.Cmd {
 	return func() tea.Msg { return deleteWorkspaceIntentMsg{id: id} }
 }
@@ -161,16 +152,6 @@ type fetchWorkspaceRootsIntentMsg struct{}
 type workspaceRootsMsg struct {
 	roots []string
 	err   error
-}
-
-type fetchPRsIntentMsg struct {
-	workspaceID uint
-	state       string
-}
-
-type prsLoadedMsg struct {
-	prs         []git.PullRequest
-	workspaceID uint
 }
 
 type workspacesLoadedMsg struct {
@@ -282,14 +263,6 @@ func (p workspacesProvider) Update(msg tea.Msg) (workspacesProvider, tea.Cmd) {
 		return p, func() tea.Msg {
 			return BranchExistsCheckedMsg{Name: name, ExistsLocal: existsLocal, ExistsRemote: existsRemote, Err: err}
 		}
-
-	case fetchPRsIntentMsg:
-		return p, p.client.fetchPRs(msg.workspaceID, msg.state)
-
-	case prsLoadedMsg:
-		prs := msg.prs
-		wsID := msg.workspaceID
-		return p, func() tea.Msg { return PRsStateUpdatedMsg{PullRequests: prs, WorkspaceID: wsID} }
 
 	case setActiveWorkspaceMsg:
 		p.activeWorkspaceID = msg.workspaceID

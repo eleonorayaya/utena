@@ -531,3 +531,18 @@ func TestSessionStore_StatusError(t *testing.T) {
 	require.Equal(t, StatusBroken, retrieved.Status)
 	require.Equal(t, "worktree creation failed", retrieved.StatusError)
 }
+
+func TestSession_MigratesDatabaseWithLegacyTodoColumns(t *testing.T) {
+	database := setupTestDB(t)
+	require.NoError(t, database.Exec("CREATE TABLE IF NOT EXISTS `todos` (`id` integer PRIMARY KEY AUTOINCREMENT,`name` text)").Error)
+	require.NoError(t, database.Exec("ALTER TABLE `sessions` ADD COLUMN `todo_id` integer").Error)
+	require.NoError(t, database.Exec("CREATE INDEX `idx_sessions_todo_id` ON `sessions`(`todo_id`)").Error)
+	require.NoError(t, database.Exec("INSERT INTO `todos` (`name`) VALUES ('legacy')").Error)
+	require.NoError(t, database.Exec("INSERT INTO `sessions` (`name`,`status`,`todo_id`) VALUES ('legacy', 'active', 1)").Error)
+
+	require.NoError(t, database.Migrate(&Session{}, &SessionWorktree{}, &SessionBranch{}, &DismissedPR{}, &SessionAction{}, &SessionSetupStep{}, &SessionBlocker{}))
+
+	var sess Session
+	require.NoError(t, database.Where("name = ?", "legacy").First(&sess).Error)
+	require.Equal(t, StatusActive, sess.Status)
+}

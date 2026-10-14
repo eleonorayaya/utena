@@ -9,20 +9,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/tui/addworkspaceform"
 	"github.com/eleonorayaya/utena/internal/tui/blockerform"
-	"github.com/eleonorayaya/utena/internal/tui/debug"
-	"github.com/eleonorayaya/utena/internal/tui/prlist"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessiondetail"
 	"github.com/eleonorayaya/utena/internal/tui/sessionform"
 	"github.com/eleonorayaya/utena/internal/tui/sessionlist"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
-	"github.com/eleonorayaya/utena/internal/tui/statusview"
-	"github.com/eleonorayaya/utena/internal/tui/todoform"
-	"github.com/eleonorayaya/utena/internal/tui/todolist"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/eleonorayaya/utena/internal/tui/workspacecloneform"
-	"github.com/eleonorayaya/utena/internal/tui/workspacedetail"
 	"github.com/eleonorayaya/utena/internal/tui/workspacelist"
 )
 
@@ -30,64 +24,35 @@ const padX = 2
 const padY = 1
 
 type App struct {
-	provider   provider.Provider
-	router     router.Router
-	help       helpModel
-	navigateTo *router.View
-	width      int
-	height     int
+	provider provider.Provider
+	router   router.Router
+	help     helpModel
+	width    int
+	height   int
 }
 
-type AppOption func(*appConfig)
-
-type appConfig struct {
-	navigateTo *router.View
-}
-
-func WithNavigateTo(view router.View) AppOption {
-	return func(c *appConfig) {
-		c.navigateTo = &view
-	}
-}
-
-func NewApp(logPath, port string, initialView router.View, opts ...AppOption) App {
-	var cfg appConfig
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-
+func NewApp(port string, initialView router.View) App {
 	baseURL := fmt.Sprintf("http://localhost:%s", port)
 	views := map[router.View]router.ViewEntry{
 		router.SessionListView:        &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
 		router.SessionDetailView:      &router.ViewAdapter[sessiondetail.Model]{Model: sessiondetail.New()},
 		router.SessionFormView:        &router.ViewAdapter[sessionform.Model]{Model: sessionform.New()},
 		router.SessionProgressView:    &router.ViewAdapter[sessionprogress.Model]{Model: sessionprogress.New()},
-		router.TodoListView:           &router.ViewAdapter[todolist.Model]{Model: todolist.New()},
-		router.TodoFormView:           &router.ViewAdapter[todoform.Model]{Model: todoform.New()},
-		router.DebugView:              &router.ViewAdapter[debug.Model]{Model: debug.New(logPath, baseURL)},
-		router.StatusView:             &router.ViewAdapter[statusview.Model]{Model: statusview.New()},
 		router.WorkspaceListView:      &router.ViewAdapter[workspacelist.Model]{Model: workspacelist.New()},
-		router.WorkspaceDetailView:    &router.ViewAdapter[workspacedetail.Model]{Model: workspacedetail.New()},
 		router.WorkspaceCloneFormView: &router.ViewAdapter[workspacecloneform.Model]{Model: workspacecloneform.New()},
-		router.PRListView:             &router.ViewAdapter[prlist.Model]{Model: prlist.New()},
 		router.AddWorkspaceFormView:   &router.ViewAdapter[addworkspaceform.Model]{Model: addworkspaceform.New()},
 		router.BlockerFormView:        &router.ViewAdapter[blockerform.Model]{Model: blockerform.New()},
 	}
 
 	return App{
-		provider:   provider.NewRootProvider(baseURL),
-		router:     router.New(views, initialView),
-		help:       newHelpModel(initialView != router.StatusView),
-		navigateTo: cfg.navigateTo,
+		provider: provider.NewRootProvider(baseURL),
+		router:   router.New(views, initialView),
+		help:     newHelpModel(),
 	}
 }
 
 func (a App) Init() tea.Cmd {
 	_, cmd := a.router.Init()
-	if a.navigateTo != nil {
-		target := *a.navigateTo
-		return tea.Sequence(cmd, router.NavigateTo(target))
-	}
 	return cmd
 }
 
@@ -105,13 +70,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		}
-		if a.help.visible && key.Matches(msg, ui.MoreKey) && !a.router.CapturesText() {
+		if key.Matches(msg, ui.MoreKey) && !a.router.CapturesText() {
 			a.help = a.help.SetFull(true)
 			return a, nil
 		}
 	}
-
-	a.help = a.help.Update(msg)
 
 	var cmds []tea.Cmd
 	var cmd tea.Cmd

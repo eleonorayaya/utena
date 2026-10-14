@@ -15,9 +15,3 @@ func NavigateTo(target View) tea.Cmd {
 func Back() tea.Cmd {
 	return func() tea.Msg { return BackMsg{} }
 }
-
-type SetHelpVisibleMsg struct{ Visible bool }
-
-func SetHelpVisible(visible bool) tea.Cmd {
-	return func() tea.Msg { return SetHelpVisibleMsg{Visible: visible} }
-}

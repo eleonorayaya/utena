@@ -14,7 +14,6 @@ import (
 	"github.com/eleonorayaya/utena/internal/monitor"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tmux"
-	"github.com/eleonorayaya/utena/internal/todo"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/afero"
@@ -28,7 +27,6 @@ type App struct {
 	Session   *session.SessionModule
 	Tmux      *tmux.TmuxModule
 	Claude    *claude.ClaudeModule
-	Todo      *todo.TodoModule
 	Jobs      *jobs.JobsModule
 	Monitor   *monitor.MonitorModule
 }
@@ -75,7 +73,6 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *tmux.TmuxMod
 		Session:   sessionModule,
 		Tmux:      tmuxModule,
 		Claude:    claude.NewClaudeModule(database),
-		Todo:      todo.NewTodoModule(workspaceModule, database),
 		Jobs:      jobsModule,
 		Monitor:   monitor.NewMonitorModule(bus, sessionModule.Service),
 	}
@@ -151,7 +148,6 @@ func (a *App) modules() []moduleEntry {
 		{"workspace", "/workspaces", a.Workspace},
 		{"claude", "/claude", a.Claude},
 		{"session", "/sessions", a.Session},
-		{"todo", "/todos", a.Todo},
 		{"jobs", "/jobs", a.Jobs},
 		{"monitor", "/monitor", a.Monitor},
 	}

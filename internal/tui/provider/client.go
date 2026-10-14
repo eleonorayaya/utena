@@ -15,7 +15,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
-	"github.com/eleonorayaya/utena/internal/todo"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
@@ -185,34 +184,6 @@ func (c *client) checkBranchExists(workspaceID uint, name string) tea.Cmd {
 	}
 }
 
-func (c *client) fetchPRs(workspaceID uint, state string) tea.Cmd {
-	return func() tea.Msg {
-		url := fmt.Sprintf("%s/workspaces/%d/prs", c.baseURL, workspaceID)
-		if state != "" {
-			url += "?state=" + state
-		}
-		res, err := c.httpClient.Get(url)
-		if err != nil {
-			log.Printf("[ERROR] fetch PRs: %v", err)
-			return ErrMsg{err}
-		}
-		defer res.Body.Close()
-
-		if res.StatusCode != http.StatusOK {
-			return parseAPIError(res, "fetch PRs")
-		}
-
-		var resp struct {
-			PullRequests []git.PullRequest `json:"pull_requests"`
-		}
-		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-			return ErrMsg{err}
-		}
-
-		return prsLoadedMsg{prs: resp.PullRequests, workspaceID: workspaceID}
-	}
-}
-
 func (c *client) activateSession(id uint) tea.Cmd {
 	return func() tea.Msg {
 		req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/sessions/%d/activate", c.baseURL, id), nil)
@@ -257,7 +228,7 @@ func (c *client) repairSession(id uint) tea.Cmd {
 	}
 }
 
-func (c *client) createSession(name string, specs []SessionWorkspaceSpec, todoID *uint) tea.Cmd {
+func (c *client) createSession(name string, specs []SessionWorkspaceSpec) tea.Cmd {
 	return func() tea.Msg {
 		wss := make([]map[string]any, 0, len(specs))
 		for _, s := range specs {
@@ -275,9 +246,6 @@ func (c *client) createSession(name string, specs []SessionWorkspaceSpec, todoID
 		}
 		if name != "" {
 			body["name"] = name
-		}
-		if todoID != nil {
-			body["todo_id"] = *todoID
 		}
 		jsonBody, err := json.Marshal(body)
 		if err != nil {
@@ -534,83 +502,6 @@ func (c *client) fetchWorkspaceRoots() tea.Cmd {
 			return workspaceRootsMsg{err: err}
 		}
 		return workspaceRootsMsg{roots: resp.Roots}
-	}
-}
-
-func (c *client) fetchTodos() tea.Cmd {
-	return func() tea.Msg {
-		res, err := c.httpClient.Get(c.baseURL + "/todos")
-		if err != nil {
-			log.Printf("[ERROR] fetch todos: %v", err)
-			return ErrMsg{err}
-		}
-		defer res.Body.Close()
-
-		if res.StatusCode != http.StatusOK {
-			return parseAPIError(res, "fetch todos")
-		}
-
-		var resp todo.TodoListResponse
-		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-			return ErrMsg{err}
-		}
-
-		todos := make([]todo.Todo, len(resp.Todos))
-		for i, tr := range resp.Todos {
-			todos[i] = *tr.Todo
-		}
-		return todosLoadedMsg{todos}
-	}
-}
-
-func (c *client) createTodo(name, description string, workspaceID *uint) tea.Cmd {
-	return func() tea.Msg {
-		body := map[string]interface{}{
-			"name":        name,
-			"description": description,
-		}
-		if workspaceID != nil {
-			body["workspace_id"] = *workspaceID
-		}
-		jsonBody, err := json.Marshal(body)
-		if err != nil {
-			return ErrMsg{err}
-		}
-
-		res, err := c.httpClient.Post(c.baseURL+"/todos", "application/json", bytes.NewReader(jsonBody))
-		if err != nil {
-			log.Printf("[ERROR] create todo: %v", err)
-			return ErrMsg{err}
-		}
-		defer res.Body.Close()
-
-		if res.StatusCode != http.StatusCreated {
-			return parseAPIError(res, "create todo")
-		}
-
-		return TodoCreatedMsg{}
-	}
-}
-
-func (c *client) deleteTodo(id uint) tea.Cmd {
-	return func() tea.Msg {
-		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/todos/%d", c.baseURL, id), nil)
-		if err != nil {
-			return ErrMsg{err}
-		}
-
-		res, err := c.httpClient.Do(req)
-		if err != nil {
-			log.Printf("[ERROR] delete todo %d: %v", id, err)
-			return ErrMsg{err}
-		}
-		defer res.Body.Close()
-
-		if res.StatusCode != http.StatusNoContent {
-			return parseAPIError(res, "delete todo")
-		}
-
-		return todoDeletedMsg{id: id}
 	}
 }
 

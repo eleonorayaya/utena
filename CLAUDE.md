@@ -31,7 +31,6 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
    - `/tmux` - client attach hooks, activation long-poll, session env lookup
    - `/claude` - Claude session endpoints
    - `/workspaces` - workspace management endpoints
-   - `/todos` - todo management endpoints
 
 ### Go Module Structure
 
@@ -43,13 +42,12 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 - `internal/workspace/` - workspace discovery and management
 - `internal/tmux/` - tuios service, socket client (`tuiosclient.go`) and controller (package name kept from the tmux era)
 - `internal/claude/` - Claude session management
-- `internal/todo/` - todo management
 - `internal/tui/` - Bubbletea TUI application
 - `internal/common/` - shared utilities
 
 ### Persistence
 
-All domain data (workspaces, sessions, todos, claude sessions) is stored in SQLite via GORM (`internal/db/`). The database file is created at `<configDir>/utena.db` with WAL mode. Each store takes a `db.Database` interface; tests use `db.OpenInMemory()` for in-memory SQLite. Workspace `config.json` (roots and discovered paths) remains file-based via `afero.Fs`.
+All domain data (workspaces, sessions, claude sessions) is stored in SQLite via GORM (`internal/db/`). The database file is created at `<configDir>/utena.db` with WAL mode. Each store takes a `db.Database` interface; tests use `db.OpenInMemory()` for in-memory SQLite. Workspace `config.json` (roots and discovered paths) remains file-based via `afero.Fs`.
 
 ### Key Patterns
 

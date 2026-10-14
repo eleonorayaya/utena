@@ -14,7 +14,7 @@ import (
 
 func sized(t *testing.T, view router.View, w, h int) App {
 	t.Helper()
-	m, _ := NewApp("", "0", view).Update(tea.WindowSizeMsg{Width: w, Height: h})
+	m, _ := NewApp("0", view).Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return m.(App)
 }
 
@@ -36,9 +36,9 @@ func TestApp_FooterIsVisibleAndViewFitsWindow(t *testing.T) {
 func TestApp_QuestionMarkTogglesFullHelp(t *testing.T) {
 	a := sized(t, router.SessionListView, 120, 30)
 	m, _ := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
-	assert.Contains(t, m.View(), "ctrl+g")
+	assert.Contains(t, m.View(), "? or esc to close")
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	assert.NotContains(t, m.View(), "ctrl+g")
+	assert.NotContains(t, m.View(), "? or esc to close")
 }
 
 func TestApp_QuestionMarkIsTypedInTextForms(t *testing.T) {
@@ -70,7 +70,7 @@ func TestApp_FullHelpFitsShortWindow(t *testing.T) {
 }
 
 func TestApp_OtherViewsFitWindowWithFooter(t *testing.T) {
-	for _, v := range []router.View{router.TodoListView, router.WorkspaceListView, router.PRListView} {
+	for _, v := range []router.View{router.WorkspaceListView, router.WorkspaceCloneFormView, router.BlockerFormView} {
 		a := sized(t, v, 120, 30)
 		out := a.View()
 		assert.LessOrEqual(t, strings.Count(out, "\n")+1, 30, "view %v", v)

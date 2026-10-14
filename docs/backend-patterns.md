@@ -113,7 +113,6 @@ Cross-domain data access goes through the owning service. Services may hold othe
 Current cross-service dependencies:
 - `SessionService` → `GitService`, `WorkspaceService`, `TmuxService`
 - `WorkspaceService` → `GitService`
-- `TodoService` → `WorkspaceService`
 
 When a direct dependency would create a cycle, use the event bus instead (see Pattern 7).
 
@@ -226,6 +225,6 @@ Errors are `common.AppError` values with a category:
 | `CategoryConflict` | 409 |
 | _(anything else)_ | 500 |
 
-Controllers call `common.RenderError(w, r, err)` to map and render. Business logic constructs errors with `common.NewNotFound()`, `common.NewInvalidRequest()`, etc. Services define package-level sentinel errors (e.g. `ErrTodoNotFound`) for `errors.Is()` comparisons.
+Controllers call `common.RenderError(w, r, err)` to map and render. Business logic constructs errors with `common.NewNotFound()`, `common.NewInvalidRequest()`, etc. Services define package-level sentinel errors (e.g. `ErrSessionNotFound`) for `errors.Is()` comparisons.
 
 See: `internal/common/error.go`

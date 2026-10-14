@@ -37,7 +37,6 @@ const (
 type Session struct {
 	gorm.Model
 	Name           string                 `json:"name,omitempty"`
-	TodoID         *uint                  `json:"todo_id,omitempty" gorm:"index"`
 	Status         SessionStatus          `json:"status"`
 	IsAttached     bool                   `json:"is_attached"`
 	LastUsedAt     time.Time              `json:"last_used_at"`

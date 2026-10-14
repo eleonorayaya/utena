@@ -9,7 +9,6 @@ type Provider interface {
 type rootProvider struct {
 	sessions   sessionsProvider
 	workspaces workspacesProvider
-	todos      todosProvider
 }
 
 func NewRootProvider(baseURL string) Provider {
@@ -17,7 +16,6 @@ func NewRootProvider(baseURL string) Provider {
 	return rootProvider{
 		sessions:   newSessionsProvider(c),
 		workspaces: newWorkspacesProvider(c),
-		todos:      newTodosProvider(c),
 	}
 }
 
@@ -27,8 +25,6 @@ func (p rootProvider) Update(msg tea.Msg) (Provider, tea.Cmd) {
 	p.sessions, cmd = p.sessions.Update(msg)
 	cmds = append(cmds, cmd)
 	p.workspaces, cmd = p.workspaces.Update(msg)
-	cmds = append(cmds, cmd)
-	p.todos, cmd = p.todos.Update(msg)
 	cmds = append(cmds, cmd)
 	return p, tea.Batch(cmds...)
 }

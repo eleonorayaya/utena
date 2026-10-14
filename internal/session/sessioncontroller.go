@@ -88,7 +88,6 @@ func (c *SessionController) CreateSession(w http.ResponseWriter, r *http.Request
 	session, err := c.service.CreateSession(ctx, CreateSessionInput{
 		Name:       data.Name,
 		Workspaces: data.Workspaces,
-		TodoID:     data.TodoID,
 	})
 	if err != nil {
 		common.RenderError(w, r, err)

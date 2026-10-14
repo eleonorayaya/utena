@@ -29,7 +29,7 @@ The daemon talks to the tuios daemon over its control socket (`$TUIOS_SOCKET`, e
 
 Start your terminal with `utena attach` instead of `tuios attach`. The utena daemon never starts tuios itself (a launchd-started tuios would give every pane and popup launchd's minimal environment), so `utena attach` is also what brings the tuios daemon up. It runs `tuios attach` and reattaches to whatever session you pick in the utena TUI (tuios has no programmatic `switch-client`, so the wrapper restarts the client on the chosen session).
 
-The tuios side (`prefix+p` / `prefix+t` popups, the `custom/utena` dock cell running `utena status-line`, and an `after-attach` hook that keeps the attached session accurate when you switch with `Ctrl+B S`) is deployed from dotfiles: `programs/tuios/contents/config.toml`.
+The tuios side (the `prefix+p` popup, the `custom/utena` dock cell running `utena status-line`, and an `after-attach` hook that keeps the attached session accurate when you switch with `Ctrl+B S`) is deployed from dotfiles: `programs/tuios/contents/config.toml`.
 
 #### Shell initialization
 
