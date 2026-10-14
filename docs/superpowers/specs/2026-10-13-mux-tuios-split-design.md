@@ -50,8 +50,12 @@ This is a pure refactor. It must not change behavior. It is the base for
   `Router`, `Module` with the same responsibilities and public methods as today.
   The service consumes `Driver` and `Event` instead of `tmuxRunner` and
   `tuiosEvent`. `handleTuiosEvent` becomes a switch over `EventType`.
-- `internal/mux/muxtest`: `FakeDriver` replaces `MockRunner` and keeps the
-  same capabilities that existing tests rely on.
+- `FakeDriver` in `internal/mux/testing.go` (same place `MockRunner` lives
+  today) replaces `MockRunner`. A separate `muxtest` package would create an
+  import cycle with `mux`'s internal tests. Agent-meta helpers move to `tuios`
+  tests, which use the existing fake tuios socket daemon.
+- `Session` declares `TableName()` explicitly. Otherwise GORM would map it to
+  `sessions` and collide with `session.Session`.
 
 ### `internal/tuios` (only knows the socket protocol)
 
@@ -136,7 +140,7 @@ companion dotfiles change, deployed together with the daemon upgrade.
 ## Testing
 
 - Moved tests keep passing unchanged except for renames: service tests via
-  `muxtest.FakeDriver`, store tests, and `tuiosclient_test` / `workspaces_test`
+  `mux.FakeDriver`, store tests, and `tuiosclient_test` / `workspaces_test`
   under `tuios`.
 - New `tuios` test: event translation (each raw tuios event maps to the
   expected `mux.Event`, and `agent-state` triggers tagging but emits nothing).
