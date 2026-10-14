@@ -128,9 +128,10 @@ describe `mux` and `tuios` and the `/mux` routes. Historical plans and specs
 stay as written.
 
 External dependency: the dotfiles tuios config (`after-attach` hook, popups,
-dock cell) is outside this repo. If any of it calls `/tmux/*` directly instead
-of going through the `utena` CLI, it must move to `/mux` at the same time as
-the daemon upgrade.
+dock cell) is outside this repo. Its only direct route dependency is the
+`after-attach` hook in `programs/tuios/contents/config.toml`, which curls
+`/tmux/hooks/client-session-changed`. It moves to `/mux/hooks/...` in a
+companion dotfiles change, deployed together with the daemon upgrade.
 
 ## Testing
 
