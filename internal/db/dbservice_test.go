@@ -166,3 +166,103 @@ func TestDB_PreMigrationExecRolledBackOnLaterFailure(t *testing.T) {
 	require.NoError(t, database.Raw("SELECT name FROM widgets WHERE id = 1").Scan(&name).Error)
 	assert.Equal(t, "old", name)
 }
+
+func TestDB_MigratePreservesAutoincrementAcrossTableRebuild(t *testing.T) {
+	database := openTestDB(t)
+	require.NoError(t, database.Exec("CREATE TABLE `widgets` (`id` integer PRIMARY KEY AUTOINCREMENT, `name` text, `obsolete` text)").Error)
+	for _, name := range []string{"a", "b", "c"} {
+		require.NoError(t, database.Exec("INSERT INTO widgets (name) VALUES (?)", name).Error)
+	}
+	require.NoError(t, database.Exec("DELETE FROM widgets WHERE id = 3").Error)
+
+	database.RegisterPreMigrations(func(tx *gorm.DB) error {
+		return tx.Migrator().DropColumn(&widget{}, "obsolete")
+	})
+	database.RegisterModels(&widget{})
+	require.NoError(t, database.OnAppStart(context.Background()))
+
+	require.False(t, database.Migrator().HasColumn(&widget{}, "obsolete"))
+	w := &widget{Name: "d"}
+	require.NoError(t, database.Create(w).Error)
+	assert.Equal(t, uint(4), w.ID)
+}
+
+func TestDB_MigrateRestoresVanishedSequenceRow(t *testing.T) {
+	database := openTestDB(t)
+	require.NoError(t, database.Exec("CREATE TABLE `widgets` (`id` integer PRIMARY KEY AUTOINCREMENT, `name` text, `obsolete` text)").Error)
+	require.NoError(t, database.Exec("INSERT INTO widgets (name) VALUES ('a')").Error)
+	require.NoError(t, database.Exec("DELETE FROM widgets").Error)
+
+	database.RegisterPreMigrations(func(tx *gorm.DB) error {
+		return tx.Migrator().DropColumn(&widget{}, "obsolete")
+	})
+	require.NoError(t, database.OnAppStart(context.Background()))
+
+	var seq int64
+	require.NoError(t, database.Raw("SELECT seq FROM sqlite_sequence WHERE name = 'widgets'").Scan(&seq).Error)
+	assert.Equal(t, int64(1), seq)
+}
+
+func TestDB_PreMigrationForeignKeyViolationRollsBack(t *testing.T) {
+	database := openTestDB(t)
+	require.NoError(t, database.Exec("CREATE TABLE parents (id integer primary key)").Error)
+	require.NoError(t, database.Exec("CREATE TABLE children (id integer primary key, parent_id integer REFERENCES parents(id))").Error)
+	require.NoError(t, database.Exec("CREATE TABLE marks (id integer primary key)").Error)
+
+	database.RegisterPreMigrations(func(tx *gorm.DB) error {
+		if err := tx.Exec("INSERT INTO marks (id) VALUES (1)").Error; err != nil {
+			return err
+		}
+		return tx.Exec("INSERT INTO children (id, parent_id) VALUES (1, 99)").Error
+	})
+
+	err := database.OnAppStart(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "foreign key violations")
+	var count int64
+	require.NoError(t, database.Raw("SELECT count(*) FROM children").Scan(&count).Error)
+	assert.Zero(t, count)
+	require.NoError(t, database.Raw("SELECT count(*) FROM marks").Scan(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestDB_MigrateToleratesPreexistingForeignKeyViolations(t *testing.T) {
+	database := openTestDB(t)
+	require.NoError(t, database.Exec("PRAGMA foreign_keys=OFF").Error)
+	require.NoError(t, database.Exec("CREATE TABLE parents (id integer primary key)").Error)
+	require.NoError(t, database.Exec("CREATE TABLE children (id integer primary key, parent_id integer REFERENCES parents(id))").Error)
+	require.NoError(t, database.Exec("INSERT INTO children (id, parent_id) VALUES (1, 99)").Error)
+	require.NoError(t, database.Exec("PRAGMA foreign_keys=ON").Error)
+
+	database.RegisterPreMigrations(func(tx *gorm.DB) error {
+		return tx.Exec("UPDATE children SET parent_id = 99 WHERE id = 1").Error
+	})
+	database.RegisterModels(&widget{})
+	require.NoError(t, database.OnAppStart(context.Background()))
+
+	var count int64
+	require.NoError(t, database.Raw("SELECT count(*) FROM children").Scan(&count).Error)
+	assert.Equal(t, int64(1), count)
+}
+
+type gadget struct {
+	ID    uint
+	Parts []part `gorm:"foreignKey:GadgetID"`
+}
+
+type part struct {
+	ID       uint
+	GadgetID uint
+}
+
+func TestDB_MigrateReportsForeignKeyViolationsAfterAutoMigrate(t *testing.T) {
+	database := openTestDB(t)
+	require.NoError(t, database.Exec("CREATE TABLE `parts` (`id` integer PRIMARY KEY AUTOINCREMENT, `gadget_id` integer)").Error)
+	require.NoError(t, database.Exec("INSERT INTO parts (id, gadget_id) VALUES (1, 99)").Error)
+
+	database.RegisterModels(&gadget{}, &part{})
+	err := database.OnAppStart(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "after auto-migrate")
+	assert.Contains(t, err.Error(), "parts rowid 1 -> gadgets")
+}

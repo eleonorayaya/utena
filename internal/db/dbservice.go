@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"gorm.io/gorm"
@@ -64,21 +66,167 @@ func (d *DB) OnAppEnd(ctx context.Context) error {
 }
 
 func (d *DB) Migrate(models ...any) error {
-	d.Exec("PRAGMA foreign_keys=OFF")
+	if err := d.Exec("PRAGMA foreign_keys=OFF").Error; err != nil {
+		return fmt.Errorf("disable foreign keys: %w", err)
+	}
 	defer d.Exec("PRAGMA foreign_keys=ON")
+	seqs, err := snapshotSequences(d.DB)
+	if err != nil {
+		return err
+	}
+	baseline, err := foreignKeyViolations(d.DB)
+	if err != nil {
+		return err
+	}
+	if len(baseline) > 0 {
+		slog.Warn("database has pre-existing foreign key violations", "violations", describeViolations(baseline))
+	}
 	if len(d.preMigrations) > 0 {
 		if err := d.Transaction(func(tx *gorm.DB) error {
+			if err := requireForeignKeysOff(tx); err != nil {
+				return err
+			}
 			for i, fn := range d.preMigrations {
 				if err := fn(tx); err != nil {
 					return fmt.Errorf("pre-migration %d: %w", i, err)
 				}
+			}
+			if err := checkNewForeignKeyViolations(tx, baseline); err != nil {
+				return fmt.Errorf("after pre-migrations: %w", err)
 			}
 			return nil
 		}); err != nil {
 			return err
 		}
 	}
-	return d.AutoMigrate(models...)
+	migrateErr := d.AutoMigrate(models...)
+	if err := restoreSequences(d.DB, seqs); err != nil {
+		return errors.Join(migrateErr, err)
+	}
+	if migrateErr != nil {
+		return migrateErr
+	}
+	if err := checkNewForeignKeyViolations(d.DB, baseline); err != nil {
+		return fmt.Errorf("after auto-migrate: %w", err)
+	}
+	return nil
+}
+
+type sequence struct {
+	Name string
+	Seq  int64
+}
+
+func hasTable(tx *gorm.DB, name string) (bool, error) {
+	var count int64
+	if err := tx.Raw("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?", name).Scan(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func snapshotSequences(tx *gorm.DB) ([]sequence, error) {
+	ok, err := hasTable(tx, "sqlite_sequence")
+	if err != nil || !ok {
+		return nil, err
+	}
+	var seqs []sequence
+	if err := tx.Raw("SELECT name, seq FROM sqlite_sequence").Scan(&seqs).Error; err != nil {
+		return nil, fmt.Errorf("snapshot sqlite_sequence: %w", err)
+	}
+	return seqs, nil
+}
+
+func restoreSequences(tx *gorm.DB, seqs []sequence) error {
+	for _, s := range seqs {
+		exists, err := hasTable(tx, s.Name)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		var rows int64
+		if err := tx.Raw("SELECT count(*) FROM sqlite_sequence WHERE name = ?", s.Name).Scan(&rows).Error; err != nil {
+			return fmt.Errorf("restore sqlite_sequence for %s: %w", s.Name, err)
+		}
+		q := "UPDATE sqlite_sequence SET seq = ? WHERE name = ? AND seq < ?"
+		args := []any{s.Seq, s.Name, s.Seq}
+		if rows == 0 {
+			q = "INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)"
+			args = []any{s.Name, s.Seq}
+		}
+		if err := tx.Exec(q, args...).Error; err != nil {
+			return fmt.Errorf("restore sqlite_sequence for %s: %w", s.Name, err)
+		}
+	}
+	return nil
+}
+
+func requireForeignKeysOff(tx *gorm.DB) error {
+	var enabled int
+	if err := tx.Raw("PRAGMA foreign_keys").Scan(&enabled).Error; err != nil {
+		return fmt.Errorf("read foreign_keys pragma: %w", err)
+	}
+	if enabled != 0 {
+		return fmt.Errorf("foreign keys must be off during pre-migrations")
+	}
+	return nil
+}
+
+type foreignKeyViolation struct {
+	Table  string
+	Rowid  *int64
+	Parent string
+	Fkid   int
+}
+
+func foreignKeyViolations(tx *gorm.DB) ([]foreignKeyViolation, error) {
+	var violations []foreignKeyViolation
+	if err := tx.Raw("PRAGMA foreign_key_check").Scan(&violations).Error; err != nil {
+		return nil, fmt.Errorf("foreign_key_check: %w", err)
+	}
+	return violations, nil
+}
+
+func violationKey(v foreignKeyViolation) string {
+	if v.Rowid == nil {
+		return v.Table + ":?"
+	}
+	return fmt.Sprintf("%s:%d", v.Table, *v.Rowid)
+}
+
+func describeViolations(violations []foreignKeyViolation) string {
+	parts := make([]string, 0, len(violations))
+	for _, v := range violations {
+		rowid := "?"
+		if v.Rowid != nil {
+			rowid = fmt.Sprintf("%d", *v.Rowid)
+		}
+		parts = append(parts, fmt.Sprintf("%s rowid %s -> %s", v.Table, rowid, v.Parent))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func checkNewForeignKeyViolations(tx *gorm.DB, baseline []foreignKeyViolation) error {
+	violations, err := foreignKeyViolations(tx)
+	if err != nil {
+		return err
+	}
+	known := make(map[string]bool, len(baseline))
+	for _, v := range baseline {
+		known[violationKey(v)] = true
+	}
+	var fresh []foreignKeyViolation
+	for _, v := range violations {
+		if !known[violationKey(v)] {
+			fresh = append(fresh, v)
+		}
+	}
+	if len(fresh) == 0 {
+		return nil
+	}
+	return fmt.Errorf("foreign key violations: %s", describeViolations(fresh))
 }
 
 func (d *DB) Close() error {

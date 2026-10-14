@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/spf13/afero"
@@ -57,10 +60,14 @@ type legacySession struct {
 	Status          string
 	IsAttached      bool
 	LastUsedAt      time.Time
-	SessionRoot     string                   `gorm:"index"`
-	SessionActions  []legacySessionAction    `gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	SetupSteps      []legacySessionSetupStep `gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	TmuxSessionID   *uint                    `gorm:"uniqueIndex"`
+	SessionRoot     string                    `gorm:"index"`
+	SessionActions  []legacySessionAction     `gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	SetupSteps      []legacySessionSetupStep  `gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	ClaudeSessions  []claude.ClaudeSession    `gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Worktrees       []session.SessionWorktree `gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Blockers        []session.SessionBlocker  `gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Branches        []session.SessionBranch   `gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	TmuxSessionID   *uint                     `gorm:"uniqueIndex"`
 	StatusError     string
 	TmuxSession     *legacyTmuxSession `gorm:"foreignKey:TmuxSessionID"`
 }
@@ -145,11 +152,50 @@ func foreignKeysOf(t *testing.T, gormDB *gorm.DB, table string) []fkInfo {
 	return fks
 }
 
-func TestMigration_LegacyTmuxSchema(t *testing.T) {
-	ctx := context.Background()
+var legacyModels = []any{
+	&legacyTmuxSession{}, &legacySession{}, &legacySessionAction{}, &legacySessionSetupStep{},
+	&git.Repo{}, &git.Branch{}, &git.Worktree{},
+	&claude.ClaudeSession{}, &session.SessionWorktree{}, &session.SessionBlocker{}, &session.SessionBranch{},
+}
+
+var sessionChildTables = []string{"session_actions", "session_setup_steps", "claude_sessions", "session_worktrees", "session_blockers", "session_branches"}
+
+func openFileSQLite(t *testing.T) *gorm.DB {
+	t.Helper()
+	gormDB, err := db.OpenSQLite(filepath.Join(t.TempDir(), "utena.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if sqlDB, err := gormDB.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	return gormDB
+}
+
+func TestMigration_LegacyTmuxSchema_InMemory(t *testing.T) {
 	gormDB, err := db.OpenInMemorySQLite()
 	require.NoError(t, err)
-	require.NoError(t, gormDB.AutoMigrate(&legacyTmuxSession{}, &legacySession{}, &legacySessionAction{}, &legacySessionSetupStep{}))
+	runLegacyMigration(t, gormDB)
+}
+
+func TestMigration_LegacyTmuxSchema_File(t *testing.T) {
+	gormDB := openFileSQLite(t)
+	var mode string
+	require.NoError(t, gormDB.Raw("PRAGMA journal_mode").Scan(&mode).Error)
+	require.Equal(t, "wal", mode)
+	runLegacyMigration(t, gormDB)
+}
+
+func runLegacyMigration(t *testing.T, gormDB *gorm.DB) {
+	ctx := context.Background()
+	require.NoError(t, gormDB.AutoMigrate(legacyModels...))
+
+	repo := &git.Repo{Path: "/src/repo", FullName: "test/repo"}
+	require.NoError(t, gormDB.Create(repo).Error)
+	branch := &git.Branch{Name: "eqt/s1", RepoID: repo.ID}
+	require.NoError(t, gormDB.Create(branch).Error)
+	worktree := &git.Worktree{Path: "/sessions/s1/repo", BranchID: branch.ID, RepoID: repo.ID}
+	require.NoError(t, gormDB.Create(worktree).Error)
 
 	tmuxRow := &legacyTmuxSession{Name: "work", StartDir: "/src/work", Env: map[string]string{"UTENA_SESSION_ID": "1"}, Status: "active"}
 	require.NoError(t, gormDB.Create(tmuxRow).Error)
@@ -171,9 +217,18 @@ func TestMigration_LegacyTmuxSchema(t *testing.T) {
 			{Position: 0, Kind: "apply_claude", Label: "Apply Claude settings", Status: "done"},
 			{Position: 1, Kind: "setup_tmux", Label: "Setup tmux", Status: "done"},
 		},
-		TmuxSessionID: &tmuxRow.ID,
+		ClaudeSessions: []claude.ClaudeSession{{ClaudeSessionID: "claude-1", Status: claude.StatusIdle, CWD: "/sessions/s1"}},
+		Worktrees:      []session.SessionWorktree{{WorktreeID: worktree.ID, Position: 0}},
+		Blockers:       []session.SessionBlocker{{Kind: session.BlockerKindReview, Note: "waiting"}},
+		Branches:       []session.SessionBranch{{BranchID: branch.ID, FirstSeenAt: lastUsed}},
+		TmuxSessionID:  &tmuxRow.ID,
 	}
 	require.NoError(t, gormDB.Create(sessRow).Error)
+	require.NoError(t, gormDB.Create(&legacySession{TmuxSessionName: "s2", Name: "s2"}).Error)
+	deleted := &legacySession{TmuxSessionName: "s3", Name: "s3"}
+	require.NoError(t, gormDB.Create(deleted).Error)
+	require.Equal(t, uint(3), deleted.ID)
+	require.NoError(t, gormDB.Unscoped().Delete(deleted).Error)
 
 	before := sqliteNames(t, gormDB)
 	for _, name := range []string{"tmux_sessions", "idx_tmux_sessions_name", "idx_tmux_sessions_deleted_at", "idx_tmux_sessions_status", "idx_sessions_tmux_session_id", "idx_sessions_tmux_session_name"} {
@@ -203,6 +258,14 @@ func TestMigration_LegacyTmuxSchema(t *testing.T) {
 	assert.True(t, lastUsed.Equal(sess.LastUsedAt))
 	assert.Equal(t, "/sessions/s1", sess.SessionRoot)
 	assert.Equal(t, "previous failure", sess.StatusError)
+	require.Len(t, sess.ClaudeSessions, 1)
+	assert.Equal(t, "claude-1", sess.ClaudeSessions[0].ClaudeSessionID)
+	require.Len(t, sess.Worktrees, 1)
+	assert.Equal(t, worktree.ID, sess.Worktrees[0].WorktreeID)
+	require.Len(t, sess.Blockers, 1)
+	assert.Equal(t, "waiting", sess.Blockers[0].Note)
+	require.Len(t, sess.Branches, 1)
+	assert.Equal(t, branch.ID, sess.Branches[0].BranchID)
 	require.Len(t, sess.SessionActions, 1)
 	assert.Equal(t, `{"prompt":"hi"}`, sess.SessionActions[0].Options)
 	require.Len(t, sess.SetupSteps, 2)
@@ -220,8 +283,9 @@ func TestMigration_LegacyTmuxSchema(t *testing.T) {
 	assertNoTmuxSchema(t, gormDB)
 
 	assert.Equal(t, []fkInfo{{From: "mux_session_id", Table: "mux_sessions", To: "id"}}, foreignKeysOf(t, gormDB, "sessions"))
-	assert.Equal(t, []fkInfo{{From: "session_id", Table: "sessions", To: "id"}}, foreignKeysOf(t, gormDB, "session_actions"))
-	assert.Equal(t, []fkInfo{{From: "session_id", Table: "sessions", To: "id"}}, foreignKeysOf(t, gormDB, "session_setup_steps"))
+	for _, child := range sessionChildTables {
+		assert.Contains(t, foreignKeysOf(t, gormDB, child), fkInfo{From: "session_id", Table: "sessions", To: "id"}, child)
+	}
 	assert.Contains(t, tableSQL(t, gormDB, "sessions"), "fk_sessions_mux_session")
 
 	var fkViolations []map[string]any
@@ -244,16 +308,29 @@ func TestMigration_LegacyTmuxSchema(t *testing.T) {
 
 	schema := schemaSnapshot(t, gormDB)
 	counts := map[string]int64{}
-	for _, table := range []string{"sessions", "mux_sessions", "session_actions", "session_setup_steps"} {
+	for _, table := range append([]string{"sessions", "mux_sessions"}, sessionChildTables...) {
 		counts[table] = rowCount(t, gormDB, table)
 	}
-	assert.Equal(t, map[string]int64{"sessions": 1, "mux_sessions": 1, "session_actions": 1, "session_setup_steps": 2}, counts)
+	assert.Equal(t, map[string]int64{
+		"sessions":            2,
+		"mux_sessions":        1,
+		"session_actions":     1,
+		"session_setup_steps": 2,
+		"claude_sessions":     1,
+		"session_worktrees":   1,
+		"session_blockers":    1,
+		"session_branches":    1,
+	}, counts)
 
 	require.NoError(t, app.DB.OnAppStart(ctx))
 	assert.Equal(t, schema, schemaSnapshot(t, gormDB))
 	for table, n := range counts {
 		assert.Equal(t, n, rowCount(t, gormDB, table), table)
 	}
+
+	fresh := &session.Session{Name: "s4", Status: session.StatusActive}
+	require.NoError(t, app.Session.Store.Add(fresh))
+	assert.Equal(t, uint(4), fresh.ID)
 }
 
 func TestMigration_FreshDB(t *testing.T) {
@@ -278,7 +355,7 @@ func TestMigration_HealsPartiallyRenamedSchema(t *testing.T) {
 	ctx := context.Background()
 	gormDB, err := db.OpenInMemorySQLite()
 	require.NoError(t, err)
-	require.NoError(t, gormDB.AutoMigrate(&legacyTmuxSession{}, &legacySession{}, &legacySessionAction{}, &legacySessionSetupStep{}))
+	require.NoError(t, gormDB.AutoMigrate(legacyModels...))
 	tmuxRow := &legacyTmuxSession{Name: "work", Status: "active"}
 	require.NoError(t, gormDB.Create(tmuxRow).Error)
 	require.NoError(t, gormDB.Create(&legacySession{Name: "s1", TmuxSessionID: &tmuxRow.ID}).Error)
@@ -308,4 +385,25 @@ func TestMigration_RefusesWhenBothTablesExist(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mux:")
 	assert.Contains(t, sqliteNames(t, gormDB), "tmux_sessions")
+}
+
+func TestMigration_RefusesWhenBothSessionColumnsExist(t *testing.T) {
+	gormDB, err := db.OpenInMemorySQLite()
+	require.NoError(t, err)
+	require.NoError(t, gormDB.AutoMigrate(legacyModels...))
+	tmuxRow := &legacyTmuxSession{Name: "work", Status: "active"}
+	require.NoError(t, gormDB.Create(tmuxRow).Error)
+	require.NoError(t, gormDB.Create(&legacySession{Name: "s1", TmuxSessionID: &tmuxRow.ID}).Error)
+	require.NoError(t, gormDB.Exec("ALTER TABLE `sessions` ADD COLUMN `mux_session_id` integer").Error)
+
+	cfg := Config{ConfigDir: "/config", SessionsRoot: t.TempDir()}
+	app := newApp(gormDB, afero.NewMemMapFs(), cfg)
+	err = app.DB.OnAppStart(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "session:")
+	assert.Contains(t, err.Error(), "both tmux_session_id and mux_session_id")
+	names := sqliteNames(t, gormDB)
+	assert.Contains(t, names, "tmux_sessions")
+	assert.NotContains(t, names, "mux_sessions")
+	assert.Contains(t, tableSQL(t, gormDB, "sessions"), "fk_sessions_tmux_session")
 }

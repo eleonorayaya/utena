@@ -84,7 +84,7 @@ func buildSetupSteps(workspaces []stepWorkspace, configs map[uint]*WorkspaceConf
 
 	defs = append(defs, stepDef{
 		Kind:         StepKindSetupMux,
-		Label:        "Setup terminal session",
+		Label:        setupMuxLabel,
 		DependsOnPos: intPtr(applyClaudePos),
 	})
 

@@ -25,6 +25,8 @@ const (
 	StepKindSetupMux         SetupStepKind = "setup_mux"
 )
 
+const setupMuxLabel = "Setup terminal session"
+
 type SessionSetupStep struct {
 	gorm.Model
 	SessionID   uint            `json:"session_id" gorm:"index;not null"`

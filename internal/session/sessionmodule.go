@@ -100,7 +100,7 @@ func renameSetupTmuxSteps(tx *gorm.DB) error {
 	if err := tx.Exec("UPDATE session_setup_steps SET kind = ? WHERE kind = ?", string(StepKindSetupMux), "setup_tmux").Error; err != nil {
 		return err
 	}
-	return tx.Exec("UPDATE session_setup_steps SET label = ? WHERE label = ?", "Setup terminal session", "Setup tmux").Error
+	return tx.Exec("UPDATE session_setup_steps SET label = ? WHERE kind = ? AND label = ?", setupMuxLabel, string(StepKindSetupMux), "Setup tmux").Error
 }
 
 func renameTmuxSessionColumn(tx *gorm.DB) error {

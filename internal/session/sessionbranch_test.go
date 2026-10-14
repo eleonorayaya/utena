@@ -159,6 +159,8 @@ func TestSessionBranch_MigratesTableCreatedWithoutWorktreeID(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, database.Exec("CREATE TABLE `session_branches` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`updated_at` datetime,`deleted_at` datetime,`session_id` integer NOT NULL,`branch_id` integer NOT NULL,`first_seen_at` datetime)").Error)
 	require.NoError(t, database.Exec("INSERT INTO `session_branches` (`session_id`,`branch_id`) VALUES (1, 1)").Error)
+	require.NoError(t, database.Migrate(&git.Branch{}))
+	require.NoError(t, database.Create(&git.Branch{Name: "main", RepoID: 1}).Error)
 
 	require.NoError(t, database.Migrate(&SessionBranch{}))
 }
