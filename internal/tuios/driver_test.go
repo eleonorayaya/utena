@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/stretchr/testify/assert"
@@ -216,8 +217,11 @@ func TestDriver_SubscribeTranslatesEvents(t *testing.T) {
 	}
 	d.mu.Unlock()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	var got []mux.Event
-	err := r.Subscribe(context.Background(), func(ev mux.Event) { got = append(got, ev) })
+	err := r.Subscribe(ctx, func(ev mux.Event) { got = append(got, ev) })
 	require.Error(t, err)
 
 	assert.Equal(t, []mux.Event{
@@ -263,8 +267,11 @@ func TestDriver_ResyncTagsUntaggedAgentPanes(t *testing.T) {
 		"set-agent-meta": `{"id":1,"result":{"type":"agent_meta_set"}}`,
 	})
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	var got []mux.Event
-	_ = r.Subscribe(context.Background(), func(ev mux.Event) { got = append(got, ev) })
+	_ = r.Subscribe(ctx, func(ev mux.Event) { got = append(got, ev) })
 
 	assert.Equal(t, []mux.Event{{Type: mux.EventResync}}, got)
 	writes := d.requestsFor("set-agent-meta")

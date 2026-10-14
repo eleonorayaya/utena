@@ -71,7 +71,7 @@ func SwitchWorkspace(session string, step int) error {
 	if session == "" {
 		return errors.New("no tuios session: run from inside tuios")
 	}
-	d := &Driver{socketPath: socketPath()}
+	d := NewDriver()
 	workspaces, err := listWorkspaces(d, session)
 	if err != nil {
 		return err
@@ -84,7 +84,7 @@ func NewWorkspaceWindow(session, cwd string) error {
 	if session == "" {
 		return errors.New("no tuios session: run from inside tuios")
 	}
-	d := &Driver{socketPath: socketPath()}
+	d := NewDriver()
 	workspaces, err := listWorkspaces(d, session)
 	if err != nil {
 		return err

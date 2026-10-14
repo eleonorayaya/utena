@@ -257,3 +257,73 @@ func TestService_WaitForActivationTimesOut(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Empty(t, svc.activationWaiters)
 }
+
+func startFollowing(t *testing.T) (*Service, *FakeDriver, eventbus.EventBus) {
+	t.Helper()
+	database := testdb.New(t, &Session{})
+	bus := eventbus.NewEventBus()
+	driver := NewFakeDriver()
+	svc := NewService(driver, NewStore(database), bus)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go svc.followEvents(ctx)
+	return svc, driver, bus
+}
+
+func emit(t *testing.T, driver *FakeDriver, ev Event) {
+	t.Helper()
+	require.Eventually(t, func() bool { return driver.Emit(ev) }, time.Second, time.Millisecond)
+}
+
+func TestService_ResyncReconcilesStatusAndRefreshesWindows(t *testing.T) {
+	svc, driver, _ := startFollowing(t)
+
+	gone := &Session{Name: "gone", Status: StatusActive}
+	back := &Session{Name: "back", Status: StatusInactive}
+	require.NoError(t, svc.store.Add(gone))
+	require.NoError(t, svc.store.Add(back))
+	require.NoError(t, driver.NewSession("back", "/tmp", nil))
+	driver.SetWindows("back", []Window{{Index: 0, Name: "zsh", Active: true}})
+
+	emit(t, driver, Event{Type: EventResync})
+
+	got, err := svc.GetSessionByName("gone")
+	require.NoError(t, err)
+	assert.Equal(t, StatusInactive, got.Status)
+	got, err = svc.GetSessionByName("back")
+	require.NoError(t, err)
+	assert.Equal(t, StatusActive, got.Status)
+	assert.Equal(t, []Window{{Index: 0, Name: "zsh", Active: true}}, got.Windows)
+}
+
+func TestService_SessionCreatedActivatesPublishesAndRefreshesWindows(t *testing.T) {
+	svc, driver, bus := startFollowing(t)
+
+	var published []string
+	bus.Subscribe(eventbus.TmuxSessionCreated, func(ctx context.Context, e eventbus.Event) error {
+		published = append(published, e.Data.(eventbus.TmuxHookEvent).TmuxSessionName)
+		return nil
+	})
+	require.NoError(t, svc.store.Add(&Session{Name: "work", Status: StatusPending}))
+	driver.SetWindows("work", []Window{{Index: 0, Name: "claude"}})
+
+	emit(t, driver, Event{Type: EventSessionCreated, Session: "work"})
+
+	got, err := svc.GetSessionByName("work")
+	require.NoError(t, err)
+	assert.Equal(t, StatusActive, got.Status)
+	assert.Equal(t, []string{"work"}, published)
+	assert.Equal(t, []Window{{Index: 0, Name: "claude"}}, svc.GetWindows(context.Background(), "work"))
+}
+
+func TestService_WindowsChangedRefreshesWindows(t *testing.T) {
+	svc, driver, _ := startFollowing(t)
+
+	driver.SetWindows("work", []Window{{Index: 0, Name: "zsh"}})
+	emit(t, driver, Event{Type: EventWindowsChanged, Session: "work"})
+	assert.Equal(t, []Window{{Index: 0, Name: "zsh"}}, svc.GetWindows(context.Background(), "work"))
+
+	driver.SetWindows("work", []Window{{Index: 0, Name: "zsh"}, {Index: 1, Name: "claude", Active: true}})
+	emit(t, driver, Event{Type: EventWindowsChanged, Session: "work"})
+	assert.Equal(t, []Window{{Index: 0, Name: "zsh"}, {Index: 1, Name: "claude", Active: true}}, svc.GetWindows(context.Background(), "work"))
+}

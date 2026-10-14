@@ -21,12 +21,14 @@ type FakeDriver struct {
 	KillErr        error
 	OnNewSession   func()
 	OnKillSession  func()
+	Windows        map[string][]Window
+	onEvent        func(Event)
 }
 
 var _ Driver = (*FakeDriver)(nil)
 
 func NewFakeDriver() *FakeDriver {
-	return &FakeDriver{Sessions: make(map[string]bool)}
+	return &FakeDriver{Sessions: make(map[string]bool), Windows: make(map[string][]Window)}
 }
 
 func (m *FakeDriver) NewWindow(sessionName, startDir, command string, env map[string]string) error {
@@ -87,12 +89,37 @@ func (m *FakeDriver) ListSessions() ([]string, error) {
 }
 
 func (m *FakeDriver) ListWindows(sessionName string) ([]Window, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.Windows[sessionName], nil
 }
 
 func (m *FakeDriver) Subscribe(ctx context.Context, onEvent func(Event)) error {
+	m.mu.Lock()
+	m.onEvent = onEvent
+	m.mu.Unlock()
 	<-ctx.Done()
+	m.mu.Lock()
+	m.onEvent = nil
+	m.mu.Unlock()
 	return ctx.Err()
+}
+
+func (m *FakeDriver) Emit(ev Event) bool {
+	m.mu.Lock()
+	onEvent := m.onEvent
+	m.mu.Unlock()
+	if onEvent == nil {
+		return false
+	}
+	onEvent(ev)
+	return true
+}
+
+func (m *FakeDriver) SetWindows(sessionName string, windows []Window) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Windows[sessionName] = windows
 }
 
 func (m *FakeDriver) SetCreateErr(err error) {

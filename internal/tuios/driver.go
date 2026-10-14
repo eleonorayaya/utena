@@ -319,7 +319,7 @@ func CloseWindow(session, window string) error {
 	if session == "" || window == "" {
 		return errors.New("close-window needs an explicit session and window")
 	}
-	d := &Driver{socketPath: socketPath()}
+	d := NewDriver()
 	err := d.call("close-window", map[string]any{"session": session, "window": window}, nil)
 	if isTuiosCode(err, "window_not_found") || isTuiosCode(err, "session_not_found") {
 		return nil
