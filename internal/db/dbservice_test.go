@@ -1,8 +1,10 @@
 package db_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -255,7 +257,12 @@ type part struct {
 	GadgetID uint
 }
 
-func TestDB_MigrateToleratesViolationsFoundByNewConstraints(t *testing.T) {
+func TestDB_MigrateLogsForeignKeyViolationsAfterAutoMigrate(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
 	database := openTestDB(t)
 	require.NoError(t, database.Exec("CREATE TABLE `parts` (`id` integer PRIMARY KEY AUTOINCREMENT, `gadget_id` integer)").Error)
 	require.NoError(t, database.Exec("INSERT INTO parts (id, gadget_id) VALUES (1, 99)").Error)
@@ -264,7 +271,6 @@ func TestDB_MigrateToleratesViolationsFoundByNewConstraints(t *testing.T) {
 	require.NoError(t, database.OnAppStart(context.Background()))
 
 	assert.True(t, database.Migrator().HasConstraint(&gadget{}, "Parts"))
-	var count int64
-	require.NoError(t, database.Raw("SELECT count(*) FROM pragma_foreign_key_check('parts')").Scan(&count).Error)
-	assert.Equal(t, int64(1), count)
+	assert.Contains(t, logs.String(), "foreign key violations after auto-migrate")
+	assert.Contains(t, logs.String(), "parts rowid 1 -> gadgets")
 }
