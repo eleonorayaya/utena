@@ -21,6 +21,7 @@ type Service struct {
 	nameLocks         sync.Map
 	activationsMu     sync.Mutex
 	activationWaiters []chan string
+	resources         *resourceSampler
 }
 
 func (t *Service) lockName(name string) func() {
@@ -36,6 +37,7 @@ func NewService(driver Driver, store *Store, bus eventbus.EventBus) *Service {
 		store:            store,
 		eventBus:         bus,
 		windowsBySession: make(map[string][]Window),
+		resources:        newResourceSampler(PSLister{}, driver),
 	}
 	bus.Subscribe(eventbus.SessionActivated, t.handleSessionActivated)
 	return t
@@ -374,4 +376,12 @@ func (t *Service) GetWindows(ctx context.Context, name string) []Window {
 	t.windowsMu.RLock()
 	defer t.windowsMu.RUnlock()
 	return t.windowsBySession[name]
+}
+
+func (t *Service) SetProcessLister(lister ProcessLister) {
+	t.resources = newResourceSampler(lister, t.driver)
+}
+
+func (t *Service) ResourceUsage(ctx context.Context) ([]Usage, error) {
+	return t.resources.sample(ctx)
 }

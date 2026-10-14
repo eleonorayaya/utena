@@ -262,3 +262,53 @@ func TestDriver_ResyncTagsUntaggedAgentPanes(t *testing.T) {
 	assert.Equal(t, "w2", writes[0].Params["window"])
 	assert.Equal(t, map[string]any{"session": "other"}, writes[0].Params["tokens"])
 }
+
+func TestDriver_PaneShellsResolvesTuiosChildrenOnceAndCaches(t *testing.T) {
+	r, d := startFakeTuios(t, map[string]string{
+		"resolve-pane": `{"id":1,"result":{"by":"pid","pid":11,"session":"work","type":"pane_resolved"}}`,
+	})
+	procs := []mux.Process{
+		{PID: 10, PPID: 1, Command: "/opt/homebrew/bin/tuios"},
+		{PID: 11, PPID: 10, Command: "/bin/zsh"},
+		{PID: 12, PPID: 11, Command: "claude"},
+		{PID: 13, PPID: 1, Command: "Safari"},
+	}
+
+	shells, err := r.PaneShells(procs)
+	require.NoError(t, err)
+	assert.Equal(t, map[int]string{11: "work"}, shells)
+	reqs := d.requestsFor("resolve-pane")
+	require.Len(t, reqs, 1)
+	assert.Equal(t, []any{float64(11)}, reqs[0].Params["pids"])
+
+	shells, err = r.PaneShells(procs)
+	require.NoError(t, err)
+	assert.Equal(t, map[int]string{11: "work"}, shells)
+	assert.Len(t, d.requestsFor("resolve-pane"), 1)
+}
+
+func TestDriver_PaneShellsTreatsUnknownPaneAsNotAShell(t *testing.T) {
+	r, d := startFakeTuios(t, map[string]string{
+		"resolve-pane": `{"id":1,"error":{"code":"window_not_found","message":"no pane"}}`,
+	})
+	procs := []mux.Process{
+		{PID: 10, PPID: 1, Command: "tuios"},
+		{PID: 20, PPID: 10, Command: "npm exec ccstatusline"},
+	}
+
+	shells, err := r.PaneShells(procs)
+	require.NoError(t, err)
+	assert.Empty(t, shells)
+
+	_, err = r.PaneShells(procs)
+	require.NoError(t, err)
+	assert.Len(t, d.requestsFor("resolve-pane"), 1)
+}
+
+func TestDriver_PaneShellsSurfacesOtherErrors(t *testing.T) {
+	r, _ := startFakeTuios(t, map[string]string{
+		"resolve-pane": `{"id":1,"error":{"code":"internal","message":"boom"}}`,
+	})
+	_, err := r.PaneShells([]mux.Process{{PID: 10, PPID: 1, Command: "tuios"}, {PID: 11, PPID: 10}})
+	assert.ErrorContains(t, err, "boom")
+}

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/mux"
@@ -62,12 +63,14 @@ func isTuiosCode(err error, code string) bool {
 
 type Driver struct {
 	socketPath string
+	shellsMu   sync.Mutex
+	shells     map[int]string
 }
 
 var _ mux.Driver = (*Driver)(nil)
 
 func NewDriver() *Driver {
-	return &Driver{socketPath: socketPath()}
+	return &Driver{socketPath: socketPath(), shells: make(map[int]string)}
 }
 
 func socketPath() string {
@@ -311,6 +314,49 @@ func (d *Driver) tagAgentPane(sessionName, windowID, state string) {
 	if err := d.setAgentMeta(sessionName, windowID, map[string]string{agentSessionMetaKey: sessionName}); err != nil {
 		slog.Debug("tuios set-agent-meta failed", "session", sessionName, "window", windowID, "error", err)
 	}
+}
+
+func (d *Driver) PaneShells(procs []mux.Process) (map[int]string, error) {
+	daemons := make(map[int]bool)
+	for _, p := range procs {
+		if filepath.Base(p.Command) == "tuios" {
+			daemons[p.PID] = true
+		}
+	}
+
+	d.shellsMu.Lock()
+	defer d.shellsMu.Unlock()
+	known := make(map[int]string)
+	out := make(map[int]string)
+	for _, p := range procs {
+		if !daemons[p.PPID] {
+			continue
+		}
+		name, ok := d.shells[p.PID]
+		if !ok {
+			var err error
+			if name, err = d.resolvePane(p.PID); err != nil {
+				return nil, err
+			}
+		}
+		known[p.PID] = name
+		if name != "" {
+			out[p.PID] = name
+		}
+	}
+	d.shells = known
+	return out, nil
+}
+
+func (d *Driver) resolvePane(pid int) (string, error) {
+	var res struct {
+		Session string `json:"session"`
+	}
+	err := d.call("resolve-pane", map[string]any{"pids": []int{pid}}, &res)
+	if isTuiosCode(err, "window_not_found") {
+		return "", nil
+	}
+	return res.Session, err
 }
 
 func CloseWindow(session, window string) error {

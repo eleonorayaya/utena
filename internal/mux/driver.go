@@ -10,6 +10,7 @@ type Driver interface {
 	ListSessions() ([]string, error)
 	ListWindows(session string) ([]Window, error)
 	Subscribe(ctx context.Context, onEvent func(Event)) error
+	PaneShells(procs []Process) (map[int]string, error)
 }
 
 type EventType string
