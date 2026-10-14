@@ -255,14 +255,16 @@ type part struct {
 	GadgetID uint
 }
 
-func TestDB_MigrateReportsForeignKeyViolationsAfterAutoMigrate(t *testing.T) {
+func TestDB_MigrateToleratesViolationsFoundByNewConstraints(t *testing.T) {
 	database := openTestDB(t)
 	require.NoError(t, database.Exec("CREATE TABLE `parts` (`id` integer PRIMARY KEY AUTOINCREMENT, `gadget_id` integer)").Error)
 	require.NoError(t, database.Exec("INSERT INTO parts (id, gadget_id) VALUES (1, 99)").Error)
 
 	database.RegisterModels(&gadget{}, &part{})
-	err := database.OnAppStart(context.Background())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "after auto-migrate")
-	assert.Contains(t, err.Error(), "parts rowid 1 -> gadgets")
+	require.NoError(t, database.OnAppStart(context.Background()))
+
+	assert.True(t, database.Migrator().HasConstraint(&gadget{}, "Parts"))
+	var count int64
+	require.NoError(t, database.Raw("SELECT count(*) FROM pragma_foreign_key_check('parts')").Scan(&count).Error)
+	assert.Equal(t, int64(1), count)
 }

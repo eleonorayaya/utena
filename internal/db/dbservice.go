@@ -81,6 +81,10 @@ func (d *DB) Migrate(models ...any) error {
 	if len(baseline) > 0 {
 		slog.Warn("database has pre-existing foreign key violations", "violations", describeViolations(baseline))
 	}
+	knownForeignKeys, err := foreignKeyDefs(d.DB)
+	if err != nil {
+		return err
+	}
 	if len(d.preMigrations) > 0 {
 		if err := d.Transaction(func(tx *gorm.DB) error {
 			if err := requireForeignKeysOff(tx); err != nil {
@@ -91,7 +95,7 @@ func (d *DB) Migrate(models ...any) error {
 					return fmt.Errorf("pre-migration %d: %w", i, err)
 				}
 			}
-			if err := checkNewForeignKeyViolations(tx, baseline); err != nil {
+			if err := checkNewForeignKeyViolations(tx, baseline, nil); err != nil {
 				return fmt.Errorf("after pre-migrations: %w", err)
 			}
 			return nil
@@ -106,7 +110,7 @@ func (d *DB) Migrate(models ...any) error {
 	if migrateErr != nil {
 		return migrateErr
 	}
-	if err := checkNewForeignKeyViolations(d.DB, baseline); err != nil {
+	if err := checkNewForeignKeyViolations(d.DB, baseline, knownForeignKeys); err != nil {
 		return fmt.Errorf("after auto-migrate: %w", err)
 	}
 	return nil
@@ -208,7 +212,33 @@ func describeViolations(violations []foreignKeyViolation) string {
 	return strings.Join(parts, "; ")
 }
 
-func checkNewForeignKeyViolations(tx *gorm.DB, baseline []foreignKeyViolation) error {
+type foreignKeyDef struct {
+	Table  string
+	From   string
+	Parent string
+}
+
+func foreignKeyDefs(tx *gorm.DB) (map[foreignKeyDef]bool, error) {
+	var defs []foreignKeyDef
+	if err := tx.Raw("SELECT m.name AS \"table\", f.\"from\" AS \"from\", f.\"table\" AS parent FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE m.type = 'table'").Scan(&defs).Error; err != nil {
+		return nil, fmt.Errorf("list foreign keys: %w", err)
+	}
+	known := make(map[foreignKeyDef]bool, len(defs))
+	for _, d := range defs {
+		known[d] = true
+	}
+	return known, nil
+}
+
+func violationDef(tx *gorm.DB, v foreignKeyViolation) (foreignKeyDef, error) {
+	var from string
+	if err := tx.Raw("SELECT \"from\" FROM pragma_foreign_key_list(?) WHERE id = ? LIMIT 1", v.Table, v.Fkid).Scan(&from).Error; err != nil {
+		return foreignKeyDef{}, fmt.Errorf("resolve foreign key %d on %s: %w", v.Fkid, v.Table, err)
+	}
+	return foreignKeyDef{Table: v.Table, From: from, Parent: v.Parent}, nil
+}
+
+func checkNewForeignKeyViolations(tx *gorm.DB, baseline []foreignKeyViolation, knownForeignKeys map[foreignKeyDef]bool) error {
 	violations, err := foreignKeyViolations(tx)
 	if err != nil {
 		return err
@@ -217,11 +247,25 @@ func checkNewForeignKeyViolations(tx *gorm.DB, baseline []foreignKeyViolation) e
 	for _, v := range baseline {
 		known[violationKey(v)] = true
 	}
-	var fresh []foreignKeyViolation
+	var fresh, underNewKeys []foreignKeyViolation
 	for _, v := range violations {
-		if !known[violationKey(v)] {
-			fresh = append(fresh, v)
+		if known[violationKey(v)] {
+			continue
 		}
+		if knownForeignKeys != nil {
+			def, err := violationDef(tx, v)
+			if err != nil {
+				return err
+			}
+			if !knownForeignKeys[def] {
+				underNewKeys = append(underNewKeys, v)
+				continue
+			}
+		}
+		fresh = append(fresh, v)
+	}
+	if len(underNewKeys) > 0 {
+		slog.Warn("new foreign key constraints found existing violations", "violations", describeViolations(underNewKeys))
 	}
 	if len(fresh) == 0 {
 		return nil
