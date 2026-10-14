@@ -23,6 +23,8 @@ Daemon:
 - The `Todo` field, the `todo.NewTodoModule(...)` construction, and the `{"todo", "/todos", a.Todo}` mount in `internal/api/app.go`
 - `Session.TodoID` (`internal/session/session.go`), `TodoID` in the create input (`types.go`, `sessionservice.go`) and in the controller mapping (`sessioncontroller.go`)
 
+Docs: the todo mentions in `CLAUDE.md` (the `/todos` mount, `internal/todo/`, "todos" under Persistence) and in the README.
+
 Database: the existing `todos` table and `sessions.todo_id` column are **left in place**, unused. GORM `AutoMigrate` does not drop them, and dropping them gains nothing.
 
 ### Status view
@@ -49,7 +51,7 @@ Any visual change; the redesign of workspaces, forms, pickers or session progres
 
 ## External follow-up (outside this repo)
 
-The README says the tuios `prefix+t` popup is configured in dotfiles (`programs/tuios/contents/config.toml`). If it runs `utena todos` or `utena new-task`, that binding must be removed or repointed when this ships. `utena status` may also be referenced there.
+In dotfiles, `programs/tuios/contents/config.toml` binds tuios `prefix+t` to `utena new-task`. That binding is removed in dotfiles, not repointed. Nothing in dotfiles references `utena todos` or `utena status`. The `prefix+p` sessions popup and the `utena status-line` dock cell are unaffected. Any README mention of `prefix+t` is removed with the todos.
 
 ## Testing
 
