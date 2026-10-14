@@ -30,6 +30,10 @@ func FilterActive(l list.Model) bool {
 	return l.FilterState() != list.Unfiltered
 }
 
+func FilterTyping(l list.Model) bool {
+	return l.FilterState() == list.Filtering
+}
+
 func ListView(l list.Model) string {
 	switch l.FilterState() {
 	case list.Filtering:

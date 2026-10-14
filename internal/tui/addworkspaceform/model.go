@@ -2,14 +2,13 @@ package addworkspaceform
 
 import (
 	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/tui/branchfield"
 	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
-	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 )
@@ -35,7 +34,8 @@ type Model struct {
 	workspacePicker workspacepicker.Model
 	branchPicker    branchpicker.Model
 	sessionID       uint
-	row             *branchfield.Row
+	row             branchfield.Row
+	hasRow          bool
 	mode            ui.Choice
 	status          ui.Status
 	submitting      bool
@@ -61,7 +61,7 @@ func Start(sessionID uint) tea.Cmd {
 
 func (m Model) reset() Model {
 	m.form = m.form.Focus(fieldMode)
-	m.row = nil
+	m.row, m.hasRow = branchfield.Row{}, false
 	m.mode = branchfield.NewModeChoice()
 	m.status = ui.Status{}
 	m.submitting = false
@@ -80,15 +80,6 @@ func (m *Model) SetSize(width, height int) {
 	m.width, m.height = width, height
 	m.workspacePicker.SetSize(width, height)
 	m.branchPicker.SetSize(width, height)
-}
-
-func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
-	m.SetSize(msg.Width, msg.Height)
-	return m, nil
-}
-
-func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
-	return m, nil, false
 }
 
 func (m Model) Keys() help.KeyMap {
@@ -121,13 +112,14 @@ func (m Model) CapturesText() bool {
 	case overlayBranch:
 		return m.branchPicker.CapturesText()
 	}
-	return m.row != nil && m.row.Editing
+	return m.hasRow && m.row.Editing
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		return m.OnWindowSizeMsg(msg)
+		m.SetSize(msg.Width, msg.Height)
+		return m, nil
 	case StartMsg:
 		m = m.reset()
 		m.sessionID = msg.SessionID
@@ -137,26 +129,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
 		return m, cmd
 	case provider.BranchesLoadedMsg:
-		if m.row != nil && m.row.Workspace.ID == msg.WorkspaceID {
-			r := m.row.Loaded(msg)
-			m.row = &r
+		if m.hasRow && m.row.Workspace.ID == msg.WorkspaceID {
+			m.row = m.row.Loaded(msg)
 		}
 		var cmd tea.Cmd
 		m.branchPicker, cmd = m.branchPicker.Update(msg)
 		return m, cmd
 	case provider.BranchesFetchedMsg:
-		if m.row != nil && m.row.Workspace.ID == msg.WorkspaceID {
-			r := m.row.Fetched(msg)
-			m.row = &r
-		}
+		m.row = m.row.Fetched(msg)
 		var cmd tea.Cmd
 		m.branchPicker, cmd = m.branchPicker.Update(msg)
 		return m, cmd
 	case provider.BranchExistsCheckedMsg:
-		if m.row != nil {
-			r := m.row.Checked(msg)
-			m.row = &r
-		}
+		m.row = m.row.Checked(msg)
 		return m, nil
 	case provider.ErrMsg:
 		m.submitting = false
@@ -190,18 +175,15 @@ func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 		m.overlay = overlayNone
 		m.status = ui.Status{}
 		m.form = m.form.Focus(fieldMode)
-		if m.row != nil && m.row.Workspace.ID == ws.ID {
+		if m.hasRow && m.row.Workspace.ID == ws.ID {
 			return m, nil
 		}
-		r := branchfield.NewRow(ws)
-		m.row = &r
+		m.row, m.hasRow = branchfield.NewRow(ws), true
 		return m, provider.RequestBranches(ws.ID)
-	case tea.KeyMsg:
-		if msg.Type == tea.KeyEsc && !m.workspacePicker.Filtering() {
-			m.overlay = overlayNone
-			m.status = ui.Status{}
-			return m, nil
-		}
+	case workspacepicker.ClosedMsg:
+		m.overlay = overlayNone
+		m.status = ui.Status{}
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.workspacePicker, cmd = m.workspacePicker.Update(msg)
@@ -211,8 +193,7 @@ func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case branchpicker.SelectedMsg:
-		r := m.row.Pick(msg.Branch)
-		m.row = &r
+		m.row = m.row.Pick(msg.Branch)
 		m.overlay = overlayNone
 		m.form = m.form.Focus(fieldBranch)
 		return m, nil
@@ -221,14 +202,12 @@ func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 	case branchpicker.ManualEntryRequestedMsg:
 		m.overlay = overlayNone
 		m.form = m.form.Focus(fieldBranch)
-		r, cmd := m.row.StartManual()
-		m.row = &r
+		var cmd tea.Cmd
+		m.row, cmd = m.row.StartManual()
 		return m, cmd
-	case tea.KeyMsg:
-		if msg.Type == tea.KeyEsc && !m.branchPicker.Filtering() {
-			m.overlay = overlayNone
-			return m, nil
-		}
+	case branchpicker.ClosedMsg:
+		m.overlay = overlayNone
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.branchPicker, cmd = m.branchPicker.Update(msg)
@@ -237,7 +216,7 @@ func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) openWorkspacePicker() Model {
 	var ids []uint
-	if m.row != nil {
+	if m.hasRow {
 		ids = []uint{m.row.Workspace.ID}
 	}
 	m.workspacePicker = m.workspacePicker.Open(ids)
@@ -246,35 +225,32 @@ func (m Model) openWorkspacePicker() Model {
 }
 
 func (m Model) onPageKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	if m.row != nil && m.row.Editing {
-		r, cmd := m.row.UpdateManual(msg)
-		m.row = &r
+	if m.hasRow && m.row.Editing {
+		var cmd tea.Cmd
+		m.row, cmd = m.row.UpdateManual(msg)
 		return m, cmd
 	}
 	field := m.form.Focused()
-	switch msg.String() {
-	case "esc":
+	switch {
+	case key.Matches(msg, formKeys.Cancel):
 		return m, router.Back()
-	case "tab", "down":
+	case key.Matches(msg, formKeys.Next):
 		m.form = m.form.Next()
 		return m, nil
-	case "shift+tab", "up":
+	case key.Matches(msg, formKeys.Prev):
 		m.form = m.form.Prev()
 		return m, nil
-	case "enter":
-		switch field {
-		case fieldWorkspace:
-			return m.openWorkspacePicker(), nil
-		case fieldBranch:
-			if m.row == nil {
-				return m.openWorkspacePicker(), nil
-			}
+	case key.Matches(msg, formKeys.Edit):
+		switch {
+		case field == fieldMode:
+			return m.submit()
+		case field == fieldBranch && m.hasRow:
 			r := m.row
 			m.branchPicker = m.branchPicker.Open("Branch for "+r.Workspace.Name, r.Workspace.ID, r.Local, r.Remote, r.DefaultBranch, r.Branch)
 			m.overlay = overlayBranch
 			return m, nil
-		case fieldMode:
-			return m.submit()
+		default:
+			return m.openWorkspacePicker(), nil
 		}
 	}
 	if field == fieldMode {
@@ -287,7 +263,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	if m.submitting {
 		return m, nil
 	}
-	if m.row == nil {
+	if !m.hasRow {
 		m.status = ui.Status{Text: "pick a workspace first", Kind: ui.StatusError}
 		m.form = m.form.Focus(fieldWorkspace)
 		return m, nil
@@ -296,15 +272,9 @@ func (m Model) submit() (Model, tea.Cmd) {
 		m.status = ui.Status{Text: "waiting for branch info", Kind: ui.StatusWarning}
 		return m, nil
 	}
-	spec := provider.SessionWorkspaceSpec{WorkspaceID: m.row.Workspace.ID}
-	if branchfield.IsNewBranch(m.mode) {
-		spec.BaseBranch = m.row.Branch
-	} else {
-		spec.Branch = m.row.Branch
-	}
 	m.status = ui.Status{}
 	m.submitting = true
-	return m, provider.AddWorkspaceToSession(m.sessionID, spec)
+	return m, provider.AddWorkspaceToSession(m.sessionID, m.row.Spec(branchfield.IsNewBranch(m.mode)))
 }
 
 func (m Model) View() string {
@@ -314,18 +284,16 @@ func (m Model) View() string {
 	case overlayBranch:
 		return ui.FitHeight(m.branchPicker.View(), m.height)
 	}
-	muted := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
-	focused := m.form.Focused()
-	wsValue := muted.Render("none — press enter to pick")
-	branchValue := muted.Render("—")
-	if m.row != nil {
+	wsValue := ui.Muted().Render("none — press enter to pick")
+	branchValue := ui.Muted().Render("—")
+	if m.hasRow {
 		wsValue = m.row.Workspace.Name
 		branchValue = m.row.BranchView()
 	}
 	fields := []ui.Field{
 		{Label: "Workspace", Value: wsValue},
 		{Label: "Branch", Value: branchValue},
-		{Label: "Mode", Value: m.mode.View(focused == fieldMode)},
+		{Label: "Mode", Value: m.mode.View(m.form.Focused() == fieldMode)},
 	}
 	return ui.FitHeight(m.form.View(fields, m.width), m.height)
 }

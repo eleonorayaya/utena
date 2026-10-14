@@ -164,15 +164,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
-	m.SetSize(msg.Width, msg.Height)
-	return m, nil
-}
-
-func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
-	return m, nil, false
-}
-
 func (m Model) title() string {
 	name := fmt.Sprintf("session %d", m.sessionID)
 	if m.session != nil && m.session.Name != "" {

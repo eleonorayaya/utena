@@ -30,6 +30,17 @@ type BranchesFetchedMsg struct {
 	Err           error
 }
 
+func SplitBranches(refs []BranchRef) (local, remote []string) {
+	for _, b := range refs {
+		if b.Remote {
+			remote = append(remote, b.Name)
+		} else {
+			local = append(local, b.Name)
+		}
+	}
+	return local, remote
+}
+
 type BranchExistsCheckedMsg struct {
 	WorkspaceID  uint
 	Name         string

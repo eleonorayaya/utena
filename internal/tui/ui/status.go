@@ -13,6 +13,21 @@ func fg(c lipgloss.Color) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(c)
 }
 
+func FG(c lipgloss.Color) lipgloss.Style {
+	return fg(c)
+}
+
+func Muted() lipgloss.Style {
+	return fg(theme.Current.TextMuted)
+}
+
+func NameStyle(selected bool) lipgloss.Style {
+	if selected {
+		return fg(theme.Current.TextEmphasis).Bold(true)
+	}
+	return fg(theme.Current.Text)
+}
+
 func ClaudeGlyph(st claude.ClaudeSessionStatus) Span {
 	switch st {
 	case claude.StatusNeedsAttention:

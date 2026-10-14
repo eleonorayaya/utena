@@ -39,7 +39,7 @@ func StepList(steps []Step, spinner string, width int) string {
 		}
 		lines = append(lines, clampWidth("  "+glyph+" "+labelStyle.Render(Truncate(s.Label, max(width-4, 1))), width))
 		if s.State == StepFailed && s.Error != "" {
-			text := strings.NewReplacer("\r\n", " ", "\n", " ").Replace(s.Error)
+			text := SingleLine(s.Error)
 			lines = append(lines, clampWidth("    "+fg(theme.Current.Error).Render(Truncate(text, max(width-4, 1))), width))
 		}
 	}

@@ -81,18 +81,21 @@ func (r Row) Fetched(msg provider.BranchesFetchedMsg) Row {
 	if msg.WorkspaceID != r.Workspace.ID || msg.Err != nil {
 		return r
 	}
-	r.Local, r.Remote = nil, nil
-	for _, b := range msg.Branches {
-		if b.Remote {
-			r.Remote = append(r.Remote, b.Name)
-		} else {
-			r.Local = append(r.Local, b.Name)
-		}
-	}
+	r.Local, r.Remote = provider.SplitBranches(msg.Branches)
 	if msg.DefaultBranch != "" {
 		r.DefaultBranch = msg.DefaultBranch
 	}
 	return r
+}
+
+func (r Row) Spec(isNew bool) provider.SessionWorkspaceSpec {
+	spec := provider.SessionWorkspaceSpec{WorkspaceID: r.Workspace.ID}
+	if isNew {
+		spec.BaseBranch = r.Branch
+	} else {
+		spec.Branch = r.Branch
+	}
+	return spec
 }
 
 func (r Row) Pick(branch string) Row {
@@ -107,11 +110,7 @@ func (r Row) IsDefault() bool {
 }
 
 func (r Row) StartManual() (Row, tea.Cmd) {
-	ti := textinput.New()
-	ti.Prompt = ""
-	ti.Placeholder = "branch name"
-	ti.Width = 40
-	r.input = ti
+	r.input = ui.NewInput("branch name")
 	r.Editing = true
 	r.Err = ""
 	return r, r.input.Focus()
@@ -156,29 +155,25 @@ func (r Row) Checked(msg provider.BranchExistsCheckedMsg) Row {
 	return r
 }
 
-func fg(c lipgloss.Color) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(c)
-}
-
 func (r Row) branchText() string {
 	switch {
 	case r.Editing && r.Checking != "":
-		return r.input.View() + fg(theme.Current.TextMuted).Render("  checking…")
+		return r.input.View() + ui.FG(theme.Current.TextMuted).Render("  checking…")
 	case r.Editing:
 		return r.input.View()
 	case r.Loading:
-		return fg(theme.Current.TextMuted).Render("…")
+		return ui.FG(theme.Current.TextMuted).Render("…")
 	case r.IsDefault():
-		return fg(theme.Current.TextMuted).Render(r.Branch)
+		return ui.FG(theme.Current.TextMuted).Render(r.Branch)
 	default:
-		return fg(theme.Current.TextEmphasis).Render(r.Branch)
+		return ui.FG(theme.Current.TextEmphasis).Render(r.Branch)
 	}
 }
 
 func (r Row) View(nameW int, active bool) string {
-	nameStyle := fg(theme.Current.Text)
+	nameStyle := ui.FG(theme.Current.Text)
 	if active {
-		nameStyle = fg(theme.Current.Primary).Bold(true)
+		nameStyle = ui.FG(theme.Current.Primary).Bold(true)
 	}
 	name := ui.Truncate(r.Workspace.Name, nameW)
 	return nameStyle.Render(name) + strings.Repeat(" ", max(nameW-lipgloss.Width(name), 0)+2) + r.BranchView()
@@ -187,7 +182,7 @@ func (r Row) View(nameW int, active bool) string {
 func (r Row) BranchView() string {
 	v := r.branchText()
 	if r.Err != "" {
-		v += "\n" + fg(theme.Current.Error).Render("✕ "+r.Err)
+		v += "\n" + ui.FG(theme.Current.Error).Render("✕ "+r.Err)
 	}
 	return v
 }

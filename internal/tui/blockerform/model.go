@@ -20,6 +20,8 @@ const (
 	fieldCount
 )
 
+var labels = [fieldCount]string{"Kind", "Note", "URL"}
+
 type Model struct {
 	sessionID  uint
 	form       ui.Form
@@ -49,17 +51,12 @@ func kindOptions() []string {
 }
 
 func New() Model {
-	note := textinput.New()
-	note.Prompt = ""
-	note.Placeholder = "what are you waiting on?"
-	note.Width = 40
-
-	url := textinput.New()
-	url.Prompt = ""
-	url.Placeholder = "PR or Slack link"
-	url.Width = 40
-
-	return Model{form: ui.NewForm("Add blocker", fieldCount), kindChoice: ui.Choice{Options: kindOptions()}, note: note, url: url}
+	return Model{
+		form:       ui.NewForm("Add blocker", fieldCount),
+		kindChoice: ui.Choice{Options: kindOptions()},
+		note:       ui.NewInput("what are you waiting on?"),
+		url:        ui.NewInput("PR or Slack link"),
+	}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
@@ -110,7 +107,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.note.Width = ui.InputWidth(msg.Width, len("Note")+2)
+		m.note.Width = ui.InputWidth(msg.Width, labels[:]...)
 		m.url.Width = m.note.Width
 		return m, nil
 	case StartMsg:
@@ -162,9 +159,9 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) View() string {
 	fields := []ui.Field{
-		{Label: "Kind", Value: m.kindChoice.View(m.form.Focused() == kindField)},
-		{Label: "Note", Value: m.note.View()},
-		{Label: "URL", Value: m.url.View()},
+		{Label: labels[kindField], Value: m.kindChoice.View(m.form.Focused() == kindField)},
+		{Label: labels[noteField], Value: m.note.View()},
+		{Label: labels[urlField], Value: m.url.View()},
 	}
 	return ui.FitHeight(m.form.View(fields, m.width), m.height)
 }

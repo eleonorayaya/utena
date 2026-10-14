@@ -2,24 +2,32 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
+
+var newlines = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+
+func SingleLine(s string) string {
+	return newlines.Replace(s)
+}
 
 func Truncate(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	if lipgloss.Width(s) <= width {
-		return s
+	return ansi.Truncate(s, width, "…")
+}
+
+func AbbreviatePath(path string) string {
+	home, err := os.UserHomeDir()
+	if err == nil && strings.HasPrefix(path, home) {
+		return "~" + path[len(home):]
 	}
-	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes)) > width-1 {
-		runes = runes[:len(runes)-1]
-	}
-	return string(runes) + "…"
+	return path
 }
 
 func FitHeight(s string, h int) string {

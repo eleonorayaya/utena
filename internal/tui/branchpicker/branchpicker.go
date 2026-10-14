@@ -7,9 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
-	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
 
@@ -60,19 +58,19 @@ func (m Model) Status() ui.Status {
 	return m.status
 }
 
-func (m Model) Filtering() bool {
-	return ui.FilterActive(m.list)
-}
-
 func (m Model) CapturesText() bool {
-	return m.list.FilterState() == list.Filtering
+	return ui.FilterTyping(m.list)
 }
 
 func (m *Model) rebuildItems() {
 	local := slices.Sorted(slices.Values(m.local))
+	isLocal := make(map[string]bool, len(local))
+	for _, b := range local {
+		isLocal[b] = true
+	}
 	var remote []string
 	for _, r := range m.remote {
-		if !slices.Contains(local, r) {
+		if !isLocal[r] {
 			remote = append(remote, r)
 		}
 	}
@@ -129,14 +127,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.status = ui.Status{}
 		cur := m.selected()
-		m.local, m.remote = nil, nil
-		for _, b := range msg.Branches {
-			if b.Remote {
-				m.remote = append(m.remote, b.Name)
-			} else {
-				m.local = append(m.local, b.Name)
-			}
-		}
+		m.local, m.remote = provider.SplitBranches(msg.Branches)
 		if msg.DefaultBranch != "" {
 			m.defaultBranch = msg.DefaultBranch
 		}
@@ -144,7 +135,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.selectBranch(cur)
 		return m, nil
 	case tea.KeyMsg:
-		if m.list.FilterState() != list.Filtering {
+		if msg.Type == tea.KeyEsc && !ui.FilterActive(m.list) {
+			return m, func() tea.Msg { return ClosedMsg{} }
+		}
+		if !ui.FilterTyping(m.list) {
 			if mm, cmd, ok := m.onKey(msg); ok {
 				return mm, cmd
 			}
@@ -179,7 +173,7 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 func (m Model) View() string {
 	body := ui.ListView(m.list)
 	if len(m.local)+len(m.remote) == 0 {
-		body = lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("  No branches — press r to fetch or n to type one")
+		body = ui.Muted().Render("  No branches — press r to fetch or n to type one")
 	}
 	return ui.FitHeight(ui.Clamp(ui.FormTitle(m.title), m.width)+"\n\n"+body, m.height)
 }

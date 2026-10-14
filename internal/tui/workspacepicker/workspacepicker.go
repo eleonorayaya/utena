@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
-	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
@@ -48,12 +47,8 @@ func (m *Model) SetSize(width, height int) {
 	m.list.SetSize(width, max(height-2, 1))
 }
 
-func (m Model) Filtering() bool {
-	return ui.FilterActive(m.list)
-}
-
 func (m Model) CapturesText() bool {
-	return m.list.FilterState() == list.Filtering
+	return ui.FilterTyping(m.list)
 }
 
 func sortWorkspaces(wss []workspace.Workspace, activeID uint) []workspace.Workspace {
@@ -89,7 +84,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.rebuildItems()
 		return m, nil
 	case tea.KeyMsg:
-		if m.list.FilterState() != list.Filtering {
+		if msg.Type == tea.KeyEsc && !ui.FilterActive(m.list) {
+			return m, func() tea.Msg { return ClosedMsg{} }
+		}
+		if !ui.FilterTyping(m.list) {
 			if mm, cmd, ok := m.onKey(msg); ok {
 				return mm, cmd
 			}
@@ -159,12 +157,12 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 func (m Model) View() string {
 	title := ui.FormTitle(m.title)
 	if m.multi && len(m.selected) > 0 {
-		title += fg(theme.Current.TextMuted).Render(fmt.Sprintf("  %d selected", len(m.selected)))
+		title += ui.Muted().Render(fmt.Sprintf("  %d selected", len(m.selected)))
 	}
 	title = ui.Clamp(title, m.width)
 	body := ui.ListView(m.list)
 	if len(m.list.Items()) == 0 {
-		body = fg(theme.Current.TextMuted).Render("  No workspaces")
+		body = ui.Muted().Render("  No workspaces")
 	}
 	return ui.FitHeight(title+"\n\n"+body, m.height)
 }

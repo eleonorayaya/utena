@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/eleonorayaya/utena/internal/tui/uitest"
 	"strings"
 	"testing"
 
@@ -26,28 +27,12 @@ func sizedList(items []list.Item, w, h int) list.Model {
 
 func feed(l list.Model, msg tea.Msg) list.Model {
 	l, cmd := UpdateList(l, msg)
-	for _, m := range runCmd(cmd) {
+	for _, m := range uitest.Drain(cmd) {
 		if _, ok := m.(list.FilterMatchesMsg); ok {
 			l, _ = UpdateList(l, m)
 		}
 	}
 	return l
-}
-
-func runCmd(cmd tea.Cmd) []tea.Msg {
-	if cmd == nil {
-		return nil
-	}
-	switch m := cmd().(type) {
-	case tea.BatchMsg:
-		var out []tea.Msg
-		for _, c := range m {
-			out = append(out, runCmd(c)...)
-		}
-		return out
-	default:
-		return []tea.Msg{m}
-	}
 }
 
 func down(l list.Model) list.Model {
@@ -108,7 +93,6 @@ func TestForm_FocusClampsAndLabelColumn(t *testing.T) {
 	f := NewForm("New session", 3)
 	assert.Equal(t, 0, f.Prev().Focused())
 	assert.Equal(t, 2, f.Next().Next().Next().Focused())
-	assert.True(t, f.Focus(2).AtEnd())
 
 	fields := []Field{{Label: "Name", Value: "x"}, {Label: "Workspaces", Value: "a\nb"}, {Label: "Mode", Value: "m"}}
 	assert.Equal(t, 12, LabelWidth(fields))

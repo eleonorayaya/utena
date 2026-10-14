@@ -8,11 +8,9 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
-	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
 
@@ -22,11 +20,12 @@ const (
 	rootField
 )
 
+var labels = [...]string{"URL", "Directory", "Root"}
+
 type Model struct {
 	form         ui.Form
 	urlInput     textinput.Model
 	dirNameInput textinput.Model
-	roots        []string
 	rootsLoaded  bool
 	rootsErr     error
 	root         ui.Choice
@@ -38,17 +37,11 @@ type Model struct {
 }
 
 func New() Model {
-	url := textinput.New()
-	url.Prompt = ""
-	url.Placeholder = "git@github.com:org/repo.git"
+	url := ui.NewInput("git@github.com:org/repo.git")
 	url.CharLimit = 512
-	url.Width = 40
 
-	dirName := textinput.New()
-	dirName.Prompt = ""
-	dirName.Placeholder = "derived from URL"
+	dirName := ui.NewInput("derived from URL")
 	dirName.CharLimit = 128
-	dirName.Width = 40
 
 	return Model{form: ui.NewForm("Clone workspace", 2), urlInput: url, dirNameInput: dirName}
 }
@@ -57,7 +50,6 @@ func (m Model) Init() (Model, tea.Cmd) {
 	m.urlInput.SetValue("")
 	m.dirNameInput.SetValue("")
 	m.dirNameInput.Blur()
-	m.roots = nil
 	m.rootsLoaded = false
 	m.rootsErr = nil
 	m.root = ui.Choice{}
@@ -71,7 +63,7 @@ func (m Model) Init() (Model, tea.Cmd) {
 func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
-	m.urlInput.Width = ui.InputWidth(width, len("Directory")+2)
+	m.urlInput.Width = ui.InputWidth(width, labels[:]...)
 	m.dirNameInput.Width = m.urlInput.Width
 }
 
@@ -87,7 +79,7 @@ func (m Model) Status() ui.Status {
 		return ui.Status{Text: "cloning…"}
 	case m.rootsErr != nil:
 		return ui.Status{Text: "failed to load roots: " + m.rootsErr.Error(), Kind: ui.StatusError}
-	case m.rootsLoaded && len(m.roots) == 0:
+	case m.rootsLoaded && len(m.root.Options) == 0:
 		return ui.Status{Text: "no workspace roots configured — add one to ~/.config/utena/config.json first", Kind: ui.StatusError}
 	}
 	return m.status
@@ -105,10 +97,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.rootsErr = msg.Err
 			return m, nil
 		}
-		m.roots = msg.Roots
-		m.root = ui.Choice{Options: m.roots}
+		m.root = ui.Choice{Options: msg.Roots}
 		fields := 2
-		if len(m.roots) > 1 {
+		if len(msg.Roots) > 1 {
 			fields = 3
 		}
 		focus := m.form.Focused()
@@ -189,7 +180,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 		m.status = ui.Status{Text: "still loading workspace roots…", Kind: ui.StatusWarning}
 		return m, nil
 	}
-	if len(m.roots) == 0 {
+	if len(m.root.Options) == 0 {
 		return m, nil
 	}
 	dirName := strings.TrimSpace(m.dirNameInput.Value())
@@ -201,16 +192,16 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 func (m Model) View() string {
 	fields := []ui.Field{
-		{Label: "URL", Value: m.urlInput.View(), Error: m.urlErr},
-		{Label: "Directory", Value: m.dirNameInput.View()},
+		{Label: labels[urlField], Value: m.urlInput.View(), Error: m.urlErr},
+		{Label: labels[dirField], Value: m.dirNameInput.View()},
 	}
-	if len(m.roots) > 1 {
-		fields = append(fields, ui.Field{Label: "Root", Value: m.root.View(m.form.Focused() == rootField)})
+	if len(m.root.Options) > 1 {
+		fields = append(fields, ui.Field{Label: labels[rootField], Value: m.root.View(m.form.Focused() == rootField)})
 	}
 	out := m.form.View(fields, m.width)
 	if root := m.root.Value(); root != "" {
 		indent := strings.Repeat(" ", ui.GutterWidth+ui.LabelWidth(fields))
-		out += "\n\n" + ui.Clamp(indent+lipgloss.NewStyle().Foreground(theme.Current.TextMuted).Render("→ "+m.targetPreview(root)), m.width)
+		out += "\n\n" + ui.Clamp(indent+ui.Muted().Render("→ "+m.targetPreview(root)), m.width)
 	}
 	return ui.FitHeight(out, m.height)
 }

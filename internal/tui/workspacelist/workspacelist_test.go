@@ -1,7 +1,7 @@
 package workspacelist
 
 import (
-	"reflect"
+	"github.com/eleonorayaya/utena/internal/tui/uitest"
 	"strings"
 	"testing"
 	"time"
@@ -40,13 +40,12 @@ func listOf(t *testing.T, w, h int, wss ...workspace.Workspace) Model {
 	return m
 }
 
-func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
-
 func cmdType(cmd tea.Cmd) string {
-	if cmd == nil {
+	types := uitest.MsgTypes(cmd)
+	if len(types) == 0 {
 		return ""
 	}
-	return reflect.TypeOf(cmd()).String()
+	return types[0]
 }
 
 func TestWorkspaceList_SectionsColumnsAndPath(t *testing.T) {
@@ -73,7 +72,7 @@ func TestWorkspaceList_SectionsColumnsAndPath(t *testing.T) {
 		assert.LessOrEqual(t, lipgloss.Width(l), 70)
 	}
 
-	m, _ = m.Update(runes("."))
+	m, _ = m.Update(uitest.Runes("."))
 	out := m.View()
 	assert.Contains(t, out, "Hidden 1")
 	assert.Contains(t, out, "proto")
@@ -86,44 +85,44 @@ func TestWorkspaceList_CloningStatusReplacesKind(t *testing.T) {
 
 func TestWorkspaceList_DeleteNeedsTwoPresses(t *testing.T) {
 	m := listOf(t, 70, 8, ws(1, "web", time.Hour))
-	m, cmd := m.Update(runes("d"))
+	m, cmd := m.Update(uitest.Runes("d"))
 	assert.Nil(t, cmd)
 	assert.Equal(t, "press d again to delete web", m.Status().Text)
-	_, cmd = m.Update(runes("d"))
+	_, cmd = m.Update(uitest.Runes("d"))
 	assert.Equal(t, "provider.deleteWorkspaceIntentMsg", cmdType(cmd))
 }
 
 func TestWorkspaceList_MigrateNeedsTwoPressesAndGuards(t *testing.T) {
 	m := listOf(t, 70, 8, ws(1, "web", time.Hour))
-	m, cmd := m.Update(runes("m"))
+	m, cmd := m.Update(uitest.Runes("m"))
 	assert.Nil(t, cmd)
 	assert.Equal(t, "press m again to migrate web to bare", m.Status().Text)
-	_, cmd = m.Update(runes("m"))
+	_, cmd = m.Update(uitest.Runes("m"))
 	assert.Equal(t, "provider.migrateWorkspaceToBareIntentMsg", cmdType(cmd))
 
 	m = listOf(t, 70, 8, ws(1, "web", time.Hour, bare))
-	m, cmd = m.Update(runes("m"))
+	m, cmd = m.Update(uitest.Runes("m"))
 	assert.Nil(t, cmd)
 	assert.Equal(t, "web is already bare", m.Status().Text)
 
 	m = listOf(t, 70, 8, ws(1, "notes", time.Hour, notGit))
-	m, _ = m.Update(runes("m"))
+	m, _ = m.Update(uitest.Runes("m"))
 	assert.Equal(t, "notes is not a git repository", m.Status().Text)
 }
 
 func TestWorkspaceList_OtherKeyCancelsPendingDelete(t *testing.T) {
 	m := listOf(t, 70, 8, ws(1, "web", time.Hour))
-	m, _ = m.Update(runes("d"))
-	m, _ = m.Update(runes("m"))
-	_, cmd := m.Update(runes("d"))
+	m, _ = m.Update(uitest.Runes("d"))
+	m, _ = m.Update(uitest.Runes("m"))
+	_, cmd := m.Update(uitest.Runes("d"))
 	assert.Nil(t, cmd)
 }
 
 func TestWorkspaceList_FilterTypingDoesNotTriggerActions(t *testing.T) {
 	m := listOf(t, 70, 8, ws(1, "web", time.Hour), ws(2, "data", 2*time.Hour))
-	m, _ = m.Update(runes("/"))
+	m, _ = m.Update(uitest.Runes("/"))
 	assert.True(t, m.CapturesText())
-	m, cmd := m.Update(runes("d"))
+	m, cmd := m.Update(uitest.Runes("d"))
 	assert.NotEqual(t, "provider.deleteWorkspaceIntentMsg", cmdType(cmd))
 	assert.True(t, m.Status().Empty())
 }
@@ -144,7 +143,7 @@ func TestWorkspaceList_ShortHelp(t *testing.T) {
 func TestWorkspaceList_RefreshWhileFilteredKeepsMatches(t *testing.T) {
 	wss := []workspace.Workspace{ws(1, "web", time.Hour), ws(2, "data", 2*time.Hour), ws(3, "webhooks", 3*time.Hour)}
 	m := listOf(t, 70, 10, wss...)
-	m, _ = m.Update(runes("/"))
+	m, _ = m.Update(uitest.Runes("/"))
 	m = typeFilter(m, "hooks")
 	m, _ = m.Update(provider.WorkspacesStateUpdatedMsg{Workspaces: wss})
 	out := m.View()
@@ -156,28 +155,12 @@ func TestWorkspaceList_RefreshWhileFilteredKeepsMatches(t *testing.T) {
 func typeFilter(m Model, s string) Model {
 	for _, r := range s {
 		var cmd tea.Cmd
-		m, cmd = m.Update(runes(string(r)))
-		for _, msg := range drain(cmd) {
+		m, cmd = m.Update(uitest.Runes(string(r)))
+		for _, msg := range uitest.Drain(cmd) {
 			if fm, ok := msg.(list.FilterMatchesMsg); ok {
 				m, _ = m.Update(fm)
 			}
 		}
 	}
 	return m
-}
-
-func drain(cmd tea.Cmd) []tea.Msg {
-	if cmd == nil {
-		return nil
-	}
-	switch m := cmd().(type) {
-	case tea.BatchMsg:
-		var out []tea.Msg
-		for _, c := range m {
-			out = append(out, drain(c)...)
-		}
-		return out
-	default:
-		return []tea.Msg{m}
-	}
 }

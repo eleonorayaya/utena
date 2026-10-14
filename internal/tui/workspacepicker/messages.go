@@ -7,3 +7,5 @@ type SelectedMsg struct {
 }
 
 type AddDirectoryMsg struct{}
+
+type ClosedMsg struct{}

@@ -4,6 +4,8 @@ import (
 	"math"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
@@ -42,12 +44,20 @@ func (f Form) Prev() Form {
 	return f.Focus(f.focus - 1)
 }
 
-func (f Form) AtEnd() bool {
-	return f.focus == f.count-1
+func InputWidth(formWidth int, labels ...string) int {
+	w := 0
+	for _, l := range labels {
+		w = max(w, lipgloss.Width(l))
+	}
+	return max(formWidth-GutterWidth-w-3, 10)
 }
 
-func InputWidth(formWidth, labelWidth int) int {
-	return max(formWidth-GutterWidth-labelWidth-1, 10)
+func NewInput(placeholder string) textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.Placeholder = placeholder
+	ti.Width = 40
+	return ti
 }
 
 func FormTitle(title string) string {

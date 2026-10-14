@@ -1,6 +1,7 @@
 package branchpicker
 
 import (
+	"github.com/eleonorayaya/utena/internal/tui/uitest"
 	"strings"
 	"testing"
 
@@ -58,18 +59,9 @@ func TestBranchPicker_EnterSelectsSkippingHeaders(t *testing.T) {
 
 func feed(m Model, msg tea.Msg) Model {
 	m, cmd := m.Update(msg)
-	for cmd != nil {
-		out := cmd()
-		cmd = nil
-		switch o := out.(type) {
-		case list.FilterMatchesMsg:
-			m, _ = m.Update(o)
-		case tea.BatchMsg:
-			for _, c := range o {
-				if fm, ok := c().(list.FilterMatchesMsg); ok {
-					m, _ = m.Update(fm)
-				}
-			}
+	for _, out := range uitest.Drain(cmd) {
+		if fm, ok := out.(list.FilterMatchesMsg); ok {
+			m, _ = m.Update(fm)
 		}
 	}
 	return m

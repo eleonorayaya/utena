@@ -10,9 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
-	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
-	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 	"github.com/eleonorayaya/utena/internal/workspace"
 )
 
@@ -209,14 +207,14 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 }
 
 func (m Model) View() string {
-	muted := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
+	muted := ui.Muted()
 	if len(m.list.Items()) == 0 {
 		return ui.FitHeight(muted.Render("  No workspaces — press c to clone one"), m.height)
 	}
 	body := ui.FitHeight(ui.ListView(m.list), max(m.height-2, 1))
 	var path string
 	if ws, ok := m.selected(); ok {
-		path = ui.Truncate(workspacepicker.AbbreviatePath(ws.Path), max(m.width-2, 1))
+		path = ui.Truncate(ui.AbbreviatePath(ws.Path), max(m.width-2, 1))
 	}
 	return ui.FitHeight(body+"\n\n"+"  "+muted.Render(path), m.height)
 }

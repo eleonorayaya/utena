@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/branchfield"
 	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
@@ -15,7 +15,6 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
-	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -56,12 +55,7 @@ type Model struct {
 	width, height   int
 }
 
-func newNameInput() textinput.Model {
-	ti := textinput.New()
-	ti.Prompt = ""
-	ti.Width = 40
-	return ti
-}
+var labels = [fieldCount]string{"Workspaces", "Branches", "Mode", "Name"}
 
 func New() Model {
 	return Model{
@@ -70,7 +64,7 @@ func New() Model {
 		branchPicker:    branchpicker.New(),
 		filePicker:      filepicker.New(),
 		mode:            branchfield.NewModeChoice(),
-		name:            newNameInput(),
+		name:            ui.NewInput(""),
 	}
 }
 
@@ -79,8 +73,8 @@ func (m Model) Init() (Model, tea.Cmd) {
 	m.rows = nil
 	m.rowCursor = 0
 	m.mode = branchfield.NewModeChoice()
-	m.name = newNameInput()
-	m.name.Width = ui.InputWidth(m.width, len("Workspaces")+2)
+	m.name = ui.NewInput("")
+	m.name.Width = ui.InputWidth(m.width, labels[:]...)
 	m.nameErr = ""
 	m.workspacesErr = ""
 	m.status = ui.Status{}
@@ -92,19 +86,10 @@ func (m Model) Init() (Model, tea.Cmd) {
 
 func (m *Model) SetSize(width, height int) {
 	m.width, m.height = width, height
-	m.name.Width = ui.InputWidth(width, len("Workspaces")+2)
+	m.name.Width = ui.InputWidth(width, labels[:]...)
 	m.workspacePicker.SetSize(width, height)
 	m.filePicker.SetSize(width, height)
 	m.branchPicker.SetSize(width, height)
-}
-
-func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
-	m.SetSize(msg.Width, msg.Height)
-	return m, nil
-}
-
-func (m Model) OnKeyMsg(_ tea.KeyMsg) (Model, tea.Cmd, bool) {
-	return m, nil, false
 }
 
 func (m Model) Keys() help.KeyMap {
@@ -160,7 +145,8 @@ func (m Model) rowIndex(wsID uint) int {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		return m.OnWindowSizeMsg(msg)
+		m.SetSize(msg.Width, msg.Height)
+		return m, nil
 	case provider.WorkspacesStateUpdatedMsg:
 		var cmd tea.Cmd
 		m.workspacePicker, cmd = m.workspacePicker.Update(msg)
@@ -280,15 +266,13 @@ func (m Model) updateWorkspacePicker(msg tea.Msg) (Model, tea.Cmd) {
 		m.filePicker, _ = m.filePicker.Init()
 		m.overlay = overlayFiles
 		return m, nil
-	case tea.KeyMsg:
-		if msg.Type == tea.KeyEsc && !m.workspacePicker.Filtering() {
-			m.overlay = overlayNone
-			m.status = ui.Status{}
-			if len(m.rows) == 0 {
-				return m.focus(fieldWorkspaces)
-			}
-			return m.focus(m.form.Focused())
+	case workspacepicker.ClosedMsg:
+		m.overlay = overlayNone
+		m.status = ui.Status{}
+		if len(m.rows) == 0 {
+			return m.focus(fieldWorkspaces)
 		}
+		return m.focus(m.form.Focused())
 	}
 	var cmd tea.Cmd
 	m.workspacePicker, cmd = m.workspacePicker.Update(msg)
@@ -300,11 +284,9 @@ func (m Model) updateFilePicker(msg tea.Msg) (Model, tea.Cmd) {
 	case filepicker.DirectorySelectedMsg:
 		m.overlay = overlayWorkspaces
 		return m, provider.AddWorkspace(msg.Path, true)
-	case tea.KeyMsg:
-		if msg.Type == tea.KeyEsc && !m.filePicker.Filtering() {
-			m.overlay = overlayWorkspaces
-			return m, nil
-		}
+	case filepicker.ClosedMsg:
+		m.overlay = overlayWorkspaces
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.filePicker, cmd = m.filePicker.Update(msg)
@@ -327,11 +309,9 @@ func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.rows[m.pickingRow], cmd = m.rows[m.pickingRow].StartManual()
 		return m, cmd
-	case tea.KeyMsg:
-		if msg.Type == tea.KeyEsc && !m.branchPicker.Filtering() {
-			m.overlay = overlayNone
-			return m, nil
-		}
+	case branchpicker.ClosedMsg:
+		m.overlay = overlayNone
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.branchPicker, cmd = m.branchPicker.Update(msg)
@@ -346,32 +326,26 @@ func (m Model) onPageKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 
 	field := m.form.Focused()
-	switch msg.String() {
-	case "esc":
+	switch {
+	case key.Matches(msg, formKeys.Cancel):
 		return m, router.Back()
-	case "tab":
-		return m.focus(min(field+1, fieldCount-1))
-	case "shift+tab":
-		return m.focus(max(field-1, 0))
-	case "down":
-		if field == fieldBranches && m.rowCursor < len(m.rows)-1 {
-			m.rowCursor++
-			return m, nil
-		}
-		if field == fieldWorkspaces {
+	case msg.Type == tea.KeyDown && field == fieldBranches && m.rowCursor < len(m.rows)-1:
+		m.rowCursor++
+		return m, nil
+	case msg.Type == tea.KeyUp && field == fieldBranches && m.rowCursor > 0:
+		m.rowCursor--
+		return m, nil
+	case key.Matches(msg, formKeys.Next):
+		if field == fieldWorkspaces && msg.Type == tea.KeyDown {
 			m.rowCursor = 0
 		}
-		return m.focus(min(field+1, fieldCount-1))
-	case "up":
-		if field == fieldBranches && m.rowCursor > 0 {
-			m.rowCursor--
-			return m, nil
-		}
-		if field == fieldMode {
+		return m.focus(m.form.Next().Focused())
+	case key.Matches(msg, formKeys.Prev):
+		if field == fieldMode && msg.Type == tea.KeyUp {
 			m.rowCursor = max(len(m.rows)-1, 0)
 		}
-		return m.focus(max(field-1, 0))
-	case "enter":
+		return m.focus(m.form.Prev().Focused())
+	case key.Matches(msg, formKeys.Edit):
 		switch field {
 		case fieldWorkspaces:
 			return m.openWorkspacePicker(), nil
@@ -435,12 +409,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 func buildSpecs(rows []branchfield.Row, isNew bool) []provider.SessionWorkspaceSpec {
 	out := make([]provider.SessionWorkspaceSpec, len(rows))
 	for i, r := range rows {
-		out[i].WorkspaceID = r.Workspace.ID
-		if isNew {
-			out[i].BaseBranch = r.Branch
-		} else {
-			out[i].Branch = r.Branch
-		}
+		out[i] = r.Spec(isNew)
 	}
 	return out
 }
@@ -450,7 +419,7 @@ func defaultSessionName(workspaceName string) string {
 }
 
 func (m Model) fields() []ui.Field {
-	muted := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
+	muted := ui.Muted()
 	focused := m.form.Focused()
 
 	names := make([]string, len(m.rows))
@@ -473,10 +442,10 @@ func (m Model) fields() []ui.Field {
 	}
 
 	return []ui.Field{
-		{Label: "Workspaces", Value: wsValue, Error: m.workspacesErr},
-		{Label: "Branches", Value: branches},
-		{Label: "Mode", Value: m.mode.View(focused == fieldMode)},
-		{Label: "Name", Value: m.name.View(), Error: m.nameErr, Hint: nameHint},
+		{Label: labels[fieldWorkspaces], Value: wsValue, Error: m.workspacesErr},
+		{Label: labels[fieldBranches], Value: branches},
+		{Label: labels[fieldMode], Value: m.mode.View(focused == fieldMode)},
+		{Label: labels[fieldName], Value: m.name.View(), Error: m.nameErr, Hint: nameHint},
 	}
 }
 

@@ -2,7 +2,7 @@ package sessionform
 
 import (
 	"errors"
-	"reflect"
+	"github.com/eleonorayaya/utena/internal/tui/uitest"
 	"strings"
 	"testing"
 
@@ -43,22 +43,12 @@ func press(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
-func msgTypes(cmd tea.Cmd) []string {
-	if cmd == nil {
-		return nil
+func closeOverlay(m Model) (Model, tea.Cmd) {
+	m, cmd := m.Update(press("esc"))
+	if cmd != nil {
+		return m.Update(cmd())
 	}
-	switch m := cmd().(type) {
-	case tea.BatchMsg:
-		var out []string
-		for _, c := range m {
-			out = append(out, msgTypes(c)...)
-		}
-		return out
-	case nil:
-		return nil
-	default:
-		return []string{reflect.TypeOf(m).String()}
-	}
+	return m, nil
 }
 
 func started(t *testing.T, wss ...workspace.Workspace) Model {
@@ -89,7 +79,7 @@ func TestForm_OpensIntoWorkspacePickerAndReturnsToName(t *testing.T) {
 	m, cmd := m.Update(workspacepicker.SelectedMsg{Workspaces: []workspace.Workspace{gitWS(1, "api"), gitWS(2, "web")}})
 	assert.Equal(t, overlayNone, m.overlay)
 	assert.Equal(t, fieldName, m.form.Focused())
-	assert.Equal(t, 2, strings.Count(strings.Join(msgTypes(cmd), " "), "provider.requestBranchesMsg"))
+	assert.Equal(t, 2, strings.Count(strings.Join(uitest.MsgTypes(cmd), " "), "provider.requestBranchesMsg"))
 	assert.True(t, m.CapturesText())
 }
 
@@ -115,7 +105,7 @@ func TestForm_ChangingWorkspacesKeepsExistingPicks(t *testing.T) {
 	require.Len(t, m.rows, 2)
 	assert.Equal(t, "feature", m.rows[0].Branch)
 	assert.Equal(t, uint(3), m.rows[1].Workspace.ID)
-	assert.Equal(t, 1, strings.Count(strings.Join(msgTypes(cmd), " "), "provider.requestBranchesMsg"))
+	assert.Equal(t, 1, strings.Count(strings.Join(uitest.MsgTypes(cmd), " "), "provider.requestBranchesMsg"))
 }
 
 func TestForm_SubmitBlockedWhileBranchesLoad(t *testing.T) {
@@ -132,7 +122,7 @@ func TestForm_EnterOnNameCreatesSession(t *testing.T) {
 		m, _ = m.Update(press(string(r)))
 	}
 	m, cmd := m.Update(press("enter"))
-	assert.Equal(t, []string{"provider.createSessionIntentMsg"}, msgTypes(cmd))
+	assert.Equal(t, []string{"provider.createSessionIntentMsg"}, uitest.MsgTypes(cmd))
 	assert.True(t, m.submitting)
 	_, cmd = m.Update(press("enter"))
 	assert.Nil(t, cmd, "repeated submits are ignored")
@@ -176,7 +166,7 @@ func TestForm_EscFromPickerReturnsToPageAndEscOnPageGoesBack(t *testing.T) {
 	assert.Equal(t, fieldBranches, m.form.Focused())
 	m, _ = m.Update(press("enter"))
 	assert.Equal(t, overlayBranch, m.overlay)
-	m, cmd := m.Update(press("esc"))
+	m, cmd := closeOverlay(m)
 	assert.Equal(t, overlayNone, m.overlay)
 	assert.Nil(t, cmd)
 
@@ -225,7 +215,7 @@ func TestForm_ManualBranchNotFoundShowsUnderRow(t *testing.T) {
 		m, _ = m.Update(press(string(r)))
 	}
 	m, cmd := m.Update(press("enter"))
-	assert.Equal(t, []string{"provider.checkBranchExistsIntentMsg"}, msgTypes(cmd))
+	assert.Equal(t, []string{"provider.checkBranchExistsIntentMsg"}, uitest.MsgTypes(cmd))
 	m, _ = m.Update(provider.BranchExistsCheckedMsg{WorkspaceID: 1, Name: "nope"})
 	assert.Contains(t, m.View(), "✕ branch not found: nope")
 	assert.True(t, m.rows[0].Editing)
@@ -280,7 +270,7 @@ func TestForm_ReInitResetsState(t *testing.T) {
 
 func TestForm_EscFromInitialPickerFocusesWorkspaces(t *testing.T) {
 	m := started(t, gitWS(1, "api"))
-	m, _ = m.Update(press("esc"))
+	m, _ = closeOverlay(m)
 	assert.Equal(t, overlayNone, m.overlay)
 	assert.Equal(t, fieldWorkspaces, m.form.Focused())
 	assert.False(t, m.CapturesText())

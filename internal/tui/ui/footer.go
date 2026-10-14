@@ -51,7 +51,7 @@ func renderBinding(b key.Binding) string {
 
 func Footer(bindings []key.Binding, status Status, width int, showMore bool) string {
 	if !status.Empty() {
-		text := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(status.Text)
+		text := SingleLine(status.Text)
 		return statusStyle(status.Kind).Render(Truncate(text, width))
 	}
 

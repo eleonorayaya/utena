@@ -10,8 +10,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
 
@@ -22,13 +20,9 @@ type dirItem struct {
 func (i dirItem) FilterValue() string { return i.name }
 
 func (i dirItem) Cells(selected bool) []ui.Cell {
-	style := lipgloss.NewStyle().Foreground(theme.Current.Text)
-	if selected {
-		style = lipgloss.NewStyle().Foreground(theme.Current.TextEmphasis).Bold(true)
-	}
 	return []ui.Cell{
-		{Spans: []ui.Span{{Text: "▸", Style: lipgloss.NewStyle().Foreground(theme.Current.TextMuted)}}, Width: 2},
-		{Spans: []ui.Span{{Text: i.name, Style: style}}},
+		{Spans: []ui.Span{{Text: "▸", Style: ui.Muted()}}, Width: 2},
+		{Spans: []ui.Span{{Text: i.name, Style: ui.NameStyle(selected)}}},
 	}
 }
 
@@ -72,12 +66,8 @@ func (m Model) Status() ui.Status {
 	return m.status
 }
 
-func (m Model) Filtering() bool {
-	return ui.FilterActive(m.list)
-}
-
 func (m Model) CapturesText() bool {
-	return m.list.FilterState() == list.Filtering
+	return ui.FilterTyping(m.list)
 }
 
 func (m *Model) load(selectName string) {
@@ -118,7 +108,10 @@ func (m *Model) load(selectName string) {
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	if msg, ok := msg.(tea.KeyMsg); ok && m.list.FilterState() != list.Filtering {
+	if msg, ok := msg.(tea.KeyMsg); ok && !ui.FilterTyping(m.list) {
+		if msg.Type == tea.KeyEsc && !ui.FilterActive(m.list) {
+			return m, func() tea.Msg { return ClosedMsg{} }
+		}
 		if mm, cmd, handled := m.onKey(msg); handled {
 			return mm, cmd
 		}
@@ -161,20 +154,12 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func abbreviate(path string) string {
-	home, err := os.UserHomeDir()
-	if err == nil && strings.HasPrefix(path, home) {
-		return "~" + path[len(home):]
-	}
-	return path
-}
-
 func (m Model) View() string {
-	muted := lipgloss.NewStyle().Foreground(theme.Current.TextMuted)
-	title := ui.FormTitle("Add directory") + "  " + muted.Render(abbreviate(m.dir))
+	muted := ui.Muted()
+	title := ui.FormTitle("Add directory") + "  " + muted.Render(ui.AbbreviatePath(m.dir))
 	body := ui.ListView(m.list)
 	if len(m.list.Items()) == 0 {
 		body = muted.Render("  No subdirectories — press s to select this one")
 	}
-	return ui.FitHeight(lipgloss.NewStyle().MaxWidth(max(m.width, 1)).Render(title)+"\n\n"+body, m.height)
+	return ui.FitHeight(ui.Clamp(title, m.width)+"\n\n"+body, m.height)
 }

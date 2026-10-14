@@ -7,3 +7,5 @@ type SelectedMsg struct {
 type FetchRequestedMsg struct{}
 
 type ManualEntryRequestedMsg struct{}
+
+type ClosedMsg struct{}

@@ -1,6 +1,7 @@
 package workspacepicker
 
 import (
+	"github.com/eleonorayaya/utena/internal/tui/uitest"
 	"strings"
 	"testing"
 	"time"
@@ -69,4 +70,16 @@ func TestKindSpan(t *testing.T) {
 	assert.Equal(t, "not bare", KindSpan(workspace.Workspace{IsGitRepo: true}).Text)
 	assert.Equal(t, "◌ cloning…", KindSpan(workspace.Workspace{Status: workspace.StatusCloning}).Text)
 	assert.Equal(t, "✕ failed", KindSpan(workspace.Workspace{Status: workspace.StatusFailed}).Text)
+}
+
+func TestPicker_EscClosesOnlyWhenNoFilter(t *testing.T) {
+	m := picker(false, ws(1, "alpha", time.Hour), ws(2, "beta", 2*time.Hour))
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.Equal(t, []tea.Msg{ClosedMsg{}}, uitest.Drain(cmd))
+
+	m, _ = m.Update(uitest.Runes("/"))
+	m, _ = m.Update(uitest.Runes("b"))
+	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.NotContains(t, uitest.Drain(cmd), tea.Msg(ClosedMsg{}))
+	assert.False(t, m.CapturesText())
 }
