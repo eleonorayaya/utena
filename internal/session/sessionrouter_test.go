@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace.WorkspaceStore, *mux.MockRunner, uint, uint) {
+func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace.WorkspaceStore, *mux.FakeDriver, uint, uint) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -30,7 +30,7 @@ func setupSessionRouter(t *testing.T) (*SessionRouter, *SessionStore, *workspace
 	require.NoError(t, workspaceStore.Add(ws1))
 	require.NoError(t, workspaceStore.Add(ws2))
 
-	mock := mux.NewMockRunner()
+	mock := mux.NewFakeDriver()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)

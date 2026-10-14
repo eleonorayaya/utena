@@ -9,11 +9,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
-	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/shellinit"
 	"github.com/eleonorayaya/utena/internal/tui"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
+	"github.com/eleonorayaya/utena/internal/tuios"
 )
 
 var (
@@ -84,7 +84,7 @@ func closeOwnPopup() {
 	if os.Getenv("UTENA_POPUP") == "" || window == "" {
 		return
 	}
-	if err := mux.CloseWindow(os.Getenv("TUIOS_SESSION"), window); err != nil {
+	if err := tuios.CloseWindow(os.Getenv("TUIOS_SESSION"), window); err != nil {
 		log.Printf("[ERROR] close popup window: %v", err)
 	}
 }

@@ -1,4 +1,4 @@
-package mux
+package tuios
 
 import (
 	"bufio"
@@ -13,19 +13,9 @@ import (
 	"slices"
 	"sort"
 	"time"
-)
 
-type tmuxRunner interface {
-	newSession(name, startDir string, env map[string]string) error
-	newWindow(sessionName, startDir, command string, env map[string]string) error
-	killSession(name string) error
-	hasSession(name string) bool
-	listSessionNames() ([]string, error)
-	listWindows(sessionName string) ([]Window, error)
-	listAgents() ([]agentPane, error)
-	setAgentMeta(sessionName, windowID string, meta map[string]string) error
-	subscribe(ctx context.Context, types []string, onEvent func(tuiosEvent)) error
-}
+	"github.com/eleonorayaya/utena/internal/mux"
+)
 
 type tuiosEvent struct {
 	Type    string `json:"type"`
@@ -44,6 +34,21 @@ type agentPane struct {
 
 const tuiosEventSubscribed = "subscribed"
 
+const agentSessionMetaKey = "session"
+
+var followedEvents = []string{
+	"session-created",
+	"session-closed",
+	"window-created",
+	"window-closed",
+	"window-retitled",
+	"window-focused",
+	"window-moved",
+	"workspace-switched",
+	"agent-state",
+	"gap",
+}
+
 type tuiosError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -58,15 +63,17 @@ func isTuiosCode(err error, code string) bool {
 	return errors.As(err, &te) && te.Code == code
 }
 
-type tuiosRunner struct {
+type Driver struct {
 	socketPath string
 }
 
-func newTuiosRunner() tmuxRunner {
-	return &tuiosRunner{socketPath: tuiosSocketPath()}
+var _ mux.Driver = (*Driver)(nil)
+
+func NewDriver() *Driver {
+	return &Driver{socketPath: socketPath()}
 }
 
-func tuiosSocketPath() string {
+func socketPath() string {
 	if p := os.Getenv("TUIOS_SOCKET"); p != "" {
 		return p
 	}
@@ -76,16 +83,16 @@ func tuiosSocketPath() string {
 	return filepath.Join("/tmp", fmt.Sprintf("tuios-%d", os.Getuid()), "tuios.sock")
 }
 
-func (r *tuiosRunner) dial() (net.Conn, error) {
-	conn, err := net.DialTimeout("unix", r.socketPath, 2*time.Second)
+func (d *Driver) dial() (net.Conn, error) {
+	conn, err := net.DialTimeout("unix", d.socketPath, 2*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("tuios daemon not running at %s (start it with `utena attach`): %w", r.socketPath, err)
+		return nil, fmt.Errorf("tuios daemon not running at %s (start it with `utena attach`): %w", d.socketPath, err)
 	}
 	return conn, nil
 }
 
-func (r *tuiosRunner) call(verb string, params map[string]any, out any) error {
-	conn, err := r.dial()
+func (d *Driver) call(verb string, params map[string]any, out any) error {
+	conn, err := d.dial()
 	if err != nil {
 		return err
 	}
@@ -134,8 +141,8 @@ func envArgv(env map[string]string, argv ...string) []string {
 	return append(out, argv...)
 }
 
-func (r *tuiosRunner) newSession(name, startDir string, env map[string]string) error {
-	err := r.call("new-session", map[string]any{
+func (d *Driver) NewSession(name, startDir string, env map[string]string) error {
+	err := d.call("new-session", map[string]any{
 		"name":    name,
 		"cwd":     startDir,
 		"command": envArgv(env, loginShell(), "-l"),
@@ -146,24 +153,24 @@ func (r *tuiosRunner) newSession(name, startDir string, env map[string]string) e
 	return err
 }
 
-func (r *tuiosRunner) newWindow(sessionName, startDir, command string, env map[string]string) error {
-	return r.call("new-window", map[string]any{
-		"session": sessionName,
+func (d *Driver) NewWindow(session, startDir, command string, env map[string]string) error {
+	return d.call("new-window", map[string]any{
+		"session": session,
 		"cwd":     startDir,
 		"command": envArgv(env, loginShell(), "-lc", command),
 	}, nil)
 }
 
-func (r *tuiosRunner) killSession(name string) error {
-	err := r.call("kill-session", map[string]any{"session": name}, nil)
+func (d *Driver) KillSession(name string) error {
+	err := d.call("kill-session", map[string]any{"session": name}, nil)
 	if isTuiosCode(err, "session_not_found") {
 		return nil
 	}
 	return err
 }
 
-func (r *tuiosRunner) hasSession(name string) bool {
-	names, err := r.listSessionNames()
+func (d *Driver) HasSession(name string) bool {
+	names, err := d.ListSessions()
 	if err != nil {
 		slog.Warn("tuios list-sessions failed", "error", err)
 		return false
@@ -171,13 +178,13 @@ func (r *tuiosRunner) hasSession(name string) bool {
 	return slices.Contains(names, name)
 }
 
-func (r *tuiosRunner) listSessionNames() ([]string, error) {
+func (d *Driver) ListSessions() ([]string, error) {
 	var res struct {
 		Sessions []struct {
 			Name string `json:"name"`
 		} `json:"sessions"`
 	}
-	if err := r.call("list-sessions", nil, &res); err != nil {
+	if err := d.call("list-sessions", nil, &res); err != nil {
 		return nil, err
 	}
 	names := make([]string, len(res.Sessions))
@@ -187,7 +194,7 @@ func (r *tuiosRunner) listSessionNames() ([]string, error) {
 	return names, nil
 }
 
-func (r *tuiosRunner) listWindows(sessionName string) ([]Window, error) {
+func (d *Driver) ListWindows(session string) ([]mux.Window, error) {
 	var res struct {
 		Windows []struct {
 			Index       int    `json:"index"`
@@ -195,28 +202,28 @@ func (r *tuiosRunner) listWindows(sessionName string) ([]Window, error) {
 			Focused     bool   `json:"focused"`
 		} `json:"windows"`
 	}
-	if err := r.call("list-windows", map[string]any{"session": sessionName}, &res); err != nil {
+	if err := d.call("list-windows", map[string]any{"session": session}, &res); err != nil {
 		return nil, err
 	}
-	windows := make([]Window, len(res.Windows))
+	windows := make([]mux.Window, len(res.Windows))
 	for i, w := range res.Windows {
-		windows[i] = Window{Index: w.Index, Name: w.DisplayName, Active: w.Focused}
+		windows[i] = mux.Window{Index: w.Index, Name: w.DisplayName, Active: w.Focused}
 	}
 	return windows, nil
 }
 
-func (r *tuiosRunner) listAgents() ([]agentPane, error) {
+func (d *Driver) listAgents() ([]agentPane, error) {
 	var res struct {
 		Agents []agentPane `json:"agents"`
 	}
-	if err := r.call("list-agents", map[string]any{"all_sessions": true}, &res); err != nil {
+	if err := d.call("list-agents", map[string]any{"all_sessions": true}, &res); err != nil {
 		return nil, err
 	}
 	return res.Agents, nil
 }
 
-func (r *tuiosRunner) setAgentMeta(sessionName, windowID string, meta map[string]string) error {
-	return r.call("set-agent-meta", map[string]any{
+func (d *Driver) setAgentMeta(sessionName, windowID string, meta map[string]string) error {
+	return d.call("set-agent-meta", map[string]any{
 		"session": sessionName,
 		"window":  windowID,
 		"source":  "utena",
@@ -224,8 +231,8 @@ func (r *tuiosRunner) setAgentMeta(sessionName, windowID string, meta map[string
 	}, nil)
 }
 
-func (r *tuiosRunner) subscribe(ctx context.Context, types []string, onEvent func(tuiosEvent)) error {
-	conn, err := r.dial()
+func (d *Driver) Subscribe(ctx context.Context, onEvent func(mux.Event)) error {
+	conn, err := d.dial()
 	if err != nil {
 		return err
 	}
@@ -234,7 +241,7 @@ func (r *tuiosRunner) subscribe(ctx context.Context, types []string, onEvent fun
 	defer stop()
 
 	if err := json.NewEncoder(conn).Encode(map[string]any{
-		"id": 1, "verb": "subscribe", "params": map[string]any{"types": types},
+		"id": 1, "verb": "subscribe", "params": map[string]any{"types": followedEvents},
 	}); err != nil {
 		return err
 	}
@@ -253,7 +260,7 @@ func (r *tuiosRunner) subscribe(ctx context.Context, types []string, onEvent fun
 	if ack.Error != nil {
 		return ack.Error
 	}
-	onEvent(tuiosEvent{Type: tuiosEventSubscribed})
+	d.translate(tuiosEvent{Type: tuiosEventSubscribed}, onEvent)
 
 	for scanner.Scan() {
 		var ev tuiosEvent
@@ -261,7 +268,7 @@ func (r *tuiosRunner) subscribe(ctx context.Context, types []string, onEvent fun
 			slog.Warn("tuios: unparseable event", "error", err)
 			continue
 		}
-		onEvent(ev)
+		d.translate(ev, onEvent)
 	}
 	if err := scanner.Err(); err != nil {
 		return err
@@ -269,12 +276,51 @@ func (r *tuiosRunner) subscribe(ctx context.Context, types []string, onEvent fun
 	return errors.New("tuios event stream closed")
 }
 
+func (d *Driver) translate(ev tuiosEvent, onEvent func(mux.Event)) {
+	switch ev.Type {
+	case tuiosEventSubscribed, "gap":
+		d.tagAgentPanes()
+		onEvent(mux.Event{Type: mux.EventResync})
+	case "session-created":
+		onEvent(mux.Event{Type: mux.EventSessionCreated, Session: ev.Session})
+	case "session-closed":
+		onEvent(mux.Event{Type: mux.EventSessionClosed, Session: ev.Session})
+	case "agent-state":
+		d.tagAgentPane(ev.Session, ev.Window, ev.State)
+	default:
+		onEvent(mux.Event{Type: mux.EventWindowsChanged, Session: ev.Session})
+	}
+}
+
+func (d *Driver) tagAgentPanes() {
+	agents, err := d.listAgents()
+	if err != nil {
+		slog.Debug("tuios list-agents failed", "error", err)
+		return
+	}
+	for _, a := range agents {
+		if a.Meta[agentSessionMetaKey] == a.Session {
+			continue
+		}
+		d.tagAgentPane(a.Session, a.WindowID, a.State)
+	}
+}
+
+func (d *Driver) tagAgentPane(sessionName, windowID, state string) {
+	if sessionName == "" || windowID == "" || state == "" || state == "none" {
+		return
+	}
+	if err := d.setAgentMeta(sessionName, windowID, map[string]string{agentSessionMetaKey: sessionName}); err != nil {
+		slog.Debug("tuios set-agent-meta failed", "session", sessionName, "window", windowID, "error", err)
+	}
+}
+
 func CloseWindow(session, window string) error {
 	if session == "" || window == "" {
 		return errors.New("close-window needs an explicit session and window")
 	}
-	r := &tuiosRunner{socketPath: tuiosSocketPath()}
-	err := r.call("close-window", map[string]any{"session": session, "window": window}, nil)
+	d := &Driver{socketPath: socketPath()}
+	err := d.call("close-window", map[string]any{"session": session, "window": window}, nil)
 	if isTuiosCode(err, "window_not_found") || isTuiosCode(err, "session_not_found") {
 		return nil
 	}

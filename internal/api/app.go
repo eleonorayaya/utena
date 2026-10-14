@@ -14,6 +14,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/monitor"
 	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tuios"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/afero"
@@ -57,7 +58,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, tmuxModule *mux.Module, 
 	}
 	workspaceModule := workspace.NewWorkspaceModule(database, fs, cfg.ConfigDir, gitModule.Service)
 	if tmuxModule == nil {
-		tmuxModule = mux.NewModule(bus, database)
+		tmuxModule = mux.NewModule(tuios.NewDriver(), bus, database)
 	}
 	sessionModule := session.NewSessionModule(tmuxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir, cfg.SessionsRoot)
 

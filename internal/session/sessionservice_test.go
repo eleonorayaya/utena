@@ -18,14 +18,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createTmuxService(t *testing.T, database db.Database, mock *mux.MockRunner, bus eventbus.EventBus) *mux.Service {
+func createTmuxService(t *testing.T, database db.Database, mock *mux.FakeDriver, bus eventbus.EventBus) *mux.Service {
 	t.Helper()
 	tmuxStore := mux.NewStore(database)
-	module := mux.NewModuleWithRunner(mock, tmuxStore, bus)
+	module := mux.NewModuleWithDriver(mock, tmuxStore, bus)
 	return module.Service
 }
 
-func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *mux.MockRunner, uint, uint) {
+func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspace.WorkspaceStore, *mux.FakeDriver, uint, uint) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -38,7 +38,7 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	require.NoError(t, workspaceStore.Add(ws1))
 	require.NoError(t, workspaceStore.Add(ws2))
 
-	mock := mux.NewMockRunner()
+	mock := mux.NewFakeDriver()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
@@ -582,13 +582,13 @@ func initTestRepo(t *testing.T) string {
 	return dir
 }
 
-func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *mux.MockRunner, uint) {
+func setupWorktreeSessionService(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *mux.FakeDriver, uint) {
 	t.Helper()
 	service, sessionStore, mock, wsID, _, _ := setupWorktreeSessionServiceFull(t, repoPath, configDir)
 	return service, sessionStore, mock, wsID
 }
 
-func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *mux.MockRunner, uint, db.Database, *git.GitService) {
+func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir string) (*SessionService, *SessionStore, *mux.FakeDriver, uint, db.Database, *git.GitService) {
 	t.Helper()
 
 	database := setupTestDB(t)
@@ -602,7 +602,7 @@ func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir st
 	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true, RepoID: &repoID}
 	require.NoError(t, workspaceStore.Add(wsGit))
 
-	mock := mux.NewMockRunner()
+	mock := mux.NewFakeDriver()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
@@ -878,7 +878,7 @@ func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 	workspaceStore := workspace.NewWorkspaceStore(database, afero.NewMemMapFs(), "/config")
 	ws := &workspace.Workspace{Name: "utena", Path: "/tmp/utena", IsGitRepo: true}
 	require.NoError(t, workspaceStore.Add(ws))
-	mock := mux.NewMockRunner()
+	mock := mux.NewFakeDriver()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
@@ -1147,7 +1147,7 @@ func TestSessionService_RepairSession_ClearsWarning(t *testing.T) {
 	require.Empty(t, retrieved.StatusError)
 }
 
-func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionService, *SessionStore, *mux.MockRunner, uint, string) {
+func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionService, *SessionStore, *mux.FakeDriver, uint, string) {
 	t.Helper()
 
 	repoPath := initTestRepo(t)
@@ -1166,7 +1166,7 @@ func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionSe
 	wsGit := &workspace.Workspace{Name: "git-repo", Path: repoPath, IsGitRepo: true, IsBare: true, RepoID: &repoID}
 	require.NoError(t, workspaceStore.Add(wsGit))
 
-	mock := mux.NewMockRunner()
+	mock := mux.NewFakeDriver()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)

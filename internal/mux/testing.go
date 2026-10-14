@@ -3,7 +3,6 @@ package mux
 import (
 	"context"
 	"fmt"
-	"slices"
 	"sync"
 )
 
@@ -14,29 +13,23 @@ type SpawnedWindow struct {
 	Env         map[string]string
 }
 
-type AgentMetaWrite struct {
-	SessionName string
-	WindowID    string
-	Meta        map[string]string
+type FakeDriver struct {
+	mu             sync.Mutex
+	Sessions       map[string]bool
+	SpawnedWindows []SpawnedWindow
+	CreateErr      error
+	KillErr        error
+	OnNewSession   func()
+	OnKillSession  func()
 }
 
-type MockRunner struct {
-	mu              sync.Mutex
-	Sessions        map[string]bool
-	SpawnedWindows  []SpawnedWindow
-	Agents          []agentPane
-	AgentMetaWrites []AgentMetaWrite
-	CreateErr       error
-	KillErr         error
-	OnNewSession    func()
-	OnKillSession   func()
+var _ Driver = (*FakeDriver)(nil)
+
+func NewFakeDriver() *FakeDriver {
+	return &FakeDriver{Sessions: make(map[string]bool)}
 }
 
-func NewMockRunner() *MockRunner {
-	return &MockRunner{Sessions: make(map[string]bool)}
-}
-
-func (m *MockRunner) newWindow(sessionName, startDir, command string, env map[string]string) error {
+func (m *FakeDriver) NewWindow(sessionName, startDir, command string, env map[string]string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.SpawnedWindows = append(m.SpawnedWindows, SpawnedWindow{
@@ -48,7 +41,7 @@ func (m *MockRunner) newWindow(sessionName, startDir, command string, env map[st
 	return nil
 }
 
-func (m *MockRunner) newSession(name, startDir string, env map[string]string) error {
+func (m *FakeDriver) NewSession(name, startDir string, env map[string]string) error {
 	if m.OnNewSession != nil {
 		m.OnNewSession()
 	}
@@ -64,7 +57,7 @@ func (m *MockRunner) newSession(name, startDir string, env map[string]string) er
 	return nil
 }
 
-func (m *MockRunner) killSession(name string) error {
+func (m *FakeDriver) KillSession(name string) error {
 	if m.OnKillSession != nil {
 		m.OnKillSession()
 	}
@@ -77,13 +70,13 @@ func (m *MockRunner) killSession(name string) error {
 	return nil
 }
 
-func (m *MockRunner) hasSession(name string) bool {
+func (m *FakeDriver) HasSession(name string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.Sessions[name]
 }
 
-func (m *MockRunner) listSessionNames() ([]string, error) {
+func (m *FakeDriver) ListSessions() ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	names := make([]string, 0, len(m.Sessions))
@@ -93,53 +86,34 @@ func (m *MockRunner) listSessionNames() ([]string, error) {
 	return names, nil
 }
 
-func (m *MockRunner) listWindows(sessionName string) ([]Window, error) {
+func (m *FakeDriver) ListWindows(sessionName string) ([]Window, error) {
 	return nil, nil
 }
 
-func (m *MockRunner) listAgents() ([]agentPane, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.Agents, nil
-}
-
-func (m *MockRunner) setAgentMeta(sessionName, windowID string, meta map[string]string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.AgentMetaWrites = append(m.AgentMetaWrites, AgentMetaWrite{SessionName: sessionName, WindowID: windowID, Meta: meta})
-	return nil
-}
-
-func (m *MockRunner) MetaWrites() []AgentMetaWrite {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return slices.Clone(m.AgentMetaWrites)
-}
-
-func (m *MockRunner) subscribe(ctx context.Context, types []string, onEvent func(tuiosEvent)) error {
+func (m *FakeDriver) Subscribe(ctx context.Context, onEvent func(Event)) error {
 	<-ctx.Done()
 	return ctx.Err()
 }
 
-func (m *MockRunner) SetCreateErr(err error) {
+func (m *FakeDriver) SetCreateErr(err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.CreateErr = err
 }
 
-func (m *MockRunner) SetKillErr(err error) {
+func (m *FakeDriver) SetKillErr(err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.KillErr = err
 }
 
-func (m *MockRunner) HasSessionByName(name string) bool {
+func (m *FakeDriver) HasSessionByName(name string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.Sessions[name]
 }
 
-func (m *MockRunner) RemoveSession(name string) {
+func (m *FakeDriver) RemoveSession(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.Sessions, name)

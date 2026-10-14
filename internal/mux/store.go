@@ -21,7 +21,7 @@ func NewStore(database db.Database) *Store {
 
 func (s *Store) Add(session *Session) error {
 	if session == nil {
-		return errors.New("tmux session cannot be nil")
+		return errors.New("mux session cannot be nil")
 	}
 
 	if err := s.db.Create(session).Error; err != nil {
@@ -66,10 +66,10 @@ func (s *Store) List() []Session {
 
 func (s *Store) Update(session *Session) error {
 	if session == nil {
-		return errors.New("tmux session cannot be nil")
+		return errors.New("mux session cannot be nil")
 	}
 	if session.ID == 0 {
-		return errors.New("tmux session ID cannot be zero")
+		return errors.New("mux session ID cannot be zero")
 	}
 
 	var existing Session
@@ -118,7 +118,7 @@ func (s *Store) BackfillStatus() error {
 
 func (s *Store) Delete(id uint) error {
 	if id == 0 {
-		return errors.New("tmux session ID cannot be zero")
+		return errors.New("mux session ID cannot be zero")
 	}
 
 	var existing Session

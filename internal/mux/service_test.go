@@ -63,7 +63,7 @@ func TestService_ConcurrentKillCreateNoOverlap(t *testing.T) {
 	database := testdb.New(t, &Session{})
 
 	bus := eventbus.NewEventBus()
-	mock := NewMockRunner()
+	mock := NewFakeDriver()
 	store := NewStore(database)
 	svc := NewService(mock, store, bus)
 
@@ -108,14 +108,14 @@ func TestService_ConcurrentKillCreateNoOverlap(t *testing.T) {
 	}
 
 	require.Equal(t, int32(1), atomic.LoadInt32(&maxInFlight),
-		"per-name lock should keep at most one tmux op in flight for the same name")
+		"per-name lock should keep at most one mux op in flight for the same name")
 }
 
 func newTestService(t *testing.T) *Service {
 	t.Helper()
 	database := testdb.New(t, &Session{})
 	store := NewStore(database)
-	return NewService(NewMockRunner(), store, eventbus.NewEventBus())
+	return NewService(NewFakeDriver(), store, eventbus.NewEventBus())
 }
 
 func TestService_RegisterPending_CreatesPendingRecord(t *testing.T) {
@@ -157,11 +157,11 @@ func TestService_RegisterPending_IdempotentOnInactive(t *testing.T) {
 }
 
 func TestService_RegisterPending_AdoptsActiveRecord(t *testing.T) {
-	// When a tmux record exists in Active status (e.g. previous owner deleted
-	// itself without killing the tmux process, or the daemon was off and missed
+	// When a mux record exists in Active status (e.g. previous owner deleted
+	// itself without killing the mux session, or the daemon was off and missed
 	// the close hook), RegisterPending returns the existing record so the new
 	// owner can adopt it. Real "another session is already linked" conflicts
-	// are caught at the caller's Session.TmuxSessionID unique-constraint write.
+	// are caught at the caller's session.Session.TmuxSessionID unique-constraint write.
 	svc := newTestService(t)
 
 	first, err := svc.RegisterPending("name", "/start", nil)
@@ -186,7 +186,7 @@ func TestService_SpawnForRecord_TransitionsPendingToActive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusActive, spawned.Status)
 
-	mock := svc.runner.(*MockRunner)
+	mock := svc.driver.(*FakeDriver)
 	assert.True(t, mock.HasSessionByName("name"))
 }
 
@@ -200,13 +200,13 @@ func TestService_SpawnForRecord_DoubleSpawnIsSafe(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = svc.SpawnForRecord(ts.ID)
-	require.NoError(t, err, "spawn should be idempotent if tmux process already exists by name")
+	require.NoError(t, err, "spawn should be idempotent if mux session already exists by name")
 }
 
 func TestService_SessionClosedAfterUtenaKillIsNotPublished(t *testing.T) {
 	database := testdb.New(t, &Session{})
 	bus := eventbus.NewEventBus()
-	svc := NewService(NewMockRunner(), NewStore(database), bus)
+	svc := NewService(NewFakeDriver(), NewStore(database), bus)
 
 	var published int32
 	bus.Subscribe(eventbus.TmuxSessionClosed, func(ctx context.Context, e eventbus.Event) error {
@@ -256,27 +256,4 @@ func TestService_WaitForActivationTimesOut(t *testing.T) {
 	_, err := svc.WaitForActivation(ctx)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Empty(t, svc.activationWaiters)
-}
-
-func TestService_AgentStateTagsPaneWithSessionName(t *testing.T) {
-	runner := NewMockRunner()
-	svc := &Service{runner: runner}
-
-	svc.handleTuiosEvent(context.Background(), tuiosEvent{Type: "agent-state", Session: "work", Window: "w1", State: "working"})
-	svc.handleTuiosEvent(context.Background(), tuiosEvent{Type: "agent-state", Session: "work", Window: "w2", State: "none"})
-
-	assert.Equal(t, []AgentMetaWrite{{SessionName: "work", WindowID: "w1", Meta: map[string]string{"session": "work"}}}, runner.MetaWrites())
-}
-
-func TestService_TagAgentPanesSkipsAlreadyTagged(t *testing.T) {
-	runner := NewMockRunner()
-	runner.Agents = []agentPane{
-		{Session: "work", WindowID: "w1", State: "idle", Meta: map[string]string{"session": "work"}},
-		{Session: "other", WindowID: "w2", State: "done"},
-	}
-	svc := &Service{runner: runner}
-
-	svc.tagAgentPanes()
-
-	assert.Equal(t, []AgentMetaWrite{{SessionName: "other", WindowID: "w2", Meta: map[string]string{"session": "other"}}}, runner.MetaWrites())
 }

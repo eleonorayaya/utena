@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/eleonorayaya/utena/internal/mux"
+	"github.com/eleonorayaya/utena/internal/tuios"
 )
 
 func workspaceCmd() *cobra.Command {
@@ -18,7 +18,7 @@ func workspaceCmd() *cobra.Command {
 		Short:        "Open a window in the next empty workspace and switch to it",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return mux.NewWorkspaceWindow(os.Getenv("TUIOS_SESSION"), os.Getenv("TUIOS_ACTIVE_PANE_CWD"))
+			return tuios.NewWorkspaceWindow(os.Getenv("TUIOS_SESSION"), os.Getenv("TUIOS_ACTIVE_PANE_CWD"))
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
@@ -26,7 +26,7 @@ func workspaceCmd() *cobra.Command {
 		Short:        "Switch to the next workspace that has windows",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return mux.SwitchWorkspace(os.Getenv("TUIOS_SESSION"), 1)
+			return tuios.SwitchWorkspace(os.Getenv("TUIOS_SESSION"), 1)
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
@@ -34,7 +34,7 @@ func workspaceCmd() *cobra.Command {
 		Short:        "Switch to the previous workspace that has windows",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return mux.SwitchWorkspace(os.Getenv("TUIOS_SESSION"), -1)
+			return tuios.SwitchWorkspace(os.Getenv("TUIOS_SESSION"), -1)
 		},
 	})
 	return cmd

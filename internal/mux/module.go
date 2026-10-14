@@ -14,17 +14,16 @@ type Module struct {
 	Router     *Router
 }
 
-func NewModule(bus eventbus.EventBus, database db.Database) *Module {
-	runner := newTuiosRunner()
+func NewModule(driver Driver, bus eventbus.EventBus, database db.Database) *Module {
 	store := NewStore(database)
-	service := NewService(runner, store, bus)
+	service := NewService(driver, store, bus)
 	controller := NewController(service)
 	router := NewRouter(controller)
 	return &Module{Service: service, Controller: controller, Router: router}
 }
 
-func NewModuleWithRunner(runner tmuxRunner, store *Store, bus eventbus.EventBus) *Module {
-	service := NewService(runner, store, bus)
+func NewModuleWithDriver(driver Driver, store *Store, bus eventbus.EventBus) *Module {
+	service := NewService(driver, store, bus)
 	controller := NewController(service)
 	router := NewRouter(controller)
 	return &Module{Service: service, Controller: controller, Router: router}

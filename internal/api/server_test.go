@@ -60,7 +60,7 @@ func initApiTestRepo(t *testing.T) string {
 	return dir
 }
 
-func setupTestRouter(t *testing.T) (*App, chi.Router, *mux.MockRunner, uint, uint) {
+func setupTestRouter(t *testing.T) (*App, chi.Router, *mux.FakeDriver, uint, uint) {
 	t.Helper()
 
 	gormDB, err := db.OpenInMemorySQLite()
@@ -69,9 +69,9 @@ func setupTestRouter(t *testing.T) (*App, chi.Router, *mux.MockRunner, uint, uin
 	cfg := Config{ConfigDir: "/config", SessionsRoot: t.TempDir()}
 	bus := eventbus.NewEventBus()
 	database := db.NewDB(gormDB)
-	mock := mux.NewMockRunner()
+	mock := mux.NewFakeDriver()
 	tmuxStore := mux.NewStore(database)
-	tmuxModule := mux.NewModuleWithRunner(mock, tmuxStore, bus)
+	tmuxModule := mux.NewModuleWithDriver(mock, tmuxStore, bus)
 	gitModule := git.NewGitModule(database, bus)
 	app := buildApp(gormDB, afero.NewMemMapFs(), cfg, tmuxModule, gitModule, bus)
 

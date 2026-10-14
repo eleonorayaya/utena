@@ -99,7 +99,7 @@ func setupPRTestEnv(t *testing.T, gitOpts ...git.GitServiceOption) *prTestEnv {
 	branch := &git.Branch{Name: branchName, RepoID: repo.ID, ExistsLocal: false, ExistsRemote: true}
 	require.NoError(t, database.Create(branch).Error)
 
-	mock := mux.NewMockRunner()
+	mock := mux.NewFakeDriver()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
@@ -512,7 +512,7 @@ func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
 	branch := &git.Branch{Name: branchName, RepoID: repo.ID, ExistsRemote: true}
 	require.NoError(t, database.Create(branch).Error)
 
-	mock := mux.NewMockRunner()
+	mock := mux.NewFakeDriver()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	dismissedPRStore := NewDismissedPRStore(database)

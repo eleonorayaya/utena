@@ -110,7 +110,7 @@ func TestSessionService_AddWorkspace_AssignsCollisionFreePath(t *testing.T) {
 	require.Equal(t, filepath.Join(sessionRoot, "other"), newWt.Path)
 }
 
-func setupTwoRepoSessionService(t *testing.T) (*SessionService, *SessionStore, *mux.MockRunner, uint, uint) {
+func setupTwoRepoSessionService(t *testing.T) (*SessionService, *SessionStore, *mux.FakeDriver, uint, uint) {
 	t.Helper()
 
 	repo1Path := initTestRepo(t)
@@ -131,7 +131,7 @@ func setupTwoRepoSessionService(t *testing.T) (*SessionService, *SessionStore, *
 	ws2 := &workspace.Workspace{Name: "repo2", Path: repo2Path, IsGitRepo: true, RepoID: &repo2.ID}
 	require.NoError(t, workspaceStore.Add(ws2))
 
-	mock := mux.NewMockRunner()
+	mock := mux.NewFakeDriver()
 	tmuxService := createTmuxService(t, database, mock, bus)
 	gitService := git.NewGitService(database)
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)

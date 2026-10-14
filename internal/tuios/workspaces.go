@@ -1,4 +1,4 @@
-package mux
+package tuios
 
 import (
 	"errors"
@@ -57,11 +57,11 @@ func pickEmptyWorkspace(workspaces []workspaceInfo) (int, bool) {
 	return first, first != 0
 }
 
-func listWorkspaces(r *tuiosRunner, session string) ([]workspaceInfo, error) {
+func listWorkspaces(d *Driver, session string) ([]workspaceInfo, error) {
 	var res struct {
 		Workspaces []workspaceInfo `json:"workspaces"`
 	}
-	if err := r.call("list-workspaces", map[string]any{"session": session}, &res); err != nil {
+	if err := d.call("list-workspaces", map[string]any{"session": session}, &res); err != nil {
 		return nil, err
 	}
 	return res.Workspaces, nil
@@ -71,21 +71,21 @@ func SwitchWorkspace(session string, step int) error {
 	if session == "" {
 		return errors.New("no tuios session: run from inside tuios")
 	}
-	r := &tuiosRunner{socketPath: tuiosSocketPath()}
-	workspaces, err := listWorkspaces(r, session)
+	d := &Driver{socketPath: socketPath()}
+	workspaces, err := listWorkspaces(d, session)
 	if err != nil {
 		return err
 	}
 	target := stepWorkspace(workspaces, step)
-	return r.call("select-workspace", map[string]any{"session": session, "workspace": target}, nil)
+	return d.call("select-workspace", map[string]any{"session": session, "workspace": target}, nil)
 }
 
 func NewWorkspaceWindow(session, cwd string) error {
 	if session == "" {
 		return errors.New("no tuios session: run from inside tuios")
 	}
-	r := &tuiosRunner{socketPath: tuiosSocketPath()}
-	workspaces, err := listWorkspaces(r, session)
+	d := &Driver{socketPath: socketPath()}
+	workspaces, err := listWorkspaces(d, session)
 	if err != nil {
 		return err
 	}
@@ -93,16 +93,16 @@ func NewWorkspaceWindow(session, cwd string) error {
 	if !ok {
 		return ErrNoEmptyWorkspace
 	}
-	if err := r.call("select-workspace", map[string]any{"session": session, "workspace": target}, nil); err != nil {
+	if err := d.call("select-workspace", map[string]any{"session": session, "workspace": target}, nil); err != nil {
 		return err
 	}
 	params := map[string]any{"session": session, "workspace": target, "focus": true}
 	if cwd != "" {
 		params["cwd"] = cwd
 	}
-	if err := r.call("new-window", params, nil); err != nil {
+	if err := d.call("new-window", params, nil); err != nil {
 		if previous := currentWorkspace(workspaces); previous != 0 {
-			_ = r.call("select-workspace", map[string]any{"session": session, "workspace": previous}, nil)
+			_ = d.call("select-workspace", map[string]any{"session": session, "workspace": previous}, nil)
 		}
 		return err
 	}

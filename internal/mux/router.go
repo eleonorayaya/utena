@@ -14,13 +14,13 @@ func NewRouter(controller *Controller) *Router {
 	}
 }
 
-func (tr *Router) Routes() chi.Router {
+func (rt *Router) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	r.Put("/hooks/{event}", tr.controller.HandleHook)
-	r.Get("/windows/{sessionName}", tr.controller.HandleGetWindows)
-	r.Get("/sessions/{sessionName}/env/{key}", tr.controller.HandleGetSessionEnv)
-	r.Get("/activations/next", tr.controller.HandleNextActivation)
+	r.Put("/hooks/{event}", rt.controller.HandleHook)
+	r.Get("/windows/{sessionName}", rt.controller.HandleGetWindows)
+	r.Get("/sessions/{sessionName}/env/{key}", rt.controller.HandleGetSessionEnv)
+	r.Get("/activations/next", rt.controller.HandleNextActivation)
 
 	return r
 }

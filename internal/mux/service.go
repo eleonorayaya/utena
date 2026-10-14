@@ -12,25 +12,10 @@ import (
 	"github.com/eleonorayaya/utena/internal/eventbus"
 )
 
-var ErrNotAvailable = errors.New("tuios is not available")
-
-var followedTuiosEvents = []string{
-	"session-created",
-	"session-closed",
-	"window-created",
-	"window-closed",
-	"window-retitled",
-	"window-focused",
-	"window-moved",
-	"workspace-switched",
-	"agent-state",
-	"gap",
-}
-
-const agentSessionMetaKey = "session"
+var ErrNotAvailable = errors.New("terminal multiplexer is not available")
 
 type Service struct {
-	runner            tmuxRunner
+	driver            Driver
 	store             *Store
 	eventBus          eventbus.EventBus
 	windowsBySession  map[string][]Window
@@ -47,9 +32,9 @@ func (t *Service) lockName(name string) func() {
 	return mu.Unlock
 }
 
-func NewService(runner tmuxRunner, store *Store, bus eventbus.EventBus) *Service {
+func NewService(driver Driver, store *Store, bus eventbus.EventBus) *Service {
 	t := &Service{
-		runner:           runner,
+		driver:           driver,
 		store:            store,
 		eventBus:         bus,
 		windowsBySession: make(map[string][]Window),
@@ -60,9 +45,9 @@ func NewService(runner tmuxRunner, store *Store, bus eventbus.EventBus) *Service
 
 func (t *Service) OnAppStart(ctx context.Context) error {
 	if err := t.store.BackfillStatus(); err != nil {
-		slog.WarnContext(ctx, "tmux: backfill status from is_alive failed", "error", err)
+		slog.WarnContext(ctx, "mux: backfill status from is_alive failed", "error", err)
 	}
-	if t.runner != nil {
+	if t.driver != nil {
 		go t.followEvents(ctx)
 	}
 	return nil
@@ -71,16 +56,16 @@ func (t *Service) OnAppStart(ctx context.Context) error {
 func (t *Service) followEvents(ctx context.Context) {
 	lastErr := ""
 	for ctx.Err() == nil {
-		err := t.runner.subscribe(ctx, followedTuiosEvents, func(ev tuiosEvent) {
+		err := t.driver.Subscribe(ctx, func(ev Event) {
 			lastErr = ""
-			t.handleTuiosEvent(ctx, ev)
+			t.handleEvent(ctx, ev)
 		})
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil && err.Error() != lastErr {
 			lastErr = err.Error()
-			slog.Warn("tuios event stream unavailable; retrying", "error", err)
+			slog.Warn("mux event stream unavailable; retrying", "error", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -90,30 +75,28 @@ func (t *Service) followEvents(ctx context.Context) {
 	}
 }
 
-func (t *Service) handleTuiosEvent(ctx context.Context, ev tuiosEvent) {
+func (t *Service) handleEvent(ctx context.Context, ev Event) {
 	var err error
 	switch ev.Type {
-	case tuiosEventSubscribed, "gap":
+	case EventResync:
 		t.resync()
-	case "session-created":
+	case EventSessionCreated:
 		err = t.HandleSessionCreated(ctx, ev.Session)
 		t.refreshWindows(ev.Session)
-	case "session-closed":
+	case EventSessionClosed:
 		err = t.HandleSessionClosed(ctx, ev.Session)
-	case "agent-state":
-		t.tagAgentPane(ev.Session, ev.Window, ev.State)
-	default:
+	case EventWindowsChanged:
 		t.refreshWindows(ev.Session)
 	}
 	if err != nil {
-		slog.Warn("tuios event handler failed", "type", ev.Type, "session", ev.Session, "error", err)
+		slog.Warn("mux event handler failed", "type", ev.Type, "session", ev.Session, "error", err)
 	}
 }
 
 func (t *Service) resync() {
-	names, err := t.runner.listSessionNames()
+	names, err := t.driver.ListSessions()
 	if err != nil {
-		slog.Warn("tuios resync: list-sessions failed", "error", err)
+		slog.Warn("mux resync: list-sessions failed", "error", err)
 		return
 	}
 	for _, ts := range t.store.List() {
@@ -127,35 +110,11 @@ func (t *Service) resync() {
 			continue
 		}
 		if err := t.store.Update(&ts); err != nil {
-			slog.Warn("tuios resync: update failed", "tmux", ts.Name, "error", err)
+			slog.Warn("mux resync: update failed", "mux", ts.Name, "error", err)
 		}
 	}
 	for _, name := range names {
 		t.refreshWindows(name)
-	}
-	t.tagAgentPanes()
-}
-
-func (t *Service) tagAgentPanes() {
-	agents, err := t.runner.listAgents()
-	if err != nil {
-		slog.Debug("tuios list-agents failed", "error", err)
-		return
-	}
-	for _, a := range agents {
-		if a.Meta[agentSessionMetaKey] == a.Session {
-			continue
-		}
-		t.tagAgentPane(a.Session, a.WindowID, a.State)
-	}
-}
-
-func (t *Service) tagAgentPane(sessionName, windowID, state string) {
-	if sessionName == "" || windowID == "" || state == "" || state == "none" {
-		return
-	}
-	if err := t.runner.setAgentMeta(sessionName, windowID, map[string]string{agentSessionMetaKey: sessionName}); err != nil {
-		slog.Debug("tuios set-agent-meta failed", "session", sessionName, "window", windowID, "error", err)
 	}
 }
 
@@ -163,9 +122,9 @@ func (t *Service) refreshWindows(sessionName string) {
 	if sessionName == "" {
 		return
 	}
-	windows, err := t.runner.listWindows(sessionName)
+	windows, err := t.driver.ListWindows(sessionName)
 	if err != nil {
-		slog.Debug("tuios list-windows failed", "session", sessionName, "error", err)
+		slog.Debug("mux list-windows failed", "session", sessionName, "error", err)
 		return
 	}
 	t.windowsMu.Lock()
@@ -218,18 +177,18 @@ func (t *Service) OnAppEnd(ctx context.Context) error {
 }
 
 // RegisterPending inserts a Session record in the pending state without
-// spawning a tmux process. It is idempotent: if a record with that name already
+// spawning a mux session. It is idempotent: if a record with that name already
 // exists in pending or inactive status, the existing record is returned. If a
 // record exists in active status, ErrSessionAlreadyExists is returned —
 // the caller should not be re-registering an active session.
 func (t *Service) RegisterPending(name, startDir string, env map[string]string) (*Session, error) {
 	defer t.lockName(name)()
 	if existing, err := t.store.GetByName(name); err == nil {
-		// Adopt whatever's there. The Session.TmuxSessionID unique constraint
+		// Adopt whatever's there. The session.Session.TmuxSessionID unique constraint
 		// will reject the caller's link if another session already owns this
-		// tmux record — that's where real conflicts surface. If the previous
+		// mux record — that's where real conflicts surface. If the previous
 		// owner was deleted, its FK was nil'd and the record is unclaimed; the
-		// new session adopts the running tmux process cleanly.
+		// new session adopts the running mux session cleanly.
 		return existing, nil
 	} else if !errors.Is(err, ErrSessionNotFound) {
 		return nil, err
@@ -256,12 +215,12 @@ func (t *Service) RegisterPending(name, startDir string, env map[string]string) 
 	return ts, nil
 }
 
-// SpawnForRecord spawns the tmux process for an existing record and transitions
-// it to active. The runner-newSession failure does not delete the record —
-// callers can retry. Idempotent for the (rare) case the tmux session already
+// SpawnForRecord spawns the mux session for an existing record and transitions
+// it to active. The driver NewSession failure does not delete the record —
+// callers can retry. Idempotent for the (rare) case the mux session already
 // exists by name: the record is just transitioned to active.
 func (t *Service) SpawnForRecord(id uint) (*Session, error) {
-	if t.runner == nil {
+	if t.driver == nil {
 		return nil, ErrNotAvailable
 	}
 	ts, err := t.store.GetByID(id)
@@ -269,8 +228,8 @@ func (t *Service) SpawnForRecord(id uint) (*Session, error) {
 		return nil, err
 	}
 	defer t.lockName(ts.Name)()
-	if !t.runner.hasSession(ts.Name) {
-		if err := t.runner.newSession(ts.Name, ts.StartDir, ts.Env); err != nil {
+	if !t.driver.HasSession(ts.Name) {
+		if err := t.driver.NewSession(ts.Name, ts.StartDir, ts.Env); err != nil {
 			return nil, err
 		}
 	}
@@ -282,11 +241,11 @@ func (t *Service) SpawnForRecord(id uint) (*Session, error) {
 }
 
 func (t *Service) CreateSession(name, startDir string, env map[string]string) (*Session, error) {
-	if t.runner == nil {
+	if t.driver == nil {
 		return nil, ErrNotAvailable
 	}
 	defer t.lockName(name)()
-	if err := t.runner.newSession(name, startDir, env); err != nil {
+	if err := t.driver.NewSession(name, startDir, env); err != nil {
 		return nil, err
 	}
 	ts := &Session{
@@ -315,7 +274,7 @@ func (t *Service) CreateSession(name, startDir string, env map[string]string) (*
 }
 
 func (t *Service) KillSession(id uint) error {
-	if t.runner == nil {
+	if t.driver == nil {
 		return ErrNotAvailable
 	}
 	ts, err := t.store.GetByID(id)
@@ -323,19 +282,19 @@ func (t *Service) KillSession(id uint) error {
 		return err
 	}
 	defer t.lockName(ts.Name)()
-	killErr := t.runner.killSession(ts.Name)
+	killErr := t.driver.KillSession(ts.Name)
 	if killErr != nil {
-		slog.Warn("tmux runner killSession failed; marking record inactive anyway", "name", ts.Name, "error", killErr)
+		slog.Warn("mux driver KillSession failed; marking record inactive anyway", "name", ts.Name, "error", killErr)
 	}
 	ts.Status = StatusInactive
 	return t.store.Update(ts)
 }
 
 func (t *Service) HasSession(name string) bool {
-	if t.runner == nil {
+	if t.driver == nil {
 		return false
 	}
-	return t.runner.hasSession(name)
+	return t.driver.HasSession(name)
 }
 
 func (t *Service) GetSession(id uint) (*Session, error) {
@@ -406,7 +365,7 @@ func (t *Service) setStatus(tmuxName string, status SessionStatus) (SessionStatu
 	if prev != status {
 		ts.Status = status
 		if err := t.store.Update(ts); err != nil {
-			slog.Warn("failed to update tmux session status", "tmux", tmuxName, "status", status, "error", err)
+			slog.Warn("failed to update mux session status", "mux", tmuxName, "status", status, "error", err)
 		}
 	}
 	return prev, true
@@ -434,14 +393,14 @@ func (t *Service) HandleClientDetached(ctx context.Context, tmuxName string) err
 }
 
 func (t *Service) SpawnWindow(sessionName, startDir, command string) error {
-	if t.runner == nil {
+	if t.driver == nil {
 		return ErrNotAvailable
 	}
 	var env map[string]string
 	if ts, err := t.store.GetByName(sessionName); err == nil {
 		env = ts.Env
 	}
-	return t.runner.newWindow(sessionName, startDir, command, env)
+	return t.driver.NewWindow(sessionName, startDir, command, env)
 }
 
 func (t *Service) GetWindows(ctx context.Context, tmuxName string) []Window {
