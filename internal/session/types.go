@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/eleonorayaya/utena/internal/claude"
 )
@@ -23,6 +24,27 @@ func NewSessionResponse(session *Session) *SessionResponse {
 }
 
 func (sr *SessionResponse) Render(w http.ResponseWriter, r *http.Request) error {
+	return nil
+}
+
+const ResourceStatusUnmanaged = "unmanaged"
+
+type SessionResources struct {
+	SessionID  *uint   `json:"session_id,omitempty"`
+	Name       string  `json:"name"`
+	MuxSession string  `json:"mux_session"`
+	Status     string  `json:"status"`
+	CPUPercent float64 `json:"cpu_pct"`
+	RSSBytes   int64   `json:"rss_bytes"`
+	Procs      int     `json:"procs"`
+}
+
+type SessionResourcesResponse struct {
+	Sessions  []SessionResources `json:"sessions"`
+	SampledAt time.Time          `json:"sampled_at"`
+}
+
+func (r *SessionResourcesResponse) Render(w http.ResponseWriter, req *http.Request) error {
 	return nil
 }
 

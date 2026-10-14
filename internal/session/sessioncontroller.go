@@ -54,6 +54,15 @@ func parseStatusFilter(r *http.Request) []SessionStatus {
 	return statuses
 }
 
+func (c *SessionController) ListResources(w http.ResponseWriter, r *http.Request) {
+	resp, err := c.service.ResourceUsage(r.Context())
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+	common.RenderResponse(w, r, resp)
+}
+
 func (c *SessionController) GetSessionByID(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id, err := parseUintParam(r, "id")

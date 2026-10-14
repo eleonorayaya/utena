@@ -427,3 +427,45 @@ func TestSessionRouter_BranchHook_RequiresPath(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+func TestSessionRouter_ListResources(t *testing.T) {
+	router, sessionStore, _, driver, ws1ID, _ := setupSessionRouter(t)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	muxSession := &mux.Session{Name: "utena-alpha", Status: mux.StatusActive}
+	require.NoError(t, mux.NewStore(sessionStore.db).Add(muxSession))
+	alpha := &Session{Name: "alpha", Status: StatusActive, LastUsedAt: time.Now(), MuxSessionID: &muxSession.ID}
+	addTestSession(t, sessionStore, swStore, alpha, ws1ID)
+
+	driver.SetPaneShell(11, "utena-alpha")
+	driver.SetPaneShell(21, "scratch")
+	lister := &mux.FakeProcessLister{}
+	lister.SetProcesses([]mux.Process{
+		{PID: 10, PPID: 1, Command: "tuios", RSSBytes: 9999},
+		{PID: 11, PPID: 10, RSSBytes: 1024, CPUPercent: 1},
+		{PID: 12, PPID: 11, RSSBytes: 4096, CPUPercent: 40},
+		{PID: 21, PPID: 10, RSSBytes: 2048, CPUPercent: 3},
+	})
+	router.controller.service.muxService.SetProcessLister(lister)
+
+	req := httptest.NewRequest("GET", "/resources", nil)
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var resp SessionResourcesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Sessions, 2)
+	require.False(t, resp.SampledAt.IsZero())
+
+	scratch, managed := resp.Sessions[0], resp.Sessions[1]
+	require.Equal(t, SessionResources{Name: "scratch", MuxSession: "scratch", Status: ResourceStatusUnmanaged, CPUPercent: 3, RSSBytes: 2048, Procs: 1}, scratch)
+	require.NotNil(t, managed.SessionID)
+	require.Equal(t, alpha.ID, *managed.SessionID)
+	require.Equal(t, "alpha", managed.Name)
+	require.Equal(t, "utena-alpha", managed.MuxSession)
+	require.Equal(t, string(StatusActive), managed.Status)
+	require.InDelta(t, 41, managed.CPUPercent, 0.001)
+	require.Equal(t, int64(5120), managed.RSSBytes)
+	require.Equal(t, 2, managed.Procs)
+}

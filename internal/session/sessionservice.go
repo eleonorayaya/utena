@@ -195,6 +195,45 @@ func (s *SessionService) ListSessions(ctx context.Context, statuses ...SessionSt
 	return sessions, nil
 }
 
+func (s *SessionService) ResourceUsage(ctx context.Context) (*SessionResourcesResponse, error) {
+	usages, err := s.muxService.ResourceUsage(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := s.store.List()
+	if err != nil {
+		return nil, err
+	}
+	byMux := make(map[string]*Session)
+	for i := range sessions {
+		sess := &sessions[i]
+		if sess.MuxSession == nil || sess.Status == StatusDeleted {
+			continue
+		}
+		byMux[sess.MuxSession.Name] = sess
+	}
+
+	rows := make([]SessionResources, 0, len(usages))
+	for _, u := range usages {
+		row := SessionResources{
+			Name:       u.Session,
+			MuxSession: u.Session,
+			Status:     ResourceStatusUnmanaged,
+			CPUPercent: u.CPUPercent,
+			RSSBytes:   u.RSSBytes,
+			Procs:      u.Procs,
+		}
+		if sess, ok := byMux[u.Session]; ok {
+			id := sess.ID
+			row.SessionID = &id
+			row.Name = sess.Name
+			row.Status = string(sess.Status)
+		}
+		rows = append(rows, row)
+	}
+	return &SessionResourcesResponse{Sessions: rows, SampledAt: time.Now()}, nil
+}
+
 func (s *SessionService) attachPullRequests(sessions []Session) {
 	var branchIDs []uint
 	for i := range sessions {
