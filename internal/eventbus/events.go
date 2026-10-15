@@ -8,6 +8,7 @@ const (
 	MuxClientDetached       = "mux.client_detached"
 
 	SessionActivated = "session.activated"
+	SessionAttached  = "session.attached"
 
 	SessionNotification = "session.notification"
 )
@@ -18,6 +19,10 @@ type MuxHookEvent struct {
 
 type SessionActivatedEvent struct {
 	SessionName string
+}
+
+type SessionAttachedEvent struct {
+	SessionID uint
 }
 
 type SessionNotificationEvent struct {
