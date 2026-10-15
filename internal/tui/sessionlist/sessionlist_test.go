@@ -9,10 +9,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -301,4 +303,26 @@ func TestSplitView_ListHasGutterBeforeDivider(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 120, lipgloss.Width(strings.Split(m.View(), "\n")[0]))
+}
+
+func outdatedState() provider.BrowserStateUpdatedMsg {
+	return provider.BrowserStateUpdatedMsg{State: browser.SessionsView{Outdated: true, Sessions: map[uint]browser.SessionBrowser{}}}
+}
+
+func TestSessionList_OutdatedExtensionWarning(t *testing.T) {
+	m, _ := New().Update(outdatedState())
+	assert.Equal(t, ui.Status{Text: "browser extension outdated — reload it in chrome://extensions", Kind: ui.StatusWarning}, m.Status())
+
+	m, _ = m.Update(provider.BrowserStateUpdatedMsg{State: browser.SessionsView{Sessions: map[uint]browser.SessionBrowser{}}})
+	assert.True(t, m.Status().Empty())
+}
+
+func TestSessionList_OutdatedWarningDoesNotClobberActionStatus(t *testing.T) {
+	m, _ := New().Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{withClaude(1, "x", claude.StatusIdle)}})
+	m, _, _ = pressA(m)
+	m, _ = m.Update(outdatedState())
+	assert.Contains(t, m.Status().Text, "press a again")
+
+	m, _, _ = m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	assert.Contains(t, m.Status().Text, "browser extension outdated")
 }

@@ -11,6 +11,7 @@ const (
 	gutterColW   = 2
 	glyphColW    = 2
 	attachedColW = 2
+	browserColW  = 2
 	prColW       = 7
 	timeColW     = 4
 )
@@ -47,8 +48,19 @@ func (m Model) renderRow(s session.Session, selected bool, width int) string {
 		{Spans: []ui.Span{ui.ClaudeGlyph(s.AttentionStatus())}, Width: glyphColW},
 		{Spans: []ui.Span{{Text: sessionDisplayName(s), Style: nameStyle(s, selected)}}},
 		{Spans: []ui.Span{attached}, Width: attachedColW},
+		{Spans: []ui.Span{browserSpan(m.browserState.Sessions[s.ID].State)}, Width: browserColW},
 		{Spans: ui.PRCountSpans(ready, draft), Width: prColW},
 		{Spans: []ui.Span{{Text: ui.ShortAgo(s.LastUsedAt), Style: muted}}, Width: timeColW, Align: ui.AlignRight},
 		{Width: gutterColW},
 	}, width, bg)
+}
+
+func browserSpan(state string) ui.Span {
+	switch state {
+	case "open":
+		return ui.Span{Text: "◫", Style: lipgloss.NewStyle().Foreground(theme.Current.AccentBlue)}
+	case "missing", "snapshotted":
+		return ui.Span{Text: "◫", Style: lipgloss.NewStyle().Foreground(theme.Current.TextMuted)}
+	}
+	return ui.Span{}
 }

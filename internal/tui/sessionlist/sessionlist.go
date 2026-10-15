@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/blockerform"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
@@ -19,8 +20,9 @@ import (
 )
 
 const (
-	splitThreshold = 90
-	listGutter     = 2
+	splitThreshold  = 90
+	listGutter      = 2
+	outdatedWarning = "browser extension outdated — reload it in chrome://extensions"
 )
 
 type Model struct {
@@ -36,6 +38,7 @@ type Model struct {
 	statusKind       ui.StatusKind
 	picker           ui.PRPicker
 	pickerSessionID  uint
+	browserState     browser.SessionsView
 	width            int
 	height           int
 }
@@ -95,6 +98,9 @@ func (m *Model) setStatus(text string, kind ui.StatusKind) {
 func (m Model) Status() ui.Status {
 	if m.picker.IsOpen() {
 		return ui.Status{Text: "↑/↓ choose · enter open · esc cancel", Kind: ui.StatusInfo}
+	}
+	if m.statusMsg == "" && m.browserState.Outdated {
+		return ui.Status{Text: outdatedWarning, Kind: ui.StatusWarning}
 	}
 	return ui.Status{Text: m.statusMsg, Kind: m.statusKind}
 }
@@ -174,6 +180,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.picker = m.picker.Sync(newSel.PullRequests)
 		}
+		return m, nil
+	case provider.BrowserStateUpdatedMsg:
+		m.browserState = msg.State
 		return m, nil
 	case ui.OpenURLFailedMsg:
 		m.setStatus("could not open PR: "+msg.Err.Error(), ui.StatusError)

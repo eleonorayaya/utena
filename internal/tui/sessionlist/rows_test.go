@@ -6,8 +6,12 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/git"
+	"github.com/eleonorayaya/utena/internal/tui/provider"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -46,4 +50,35 @@ func TestSessionList_ShortHelp(t *testing.T) {
 		got = append(got, b.Help().Key+" "+b.Help().Desc)
 	}
 	assert.Equal(t, []string{"enter switch", "o open PR", "n new", "b block", "a archive"}, got)
+}
+
+func TestBrowserSpan_States(t *testing.T) {
+	open := browserSpan("open")
+	assert.Equal(t, "◫", open.Text)
+	assert.Equal(t, theme.Current.AccentBlue, open.Style.GetForeground())
+	for _, st := range []string{"missing", "snapshotted"} {
+		sp := browserSpan(st)
+		assert.Equal(t, "◫", sp.Text, st)
+		assert.Equal(t, theme.Current.TextMuted, sp.Style.GetForeground(), st)
+	}
+	assert.Equal(t, "", browserSpan("").Text)
+}
+
+func TestRenderRow_BrowserMarker(t *testing.T) {
+	s := withClaude(7, "web", claude.StatusIdle)
+	s.IsAttached = true
+	m := New()
+	m, _ = m.Update(provider.BrowserStateUpdatedMsg{State: browser.SessionsView{Sessions: map[uint]browser.SessionBrowser{7: {State: "open", TabCount: 2}}}})
+	out := ansi.Strip(m.renderRow(s, false, 40))
+	assert.Equal(t, 40, lipgloss.Width(out))
+	assert.Equal(t, "  · web"+strings.Repeat(" ", 16)+"◆ ◫ "+strings.Repeat(" ", 13), out)
+
+	without := ansi.Strip(New().renderRow(s, false, 40))
+	assert.Equal(t, "  · web"+strings.Repeat(" ", 16)+"◆   "+strings.Repeat(" ", 13), without)
+}
+
+func TestRenderRow_BrowserMarkerOnlyForOwnSession(t *testing.T) {
+	m := New()
+	m, _ = m.Update(provider.BrowserStateUpdatedMsg{State: browser.SessionsView{Sessions: map[uint]browser.SessionBrowser{8: {State: "open"}}}})
+	assert.NotContains(t, m.renderRow(withClaude(7, "web", claude.StatusIdle), false, 40), "◫")
 }
