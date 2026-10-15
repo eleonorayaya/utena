@@ -926,9 +926,7 @@ func (s *Service) Connected() bool {
 }
 
 func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.connected {
+	if !s.Connected() {
 		return OpenResult{}, ErrUnavailable
 	}
 
@@ -945,6 +943,12 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 			attached = true
 		}
 		focus = attached
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.connected {
+		return OpenResult{}, ErrUnavailable
 	}
 
 	live, err := s.driver.ListWindows(ctx)
@@ -1053,6 +1057,8 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 }
 ```
 
+`sessions.IsAttached` and `sessions.Activate` deliberately run **outside** `s.mu`. `ActivateSession` does worktree and branch sync synchronously. It also publishes `session.activated` on the synchronous eventbus, so a later PR that subscribes `browser` to that event would deadlock on a lock this goroutine already holds.
+
 Then add this to `internal/browser/testing.go`, just below the `FakeSessions` type:
 
 ```go
@@ -1081,7 +1087,7 @@ git commit -m "feat(browser): open links in a session's window"
 
 The rules:
 - `Connected`: mark connected, then **resync**. List the windows, call `store.MarkMissingExcept(liveIDs)`, and set `lastFocusedWindowID` from the window with `Focused`.
-- `WindowCreated`: if a row already has that ID, do nothing, because utena created it. Otherwise, if `lastFocusedWindowID` belongs to an `open` row, insert a row for the new window with the same `SessionID`.
+- `WindowCreated`: if a row already has that ID, do nothing, because utena created it. Otherwise the parent is `lastFocusedWindowID`. If Chrome sent `onFocusChanged(new)` before `onCreated(new)`, so that `lastFocusedWindowID` is the new window itself, the parent is `prevFocusedWindowID` instead. If the parent belongs to an `open` row, insert a row for the new window with the same `SessionID`. Chrome's event order for cmd-N hasn't been checked, so both orders must work.
 - `WindowRemoved`: delete its row (a deliberate close; telling a quit from a close is PR 3).
 - `OnAppStart` runs `followEvents`, which retries `driver.Subscribe` every 2 seconds the same way `mux.Service.followEvents` does. When the driver stream ends, it marks the service disconnected.
 
@@ -1120,6 +1126,21 @@ func TestWindowCreated_InheritsOwnerFromFocusedWindow(t *testing.T) {
 	h.svc.handleEvent(context.Background(), Event{Type: EventFocusChanged, WindowID: parent.ID})
 
 	child := h.driver.AddWindow("chrome://newtab")
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: child.ID})
+
+	got, err := h.store.GetByDriverWindowID(child.ID)
+	require.NoError(t, err)
+	assert.Equal(t, uint(3), got.SessionID)
+}
+
+func TestWindowCreated_InheritsWhenFocusEventArrivesFirst(t *testing.T) {
+	h := newHarness(t)
+	parent := h.driver.AddWindow("https://a.example.com")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 3, State: WindowOpen, DriverWindowID: parent.ID}))
+	h.svc.handleEvent(context.Background(), Event{Type: EventFocusChanged, WindowID: parent.ID})
+
+	child := h.driver.AddWindow("chrome://newtab")
+	h.svc.handleEvent(context.Background(), Event{Type: EventFocusChanged, WindowID: child.ID})
 	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: child.ID})
 
 	got, err := h.store.GetByDriverWindowID(child.ID)
@@ -1183,7 +1204,7 @@ func TestFollowEvents_DeliversDriverEvents(t *testing.T) {
 Run: `task test --force`
 Expected: they FAIL. The resync, created and removed cases fail on assertions, and `followEvents` is undefined.
 
-**Step 3: Implement it.** In `internal/browser/service.go`, replace `handleEvent` and add the methods below:
+**Step 3: Implement it.** In `internal/browser/service.go`, add the field `prevFocusedWindowID string` to `Service`, next to `lastFocusedWindowID`. Then replace `handleEvent` and add the methods below:
 
 ```go
 func (s *Service) OnAppStart(ctx context.Context) error {
@@ -1236,7 +1257,10 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 		if ev.WindowID == "" {
 			return
 		}
-		s.lastFocusedWindowID = ev.WindowID
+		if ev.WindowID != s.lastFocusedWindowID {
+			s.prevFocusedWindowID = s.lastFocusedWindowID
+			s.lastFocusedWindowID = ev.WindowID
+		}
 		err = s.store.TouchFocused(ev.WindowID, s.now())
 	}
 	if err != nil {
@@ -1265,7 +1289,11 @@ func (s *Service) adopt(windowID string) error {
 	} else if !errors.Is(err, ErrWindowNotFound) {
 		return err
 	}
-	parent, err := s.store.GetByDriverWindowID(s.lastFocusedWindowID)
+	parentID := s.lastFocusedWindowID
+	if parentID == windowID {
+		parentID = s.prevFocusedWindowID
+	}
+	parent, err := s.store.GetByDriverWindowID(parentID)
 	if errors.Is(err, ErrWindowNotFound) {
 		return nil
 	}
@@ -1436,6 +1464,9 @@ func (c *Controller) HandleStatus(w http.ResponseWriter, r *http.Request) {
 ```
 
 `context.WithoutCancel` matters here. With `activate: true`, the TUI popup is killed as soon as tuios reattaches, and the open must still finish after that.
+
+> [!IMPORTANT]
+> **Timeout ordering.** The server's budget is 15 seconds. Both clients (the CLI in Task 10 and the TUI in Task 11) wait **20 seconds** before falling back to `/usr/bin/open`. If a client gave up first, the server would still finish the open, and the fallback would open the link a second time.
 
 `internal/browser/router.go`:
 
@@ -2280,25 +2311,36 @@ browserModule := browser.NewModule(chrome.NewDriver(), browserSessions{sessions:
 
 - In `modules()`, add `{"browser", "/browser", a.Browser},` directly after the `session` entry, so it starts after sessions and stops before them.
 
-**Step 3: Write a wiring test, `internal/api/browsersessions_test.go`.** Look at the existing `internal/api/*_test.go` to see how tests build an app (for example `newApp` with `db.OpenInMemorySQLite()` and `afero.NewMemMapFs()`), and use the same helper. The test asserts that `GET /browser/status` on `app.Routes()` returns 200 with `{"connected":false}` once `app.DB.OnAppStart` has run migrations, and that `POST /browser/open` returns 503.
+**Step 3: Write a wiring test, `internal/api/browsersessions_test.go`.** It uses the existing `setupTestRouter` from `server_test.go`. That helper builds the app with `mux.FakeDriver` and runs `app.OnStart`. The real `chrome.Driver` it starts is harmless, because nothing connects to it.
 
 ```go
+package api
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
 func TestBrowserRoutesMounted(t *testing.T) {
-	app := newTestApp(t)
-	srv := httptest.NewServer(app.Routes())
-	defer srv.Close()
+	_, router, _, _, _ := setupTestRouter(t)
 
-	res, err := srv.Client().Get(srv.URL + "/browser/status")
-	require.NoError(t, err)
-	defer res.Body.Close()
-	assert.Equal(t, http.StatusOK, res.StatusCode)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/browser/status", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"connected":false}`, w.Body.String())
 
-	_, err = browser.RequestOpen(context.Background(), srv.Client(), srv.URL+"/browser", browser.OpenRequest{SessionID: 1, URL: "https://x.example.com"})
-	assert.ErrorIs(t, err, browser.ErrUnavailable)
+	body, _ := json.Marshal(map[string]any{"session_id": 1, "url": "https://x.example.com"})
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/browser/open", bytes.NewReader(body)))
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 ```
-
-If no `newTestApp` helper exists, build one inline. Construct with `newApp(gormDB, afero.NewMemMapFs(), Config{ConfigDir: t.TempDir(), SessionsRoot: t.TempDir()})` and call `app.DB.OnAppStart(ctx)` to migrate. Don't call `app.OnStart`, which would start tuios and the other modules.
 
 **Step 4: Run the tests and lint**
 
@@ -2608,7 +2650,7 @@ func openCmd() *cobra.Command {
 }
 
 func openURL(ctx context.Context, baseURL string, sessionID uint, url string, fallback func(string) error) error {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	_, err := browser.RequestOpen(ctx, http.DefaultClient, baseURL+"/browser", browser.OpenRequest{SessionID: sessionID, URL: url})
 	if err != nil {
@@ -2723,7 +2765,7 @@ and in `sessionsProvider.Update`, next to `case activateSessionMsg:`:
 ```go
 func (c *client) openURL(sessionID uint, url string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		req := browser.OpenRequest{SessionID: sessionID, URL: url, Activate: true}
 		if _, err := browser.RequestOpen(ctx, c.httpClient, c.baseURL+"/browser", req); err != nil {
