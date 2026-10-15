@@ -1,0 +1,12 @@
+version: '3'
+
+vars:
+  EXTENSION_DIR: '{{.HOME}}/.local/share/utena/chrome-extension'
+
+tasks:
+  install:
+    desc: Copy the Chrome extension to a stable path for "Load unpacked"
+    cmds:
+      - mkdir -p {{shellQuote .EXTENSION_DIR}}
+      - cp extension/chrome/manifest.json extension/chrome/background.js {{shellQuote .EXTENSION_DIR}}/
+      - echo "Reload the utena extension in chrome://extensions (first time{{":"}} Developer mode → Load unpacked → {{.EXTENSION_DIR}})"

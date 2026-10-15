@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "utena",
+  "version": "0.1.0",
+  "description": "Lets the utena daemon route links into per-session browser windows.",
+  "minimum_chrome_version": "116",
+  "permissions": ["tabs", "alarms"],
+  "background": { "service_worker": "background.js" }
+}

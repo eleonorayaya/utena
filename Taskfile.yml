@@ -5,6 +5,8 @@ includes:
     taskfile: Taskfile.daemon.yml
   tui:
     taskfile: Taskfile.tui.yml
+  extension:
+    taskfile: Taskfile.extension.yml
 
 vars:
   DEV_PORT:
@@ -49,6 +51,7 @@ tasks:
     cmds:
       - task: daemon:install
       - task: tui:install
+      - task: extension:install
 
   dev:
     cmds:
