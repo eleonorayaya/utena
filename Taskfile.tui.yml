@@ -23,6 +23,7 @@ tasks:
       - mkdir -p {{dir .TUI_BIN}}
       - rm -f {{shellQuote .TUI_BIN}}
       - cp ./out/tui {{shellQuote .TUI_BIN}}
+      - ln -sf utena {{shellQuote (print (dir .TUI_BIN) "/utena-open")}}
   run:
     deps:
       - build

@@ -22,6 +22,7 @@ var (
 )
 
 func main() {
+	os.Args = rewriteArgs(os.Args)
 	rootCmd := &cobra.Command{
 		Use:          "utena",
 		Short:        "Utena workspace manager for tuios",
@@ -39,6 +40,7 @@ func main() {
 	rootCmd.AddCommand(workspaceCmd())
 	rootCmd.AddCommand(hookCmd())
 	rootCmd.AddCommand(topCmd())
+	rootCmd.AddCommand(openCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

@@ -8,6 +8,9 @@ func Script() string {
     export UTENA_SESSION_ID="$_utena_val"
   fi
   unset _utena_val
+  if [ -x "$HOME/.local/bin/utena-open" ]; then
+    export BROWSER="$HOME/.local/bin/utena-open"
+  fi
 fi
 `
 }
