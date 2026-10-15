@@ -30,7 +30,7 @@ func postCheckoutHookCmd() *cobra.Command {
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
-			reportCheckout(cmd.Context(), "http://localhost:"+port, args)
+			reportCheckout(cmd.Context(), "http://127.0.0.1:"+port, args)
 			return nil
 		},
 	}

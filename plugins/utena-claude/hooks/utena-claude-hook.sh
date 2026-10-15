@@ -21,6 +21,6 @@ curl -s -X PUT \
         --arg cwd "$CWD" \
         --arg notification_type "$NOTIFICATION_TYPE" \
         '{event:$event, claude_session_id:$claude_session_id, session_id:$session_id, cwd:$cwd, notification_type:$notification_type}')" \
-    "http://localhost:3333/claude/hook" > /dev/null 2>&1 || true
+    "http://127.0.0.1:3333/claude/hook" > /dev/null 2>&1 || true
 
 exit 0

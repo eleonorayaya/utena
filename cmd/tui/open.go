@@ -25,7 +25,7 @@ func openCmd() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
-			base := fmt.Sprintf("http://localhost:%s", port)
+			base := fmt.Sprintf("http://127.0.0.1:%s", port)
 			sessionID := sessionIDFromEnv()
 			for _, u := range args {
 				if err := openURL(cmd.Context(), base, sessionID, u, systemOpen); err != nil {

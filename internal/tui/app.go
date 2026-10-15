@@ -32,7 +32,7 @@ type App struct {
 }
 
 func NewApp(port string, initialView router.View) App {
-	baseURL := fmt.Sprintf("http://localhost:%s", port)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
 	views := map[router.View]router.ViewEntry{
 		router.SessionListView:        &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
 		router.SessionDetailView:      &router.ViewAdapter[sessiondetail.Model]{Model: sessiondetail.New()},

@@ -30,7 +30,7 @@ func monitorCmd() *cobra.Command {
 				return fmt.Errorf("invalid session id %q", args[0])
 			}
 			port, _ := cmd.Root().Flags().GetString("port")
-			url := fmt.Sprintf("ws://localhost:%s/monitor/ws?session_id=%d", port, sessionID)
+			url := fmt.Sprintf("ws://127.0.0.1:%s/monitor/ws?session_id=%d", port, sessionID)
 
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()

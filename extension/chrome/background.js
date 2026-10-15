@@ -1,11 +1,10 @@
 const PROTOCOL = 1;
-const ENDPOINT = "ws://localhost:3333/browser/chrome";
+const ENDPOINT = "ws://127.0.0.1:3333/browser/chrome";
 const PING_MS = 20000;
 const MAX_BACKOFF_MS = 30000;
 
 let socket = null;
 let backoff = 1000;
-let pingTimer = null;
 let retryTimer = null;
 
 function connect() {
@@ -13,15 +12,17 @@ function connect() {
   clearTimeout(retryTimer);
   const ws = new WebSocket(ENDPOINT);
   socket = ws;
+  let ping = null;
   ws.onopen = () => {
     backoff = 1000;
     send({ type: "hello", protocol: PROTOCOL, browser: "chrome" });
-    pingTimer = setInterval(() => send({ type: "ping" }), PING_MS);
+    ping = setInterval(() => send({ type: "ping" }), PING_MS);
   };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
   ws.onclose = (e) => {
-    clearInterval(pingTimer);
-    if (socket === ws) socket = null;
+    clearInterval(ping);
+    if (socket !== ws) return;
+    socket = null;
     if (e.reason === "replaced") return;
     retryTimer = setTimeout(connect, backoff);
     backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
