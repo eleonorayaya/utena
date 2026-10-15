@@ -93,6 +93,62 @@ func (s *Store) MarkMissingExcept(live map[string]bool) error {
 	return nil
 }
 
+func (s *Store) SaveTabs(driverWindowID string, tabs []SavedTab, at time.Time) error {
+	if driverWindowID == "" {
+		return nil
+	}
+	return s.db.Model(&BrowserWindow{}).
+		Where("driver_window_id = ? AND state = ?", driverWindowID, WindowOpen).
+		Select("Tabs", "SnapshotAt").
+		Updates(&BrowserWindow{Tabs: tabs, SnapshotAt: at}).Error
+}
+
+func (s *Store) ListBySession(sessionID uint) ([]BrowserWindow, error) {
+	var rows []BrowserWindow
+	err := s.db.Where("session_id = ?", sessionID).Order("id").Find(&rows).Error
+	return rows, err
+}
+
+func (s *Store) ListRestorable(sessionID uint) ([]BrowserWindow, error) {
+	var rows []BrowserWindow
+	err := s.db.Where("session_id = ? AND state IN ?", sessionID, []WindowState{WindowMissing, WindowSnapshotted}).
+		Order("last_focused_at DESC, id DESC").
+		Find(&rows).Error
+	return rows, err
+}
+
+func (s *Store) MarkSnapshotted(id uint, tabs []SavedTab, at time.Time) error {
+	return s.db.Model(&BrowserWindow{}).
+		Where("id = ?", id).
+		Select("State", "DriverWindowID", "Tabs", "SnapshotAt").
+		Updates(&BrowserWindow{State: WindowSnapshotted, Tabs: tabs, SnapshotAt: at}).Error
+}
+
+func (s *Store) Reopen(id uint, driverWindowID string, at time.Time) error {
+	return s.db.Model(&BrowserWindow{}).
+		Where("id = ?", id).
+		Updates(map[string]any{"state": WindowOpen, "driver_window_id": driverWindowID, "last_focused_at": at}).Error
+}
+
+func (s *Store) MarkMissingByDriverWindowID(id string) error {
+	if id == "" {
+		return nil
+	}
+	return s.db.Model(&BrowserWindow{}).
+		Where("driver_window_id = ? AND state = ?", id, WindowOpen).
+		Updates(map[string]any{"state": WindowMissing, "driver_window_id": ""}).Error
+}
+
+func (s *Store) DeleteBySession(sessionID uint) error {
+	return s.db.Where("session_id = ?", sessionID).Delete(&BrowserWindow{}).Error
+}
+
+func (s *Store) ListMissing() ([]BrowserWindow, error) {
+	var rows []BrowserWindow
+	err := s.db.Where("state = ?", WindowMissing).Order("id").Find(&rows).Error
+	return rows, err
+}
+
 const browserStateID = 1
 
 func (s *Store) RunID() (string, error) {
