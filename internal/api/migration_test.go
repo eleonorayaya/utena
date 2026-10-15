@@ -260,8 +260,6 @@ func runLegacyMigration(t *testing.T, gormDB *gorm.DB) {
 	assert.Equal(t, mux.StatusActive, sess.MuxSession.Status)
 	assert.Equal(t, map[string]string{"UTENA_SESSION_ID": "1"}, sess.MuxSession.Env)
 	assert.Equal(t, "s1", sess.Name)
-	require.NotNil(t, sess.TodoID)
-	assert.Equal(t, todoID, *sess.TodoID)
 	assert.Equal(t, "active", string(sess.Status))
 	assert.True(t, sess.IsAttached)
 	assert.True(t, lastUsed.Equal(sess.LastUsedAt))
@@ -300,7 +298,6 @@ func runLegacyMigration(t *testing.T, gormDB *gorm.DB) {
 	sessIdx := indexesOf(t, gormDB, "sessions")
 	assert.Equal(t, map[string]bool{
 		"idx_sessions_mux_session_id": true,
-		"idx_sessions_todo_id":        false,
 		"idx_sessions_session_root":   false,
 		"idx_sessions_deleted_at":     false,
 	}, sessIdx)
