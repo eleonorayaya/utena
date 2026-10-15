@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-var newlines = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+var newlines = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ")
 
 func SingleLine(s string) string {
 	return strings.Map(func(r rune) rune {
@@ -18,7 +18,7 @@ func SingleLine(s string) string {
 			return -1
 		}
 		return r
-	}, newlines.Replace(s))
+	}, ansi.Strip(newlines.Replace(s)))
 }
 
 func Truncate(s string, width int) string {

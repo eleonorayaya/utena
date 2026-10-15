@@ -284,7 +284,7 @@ func TestBrowserSection_SanitizesControlCharacters(t *testing.T) {
 	out := m.View()
 	assert.NotContains(t, out, "\x1b]52")
 	assert.NotContains(t, out, "\a")
-	assert.Contains(t, ansi.Strip(out), "evil]52;c;Zm9vtitle")
+	assert.Contains(t, ansi.Strip(out), "eviltitle")
 }
 
 func TestBrowserSection_UntitledTabShowsURLOnly(t *testing.T) {
@@ -330,4 +330,32 @@ func TestDetail_ShortHelpShowsNextWhenTabsSelectable(t *testing.T) {
 
 	m, _ = New().Update(SelectMsg{Session: makeActiveSession()})
 	assert.Len(t, m.Keys().ShortHelp(), 5)
+}
+
+func threeTabs() browser.SessionBrowser {
+	sb := oneWindow()
+	sb.TabCount = 3
+	sb.Windows[0].Tabs = append(sb.Windows[0].Tabs, browser.TabView{ID: "t3", Title: "Third", URL: "https://third.example.com"})
+	return sb
+}
+
+func TestBrowserCursor_TabGoneWhileBlockersChangeKeepsTabPosition(t *testing.T) {
+	m := detailWith(makeBlockedSession(), threeTabs())
+	m, _ = m.Update(runeKey("j"))
+	m, _ = m.Update(runeKey("j"))
+	sel := m.currentSelection()
+	require.Equal(t, "t1", sel.tab.tabID)
+
+	fewer := makeBlockedSession()
+	fewer.Blockers = fewer.Blockers[:1]
+	m.sess = &fewer
+	gone := threeTabs()
+	gone.Windows[0].Tabs = gone.Windows[0].Tabs[1:]
+	m.browserState = browserState(1, gone).State
+	m.restoreSelection(sel)
+	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t2"}, enterTarget(t, m))
+
+	m.browserState = browserState(1, browser.SessionBrowser{}).State
+	m.restoreSelection(sel)
+	assert.Equal(t, 0, m.cursor)
 }

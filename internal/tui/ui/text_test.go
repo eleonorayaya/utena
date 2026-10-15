@@ -54,6 +54,8 @@ func TestHyperlink(t *testing.T) {
 
 func TestSingleLine_StripsControlCharacters(t *testing.T) {
 	assert.Equal(t, "a b c", SingleLine("a\nb\r\nc"))
-	assert.Equal(t, "evil]52;c;Zm9vtitle", SingleLine("evil\x1b]52;c;Zm9v\atitle"))
+	assert.Equal(t, "eviltitle", SingleLine("evil\x1b]52;c;Zm9v\atitle"))
+	assert.Equal(t, "a b", SingleLine("a\tb"))
+	assert.Equal(t, "red plain", SingleLine("\x1b[31mred\x1b[0m plain"))
 	assert.Equal(t, "日本語 🚀", SingleLine("日本語 🚀"))
 }

@@ -92,10 +92,11 @@ type selection struct {
 	blockerID uint
 	tab       tabRef
 	index     int
+	tabIndex  int
 }
 
 func (m Model) currentSelection() selection {
-	sel := selection{index: m.cursor}
+	sel := selection{index: m.cursor, tabIndex: m.cursor - len(m.sess.OpenBlockers())}
 	if b := m.selectedBlocker(); b != nil {
 		sel.blockerID = b.ID
 	}
@@ -119,11 +120,16 @@ func (m *Model) restoreSelection(sel selection) {
 		return
 	}
 	if sel.tab != (tabRef{}) {
-		for i, t := range m.selectableTabs() {
+		tabs := m.selectableTabs()
+		for i, t := range tabs {
 			if t == sel.tab {
 				m.cursor = len(open) + i
 				return
 			}
+		}
+		if len(tabs) > 0 {
+			m.cursor = len(open) + min(sel.tabIndex, len(tabs)-1)
+			return
 		}
 	}
 	m.clampCursor()
