@@ -48,6 +48,7 @@ type Service struct {
 	mu                  sync.Mutex
 	connected           bool
 	lastFocusedWindowID string
+	prevFocusedWindowID string
 }
 
 func NewService(driver Driver, store *Store, sessions Sessions) *Service {
@@ -172,21 +173,98 @@ func (s *Service) targetWindow(sessionID uint, live []Window) (Window, bool, err
 	return Window{}, false, nil
 }
 
+func (s *Service) OnAppStart(ctx context.Context) error {
+	go s.followEvents(ctx)
+	return nil
+}
+
+func (s *Service) OnAppEnd(ctx context.Context) error {
+	return nil
+}
+
+func (s *Service) followEvents(ctx context.Context) {
+	lastErr := ""
+	for ctx.Err() == nil {
+		err := s.driver.Subscribe(ctx, func(ev Event) {
+			lastErr = ""
+			s.handleEvent(ctx, ev)
+		})
+		s.handleEvent(ctx, Event{Type: EventDisconnected})
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil && err.Error() != lastErr {
+			lastErr = err.Error()
+			slog.Warn("browser event stream unavailable; retrying", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
 func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var err error
 	switch ev.Type {
 	case EventConnected:
 		s.connected = true
+		err = s.resync(ctx)
 	case EventDisconnected:
 		s.connected = false
+	case EventWindowCreated:
+		err = s.adopt(ev.WindowID)
+	case EventWindowRemoved:
+		err = s.store.DeleteByDriverWindowID(ev.WindowID)
 	case EventFocusChanged:
 		if ev.WindowID == "" {
 			return
 		}
-		s.lastFocusedWindowID = ev.WindowID
-		if err := s.store.TouchFocused(ev.WindowID, s.now()); err != nil {
-			slog.WarnContext(ctx, "browser: record focus failed", "window", ev.WindowID, "error", err)
+		if ev.WindowID != s.lastFocusedWindowID {
+			s.prevFocusedWindowID = s.lastFocusedWindowID
+			s.lastFocusedWindowID = ev.WindowID
+		}
+		err = s.store.TouchFocused(ev.WindowID, s.now())
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "browser event handler failed", "type", ev.Type, "window", ev.WindowID, "error", err)
+	}
+}
+
+func (s *Service) resync(ctx context.Context) error {
+	windows, err := s.driver.ListWindows(ctx)
+	if err != nil {
+		return err
+	}
+	live := make(map[string]bool, len(windows))
+	for _, w := range windows {
+		live[w.ID] = true
+		if w.Focused {
+			s.lastFocusedWindowID = w.ID
 		}
 	}
+	return s.store.MarkMissingExcept(live)
+}
+
+func (s *Service) adopt(windowID string) error {
+	if _, err := s.store.GetByDriverWindowID(windowID); err == nil {
+		return nil
+	} else if !errors.Is(err, ErrWindowNotFound) {
+		return err
+	}
+	parentID := s.lastFocusedWindowID
+	if parentID == windowID {
+		parentID = s.prevFocusedWindowID
+	}
+	parent, err := s.store.GetByDriverWindowID(parentID)
+	if errors.Is(err, ErrWindowNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return s.store.Add(&BrowserWindow{SessionID: parent.SessionID, State: WindowOpen, DriverWindowID: windowID, LastFocusedAt: s.now()})
 }
