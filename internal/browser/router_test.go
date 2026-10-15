@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -69,4 +70,43 @@ func TestRouter_Status(t *testing.T) {
 	require.NoError(t, err)
 	defer res.Body.Close()
 	assert.Equal(t, http.StatusOK, res.StatusCode)
+}
+
+func TestRouter_OpenRejectsCrossOriginRequests(t *testing.T) {
+	srv, m, driver := newTestServer(t)
+	m.Service.handleEvent(context.Background(), Event{Type: EventConnected})
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/open", strings.NewReader(`{"session_id":1,"url":"`+prURL+`"}`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://evil.example")
+	res, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	res.Body.Close()
+
+	assert.Equal(t, http.StatusForbidden, res.StatusCode)
+	windows, _ := driver.ListWindows(context.Background())
+	assert.Empty(t, windows)
+}
+
+func TestRouter_StatusRejectsCrossOriginRequests(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/status", nil)
+	require.NoError(t, err)
+	req.Header.Set("Origin", "null")
+	res, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	res.Body.Close()
+	assert.Equal(t, http.StatusForbidden, res.StatusCode)
+}
+
+func TestRouter_DriverHandlerAcceptsExtensionOrigin(t *testing.T) {
+	srv, _, driver := newTestServer(t)
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/fake", nil)
+	require.NoError(t, err)
+	req.Header.Set("Origin", "chrome-extension://abc")
+	res, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	res.Body.Close()
+	assert.Equal(t, int32(1), driver.hits.Load())
 }
