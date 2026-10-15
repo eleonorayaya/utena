@@ -275,6 +275,10 @@ func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceI
 	return sessions, nil
 }
 
+func (s *SessionService) AttachedSessionID(ctx context.Context) (uint, error) {
+	return s.store.AttachedID()
+}
+
 func (s *SessionService) GetSession(ctx context.Context, id uint) (*Session, error) {
 	sess, err := s.store.GetByID(id)
 	if err != nil {

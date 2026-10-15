@@ -20,6 +20,8 @@
 - `wm.Driver` has no focus method, because AeroSpace follows Chrome's own focus (confirmed in the smoke test).
 - `browser.Driver` gains `AppBundleID()` and `WindowTitle(Window) string`. The second returns the title the OS shows for that window, for Chrome `"<active tab title> - Google Chrome"`. This keeps the title format inside the driver.
 - Linking order: (1) a cached link that is still live; (2) for windows utena creates, the AeroSpace window that appeared since a snapshot taken just before `CreateWindow`, polled for up to 1.5 s, ignoring wm IDs that are already linked; (3) an exact title match among unlinked wm windows, only when no other unlinked Chrome window shares that title. There is **no elimination step**. AeroSpace lists every Chrome window (popups, PiP, undocked DevTools, other profiles), while the extension reports only normal windows, and AeroSpace can lag behind the extension. So "the last unlinked window" can be a foreign window, and no counting heuristic is safe. If the match is still ambiguous, **don't move anything**: log it at debug level and retry on the next `TabsChanged` or swap. The marker-tab fallback in the spec is deferred until real ambiguity shows up.
+- An activating `Open` that reuses an existing window runs placement synchronously, under its lock, before it touches tabs or focuses the window. AeroSpace follows Chrome focus, so focusing a window still parked on `P` would switch the user's view to `P`. Placing before the tab change also keeps the window's title matching its wm title.
+- The created-window diff is checked on the Chrome side as well. After `linkCreated` succeeds, `Open` lists Chrome windows once. If any Chrome window other than the one it created appeared since its earlier list, it drops the link, because the new wm window may belong to that other window. Title matching may link it later.
 - Detach never clears the attached session. The browser keeps the last attached session's windows on the browser workspace (there is no `SessionAttached{0}`).
 - Creating windows minimized to avoid the flash is not attempted. A background-session window may briefly appear where AeroSpace's `on-window-detected` rule puts it (`2`), then it is moved to `P`.
 
@@ -173,13 +175,13 @@ Commit: `feat(browser): link browser windows to window-manager windows`
 **Constructor:** `NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driver, layout Layout)`, with `type Layout struct { BrowserWorkspace, ParkWorkspace string }`. Update `NewModule` to take the same extra parameters and pass them through. Update every existing test and caller (`newHarness`, `router_test`, `internal/api/app.go`) to pass `wm.None{}` and `Layout{"2", "P"}`, or a `wm.FakeDriver` where placement is tested.
 
 **State:**
-- `attached uint`, guarded by `s.mu`. Seed it when connected: in `resync`, if `attached == 0`, ask `Sessions.Attached(ctx)`.
+- `attached`, an `atomic.Uint64`, **not** guarded by `s.mu`: `Open` can hold `s.mu` for seconds, and `SetAttached` must never wait on it. Seed it when connected: in `resync`, if `attached == 0`, ask `Sessions.Attached(ctx)` and store it with `CompareAndSwap(0, id)`, so a concurrent `SetAttached` wins. `Sessions.Attached` is backed by `SessionService.AttachedSessionID`, a store query that selects only the attached session's ID.
 - Add `Attached(ctx) (uint, error)` to the `Sessions` interface. It returns the currently attached session ID, or 0. Implement it in `internal/api/browsersessions.go` by listing sessions and finding the one with `IsAttached`; check `SessionService` for an existing helper first. Add it to `FakeSessions`, backed by the existing `Attached` field.
 - `linker` (Task 5).
 - `swapCh chan struct{}`, a 1-slot channel.
 
 **`SetAttached(sessionID uint)`:**
-- Stores the ID under `s.mu`.
+- Stores the ID atomically, without taking `s.mu`.
 - Does a non-blocking send on `swapCh`.
 - Never takes long, because it is called from synchronous eventbus handlers. The tuios hook's curl uses `--max-time 1`.
 
@@ -206,7 +208,8 @@ Commit: `feat(browser): link browser windows to window-manager windows`
   2. after creating, poll `wm.ListWindows` every 100 ms for up to 1.5 s, until `linker.linkCreated` succeeds or time runs out;
   3. then signal `swapCh`. `Open` must not wait for the move itself.
   - Hold the lock as `Open` already does. The wm polling happens inside `Open`'s existing critical section, and that is acceptable.
-- In `Open`, when `activated` is true, update `s.attached = req.SessionID` before taking the lock, so the swap that follows uses the new target even if the eventbus event arrives late.
+- In `Open`, when `activated` is true, call `SetAttached(req.SessionID)` before taking the lock. The swap that follows then uses the new target, and is signalled, even if the eventbus event arrives late or never.
+- In `Open`, when `activated` is true and an existing window is found, call `placeLocked(ctx)` (the body of `place`, without taking the lock) before `ActivateTab`/`OpenTab` and `FocusWindow`. Log errors; never fail `Open`.
 
 **Tests** use `FakeDriver` + `wm.FakeDriver` + `FakeSessions` + `testdb`. Call `place` directly; it is synchronous.
 - Swap: sessions 1 and 2 each own a linked window. With `SetAttached(1)` and `place`, 1's window is on `2` and 2's is on `P`. Switching to 2 reverses that.

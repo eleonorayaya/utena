@@ -329,3 +329,74 @@ func TestFakeSessions_Attached(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint(3), id)
 }
+
+func TestOpen_ActivatePlacesBeforeFocusing(t *testing.T) {
+	h := newPlaceHarness(t)
+	a := h.own(t, 1, "a", "P")
+	b := h.own(t, 2, "b", "2")
+	h.sessions.AttachedID = 2
+	h.svc.SetAttached(2)
+	drain(h.svc)
+	workspaceAtFocus := ""
+	h.driver.OnFocus = func(string) { workspaceAtFocus = h.wm.Workspace(a) }
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL, Activate: true})
+	require.NoError(t, err)
+	assert.False(t, res.Created)
+	assert.True(t, res.Focused)
+
+	assert.Equal(t, "2", workspaceAtFocus)
+	assert.Equal(t, "2", h.wm.Workspace(a))
+	assert.Equal(t, "P", h.wm.Workspace(b))
+	assert.Len(t, h.svc.swapCh, 1)
+}
+
+func TestOpen_CreatedLinkDroppedWhenAnotherBrowserWindowAppears(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.driver.OnCreate = func(Window) {
+		h.driver.AddWindow("https://other.example.com")
+		h.wm.Add("wm-other", "", "2")
+	}
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	assert.True(t, res.Created)
+	assert.NotContains(t, h.svc.links.links, res.WindowID)
+
+	require.NoError(t, h.svc.place(context.Background()))
+	assert.Empty(t, h.wm.Moves())
+}
+
+func TestOpen_CreatedLinkRetriesUntilWindowAppears(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.driver.OnCreate = func(w Window) {
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			h.wm.Add("wm-"+w.ID, "", "2")
+		}()
+	}
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	assert.Equal(t, "wm-"+res.WindowID, h.svc.links.links[res.WindowID])
+}
+
+func TestOpen_CreatedLinkGivesUpAfterTimeout(t *testing.T) {
+	h := newPlaceHarness(t)
+
+	start := time.Now()
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	elapsed := time.Since(start)
+	require.NoError(t, err)
+	assert.True(t, res.Created)
+	assert.GreaterOrEqual(t, elapsed, createdLinkWait)
+	assert.Less(t, elapsed, 3*time.Second)
+	assert.Empty(t, h.svc.links.links)
+}
+
+func TestNewService_PointerToNoneIsInert(t *testing.T) {
+	store := NewStore(testdb.New(t, &BrowserWindow{}, &BrowserState{}))
+	svc := NewService(NewFakeDriver(), store, &FakeSessions{}, &wm.None{}, Layout{BrowserWorkspace: "2", ParkWorkspace: "P"})
+	assert.True(t, svc.wmInert)
+	assert.False(t, NewService(NewFakeDriver(), store, &FakeSessions{}, wm.NewFakeDriver(), Layout{}).wmInert)
+}

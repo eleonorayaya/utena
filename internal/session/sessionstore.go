@@ -224,6 +224,17 @@ func sessionConflictMessage(session *Session) string {
 	return fmt.Sprintf("session %q already exists", session.Name)
 }
 
+func (s *SessionStore) AttachedID() (uint, error) {
+	var ids []uint
+	if err := s.db.Model(&Session{}).Where("is_attached = ?", true).Order("id").Limit(1).Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	return ids[0], nil
+}
+
 func (s *SessionStore) ClearAttachedExcept(id uint) error {
 	return s.db.Model(&Session{}).Where("is_attached = ? AND id != ?", true, id).Update("is_attached", false).Error
 }

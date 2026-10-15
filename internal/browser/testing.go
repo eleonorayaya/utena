@@ -15,6 +15,7 @@ type FakeDriver struct {
 	stopped  chan struct{}
 	ListErr  error
 	OnCreate func(Window)
+	OnFocus  func(windowID string)
 }
 
 var _ Driver = (*FakeDriver)(nil)
@@ -172,8 +173,12 @@ func (f *FakeDriver) ActivateTab(ctx context.Context, windowID, tabID string) er
 
 func (f *FakeDriver) FocusWindow(ctx context.Context, windowID string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.focused = append(f.focused, windowID)
+	onFocus := f.OnFocus
+	f.mu.Unlock()
+	if onFocus != nil {
+		onFocus(windowID)
+	}
 	return nil
 }
 

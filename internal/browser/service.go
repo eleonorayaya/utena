@@ -79,18 +79,25 @@ type Service struct {
 }
 
 func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driver, layout Layout) *Service {
-	_, inert := wmDriver.(wm.None)
 	return &Service{
 		driver:   driver,
 		store:    store,
 		sessions: sessions,
 		wm:       wmDriver,
-		wmInert:  inert,
+		wmInert:  isInert(wmDriver),
 		layout:   layout,
 		now:      time.Now,
 		swapCh:   make(chan struct{}, 1),
 		unowned:  map[string]struct{}{},
 	}
+}
+
+func isInert(d wm.Driver) bool {
+	switch d.(type) {
+	case wm.None, *wm.None:
+		return true
+	}
+	return false
 }
 
 func (s *Service) SetAttached(sessionID uint) {
@@ -135,7 +142,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 				return OpenResult{}, err
 			}
 			activated = true
-			s.attached.Store(uint64(req.SessionID))
+			s.SetAttached(req.SessionID)
 		default:
 			focus = attached
 		}
@@ -172,7 +179,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 				return OpenResult{}, err
 			}
 			if track {
-				s.linkCreated(ctx, w.ID, before)
+				s.linkCreated(ctx, w.ID, before, live)
 			}
 			s.signal()
 		}
@@ -181,6 +188,11 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 			res.TabID = w.Tabs[0].ID
 		}
 	default:
+		if activated {
+			if err := s.placeLocked(ctx); err != nil {
+				slog.WarnContext(ctx, "browser: placement before focus failed", "error", err)
+			}
+		}
 		res.WindowID = target.ID
 		if tab, ok := MatchTab(target.Tabs, req.URL); ok {
 			if err := s.driver.ActivateTab(ctx, target.ID, tab.ID); err != nil {
@@ -218,11 +230,15 @@ func (s *Service) wmSnapshot(ctx context.Context, sessionID uint) ([]wm.Window, 
 	return before, true
 }
 
-func (s *Service) linkCreated(ctx context.Context, windowID string, before []wm.Window) {
+func (s *Service) linkCreated(ctx context.Context, windowID string, before []wm.Window, live []Window) {
 	deadline := time.Now().Add(createdLinkWait)
 	for {
 		after, err := s.wm.ListWindows(ctx, s.driver.AppBundleID())
 		if err == nil && s.links.linkCreated(windowID, before, after) {
+			if !s.onlyNewBrowserWindow(ctx, windowID, live) {
+				delete(s.links.links, windowID)
+				slog.DebugContext(ctx, "browser: created window link dropped; another browser window appeared", "window", windowID)
+			}
 			return
 		}
 		if !time.Now().Before(deadline) {
@@ -235,6 +251,23 @@ func (s *Service) linkCreated(ctx context.Context, windowID string, before []wm.
 		case <-time.After(createdLinkPoll):
 		}
 	}
+}
+
+func (s *Service) onlyNewBrowserWindow(ctx context.Context, windowID string, live []Window) bool {
+	now, err := s.driver.ListWindows(ctx)
+	if err != nil {
+		return false
+	}
+	existing := make(map[string]bool, len(live))
+	for _, w := range live {
+		existing[w.ID] = true
+	}
+	for _, w := range now {
+		if !existing[w.ID] && w.ID != windowID {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Service) targetWindow(sessionID uint, live []Window) (Window, bool, error) {
@@ -293,6 +326,10 @@ func (s *Service) placeLoop(ctx context.Context) {
 func (s *Service) place(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.placeLocked(ctx)
+}
+
+func (s *Service) placeLocked(ctx context.Context) error {
 	if !s.connected.Load() || s.wmInert {
 		return nil
 	}
