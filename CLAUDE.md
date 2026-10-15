@@ -31,7 +31,7 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
    - `/mux` - client attach hooks, activation long-poll, session env lookup
    - `/claude` - Claude session endpoints
    - `/workspaces` - workspace management endpoints
-   - `/browser` - open links in session windows (`POST /open`), driver status, and the `/browser/chrome` extension websocket
+   - `/browser` - open links in session windows (`POST /open`), driver status, per-session window and tab state for the TUI (`GET /sessions`), tab focus that activates the session first if needed (`POST /focus`), and the `/browser/chrome` extension websocket
 
 ### Go Module Structure
 
@@ -48,7 +48,7 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 - `internal/wm/` - window-manager seam: `wm.Driver` interface (list windows by app bundle ID, move a window to a workspace, focus a window), `wm.FakeDriver`, and the inert `wm.None`
 - `internal/aerospace/` - `wm.Driver` over the `aerospace` CLI
 - `internal/claude/` - Claude session management
-- `internal/tui/` - Bubbletea TUI application
+- `internal/tui/` - Bubbletea TUI application; `internal/tui/provider` holds the daemon client and providers (sessions, workspaces, and a browser provider that fetches `GET /browser/sessions` after every sessions load and focuses tabs through `POST /browser/focus`)
 - `internal/common/` - shared utilities
 
 ### Persistence
