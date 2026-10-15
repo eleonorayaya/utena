@@ -371,6 +371,7 @@ func TestMigration_RefusesWhenBothTablesExist(t *testing.T) {
 	gormDB, err := db.OpenInMemorySQLite()
 	require.NoError(t, err)
 	require.NoError(t, gormDB.AutoMigrate(&legacyTmuxSession{}, &mux.Session{}))
+	require.NoError(t, gormDB.Create(&legacyTmuxSession{Name: "stray"}).Error)
 
 	err = newMigrationApp(t, gormDB).DB.OnAppStart(context.Background())
 	require.Error(t, err)
@@ -391,4 +392,27 @@ func TestMigration_RefusesWhenBothSessionColumnsExist(t *testing.T) {
 	assert.True(t, gormDB.Migrator().HasTable("tmux_sessions"))
 	assert.False(t, gormDB.Migrator().HasTable("mux_sessions"))
 	assert.Contains(t, tableSQL(t, gormDB, "sessions"), "fk_sessions_tmux_session")
+}
+
+func TestMigration_DropsEmptyLeftoversFromOldBinary(t *testing.T) {
+	gormDB := openFileSQLite(t)
+	seedLegacySession(t, gormDB)
+	migrateLegacy(t, gormDB)
+
+	require.NoError(t, gormDB.AutoMigrate(legacyModels...))
+	require.True(t, gormDB.Migrator().HasTable("tmux_sessions"))
+	require.True(t, gormDB.Migrator().HasColumn("sessions", "tmux_session_id"))
+
+	app := migrateLegacy(t, gormDB)
+
+	assertNoTmuxSchema(t, gormDB)
+	assert.Equal(t, []fkInfo{{From: "mux_session_id", Table: "mux_sessions", To: "id"}}, foreignKeysOf(t, gormDB, "sessions"))
+	sess, err := app.Session.Store.GetByID(1)
+	require.NoError(t, err)
+	require.NotNil(t, sess.MuxSession)
+	assert.Equal(t, "work", sess.MuxSession.Name)
+
+	var fkViolations []map[string]any
+	require.NoError(t, gormDB.Raw("PRAGMA foreign_key_check").Scan(&fkViolations).Error)
+	assert.Empty(t, fkViolations)
 }

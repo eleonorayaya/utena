@@ -101,15 +101,20 @@ func renameTmuxSessionColumn(tx *gorm.DB) error {
 	if err := db.DropIndexesIfExist(mg, "sessions", "idx_sessions_tmux_session_id"); err != nil {
 		return err
 	}
-	if mg.HasColumn("sessions", "tmux_session_id") {
-		if mg.HasColumn("sessions", "mux_session_id") {
-			return fmt.Errorf("sessions has both tmux_session_id and mux_session_id columns")
-		}
-		if err := mg.RenameColumn("sessions", "tmux_session_id", "mux_session_id"); err != nil {
-			return err
-		}
+	if !mg.HasColumn("sessions", "tmux_session_id") {
+		return nil
 	}
-	return nil
+	if !mg.HasColumn("sessions", "mux_session_id") {
+		return mg.RenameColumn("sessions", "tmux_session_id", "mux_session_id")
+	}
+	var linked int64
+	if err := tx.Table("sessions").Unscoped().Where("tmux_session_id IS NOT NULL").Count(&linked).Error; err != nil {
+		return err
+	}
+	if linked > 0 {
+		return fmt.Errorf("sessions has both tmux_session_id and mux_session_id columns")
+	}
+	return tx.Exec("ALTER TABLE sessions DROP COLUMN tmux_session_id").Error
 }
 
 func (m *SessionModule) Routes() chi.Router {

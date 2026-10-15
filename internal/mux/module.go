@@ -47,9 +47,17 @@ func renameTmuxSessionsTable(tx *gorm.DB) error {
 	mg := tx.Migrator()
 	if mg.HasTable("tmux_sessions") {
 		if mg.HasTable("mux_sessions") {
-			return fmt.Errorf("both tmux_sessions and mux_sessions tables exist")
-		}
-		if err := mg.RenameTable("tmux_sessions", "mux_sessions"); err != nil {
+			var leftover int64
+			if err := tx.Table("tmux_sessions").Unscoped().Count(&leftover).Error; err != nil {
+				return err
+			}
+			if leftover > 0 {
+				return fmt.Errorf("both tmux_sessions and mux_sessions tables exist")
+			}
+			if err := mg.DropTable("tmux_sessions"); err != nil {
+				return err
+			}
+		} else if err := mg.RenameTable("tmux_sessions", "mux_sessions"); err != nil {
 			return err
 		}
 	}
