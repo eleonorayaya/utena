@@ -98,6 +98,40 @@ func TestPlace_UntitledOwnedWindowIsNotEliminatedAgainstUnownedWindow(t *testing
 	assert.Empty(t, h.wm.Moves())
 }
 
+func TestPlace_WindowNotYetListedByWMIsNotGuessed(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.own(t, 1, "a", "2")
+	b := h.driver.AddWindow("https://b.example.com")
+	h.driver.SetTitle(b.ID, "b")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 2, State: WindowOpen, DriverWindowID: b.ID}))
+	h.wm.Add("wm-foreign", "DevTools", "2")
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+	require.NoError(t, h.svc.place(context.Background()))
+
+	assert.NotContains(t, h.svc.links.links, b.ID)
+	assert.Equal(t, "2", h.wm.Workspace("wm-foreign"))
+	assert.Empty(t, h.wm.Moves())
+}
+
+func TestPlace_TitleSharedWithUnownedWindowMovesNothing(t *testing.T) {
+	h := newPlaceHarness(t)
+	b := h.driver.AddWindow("https://b.example.com")
+	h.driver.SetTitle(b.ID, "shared")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 2, State: WindowOpen, DriverWindowID: b.ID}))
+	h.wm.Add("wm-b", "old - Fake", "2")
+	c := h.driver.AddWindow("https://c.example.com")
+	h.driver.SetTitle(c.ID, "shared")
+	h.wm.Add("wm-c", "shared - Fake", "2")
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	assert.Empty(t, h.svc.links.links)
+	assert.Empty(t, h.wm.Moves())
+}
+
 func TestPlace_WindowAlreadyInPlaceDoesNotMove(t *testing.T) {
 	h := newPlaceHarness(t)
 	h.own(t, 1, "a", "2")

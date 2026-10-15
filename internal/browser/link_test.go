@@ -44,19 +44,19 @@ func TestLinkerResolve(t *testing.T) {
 			name:      "stale chrome entry dropped frees its wm window",
 			cache:     map[string]string{"c9": "w1"},
 			chrome:    []chromeWin{{"c1", "A"}},
-			wm:        []wm.Window{{ID: "w1", Title: "X"}},
+			wm:        []wm.Window{{ID: "w1", Title: "A"}},
 			want:      []string{"c1"},
 			expected:  map[string]string{"c1": "w1"},
 			wantCache: map[string]string{"c1": "w1"},
 		},
 		{
-			name:      "elimination",
+			name:      "last unlinked window is never guessed by elimination",
 			cache:     map[string]string{"c1": "w1"},
 			chrome:    []chromeWin{{"c1", "A"}, {"c2", "B"}},
 			wm:        []wm.Window{{ID: "w1", Title: "A"}, {ID: "w2", Title: "unrelated"}},
 			want:      []string{"c2"},
-			expected:  map[string]string{"c2": "w2"},
-			wantCache: map[string]string{"c1": "w1", "c2": "w2"},
+			expected:  map[string]string{},
+			wantCache: map[string]string{"c1": "w1"},
 		},
 		{
 			name:      "no elimination while another chrome window is unlinked",
@@ -93,6 +93,24 @@ func TestLinkerResolve(t *testing.T) {
 			want:      []string{"c1", "c2"},
 			expected:  map[string]string{},
 			wantCache: map[string]string{},
+		},
+		{
+			name:      "title shared with an unwanted unlinked chrome window gives no link",
+			cache:     map[string]string{},
+			chrome:    []chromeWin{{"c1", "A"}, {"c2", "A"}},
+			wm:        []wm.Window{{ID: "w1", Title: "A"}, {ID: "w2", Title: "stale"}},
+			want:      []string{"c1"},
+			expected:  map[string]string{},
+			wantCache: map[string]string{},
+		},
+		{
+			name:      "title shared with a linked chrome window still links",
+			cache:     map[string]string{"c1": "w1"},
+			chrome:    []chromeWin{{"c1", "A"}, {"c2", "A"}},
+			wm:        []wm.Window{{ID: "w1", Title: "stale"}, {ID: "w2", Title: "A"}},
+			want:      []string{"c2"},
+			expected:  map[string]string{"c2": "w2"},
+			wantCache: map[string]string{"c1": "w1", "c2": "w2"},
 		},
 		{
 			name:      "empty title gives no link",
@@ -132,25 +150,28 @@ func TestLinkerResolve(t *testing.T) {
 func TestLinkerResolveNilCache(t *testing.T) {
 	l := &linker{}
 	got := l.resolve([]Window{{ID: "c1"}}, func(Window) string { return "" }, []wm.Window{{ID: "w1"}}, []string{"c1"})
-	assert.Equal(t, map[string]string{"c1": "w1"}, got)
-	assert.Equal(t, map[string]string{"c1": "w1"}, l.links)
+	assert.Empty(t, got)
+	assert.Empty(t, l.links)
 }
 
 func TestLinkerLinkCreated(t *testing.T) {
 	before := []wm.Window{{ID: "w1"}}
 	tests := []struct {
 		name      string
+		cache     map[string]string
 		after     []wm.Window
 		ok        bool
 		wantCache map[string]string
 	}{
-		{"one new window", []wm.Window{{ID: "w1"}, {ID: "w2"}}, true, map[string]string{"c1": "w2"}},
-		{"zero new windows", []wm.Window{{ID: "w1"}}, false, map[string]string{}},
-		{"two new windows", []wm.Window{{ID: "w1"}, {ID: "w2"}, {ID: "w3"}}, false, map[string]string{}},
+		{"one new window", map[string]string{}, []wm.Window{{ID: "w1"}, {ID: "w2"}}, true, map[string]string{"c1": "w2"}},
+		{"zero new windows", map[string]string{}, []wm.Window{{ID: "w1"}}, false, map[string]string{}},
+		{"two new windows", map[string]string{}, []wm.Window{{ID: "w1"}, {ID: "w2"}, {ID: "w3"}}, false, map[string]string{}},
+		{"only new window already claimed", map[string]string{"c0": "w2"}, []wm.Window{{ID: "w1"}, {ID: "w2"}}, false, map[string]string{"c0": "w2"}},
+		{"claimed new window is ignored", map[string]string{"c0": "w2"}, []wm.Window{{ID: "w1"}, {ID: "w2"}, {ID: "w3"}}, true, map[string]string{"c0": "w2", "c1": "w3"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := &linker{links: map[string]string{}}
+			l := &linker{links: tt.cache}
 			assert.Equal(t, tt.ok, l.linkCreated("c1", before, tt.after))
 			assert.Equal(t, tt.wantCache, l.links)
 		})

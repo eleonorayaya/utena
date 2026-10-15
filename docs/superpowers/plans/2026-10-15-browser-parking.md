@@ -19,7 +19,8 @@
 **Spec:** `docs/superpowers/specs/2026-10-15-browser-window-management-design.md`. See §Event flow, §Linking, the "PR 1 amendments" and the "PR 1 smoke findings". Decisions in this plan that refine the spec are recorded in Task 8:
 - `wm.Driver` has no focus method, because AeroSpace follows Chrome's own focus (confirmed in the smoke test).
 - `browser.Driver` gains `AppBundleID()` and `WindowTitle(Window) string`. The second returns the title the OS shows for that window, for Chrome `"<active tab title> - Google Chrome"`. This keeps the title format inside the driver.
-- Linking order: (1) a cached link that is still live; (2) for windows utena creates, the AeroSpace window that appeared since a snapshot taken just before `CreateWindow`, polled for up to 1.5 s; (3) elimination, when exactly one unlinked wm window and one unlinked Chrome window remain; (4) an exact title match among unlinked wm windows. If the match is still ambiguous, **don't move anything**: log it at debug level and retry on the next `TabsChanged` or swap. The marker-tab fallback in the spec is deferred until real ambiguity shows up.
+- Linking order: (1) a cached link that is still live; (2) for windows utena creates, the AeroSpace window that appeared since a snapshot taken just before `CreateWindow`, polled for up to 1.5 s, ignoring wm IDs that are already linked; (3) an exact title match among unlinked wm windows, only when no other unlinked Chrome window shares that title. There is **no elimination step**. AeroSpace lists every Chrome window (popups, PiP, undocked DevTools, other profiles), while the extension reports only normal windows, and AeroSpace can lag behind the extension. So "the last unlinked window" can be a foreign window, and no counting heuristic is safe. If the match is still ambiguous, **don't move anything**: log it at debug level and retry on the next `TabsChanged` or swap. The marker-tab fallback in the spec is deferred until real ambiguity shows up.
+- Detach never clears the attached session. The browser keeps the last attached session's windows on the browser workspace (there is no `SessionAttached{0}`).
 - Creating windows minimized to avoid the flash is not attempted. A background-session window may briefly appear where AeroSpace's `on-window-detected` rule puts it (`2`), then it is moved to `P`.
 
 **Rules:**
@@ -149,18 +150,19 @@ func (l *linker) resolve(chrome []Window, title func(Window) string, wmWindows [
   1. Drop any cached link whose wm ID is no longer in `wmWindows`, or whose Chrome ID is no longer in `chrome`.
   2. For each wanted ID that has a valid cached link, use it.
   3. Set aside the "claimed" wm IDs, meaning every cached link, including links for Chrome windows that aren't wanted. The unclaimed wm windows are the candidates.
-  4. **Elimination:** if exactly one wanted ID is still unlinked, every Chrome window in `chrome` other than that one is linked, and exactly one candidate remains, link the two.
-  5. **Title:** for each remaining wanted ID with a non-empty `title(w)`, link it if exactly one candidate has `Title == title(w)` and no other remaining wanted Chrome window has the same title.
+  4. **No elimination.** Never link a window because it is the last one left. AeroSpace lists Chrome windows the extension never reports, and it can lag behind the extension.
+  5. **Title:** for each remaining wanted ID with a non-empty `title(w)`, link it if exactly one candidate has `Title == title(w)` and no other Chrome window in `chrome` without a cached link (wanted or not) has the same title.
   6. Store new links in the cache.
-- Add `func (l *linker) linkCreated(chromeID string, before, after []wm.Window) bool`. When exactly one wm ID is in `after` but not in `before`, it caches that link and returns true.
+- Add `func (l *linker) linkCreated(chromeID string, before, after []wm.Window) bool`. When exactly one wm ID is in `after` but not in `before` and not already linked in the cache, it caches that link and returns true.
 - Table tests:
   - a cache hit;
   - a stale cache entry is dropped;
-  - elimination;
+  - no elimination: the last unlinked window is not guessed;
   - a unique title;
   - a duplicate title gives no link;
   - a title already claimed by another link;
-  - created diff: one new window, zero new, two new.
+  - a title shared with an unwanted, unlinked Chrome window gives no link;
+  - created diff: one new window, zero new, two new, and a new window that is already linked is ignored.
 
 Commit: `feat(browser): link browser windows to window-manager windows`
 

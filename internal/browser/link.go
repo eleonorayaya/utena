@@ -58,14 +58,11 @@ func (l *linker) resolve(chrome []Window, title func(Window) string, wmWindows [
 		result[chromeID] = wmID
 	}
 
-	if len(remaining) == 1 && len(candidates) == 1 && l.othersLinked(chrome, remaining[0]) {
-		link(remaining[0], candidates[0].ID)
-		return result
-	}
-
 	titleCounts := map[string]int{}
-	for _, id := range remaining {
-		titleCounts[title(chromeByID[id])]++
+	for _, w := range chrome {
+		if _, ok := l.links[w.ID]; !ok {
+			titleCounts[title(w)]++
+		}
 	}
 	for _, id := range remaining {
 		t := title(chromeByID[id])
@@ -88,22 +85,13 @@ func (l *linker) resolve(chrome []Window, title func(Window) string, wmWindows [
 	return result
 }
 
-func (l *linker) othersLinked(chrome []Window, except string) bool {
-	for _, w := range chrome {
-		if w.ID == except {
-			continue
-		}
-		if _, ok := l.links[w.ID]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
 func (l *linker) linkCreated(chromeID string, before, after []wm.Window) bool {
-	existing := make(map[string]bool, len(before))
+	existing := make(map[string]bool, len(before)+len(l.links))
 	for _, w := range before {
 		existing[w.ID] = true
+	}
+	for _, wmID := range l.links {
+		existing[wmID] = true
 	}
 	var created []string
 	for _, w := range after {
