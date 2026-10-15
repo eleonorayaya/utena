@@ -4,17 +4,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
+	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
 
 type topSort string
@@ -121,6 +125,26 @@ func formatBytes(n int64) string {
 	return fmt.Sprintf("%.1f%s", value, suffix)
 }
 
+type topKeyMap struct {
+	SortCPU  key.Binding
+	SortMem  key.Binding
+	SortName key.Binding
+	Quit     key.Binding
+}
+
+var topKeys = topKeyMap{
+	SortCPU:  key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "cpu")),
+	SortMem:  key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mem")),
+	SortName: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "name")),
+	Quit:     key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
+}
+
+func (k topKeyMap) bindings() []key.Binding {
+	return []key.Binding{k.SortCPU, k.SortMem, k.SortName, k.Quit}
+}
+
+const topHistoryLen = 24
+
 type resourcesMsg struct {
 	resp *session.SessionResourcesResponse
 	err  error
@@ -129,21 +153,24 @@ type resourcesMsg struct {
 type topTickMsg struct{}
 
 type topModel struct {
-	port      string
 	interval  time.Duration
 	fetch     func() (*session.SessionResourcesResponse, error)
 	rows      []session.SessionResources
+	history   map[string][]float64
 	sampledAt time.Time
 	err       error
 	sortBy    topSort
+	cores     int
 	width     int
+	height    int
 }
 
 func newTopModel(port string, interval time.Duration) topModel {
 	return topModel{
-		port:     port,
 		interval: interval,
 		sortBy:   sortCPU,
+		history:  make(map[string][]float64),
+		cores:    runtime.NumCPU(),
 		fetch: func() (*session.SessionResourcesResponse, error) {
 			return fetchResources(port, interval+5*time.Second)
 		},
@@ -165,25 +192,26 @@ func (m topModel) Init() tea.Cmd {
 func (m topModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "esc", "ctrl+c":
+		switch {
+		case key.Matches(msg, topKeys.Quit):
 			return m, tea.Quit
-		case "c":
+		case key.Matches(msg, topKeys.SortCPU):
 			m.sortBy = sortCPU
-		case "m":
+		case key.Matches(msg, topKeys.SortMem):
 			m.sortBy = sortMem
-		case "n":
+		case key.Matches(msg, topKeys.SortName):
 			m.sortBy = sortName
 		}
 		return m, nil
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
+		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case resourcesMsg:
 		m.err = msg.err
 		if msg.err == nil {
 			m.rows = msg.resp.Sessions
 			m.sampledAt = msg.resp.SampledAt
+			m.recordHistory()
 		}
 		return m, tea.Tick(m.interval, func(time.Time) tea.Msg { return topTickMsg{} })
 	case topTickMsg:
@@ -192,64 +220,233 @@ func (m topModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m topModel) View() string {
-	t := theme.Current
-	title := lipgloss.NewStyle().Bold(true).Foreground(t.Primary)
-	muted := lipgloss.NewStyle().Foreground(t.TextMuted)
-	header := lipgloss.NewStyle().Bold(true).Foreground(t.TextEmphasis)
-	errStyle := lipgloss.NewStyle().Foreground(t.Error)
-
-	var b strings.Builder
-	sampled := "waiting for first sample"
-	if !m.sampledAt.IsZero() {
-		sampled = "sampled " + m.sampledAt.Local().Format("15:04:05")
-	}
-	b.WriteString(title.Render("utena top") + muted.Render(fmt.Sprintf("  %s · sort: %s", sampled, m.sortBy)) + "\n\n")
-
-	nameWidth := 24
+func (m *topModel) recordHistory() {
+	next := make(map[string][]float64, len(m.rows))
 	for _, r := range m.rows {
-		nameWidth = max(nameWidth, lipgloss.Width(r.Name))
-	}
-	if m.width > 0 {
-		nameWidth = min(nameWidth, max(12, m.width-46))
-	}
-	row := func(name, status, cpu, mem, procs string) string {
-		return fmt.Sprintf("%-*s  %-10s %8s %10s %6s", nameWidth, truncate(name, nameWidth), truncate(status, 10), cpu, mem, procs)
-	}
-	b.WriteString(header.Render(row("SESSION", "STATUS", "CPU%", "MEM", "PROCS")) + "\n")
-
-	var totalCPU float64
-	var totalRSS int64
-	var totalProcs int
-	for _, r := range sortResources(m.rows, m.sortBy) {
-		line := row(r.Name, r.Status, fmt.Sprintf("%.1f", r.CPUPercent), formatBytes(r.RSSBytes), fmt.Sprintf("%d", r.Procs))
-		if r.SessionID == nil {
-			line = muted.Render(line)
+		h := append(m.history[r.MuxSession], r.CPUPercent)
+		if len(h) > topHistoryLen {
+			h = h[len(h)-topHistoryLen:]
 		}
-		b.WriteString(line + "\n")
-		totalCPU += r.CPUPercent
-		totalRSS += r.RSSBytes
-		totalProcs += r.Procs
+		next[r.MuxSession] = h
 	}
-	if len(m.rows) == 0 && m.err == nil && !m.sampledAt.IsZero() {
-		b.WriteString(muted.Render("no session processes found") + "\n")
-	}
-	b.WriteString(header.Render(row("TOTAL", "", fmt.Sprintf("%.1f", totalCPU), formatBytes(totalRSS), fmt.Sprintf("%d", totalProcs))) + "\n")
-
-	if m.err != nil {
-		b.WriteString("\n" + errStyle.Render(m.err.Error()) + "\n")
-	}
-	b.WriteString("\n" + muted.Render("c cpu · m mem · n name · q quit"))
-	return b.String()
+	m.history = next
 }
 
-func truncate(s string, width int) string {
-	if lipgloss.Width(s) <= width {
-		return s
+type topLayout struct {
+	bar   int
+	trend int
+}
+
+func layoutFor(width int) topLayout {
+	switch {
+	case width >= 104:
+		return topLayout{bar: 10, trend: topHistoryLen / 2}
+	case width >= 84:
+		return topLayout{bar: 8}
+	default:
+		return topLayout{}
 	}
-	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
-		runes = runes[:len(runes)-1]
+}
+
+func (m topModel) View() string {
+	width := m.width
+	if width <= 0 {
+		width = 110
 	}
-	return string(runes) + "…"
+	lay := layoutFor(width)
+
+	lines := []string{m.titleLine(width), "", m.summaryLine(width), "", m.headerRow(width, lay)}
+	rows := sortResources(m.rows, m.sortBy)
+	var maxRSS int64
+	for _, r := range rows {
+		maxRSS = max(maxRSS, r.RSSBytes)
+	}
+	for _, r := range rows {
+		lines = append(lines, m.sessionRow(r, maxRSS, width, lay))
+	}
+	if len(rows) == 0 {
+		msg := "waiting for the first sample…"
+		if !m.sampledAt.IsZero() {
+			msg = "no processes running in any session"
+		}
+		lines = append(lines, "  "+ui.Muted().Italic(true).Render(msg))
+	}
+
+	body := strings.Join(lines, "\n")
+	if m.height > 2 {
+		body = ui.FitHeight(body, m.height-2)
+	}
+	status := ui.Status{}
+	if m.err != nil {
+		status = ui.Status{Text: m.err.Error(), Kind: ui.StatusError}
+	}
+	return body + "\n\n" + ui.Footer(topKeys.bindings(), status, width, false)
+}
+
+func (m topModel) titleLine(width int) string {
+	t := theme.Current
+	left := lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("utena top") +
+		ui.Muted().Render(fmt.Sprintf("  %d sessions", len(m.rows)))
+	right := ui.Muted().Render("every " + m.interval.String())
+	if !m.sampledAt.IsZero() {
+		right = ui.Muted().Render("sampled ") + ui.FG(t.Text).Render(m.sampledAt.Local().Format("15:04:05")) + ui.Muted().Render(" · every "+m.interval.String())
+	}
+	gap := max(width-lipgloss.Width(left)-lipgloss.Width(right), 1)
+	return ui.Clamp(left+strings.Repeat(" ", gap)+right, width)
+}
+
+func (m topModel) summaryLine(width int) string {
+	var cpu float64
+	var rss int64
+	var procs int
+	for _, r := range m.rows {
+		cpu += r.CPUPercent
+		rss += r.RSSBytes
+		procs += r.Procs
+	}
+	cores := max(m.cores, 1)
+	label := ui.Muted()
+	value := ui.FG(theme.Current.TextEmphasis).Bold(true)
+	line := label.Render("CPU ") + meter(cpu/float64(cores*100), 20, cpuStyle(cpu/float64(cores))) +
+		" " + value.Render(fmt.Sprintf("%.1f%%", cpu)) + label.Render(fmt.Sprintf(" of %d cores", cores)) +
+		label.Render("    MEM ") + value.Render(formatBytes(rss)) +
+		label.Render("    ") + value.Render(fmt.Sprintf("%d", procs)) + label.Render(" procs")
+	return ui.Clamp(line, width)
+}
+
+func (m topModel) headerRow(width int, lay topLayout) string {
+	t := theme.Current
+	plain := lipgloss.NewStyle().Foreground(t.TextMuted).Bold(true)
+	active := lipgloss.NewStyle().Foreground(t.Primary).Bold(true)
+	head := func(title string, by topSort) ui.Span {
+		if by != "" && by == m.sortBy {
+			return ui.Span{Text: title + " ▼", Style: active}
+		}
+		return ui.Span{Text: title, Style: plain}
+	}
+	cells := []ui.Cell{
+		{Width: 2},
+		{Spans: []ui.Span{head("SESSION", sortName)}},
+		{Spans: []ui.Span{head("STATUS", "")}, Width: 12},
+	}
+	if lay.bar > 0 {
+		cells = append(cells, ui.Cell{Width: lay.bar + 1})
+	}
+	cells = append(cells, ui.Cell{Spans: []ui.Span{head("CPU", sortCPU)}, Width: 8, Align: ui.AlignRight}, ui.Cell{Width: 2})
+	if lay.bar > 0 {
+		cells = append(cells, ui.Cell{Width: lay.bar + 1})
+	}
+	cells = append(cells, ui.Cell{Spans: []ui.Span{head("MEM", sortMem)}, Width: 10, Align: ui.AlignRight},
+		ui.Cell{Spans: []ui.Span{head("PROCS", "")}, Width: 7, Align: ui.AlignRight})
+	if lay.trend > 0 {
+		cells = append(cells, ui.Cell{Width: 2}, ui.Cell{Spans: []ui.Span{head("TREND", "")}, Width: lay.trend})
+	}
+	return ui.Row(cells, width, nil)
+}
+
+func (m topModel) sessionRow(r session.SessionResources, maxRSS int64, width int, lay topLayout) string {
+	t := theme.Current
+	unmanaged := r.SessionID == nil
+	glyph, glyphStyle := statusGlyph(r.Status)
+	nameStyle := ui.FG(t.Text)
+	if unmanaged {
+		nameStyle = ui.Muted()
+	}
+	cs := cpuStyle(r.CPUPercent)
+	ms := ui.FG(t.AccentLavender)
+	if unmanaged {
+		cs, ms = ui.Muted(), ui.Muted()
+	}
+
+	cells := []ui.Cell{
+		{Spans: []ui.Span{{Text: glyph, Style: glyphStyle}}, Width: 2},
+		{Spans: []ui.Span{{Text: r.Name, Style: nameStyle}}},
+		{Spans: []ui.Span{{Text: r.Status, Style: ui.Muted()}}, Width: 12},
+	}
+	if lay.bar > 0 {
+		cells = append(cells, ui.Cell{Spans: []ui.Span{{Text: meter(r.CPUPercent/100, lay.bar, cs)}}, Width: lay.bar + 1})
+	}
+	cells = append(cells,
+		ui.Cell{Spans: []ui.Span{{Text: fmt.Sprintf("%.1f%%", r.CPUPercent), Style: cs}}, Width: 8, Align: ui.AlignRight},
+		ui.Cell{Width: 2})
+	if lay.bar > 0 {
+		frac := 0.0
+		if maxRSS > 0 {
+			frac = float64(r.RSSBytes) / float64(maxRSS)
+		}
+		cells = append(cells, ui.Cell{Spans: []ui.Span{{Text: meter(frac, lay.bar, ms)}}, Width: lay.bar + 1})
+	}
+	cells = append(cells,
+		ui.Cell{Spans: []ui.Span{{Text: formatBytes(r.RSSBytes), Style: nameStyle}}, Width: 10, Align: ui.AlignRight},
+		ui.Cell{Spans: []ui.Span{{Text: fmt.Sprintf("%d", r.Procs), Style: ui.Muted()}}, Width: 7, Align: ui.AlignRight})
+	if lay.trend > 0 {
+		cells = append(cells, ui.Cell{Width: 2},
+			ui.Cell{Spans: []ui.Span{{Text: sparkline(m.history[r.MuxSession], lay.trend), Style: cs}}, Width: lay.trend})
+	}
+	return ui.Row(cells, width, nil)
+}
+
+func statusGlyph(status string) (string, lipgloss.Style) {
+	t := theme.Current
+	switch session.SessionStatus(status) {
+	case session.StatusActive:
+		return "●", ui.FG(t.StatusReady)
+	case session.StatusCompleted:
+		return "✓", ui.FG(t.StatusDone)
+	case session.StatusCreating, session.StatusPending:
+		return "◐", ui.FG(t.StatusActive)
+	case session.StatusBroken:
+		return "✕", ui.FG(t.Error)
+	case session.StatusInactive, session.StatusArchived:
+		return "○", ui.Muted()
+	default:
+		return "◌", ui.Muted()
+	}
+}
+
+func cpuStyle(pct float64) lipgloss.Style {
+	t := theme.Current
+	switch {
+	case pct >= 100:
+		return ui.FG(t.Error)
+	case pct >= 50:
+		return ui.FG(t.StatusActive)
+	default:
+		return ui.FG(t.StatusReady)
+	}
+}
+
+var meterEighths = []string{"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"}
+
+func meter(frac float64, width int, style lipgloss.Style) string {
+	if width <= 0 {
+		return ""
+	}
+	frac = math.Max(0, math.Min(frac, 1))
+	eighths := int(math.Round(frac * float64(width*8)))
+	full, part := eighths/8, eighths%8
+	filled := strings.Repeat("█", full) + meterEighths[part]
+	track := strings.Repeat("·", width-lipgloss.Width(filled))
+	return style.Render(filled) + ui.FG(theme.Current.SurfaceVariant).Render(track)
+}
+
+var sparkLevels = []rune("▁▂▃▄▅▆▇█")
+
+func sparkline(values []float64, width int) string {
+	if width <= 0 || len(values) == 0 {
+		return ""
+	}
+	if len(values) > width {
+		values = values[len(values)-width:]
+	}
+	peak := 25.0
+	for _, v := range values {
+		peak = math.Max(peak, v)
+	}
+	out := make([]rune, len(values))
+	for i, v := range values {
+		level := int(math.Round(math.Max(v, 0) / peak * float64(len(sparkLevels)-1)))
+		out[i] = sparkLevels[level]
+	}
+	return string(out)
 }

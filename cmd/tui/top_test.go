@@ -8,6 +8,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -17,9 +19,9 @@ import (
 func topRows() []session.SessionResources {
 	id := uint(7)
 	return []session.SessionResources{
-		{SessionID: &id, Name: "alpha", Status: "active", CPUPercent: 12, RSSBytes: 3 << 30, Procs: 9},
-		{Name: "scratch", Status: session.ResourceStatusUnmanaged, CPUPercent: 80, RSSBytes: 10 << 20, Procs: 2},
-		{Name: "beta", Status: "inactive", CPUPercent: 12, RSSBytes: 1 << 20, Procs: 1},
+		{SessionID: &id, Name: "alpha", MuxSession: "alpha", Status: "active", CPUPercent: 12, RSSBytes: 3 << 30, Procs: 9},
+		{Name: "scratch", MuxSession: "scratch", Status: session.ResourceStatusUnmanaged, CPUPercent: 80, RSSBytes: 10 << 20, Procs: 2},
+		{Name: "beta", MuxSession: "beta", Status: "inactive", CPUPercent: 12, RSSBytes: 1 << 20, Procs: 1},
 	}
 }
 
@@ -68,16 +70,17 @@ func TestTopModel_FetchRenderSortAndQuit(t *testing.T) {
 	require.NotNil(t, cmd)
 
 	view := m.View()
-	assert.Contains(t, view, "sampled 09:30:00")
-	assert.Contains(t, view, "sort: cpu")
+	assert.Contains(t, view, "09:30:00")
+	assert.Contains(t, view, "CPU ▼")
 	assert.Less(t, strings.Index(view, "scratch"), strings.Index(view, "alpha"))
 	assert.Contains(t, view, "3.0GiB")
-	assert.Contains(t, view, "TOTAL")
+	assert.Contains(t, view, "12 procs")
 
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
 	m = next.(topModel)
 	view = m.View()
-	assert.Contains(t, view, "sort: mem")
+	assert.Contains(t, view, "MEM ▼")
+	assert.NotContains(t, view, "CPU ▼")
 	assert.Less(t, strings.Index(view, "alpha"), strings.Index(view, "scratch"))
 
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
@@ -95,4 +98,46 @@ func TestTopModel_KeepsLastRowsOnError(t *testing.T) {
 	view := m.View()
 	assert.Contains(t, view, "alpha")
 	assert.Contains(t, view, "daemon down")
+}
+
+func TestMeter(t *testing.T) {
+	assert.Equal(t, "··········", ansiStrip(meter(0, 10, lipgloss.NewStyle())))
+	assert.Equal(t, "█████·····", ansiStrip(meter(0.5, 10, lipgloss.NewStyle())))
+	assert.Equal(t, "██▌·", ansiStrip(meter(0.625, 4, lipgloss.NewStyle())))
+	assert.Equal(t, "████", ansiStrip(meter(3, 4, lipgloss.NewStyle())))
+}
+
+func TestSparkline(t *testing.T) {
+	assert.Equal(t, "", sparkline(nil, 5))
+	assert.Equal(t, "▁▁▁", sparkline([]float64{0, 0, 0}, 5))
+	assert.Equal(t, "▁▅█", sparkline([]float64{0, 50, 100}, 5))
+	assert.Equal(t, "▅█", sparkline([]float64{0, 50, 100}, 2))
+}
+
+func TestTopModel_HistoryFollowsSessionsAndIsBounded(t *testing.T) {
+	m := newTopModel("0", time.Second)
+	for i := 0; i < topHistoryLen+5; i++ {
+		next, _ := m.Update(resourcesMsg{resp: &session.SessionResourcesResponse{Sessions: topRows(), SampledAt: time.Now()}})
+		m = next.(topModel)
+	}
+	assert.Len(t, m.history["alpha"], topHistoryLen)
+
+	next, _ := m.Update(resourcesMsg{resp: &session.SessionResourcesResponse{Sessions: topRows()[:1], SampledAt: time.Now()}})
+	m = next.(topModel)
+	assert.NotContains(t, m.history, "beta")
+}
+
+func TestTopModel_NarrowWidthDropsBarsAndTrend(t *testing.T) {
+	m := newTopModel("0", time.Second)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 20})
+	next, _ = next.(topModel).Update(resourcesMsg{resp: &session.SessionResourcesResponse{Sessions: topRows(), SampledAt: time.Now()}})
+	view := next.(topModel).View()
+	assert.NotContains(t, view, "TREND")
+	for _, line := range strings.Split(view, "\n") {
+		assert.LessOrEqual(t, lipgloss.Width(line), 70, line)
+	}
+}
+
+func ansiStrip(s string) string {
+	return ansi.Strip(s)
 }
