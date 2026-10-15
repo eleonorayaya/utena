@@ -77,3 +77,10 @@ func (d *Driver) MoveToWorkspace(ctx context.Context, windowID, workspace string
 	}
 	return nil
 }
+
+func (d *Driver) FocusWindow(ctx context.Context, windowID string) error {
+	if _, err := d.runner.Run(ctx, "aerospace", "focus", "--window-id", windowID); err != nil {
+		return fmt.Errorf("aerospace focus: %w", err)
+	}
+	return nil
+}

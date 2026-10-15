@@ -70,3 +70,27 @@ func TestFakeDriver_MoveErr(t *testing.T) {
 	assert.ErrorIs(t, f.MoveToWorkspace(context.Background(), "1", "P"), f.MoveErr)
 	assert.Equal(t, "2", f.Workspace("1"))
 }
+
+func TestNone_FocusWindowIsNoop(t *testing.T) {
+	assert.NoError(t, None{}.FocusWindow(context.Background(), "1"))
+}
+
+func TestFakeDriver_FocusWindowRecords(t *testing.T) {
+	f := NewFakeDriver()
+	var seen []string
+	f.OnFocus = func(id string) { seen = append(seen, id) }
+
+	require.NoError(t, f.FocusWindow(context.Background(), "1"))
+	require.NoError(t, f.FocusWindow(context.Background(), "2"))
+
+	assert.Equal(t, []string{"1", "2"}, f.Focused())
+	assert.Equal(t, []string{"1", "2"}, seen)
+}
+
+func TestFakeDriver_FocusErr(t *testing.T) {
+	f := NewFakeDriver()
+	f.FocusErr = errors.New("boom")
+
+	assert.ErrorIs(t, f.FocusWindow(context.Background(), "1"), f.FocusErr)
+	assert.Empty(t, f.Focused())
+}

@@ -108,3 +108,19 @@ func TestExecRunner_ReturnsStdout(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ok\n", string(out))
 }
+
+func TestFocusWindow_Argv(t *testing.T) {
+	r := &fakeRunner{}
+	d := newDriver(r)
+
+	require.NoError(t, d.FocusWindow(context.Background(), "70770"))
+
+	assert.Equal(t, [][]string{{"aerospace", "focus", "--window-id", "70770"}}, r.calls)
+}
+
+func TestFocusWindow_RunnerError(t *testing.T) {
+	boom := errors.New("boom")
+	d := newDriver(&fakeRunner{err: boom})
+
+	assert.ErrorIs(t, d.FocusWindow(context.Background(), "70770"), boom)
+}

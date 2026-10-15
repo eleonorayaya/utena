@@ -12,10 +12,13 @@ type Move struct {
 }
 
 type FakeDriver struct {
-	mu      sync.Mutex
-	windows []Window
-	moves   []Move
-	MoveErr error
+	mu       sync.Mutex
+	windows  []Window
+	moves    []Move
+	focused  []string
+	MoveErr  error
+	FocusErr error
+	OnFocus  func(windowID string)
 }
 
 var _ Driver = (*FakeDriver)(nil)
@@ -79,6 +82,27 @@ func (f *FakeDriver) MoveToWorkspace(ctx context.Context, windowID, workspace st
 	}
 	f.windows[i].Workspace = workspace
 	f.moves = append(f.moves, Move{WindowID: windowID, Workspace: workspace})
+	return nil
+}
+
+func (f *FakeDriver) Focused() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.focused...)
+}
+
+func (f *FakeDriver) FocusWindow(ctx context.Context, windowID string) error {
+	f.mu.Lock()
+	if f.FocusErr != nil {
+		f.mu.Unlock()
+		return f.FocusErr
+	}
+	f.focused = append(f.focused, windowID)
+	onFocus := f.OnFocus
+	f.mu.Unlock()
+	if onFocus != nil {
+		onFocus(windowID)
+	}
 	return nil
 }
 

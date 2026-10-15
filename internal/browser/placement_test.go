@@ -400,3 +400,128 @@ func TestNewService_PointerToNoneIsInert(t *testing.T) {
 	assert.True(t, svc.wmInert)
 	assert.False(t, NewService(NewFakeDriver(), store, &FakeSessions{}, wm.NewFakeDriver(), Layout{}).wmInert)
 }
+
+func TestOpen_AttachedSessionFocusesLinkedWMWindow(t *testing.T) {
+	h := newPlaceHarness(t)
+	a := h.own(t, 1, "a", "2")
+	h.sessions.AttachedID = 1
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+	h.wm.SetTitle(a, "renamed - Fake")
+	var browserFocusedFirst []string
+	h.wm.OnFocus = func(string) { browserFocusedFirst = h.driver.Focused() }
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	assert.True(t, res.Focused)
+	assert.Equal(t, []string{a}, h.wm.Focused())
+	assert.Equal(t, []string{res.WindowID}, browserFocusedFirst)
+}
+
+func TestOpen_ActivateFocusesWMWindowAfterPlacement(t *testing.T) {
+	h := newPlaceHarness(t)
+	a := h.own(t, 1, "a", "P")
+	h.own(t, 2, "b", "2")
+	h.sessions.AttachedID = 2
+	h.svc.SetAttached(2)
+	drain(h.svc)
+	workspaceAtFocus := ""
+	h.wm.OnFocus = func(string) { workspaceAtFocus = h.wm.Workspace(a) }
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL, Activate: true})
+	require.NoError(t, err)
+	assert.True(t, res.Focused)
+	assert.Equal(t, []string{a}, h.wm.Focused())
+	assert.Equal(t, "2", workspaceAtFocus)
+}
+
+func TestOpen_CreatedWindowFocusesLinkedWMWindow(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.sessions.AttachedID = 1
+	h.svc.SetAttached(1)
+	h.driver.OnCreate = func(w Window) { h.wm.Add("wm-"+w.ID, "", "2") }
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	require.True(t, res.Created)
+	assert.True(t, res.Focused)
+	assert.Equal(t, []string{"wm-" + res.WindowID}, h.wm.Focused())
+}
+
+func TestOpen_BackgroundSessionDoesNotFocusWMWindow(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.own(t, 1, "a", "P")
+	h.sessions.AttachedID = 2
+	h.svc.SetAttached(2)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	assert.False(t, res.Focused)
+	assert.Empty(t, h.wm.Focused())
+}
+
+func TestOpen_InertWindowManagerDoesNotFocusWMWindow(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.own(t, 1, "a", "2")
+	h.sessions.AttachedID = 1
+	h.svc.wmInert = true
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	assert.True(t, res.Focused)
+	assert.Empty(t, h.wm.Focused())
+}
+
+func TestOpen_UnownedWindowFocusesUniqueTitleMatch(t *testing.T) {
+	h := newPlaceHarness(t)
+	personal := h.driver.AddWindow("https://personal.example.com")
+	h.driver.SetTitle(personal.ID, "personal")
+	h.wm.Add("wm-personal", "personal - Fake", "3")
+	h.wm.Add("wm-other", "other - Fake", "3")
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	assert.Equal(t, personal.ID, res.WindowID)
+	assert.True(t, res.Focused)
+	assert.Equal(t, []string{"wm-personal"}, h.wm.Focused())
+}
+
+func TestOpen_UnownedWindowWithDuplicateTitlesIsNotFocused(t *testing.T) {
+	h := newPlaceHarness(t)
+	personal := h.driver.AddWindow("https://personal.example.com")
+	h.driver.SetTitle(personal.ID, "personal")
+	h.wm.Add("wm-personal", "personal - Fake", "3")
+	h.wm.Add("wm-popup", "personal - Fake", "3")
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	assert.True(t, res.Focused)
+	assert.Empty(t, h.wm.Focused())
+}
+
+func TestOpen_WMFocusErrorIsLoggedNotReturned(t *testing.T) {
+	h := newPlaceHarness(t)
+	personal := h.driver.AddWindow("https://personal.example.com")
+	h.driver.SetTitle(personal.ID, "personal")
+	h.wm.Add("wm-personal", "personal - Fake", "3")
+	h.wm.FocusErr = errors.New("aerospace broke")
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	assert.True(t, res.Focused)
+}
+
+func TestOpen_CreatedUnownedWindowFocusesLinkedWMWindow(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.driver.OnCreate = func(w Window) { h.wm.Add("wm-"+w.ID, "", "3") }
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	require.True(t, res.Created)
+	assert.True(t, res.Focused)
+	assert.Equal(t, []string{"wm-" + res.WindowID}, h.wm.Focused())
+
+	require.NoError(t, h.svc.place(context.Background()))
+	assert.Empty(t, h.wm.Moves())
+}

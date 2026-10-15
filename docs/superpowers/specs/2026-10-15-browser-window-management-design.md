@@ -281,9 +281,12 @@ Daemon flags, each with an env var override in the style of `--branch-prefix`:
 - The AeroSpace window title is `<active tab title> - Google Chrome`. Title matching
   must strip the ` - Google Chrome` suffix. An earlier sample without the suffix was
   misleading.
-- AeroSpace follows Chrome's native focus. `chrome.windows.update({focused: true})`
-  on a window in workspace `2` switches AeroSpace to `2`. Focus therefore needs no
-  `wm` method, which confirms PR 1 amendment 1.
+- AeroSpace followed Chrome's native focus here: `chrome.windows.update({focused: true})`
+  on a window in workspace `2` switched AeroSpace to `2`. PR 2 live testing showed
+  this is unreliable: macOS cooperative app activation stops Chrome from activating
+  itself while another app (the terminal) is frontmost, so the user stays on the
+  terminal workspace. Focus therefore goes through `wm.FocusWindow` (see PR 2
+  amendments), which supersedes PR 1 amendment 1.
 - A window created with `focused: false` for a background session does not take
   focus. AeroSpace places it on the focused workspace (`T`) unless an
   `on-window-detected` rule moves it. The dotfiles rule now sends every new Chrome
@@ -355,7 +358,7 @@ The browser core departs from this design in a few small ways.
 
 From the implementation plan:
 
-- `browser.Driver` gains `FocusWindow`, which lets Chrome focus a window. AeroSpace follows macOS focus, so `wm.Driver` won't need a focus method.
+- `browser.Driver` gains `FocusWindow`, which sets Chrome's own active window. Superseded in PR 2: it alone does not bring the window forward, and `Open` also focuses through `wm.FocusWindow`.
 - Rows store `DriverWindowID` as a hint, so a daemon restart while Chrome keeps running keeps ownership. Rows whose window is gone on `Connected` become `missing`, with the ID cleared. Restoring them is PR 3.
 - Links from outside any session (`session_id` 0) go to an unowned Chrome window through the daemon, not straight to `/usr/bin/open`. That keeps personal links out of session windows.
 - There's no `--browser` flag yet. Chrome is the only driver, and with no extension connected the daemon returns 503, which triggers the fallback.
@@ -382,7 +385,7 @@ Decided during review:
 
 Parking departs from this design in these ways (see `docs/superpowers/plans/2026-10-15-browser-parking.md`):
 
-- `wm.Driver` has only `ListWindows(ctx, bundleID)` and `MoveToWorkspace(ctx, windowID, workspace)`. There is no focus method: AeroSpace follows Chrome's own focus (smoke finding). `wm.None` (`--wm none`) is inert, and placement is skipped entirely with it.
+- `wm.Driver` has `ListWindows(ctx, bundleID)`, `MoveToWorkspace(ctx, windowID, workspace)` and `FocusWindow(ctx, windowID)`. Live testing showed Chrome cannot reliably activate itself while another app is frontmost (macOS cooperative app activation), so relying on AeroSpace to follow Chrome's native focus left the user on the terminal workspace. Whenever `Open` intends to focus (attached session, activated session, session 0), it calls `browser.Driver.FocusWindow` (so Chrome's own window order and key window are right) and then focuses the window explicitly with `wm.FocusWindow` (AeroSpace `focus --window-id`), which switches to the window's workspace. The wm window is found with the same linking rules as placement, resolved once at focus time (cached link, created-window diff, or a unique exact title among unclaimed wm windows; never a guess). If none is found, or the wm call fails, `Open` logs at warn and still succeeds. Windows created for session-0 links are linked by the created-window diff too, so they can be focused; they stay unowned and are never moved. `wm.None` (`--wm none`) is inert: placement is skipped entirely and focus is browser-only.
 - `browser.Driver` gained `AppBundleID()` and `WindowTitle(Window) string`, the title the OS shows for a window (for Chrome, `"<active tab title> - Google Chrome"`). The title format stays inside the driver.
 - The swap trigger is a new `session.attached` eventbus event, published by `SessionService` after every store update that sets `IsAttached`. `browser.Service.SetAttached` stores the ID in an `atomic.Uint64` (never under the service lock, since `Open` can hold it for seconds) and signals a 1-slot channel. A single worker runs placement and coalesces signals. On `Connected` the attached ID is seeded from the session store with a compare-and-swap, so a concurrent `SetAttached` wins.
 - Detach never clears the attached session. There is no `SessionAttached{0}`; the last attached session's windows stay on the browser workspace.
@@ -392,8 +395,8 @@ Parking departs from this design in these ways (see `docs/superpowers/plans/2026
   3. an exact title match among unlinked wm windows, only when no other unlinked Chrome window (wanted or not) has the same title.
 - There is no elimination step. AeroSpace lists Chrome windows the extension never reports (popups, picture-in-picture, undocked DevTools, other profiles), and AeroSpace can lag behind the extension, so "the last unlinked window" may be a foreign one.
 - An ambiguous window is not moved. It is logged at debug level and retried on the next `TabsChanged` for that window (only while it is owned but unlinked) or the next swap. The marker-tab fallback is deferred until real ambiguity shows up.
-- An activating `Open` that reuses an existing window runs placement synchronously, under its lock, before it changes tabs or focuses. Focusing a window still parked on `P` would otherwise pull the user's view to `P`, and placing first keeps the window's title matching its wm title.
-- Placement moves only session-owned windows that are on the wrong workspace, never focuses anything, and never moves unowned windows.
+- An activating `Open` that reuses an existing window runs placement synchronously, under its lock, before it changes tabs or focuses. Focusing a window still parked on `P` would otherwise pull the user's view to `P`, and placing first keeps the window's title matching its wm title. The wm window to focus is resolved before the tab change for the same reason.
+- Placement moves only session-owned windows that are on the wrong workspace, never focuses anything, and never moves unowned windows. Swaps and background-session opens never focus; only `Open` focuses, as above.
 - Creating windows minimized is not attempted (risk 3). A background-session window may briefly appear on `2`, where the dotfiles `on-window-detected` rule puts it, before it is moved to `P`.
 - Dotfiles: `alt-b` (`workspace P`) and `alt-shift-b` (`move-node-to-workspace P`) in both `main` and `term` modes. No `persistent-workspaces` entry; AeroSpace creates `P` on demand.
 - The flags are `--wm aerospace|none` (`UTENA_WM`), `--browser-workspace` (`UTENA_BROWSER_WORKSPACE`, default `2`) and `--park-workspace` (`UTENA_PARK_WORKSPACE`, default `P`). Any other `--wm` value is a config error. Only `internal/api` imports `internal/aerospace`.
