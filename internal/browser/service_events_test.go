@@ -87,6 +87,7 @@ func TestWindowRemoved_DeletesRow(t *testing.T) {
 	require.NoError(t, err)
 
 	h.svc.handleEvent(context.Background(), Event{Type: EventWindowRemoved, WindowID: res.WindowID})
+	h.clock.fire()
 
 	rows, err := h.store.ListOpenBySession(1)
 	require.NoError(t, err)

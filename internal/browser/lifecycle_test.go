@@ -211,3 +211,129 @@ func TestSnapshot_NewTabOnlyWindowKeepsSavedTabs(t *testing.T) {
 
 	assert.Equal(t, []string{"https://b.example.com"}, urlsOf(storedTabs(t, h, 1)))
 }
+
+func removeWindow(h harness, id string) {
+	h.driver.RemoveWindow(id)
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowRemoved, WindowID: id})
+}
+
+func TestWindowRemoved_GraceExpiryDeletesRow(t *testing.T) {
+	h := newHarness(t)
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+
+	removeWindow(h, res.WindowID)
+
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Len(t, h.clock.live(), 1)
+	assert.Equal(t, removeGrace, h.clock.live()[0].d)
+
+	assert.Equal(t, 1, h.clock.fire())
+
+	all, err := h.store.ListBySession(1)
+	require.NoError(t, err)
+	assert.Empty(t, all)
+}
+
+func TestWindowRemoved_DisconnectInsideGraceMarksMissingAndKeepsTabs(t *testing.T) {
+	h := newHarness(t)
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+
+	removeWindow(h, res.WindowID)
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+
+	assert.Empty(t, h.clock.live())
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	require.Len(t, missing, 1)
+	assert.Equal(t, uint(1), missing[0].SessionID)
+	assert.Empty(t, missing[0].DriverWindowID)
+	assert.Equal(t, []string{prURL}, urlsOf(missing[0].Tabs))
+
+	h.clock.fire()
+	missing, err = h.store.ListMissing()
+	require.NoError(t, err)
+	assert.Len(t, missing, 1)
+}
+
+func TestWindowRemoved_UnownedWindowIsNoop(t *testing.T) {
+	h := newHarness(t)
+	owned := ownWindow(t, h, 1, "https://a.example.com")
+	personal := h.driver.AddWindow("https://personal.example.com")
+
+	removeWindow(h, personal.ID)
+
+	assert.Empty(t, h.clock.live())
+	got, err := h.store.GetByDriverWindowID(owned.ID)
+	require.NoError(t, err)
+	assert.Equal(t, uint(1), got.SessionID)
+}
+
+func TestWindowRemoved_DropsLinkAndPendingSnapshot(t *testing.T) {
+	h := newHarness(t)
+	w := ownWindow(t, h, 1, "https://a.example.com")
+	h.svc.links.links = map[string]string{w.ID: "wm-1"}
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: w.ID})
+
+	removeWindow(h, w.ID)
+
+	_, linked := h.svc.links.links[w.ID]
+	assert.False(t, linked)
+	require.Len(t, h.clock.live(), 1)
+	assert.Equal(t, removeGrace, h.clock.live()[0].d)
+}
+
+func TestWindowRemoved_ReconnectDoesNotResurrectDeletedRows(t *testing.T) {
+	h := newHarness(t)
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	removeWindow(h, res.WindowID)
+	h.clock.fire()
+
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+	h.svc.handleEvent(context.Background(), Event{Type: EventConnected})
+
+	all, err := h.store.ListBySession(1)
+	require.NoError(t, err)
+	assert.Empty(t, all)
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	assert.Empty(t, missing)
+}
+
+func TestWindowRemoved_StaleGraceTimerDoesNotDeleteReusedID(t *testing.T) {
+	h := newHarness(t)
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	removeWindow(h, res.WindowID)
+	stale := h.clock.live()[0]
+
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+	h.svc.handleEvent(context.Background(), Event{Type: EventConnected})
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 2, State: WindowOpen, DriverWindowID: res.WindowID}))
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowRemoved, WindowID: res.WindowID})
+
+	stale.f()
+
+	got, err := h.store.GetByDriverWindowID(res.WindowID)
+	require.NoError(t, err)
+	assert.Equal(t, uint(2), got.SessionID)
+}
+
+func TestWindowRemoved_ConnectedInsideGraceMarksMissing(t *testing.T) {
+	h := newHarness(t)
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	removeWindow(h, res.WindowID)
+
+	h.svc.handleEvent(context.Background(), Event{Type: EventConnected})
+	h.clock.fire()
+
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	require.Len(t, missing, 1)
+	assert.Equal(t, []string{prURL}, urlsOf(missing[0].Tabs))
+}

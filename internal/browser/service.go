@@ -29,6 +29,7 @@ const (
 	createdLinkPoll = 100 * time.Millisecond
 	createdLinkWait = 1500 * time.Millisecond
 	snapshotDelay   = 2 * time.Second
+	removeGrace     = 2 * time.Second
 )
 
 type pendingTimer struct {
@@ -75,6 +76,7 @@ type Service struct {
 
 	afterFunc     func(time.Duration, func()) func() bool
 	snapshotDelay time.Duration
+	removeGrace   time.Duration
 
 	mu                  sync.Mutex
 	connected           atomic.Bool
@@ -86,6 +88,7 @@ type Service struct {
 	links               linker
 	placedFor           uint
 	snapshots           map[string]*pendingTimer
+	removals            map[string]*pendingTimer
 }
 
 func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driver, layout Layout) *Service {
@@ -104,7 +107,9 @@ func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driv
 			return time.AfterFunc(d, f).Stop
 		},
 		snapshotDelay: snapshotDelay,
+		removeGrace:   removeGrace,
 		snapshots:     map[string]*pendingTimer{},
+		removals:      map[string]*pendingTimer{},
 	}
 }
 
@@ -500,14 +505,15 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	switch ev.Type {
 	case EventConnected:
 		s.connected.Store(true)
-		err = errors.Join(s.trackRun(ev.Run), s.resync(ctx))
+		err = errors.Join(s.flushRemovals(), s.trackRun(ev.Run), s.resync(ctx))
 		s.signal()
 	case EventDisconnected:
 		s.connected.Store(false)
+		err = s.flushRemovals()
 	case EventWindowCreated:
 		err = s.adopt(ctx, ev.WindowID)
 	case EventWindowRemoved:
-		err = s.store.DeleteByDriverWindowID(ev.WindowID)
+		err = s.windowRemoved(ctx, ev.WindowID)
 	case EventTabsChanged:
 		err = s.tabsChanged(ev.WindowID)
 	case EventFocusChanged:
@@ -536,6 +542,44 @@ func (s *Service) tabsChanged(windowID string) error {
 		s.signal()
 	}
 	return nil
+}
+
+func (s *Service) windowRemoved(ctx context.Context, windowID string) error {
+	delete(s.links.links, windowID)
+	stopTimer(s.snapshots, windowID)
+	if _, ok := s.removals[windowID]; ok {
+		return nil
+	}
+	if _, err := s.store.GetByDriverWindowID(windowID); errors.Is(err, ErrWindowNotFound) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	s.schedule(s.removals, windowID, s.removeGrace, func() {
+		if !s.connected.Load() {
+			return
+		}
+		if err := s.store.DeleteByDriverWindowID(windowID); err != nil {
+			slog.WarnContext(ctx, "browser: forget closed window failed", "window", windowID, "error", err)
+		}
+	})
+	return nil
+}
+
+func (s *Service) flushRemovals() error {
+	var errs []error
+	for id := range s.removals {
+		stopTimer(s.removals, id)
+		errs = append(errs, s.store.MarkMissingByDriverWindowID(id))
+	}
+	return errors.Join(errs...)
+}
+
+func stopTimer(timers map[string]*pendingTimer, key string) {
+	if t, ok := timers[key]; ok {
+		t.stop()
+		delete(timers, key)
+	}
 }
 
 func (s *Service) schedule(timers map[string]*pendingTimer, key string, d time.Duration, f func()) {
