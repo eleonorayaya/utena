@@ -1195,19 +1195,55 @@ func TestPlace_RestoresWithoutWindowManager(t *testing.T) {
 	assert.Len(t, rows, 1)
 }
 
-func TestRestore_EmptySnapshotOpensNewTab(t *testing.T) {
+func TestRestore_EmptySavedRowsAreDroppedNotRestored(t *testing.T) {
 	h := newHarness(t)
 	addSnapshotted(t, h, 1, time.Time{})
+	addMissing(t, h, 1)
 
 	h.svc.SetAttached(1)
 	require.NoError(t, h.svc.place(context.Background()))
 
-	rows, err := h.store.ListOpenBySession(1)
+	live, err := h.driver.ListWindows(context.Background())
 	require.NoError(t, err)
+	assert.Empty(t, live)
+	assert.Empty(t, rowsOf(t, h, 1))
+}
+
+func TestRestore_MixedEmptyAndSavedRowsRestoreOnlySaved(t *testing.T) {
+	h := newHarness(t)
+	addSnapshotted(t, h, 1, time.Time{})
+	addSnapshotted(t, h, 1, time.Time{}, SavedTab{URL: "https://a.example.com"})
+	addMissing(t, h, 1)
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	live, err := h.driver.ListWindows(context.Background())
+	require.NoError(t, err)
+	require.Len(t, live, 1)
+	assert.Equal(t, []string{"https://a.example.com"}, tabURLs(live[0]))
+	rows := rowsOf(t, h, 1)
 	require.Len(t, rows, 1)
-	w, ok := h.driver.Window(rows[0].DriverWindowID)
-	require.True(t, ok)
-	assert.Equal(t, []string{"chrome://newtab/"}, tabURLs(w))
+	assert.Equal(t, WindowOpen, rows[0].State)
+}
+
+func TestOpen_SessionWithOnlyEmptySavedRowsCreatesOneWindow(t *testing.T) {
+	h := newHarness(t)
+	addSnapshotted(t, h, 1, time.Time{})
+	addSnapshotted(t, h, 1, time.Time{})
+	addSnapshotted(t, h, 1, time.Time{})
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+
+	assert.True(t, res.Created)
+	live, err := h.driver.ListWindows(context.Background())
+	require.NoError(t, err)
+	require.Len(t, live, 1)
+	assert.Equal(t, []string{prURL}, tabURLs(live[0]))
+	rows := rowsOf(t, h, 1)
+	require.Len(t, rows, 1)
+	assert.Equal(t, WindowOpen, rows[0].State)
 }
 
 func TestRestore_DisconnectedIsNoop(t *testing.T) {
@@ -1271,7 +1307,7 @@ func TestRestore_RestoredWindowIsNotAdoptedByFocusedSession(t *testing.T) {
 	addMissing(t, h, 5, "https://unrelated.example.com")
 	connectRun(h, "r1")
 	focusedParent(t, h, 3)
-	addSnapshotted(t, h, 1, time.Time{})
+	addSnapshotted(t, h, 1, time.Time{}, SavedTab{URL: "https://saved.example.com"})
 
 	h.svc.SetAttached(1)
 	require.NoError(t, h.svc.place(context.Background()))

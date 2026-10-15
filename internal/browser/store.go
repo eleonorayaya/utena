@@ -140,6 +140,10 @@ func (s *Store) MarkMissingByDriverWindowID(id string) error {
 	return s.openWindow(id).Model(&BrowserWindow{}).Updates(missingUpdate()).Error
 }
 
+func (s *Store) Delete(id uint) error {
+	return s.db.Delete(&BrowserWindow{}, id).Error
+}
+
 func (s *Store) DeleteBySession(sessionID uint) error {
 	return s.db.Where("session_id = ?", sessionID).Delete(&BrowserWindow{}).Error
 }

@@ -639,6 +639,12 @@ func (s *Service) restoreLocked(ctx context.Context, sessionID uint) ([]Window, 
 		if restoring && r.State == WindowMissing {
 			continue
 		}
+		if len(r.Tabs) == 0 {
+			if err := s.store.Delete(r.ID); err != nil {
+				errs = append(errs, err)
+			}
+			continue
+		}
 		w, err := s.restoreRow(ctx, r, deadline)
 		if err != nil {
 			errs = append(errs, driverErr(err))
@@ -656,9 +662,6 @@ func (s *Service) restoreLocked(ctx context.Context, sessionID uint) ([]Window, 
 
 func (s *Service) restoreRow(ctx context.Context, r BrowserWindow, deadline time.Time) (Window, error) {
 	urls := savedURLs(r.Tabs)
-	if len(urls) == 0 {
-		urls = []string{"chrome://newtab/"}
-	}
 	live, err := s.driver.ListWindows(ctx)
 	if err != nil {
 		return Window{}, err
