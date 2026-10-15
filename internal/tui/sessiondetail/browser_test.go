@@ -5,15 +5,18 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func browserState(id uint, sb browser.SessionBrowser) provider.BrowserStateUpdatedMsg {
@@ -70,7 +73,7 @@ func TestBrowserSection_OneWindow(t *testing.T) {
 	m := detailWith(makeActiveSession(), oneWindow())
 	got := browserLines(m.View())
 	assert.Equal(t, []string{
-		"  Browser "+strings.Repeat("─", 34)+" 2 tabs · open",
+		"  Browser " + strings.Repeat("─", 34) + " 2 tabs · open",
 		"    ● Pull request #42  github.com",
 		"      Docs  docs.example.com",
 	}, got)
@@ -82,12 +85,12 @@ func TestBrowserSection_OneWindow(t *testing.T) {
 func TestBrowserSection_SeveralWindowsAndSnapshotted(t *testing.T) {
 	m := detailWith(makeActiveSession(), twoWindows())
 	assert.Equal(t, []string{
-		"  Browser "+strings.Repeat("─", 34)+" 3 tabs · open",
+		"  Browser " + strings.Repeat("─", 34) + " 3 tabs · open",
 		"    window 1",
 		"    ● Pull request #42  github.com",
 		"    window 2 · snapshotted",
 		"    ● Old notes  notes.example.com",
-		"      https://blank.example.com/b  blank.example.com",
+		"      https://blank.example.com/b",
 	}, browserLines(m.View()))
 }
 
@@ -97,7 +100,7 @@ func TestBrowserSection_SnapshottedOnlyIsMutedAndNotSelectable(t *testing.T) {
 	}}
 	m := detailWith(makeActiveSession(), sb)
 	assert.Equal(t, []string{
-		"  Browser "+strings.Repeat("─", 28)+" 1 tab · snapshotted",
+		"  Browser " + strings.Repeat("─", 28) + " 1 tab · snapshotted",
 		"    ● Saved  saved.example.com",
 	}, browserLines(m.View()))
 	m, _ = m.Update(runeKey("j"))
@@ -217,4 +220,114 @@ func TestDetail_ErrorShowsInFooter(t *testing.T) {
 	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
 	m, _ = m.Update(provider.ErrMsg{Err: errors.New("browser unavailable")})
 	assert.Equal(t, ui.Status{Text: "browser unavailable", Kind: ui.StatusError}, m.Status())
+}
+
+func oneBlocker() session.Session {
+	s := makeActiveSession()
+	s.Blockers = []session.SessionBlocker{{Model: gorm.Model{ID: 10}, Kind: session.BlockerKindReview, Note: "only"}}
+	return s
+}
+
+func enterTarget(t *testing.T, m Model) tea.Msg {
+	t.Helper()
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	return cmd()
+}
+
+func TestBrowserCursor_StaysOnTabWhenBlockersChange(t *testing.T) {
+	m := detailWith(oneBlocker(), oneWindow())
+	m, _ = m.Update(runeKey("j"))
+	want := provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t1"}
+	assert.Equal(t, want, enterTarget(t, m))
+
+	resolved := oneBlocker()
+	now := time.Now()
+	resolved.Blockers[0].ResolvedAt = &now
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{resolved}})
+	assert.Equal(t, want, enterTarget(t, m))
+
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{makeBlockedSession()}})
+	assert.Equal(t, want, enterTarget(t, m))
+}
+
+func TestBrowserCursor_StaysOnTabWhenTabsChange(t *testing.T) {
+	m := detailWith(makeActiveSession(), oneWindow())
+	m, _ = m.Update(runeKey("j"))
+	grown := oneWindow()
+	grown.Windows[0].Tabs = append([]browser.TabView{{ID: "t0", Title: "New", URL: "https://new.example.com"}}, grown.Windows[0].Tabs...)
+	m, _ = m.Update(browserState(1, grown))
+	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t1"}, enterTarget(t, m))
+}
+
+func TestBrowserCursor_BlockerGoneClampsWithinBlockers(t *testing.T) {
+	m := detailWith(makeBlockedSession(), oneWindow())
+	m, _ = m.Update(runeKey("j"))
+	now := time.Now()
+	refreshed := makeBlockedSession()
+	refreshed.Blockers[1].ResolvedAt = &now
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{refreshed}})
+	assert.Equal(t, 0, m.cursor)
+
+	gone := makeBlockedSession()
+	gone.Blockers[0].ResolvedAt = &now
+	gone.Blockers[1].ResolvedAt = &now
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{gone}})
+	assert.Equal(t, -1, m.cursor)
+	assert.Equal(t, "provider.activateSessionMsg", msgType(enterTarget(t, m)))
+}
+
+func TestBrowserSection_SanitizesControlCharacters(t *testing.T) {
+	sb := oneWindow()
+	sb.Windows[0].Tabs[0].Title = "evil\x1b]52;c;Zm9v\atitle"
+	m := detailWith(makeActiveSession(), sb)
+	out := m.View()
+	assert.NotContains(t, out, "\x1b]52")
+	assert.NotContains(t, out, "\a")
+	assert.Contains(t, ansi.Strip(out), "evil]52;c;Zm9vtitle")
+}
+
+func TestBrowserSection_UntitledTabShowsURLOnly(t *testing.T) {
+	sb := oneWindow()
+	sb.Windows[0].Tabs[1].Title = ""
+	m := detailWith(makeActiveSession(), sb)
+	assert.Equal(t, "      https://docs.example.com/guide", lineWith(plainLines(m.View()), "docs.example.com"))
+}
+
+func TestBrowserSection_UnfocusableOpenTabIsMuted(t *testing.T) {
+	sb := oneWindow()
+	sb.Windows[0].Tabs[1].ID = ""
+	live := tabLine(sb.Windows[0], sb.Windows[0].Tabs[0], false, 40)
+	stale := tabLine(sb.Windows[0], sb.Windows[0].Tabs[1], false, 40)
+	assert.Contains(t, live, valueStyle().Render("Pull request #42"))
+	assert.Contains(t, stale, mutedStyle().Render("Docs"))
+}
+
+func TestBrowserSection_FitsNarrowAndWideRunes(t *testing.T) {
+	sb := oneWindow()
+	sb.Windows[0].Tabs[0].Title = "日本語のタイトルがとても長い場合のテスト"
+	sb.Windows[0].Tabs[1].Title = "🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀"
+	for _, w := range []int{20, 60} {
+		m, _ := New().Update(tea.WindowSizeMsg{Width: w, Height: 40})
+		m, _ = m.Update(SelectMsg{Session: makeActiveSession()})
+		m, _ = m.Update(browserState(1, sb))
+		m, _ = m.Update(runeKey("j"))
+		out := m.View()
+		assert.Contains(t, out, "▌")
+		for _, l := range strings.Split(out, "\n") {
+			assert.LessOrEqual(t, lipgloss.Width(l), w, "%q", ansi.Strip(l))
+		}
+	}
+}
+
+func TestDetail_ShortHelpShowsNextWhenTabsSelectable(t *testing.T) {
+	m := detailWith(makeActiveSession(), oneWindow())
+	var got []string
+	for _, b := range m.Keys().ShortHelp() {
+		got = append(got, b.Help().Key+" "+b.Help().Desc)
+	}
+	assert.Equal(t, []string{"enter switch", "↓/j next item", "o open PR", "b block", "a archive", "esc back"}, got)
+
+	m, _ = New().Update(SelectMsg{Session: makeActiveSession()})
+	assert.Len(t, m.Keys().ShortHelp(), 5)
 }

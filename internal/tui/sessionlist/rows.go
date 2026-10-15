@@ -2,6 +2,7 @@ package sessionlist
 
 import (
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
@@ -56,10 +57,10 @@ func (m Model) renderRow(s session.Session, selected bool, width int) string {
 }
 
 func browserSpan(state string) ui.Span {
-	switch state {
-	case "open":
+	switch browser.WindowState(state) {
+	case browser.WindowOpen:
 		return ui.Span{Text: "◫", Style: lipgloss.NewStyle().Foreground(theme.Current.AccentBlue)}
-	case "missing", "snapshotted":
+	case browser.WindowMissing, browser.WindowSnapshotted:
 		return ui.Span{Text: "◫", Style: lipgloss.NewStyle().Foreground(theme.Current.TextMuted)}
 	}
 	return ui.Span{}

@@ -51,3 +51,9 @@ func TestHyperlink(t *testing.T) {
 	styled := Hyperlink("https://x/1", lipgloss.NewStyle().Bold(true).Render("#1"))
 	assert.Equal(t, 2, lipgloss.Width(styled))
 }
+
+func TestSingleLine_StripsControlCharacters(t *testing.T) {
+	assert.Equal(t, "a b c", SingleLine("a\nb\r\nc"))
+	assert.Equal(t, "evil]52;c;Zm9vtitle", SingleLine("evil\x1b]52;c;Zm9v\atitle"))
+	assert.Equal(t, "日本語 🚀", SingleLine("日本語 🚀"))
+}

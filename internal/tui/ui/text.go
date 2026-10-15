@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -12,7 +13,12 @@ import (
 var newlines = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 
 func SingleLine(s string) string {
-	return newlines.Replace(s)
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, newlines.Replace(s))
 }
 
 func Truncate(s string, width int) string {

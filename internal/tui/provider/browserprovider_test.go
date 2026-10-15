@@ -82,7 +82,26 @@ func TestFocusTab_ErrorReturnsErrMsg(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "browser unavailable"})
 	})
-	assert.Equal(t, ErrMsg{errors.New("browser unavailable")}, newClient(srv.URL).focusTab(7, "w1", "t1")())
+	assert.Equal(t, browserFocusFailedMsg{err: errors.New("browser unavailable")}, newClient(srv.URL).focusTab(7, "w1", "t1")())
+}
+
+func TestBrowserProvider_FailedFocusRefetchesAndReportsError(t *testing.T) {
+	calls := 0
+	srv := browserServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(sampleView())
+	})
+	p := newBrowserProvider(newClient(srv.URL))
+	_, cmd := p.Update(browserFocusFailedMsg{err: errors.New("tab gone")})
+	require.NotNil(t, cmd)
+	batch, ok := cmd().(tea.BatchMsg)
+	require.True(t, ok)
+	var msgs []tea.Msg
+	for _, c := range batch {
+		msgs = append(msgs, c())
+	}
+	assert.ElementsMatch(t, []tea.Msg{ErrMsg{errors.New("tab gone")}, browserStateLoadedMsg{state: sampleView()}}, msgs)
+	assert.Equal(t, 1, calls)
 }
 
 func TestFocusTab_IntentCmd(t *testing.T) {

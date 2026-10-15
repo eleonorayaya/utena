@@ -88,6 +88,47 @@ func (m Model) minCursor() int {
 	return -1
 }
 
+type selection struct {
+	blockerID uint
+	tab       tabRef
+	index     int
+}
+
+func (m Model) currentSelection() selection {
+	sel := selection{index: m.cursor}
+	if b := m.selectedBlocker(); b != nil {
+		sel.blockerID = b.ID
+	}
+	if t := m.selectedTab(); t != nil {
+		sel.tab = *t
+	}
+	return sel
+}
+
+func (m *Model) restoreSelection(sel selection) {
+	open := m.sess.OpenBlockers()
+	if sel.blockerID != 0 {
+		for i, b := range open {
+			if b.ID == sel.blockerID {
+				m.cursor = i
+				return
+			}
+		}
+		m.cursor = min(sel.index, len(open)-1)
+		m.clampCursor()
+		return
+	}
+	if sel.tab != (tabRef{}) {
+		for i, t := range m.selectableTabs() {
+			if t == sel.tab {
+				m.cursor = len(open) + i
+				return
+			}
+		}
+	}
+	m.clampCursor()
+}
+
 func (m *Model) clampCursor() {
 	last := len(m.sess.OpenBlockers()) + len(m.selectableTabs()) - 1
 	m.cursor = max(min(m.cursor, last), m.minCursor())
@@ -108,7 +149,7 @@ func (m Model) selectedTab() *tabRef {
 	}
 	i := m.cursor - len(m.sess.OpenBlockers())
 	tabs := m.selectableTabs()
-	if m.cursor < 0 || i < 0 || i >= len(tabs) {
+	if i < 0 || i >= len(tabs) {
 		return nil
 	}
 	return &tabs[i]
@@ -119,6 +160,7 @@ func (m Model) Keys() help.KeyMap {
 	if m.selectedTab() != nil {
 		k.Activate = openTabKey
 	}
+	k.showNext = len(m.selectableTabs()) > 0
 	return k
 }
 
@@ -139,10 +181,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.setStatus("", ui.StatusInfo)
 		return m, provider.RequestBrowserState()
 	case provider.BrowserStateUpdatedMsg:
-		m.browserState = msg.State
-		if m.sess != nil {
-			m.clampCursor()
+		if m.sess == nil {
+			m.browserState = msg.State
+			return m, nil
 		}
+		sel := m.currentSelection()
+		m.browserState = msg.State
+		m.restoreSelection(sel)
 		return m, nil
 	case provider.ErrMsg:
 		m.setStatus(msg.Err.Error(), ui.StatusError)
@@ -156,6 +201,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.sess == nil {
 			return m, nil
 		}
+		sel := m.currentSelection()
 		found := false
 		for _, s := range msg.Sessions {
 			if s.ID == m.sess.ID {
@@ -170,7 +216,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.picker = m.picker.Close()
 		}
-		m.clampCursor()
+		m.restoreSelection(sel)
 		return m, nil
 	case tea.KeyMsg:
 		return m.onKeyMsg(msg)

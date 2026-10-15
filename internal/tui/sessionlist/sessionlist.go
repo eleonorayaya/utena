@@ -48,7 +48,7 @@ func New() Model {
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
-	return m, provider.FetchSessions()
+	return m, tea.Batch(provider.FetchSessions(), provider.RequestBrowserState())
 }
 
 func (m Model) Keys() help.KeyMap {

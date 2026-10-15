@@ -338,3 +338,15 @@ func TestSessionList_SplitPreviewShowsBrowserSection(t *testing.T) {
 	assert.Contains(t, out, "Preview tab")
 	assert.NotContains(t, out, "▌ ●")
 }
+
+func TestSessionList_InitRequestsBrowserState(t *testing.T) {
+	_, cmd := New().Init()
+	require.NotNil(t, cmd)
+	batch, ok := cmd().(tea.BatchMsg)
+	require.True(t, ok)
+	var got []string
+	for _, c := range batch {
+		got = append(got, reflect.TypeOf(c()).String())
+	}
+	assert.ElementsMatch(t, []string{"provider.fetchSessionsIntentMsg", "provider.requestBrowserStateMsg"}, got)
+}

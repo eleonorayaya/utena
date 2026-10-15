@@ -663,27 +663,27 @@ func (c *client) focusTab(sessionID uint, windowID, tabID string) tea.Cmd {
 		defer cancel()
 		body, err := json.Marshal(browser.FocusRequest{SessionID: sessionID, WindowID: windowID, TabID: tabID})
 		if err != nil {
-			return ErrMsg{err}
+			return browserFocusFailedMsg{err}
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/browser/focus", bytes.NewReader(body))
 		if err != nil {
-			return ErrMsg{err}
+			return browserFocusFailedMsg{err}
 		}
 		req.Header.Set("Content-Type", "application/json")
 
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			log.Printf("[ERROR] focus tab %s/%s: %v", windowID, tabID, err)
-			return ErrMsg{err}
+			return browserFocusFailedMsg{err}
 		}
 		defer res.Body.Close()
 
 		if res.StatusCode != http.StatusOK {
-			return parseAPIError(res, "focus tab")
+			return browserFocusFailedMsg{parseAPIError(res, "focus tab").Err}
 		}
 		var out browser.FocusResult
 		if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-			return ErrMsg{err}
+			return browserFocusFailedMsg{err}
 		}
 		if out.Activated {
 			return SessionSwitchedMsg{}

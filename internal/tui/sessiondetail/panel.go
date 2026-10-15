@@ -371,13 +371,14 @@ func (m Model) browserRows(width int) []string {
 				selected = m.interactive && m.cursor == selectable
 				selectable++
 			}
-			rows = append(rows, tabLine(t, w.State == string(browser.WindowOpen), selected, width))
+			rows = append(rows, tabLine(w, t, selected, width))
 		}
 	}
 	return rows
 }
 
-func tabLine(t browser.TabView, live, selected bool, width int) string {
+func tabLine(w browser.WindowView, t browser.TabView, selected bool, width int) string {
+	live := focusable(w, t)
 	gutter := "  "
 	if selected {
 		gutter = lipgloss.NewStyle().Foreground(theme.Current.Primary).Render("▌ ")
@@ -393,11 +394,11 @@ func tabLine(t browser.TabView, live, selected bool, width int) string {
 		marker = markerStyle.Render("●")
 	}
 	title := ui.SingleLine(t.Title)
+	host := tabHost(t.URL)
 	if title == "" {
-		title = ui.SingleLine(t.URL)
+		title, host = ui.SingleLine(t.URL), ""
 	}
 	avail := max(width-4, 1)
-	host := tabHost(t.URL)
 	hostW := min(lipgloss.Width(host), avail/3)
 	titleW := avail
 	if hostW > 0 {

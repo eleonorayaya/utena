@@ -31,6 +31,10 @@ type browserStateLoadedMsg struct {
 
 type browserFocusedMsg struct{}
 
+type browserFocusFailedMsg struct {
+	err error
+}
+
 type browserProvider struct {
 	client *client
 	state  browser.SessionsView
@@ -49,6 +53,9 @@ func (p browserProvider) Update(msg tea.Msg) (browserProvider, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionsLoadedMsg, browserFocusedMsg:
 		return p, p.client.fetchBrowserState()
+	case browserFocusFailedMsg:
+		err := msg.err
+		return p, tea.Batch(p.client.fetchBrowserState(), func() tea.Msg { return ErrMsg{err} })
 	case browserStateLoadedMsg:
 		p.state = msg.state
 		return p, p.emitState()

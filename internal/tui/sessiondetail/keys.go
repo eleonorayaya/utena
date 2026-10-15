@@ -18,9 +18,13 @@ type keyMap struct {
 	Resolve       key.Binding
 	RemoveBlocker key.Binding
 	Back          key.Binding
+	showNext      bool
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
+	if k.showNext {
+		return []key.Binding{k.Activate, k.Down, k.OpenPR, k.Block, k.Archive, k.Back}
+	}
 	return []key.Binding{k.Activate, k.OpenPR, k.Block, k.Archive, k.Back}
 }
 
