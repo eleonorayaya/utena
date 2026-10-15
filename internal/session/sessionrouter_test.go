@@ -459,7 +459,10 @@ func TestSessionRouter_ListResources(t *testing.T) {
 	require.False(t, resp.SampledAt.IsZero())
 
 	scratch, managed := resp.Sessions[0], resp.Sessions[1]
-	require.Equal(t, SessionResources{Name: "scratch", MuxSession: "scratch", Status: ResourceStatusUnmanaged, CPUPercent: 3, RSSBytes: 2048, Procs: 1}, scratch)
+	require.Equal(t, SessionResources{
+		Name: "scratch", MuxSession: "scratch", Status: ResourceStatusUnmanaged, CPUPercent: 3, RSSBytes: 2048, Procs: 1,
+		Processes: []mux.ProcessUsage{{PID: 21, CPUPercent: 3, RSSBytes: 2048}},
+	}, scratch)
 	require.NotNil(t, managed.SessionID)
 	require.Equal(t, alpha.ID, *managed.SessionID)
 	require.Equal(t, "alpha", managed.Name)
@@ -468,4 +471,5 @@ func TestSessionRouter_ListResources(t *testing.T) {
 	require.InDelta(t, 41, managed.CPUPercent, 0.001)
 	require.Equal(t, int64(5120), managed.RSSBytes)
 	require.Equal(t, 2, managed.Procs)
+	require.Equal(t, []int{12, 11}, []int{managed.Processes[0].PID, managed.Processes[1].PID})
 }

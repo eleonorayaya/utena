@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/claude"
+	"github.com/eleonorayaya/utena/internal/mux"
 )
 
 type SessionResponse struct {
@@ -30,13 +31,14 @@ func (sr *SessionResponse) Render(w http.ResponseWriter, r *http.Request) error 
 const ResourceStatusUnmanaged = "unmanaged"
 
 type SessionResources struct {
-	SessionID  *uint   `json:"session_id,omitempty"`
-	Name       string  `json:"name"`
-	MuxSession string  `json:"mux_session"`
-	Status     string  `json:"status"`
-	CPUPercent float64 `json:"cpu_pct"`
-	RSSBytes   int64   `json:"rss_bytes"`
-	Procs      int     `json:"procs"`
+	SessionID  *uint              `json:"session_id,omitempty"`
+	Name       string             `json:"name"`
+	MuxSession string             `json:"mux_session"`
+	Status     string             `json:"status"`
+	CPUPercent float64            `json:"cpu_pct"`
+	RSSBytes   int64              `json:"rss_bytes"`
+	Procs      int                `json:"procs"`
+	Processes  []mux.ProcessUsage `json:"processes"`
 }
 
 type SessionResourcesResponse struct {

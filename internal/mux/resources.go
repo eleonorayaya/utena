@@ -2,16 +2,25 @@ package mux
 
 import (
 	"context"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 )
 
 type Usage struct {
-	Session    string  `json:"session"`
+	Session    string         `json:"session"`
+	CPUPercent float64        `json:"cpu_pct"`
+	RSSBytes   int64          `json:"rss_bytes"`
+	Procs      int            `json:"procs"`
+	Processes  []ProcessUsage `json:"processes"`
+}
+
+type ProcessUsage struct {
+	PID        int     `json:"pid"`
+	Command    string  `json:"command"`
 	CPUPercent float64 `json:"cpu_pct"`
 	RSSBytes   int64   `json:"rss_bytes"`
-	Procs      int     `json:"procs"`
 }
 
 const maxCPUDeltaWindow = time.Minute
@@ -67,10 +76,26 @@ func (s *resourceSampler) sample(ctx context.Context) ([]Usage, error) {
 		u.CPUPercent += cpu[p.proc.PID]
 		u.RSSBytes += p.proc.RSSBytes
 		u.Procs++
+		u.Processes = append(u.Processes, ProcessUsage{
+			PID:        p.proc.PID,
+			Command:    commandName(p.proc.Command),
+			CPUPercent: cpu[p.proc.PID],
+			RSSBytes:   p.proc.RSSBytes,
+		})
 	}
 
 	usages := make([]Usage, 0, len(byName))
 	for _, u := range byName {
+		sort.Slice(u.Processes, func(i, j int) bool {
+			a, b := u.Processes[i], u.Processes[j]
+			if a.CPUPercent != b.CPUPercent {
+				return a.CPUPercent > b.CPUPercent
+			}
+			if a.RSSBytes != b.RSSBytes {
+				return a.RSSBytes > b.RSSBytes
+			}
+			return a.PID < b.PID
+		})
 		usages = append(usages, *u)
 	}
 	sort.Slice(usages, func(i, j int) bool { return usages[i].Session < usages[j].Session })
@@ -112,4 +137,11 @@ func attribute(procs []Process, shells map[int]string) []attributed {
 		}
 	}
 	return out
+}
+
+func commandName(command string) string {
+	if command == "" {
+		return ""
+	}
+	return filepath.Base(command)
 }

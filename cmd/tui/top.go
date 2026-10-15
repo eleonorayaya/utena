@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
@@ -129,6 +130,7 @@ type topKeyMap struct {
 	SortCPU  key.Binding
 	SortMem  key.Binding
 	SortName key.Binding
+	Procs    key.Binding
 	Quit     key.Binding
 }
 
@@ -136,14 +138,18 @@ var topKeys = topKeyMap{
 	SortCPU:  key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "cpu")),
 	SortMem:  key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mem")),
 	SortName: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "name")),
+	Procs:    key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "processes")),
 	Quit:     key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
 func (k topKeyMap) bindings() []key.Binding {
-	return []key.Binding{k.SortCPU, k.SortMem, k.SortName, k.Quit}
+	return []key.Binding{k.SortCPU, k.SortMem, k.SortName, k.Procs, k.Quit}
 }
 
-const topHistoryLen = 24
+const (
+	topHistoryLen      = 24
+	topProcsPerSession = 4
+)
 
 type resourcesMsg struct {
 	resp *session.SessionResourcesResponse
@@ -160,6 +166,7 @@ type topModel struct {
 	sampledAt time.Time
 	err       error
 	sortBy    topSort
+	showProcs bool
 	cores     int
 	width     int
 	height    int
@@ -167,10 +174,11 @@ type topModel struct {
 
 func newTopModel(port string, interval time.Duration) topModel {
 	return topModel{
-		interval: interval,
-		sortBy:   sortCPU,
-		history:  make(map[string][]float64),
-		cores:    runtime.NumCPU(),
+		interval:  interval,
+		sortBy:    sortCPU,
+		showProcs: true,
+		history:   make(map[string][]float64),
+		cores:     runtime.NumCPU(),
 		fetch: func() (*session.SessionResourcesResponse, error) {
 			return fetchResources(port, interval+5*time.Second)
 		},
@@ -201,6 +209,8 @@ func (m topModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sortBy = sortMem
 		case key.Matches(msg, topKeys.SortName):
 			m.sortBy = sortName
+		case key.Matches(msg, topKeys.Procs):
+			m.showProcs = !m.showProcs
 		}
 		return m, nil
 	case tea.WindowSizeMsg:
@@ -263,6 +273,9 @@ func (m topModel) View() string {
 	}
 	for _, r := range rows {
 		lines = append(lines, m.sessionRow(r, maxRSS, width, lay))
+		if m.showProcs {
+			lines = append(lines, m.processRows(r, width, lay)...)
+		}
 	}
 	if len(rows) == 0 {
 		msg := "waiting for the first sample…"
@@ -449,4 +462,88 @@ func sparkline(values []float64, width int) string {
 		out[i] = sparkLevels[level]
 	}
 	return string(out)
+}
+
+func sortProcesses(procs []mux.ProcessUsage, by topSort) []mux.ProcessUsage {
+	out := append([]mux.ProcessUsage(nil), procs...)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		switch by {
+		case sortMem:
+			if a.RSSBytes != b.RSSBytes {
+				return a.RSSBytes > b.RSSBytes
+			}
+		case sortName:
+			if a.Command != b.Command {
+				return a.Command < b.Command
+			}
+		default:
+			if a.CPUPercent != b.CPUPercent {
+				return a.CPUPercent > b.CPUPercent
+			}
+			if a.RSSBytes != b.RSSBytes {
+				return a.RSSBytes > b.RSSBytes
+			}
+		}
+		return a.PID < b.PID
+	})
+	return out
+}
+
+func (m topModel) processRows(r session.SessionResources, width int, lay topLayout) []string {
+	procs := sortProcesses(r.Processes, m.sortBy)
+	hidden := 0
+	if len(procs) > topProcsPerSession {
+		hidden = len(procs) - topProcsPerSession
+		procs = procs[:topProcsPerSession]
+	}
+	t := theme.Current
+	tree := ui.FG(t.SurfaceVariant)
+	unmanaged := r.SessionID == nil
+
+	var lines []string
+	for i, p := range procs {
+		branch := "├ "
+		if i == len(procs)-1 && hidden == 0 {
+			branch = "└ "
+		}
+		nameStyle := ui.FG(t.Text)
+		cs := cpuStyle(p.CPUPercent)
+		if unmanaged {
+			nameStyle, cs = ui.Muted(), ui.Muted()
+		}
+		command := p.Command
+		if command == "" {
+			command = "?"
+		}
+		cells := []ui.Cell{
+			{Width: 2},
+			{Spans: []ui.Span{{Text: branch, Style: tree}, {Text: command, Style: nameStyle}}},
+			{Width: 12},
+		}
+		if lay.bar > 0 {
+			cells = append(cells, ui.Cell{Width: lay.bar + 1})
+		}
+		cells = append(cells,
+			ui.Cell{Spans: []ui.Span{{Text: fmt.Sprintf("%.1f%%", p.CPUPercent), Style: cs}}, Width: 8, Align: ui.AlignRight},
+			ui.Cell{Width: 2})
+		if lay.bar > 0 {
+			cells = append(cells, ui.Cell{Width: lay.bar + 1})
+		}
+		cells = append(cells,
+			ui.Cell{Spans: []ui.Span{{Text: formatBytes(p.RSSBytes), Style: ui.Muted()}}, Width: 10, Align: ui.AlignRight},
+			ui.Cell{Spans: []ui.Span{{Text: fmt.Sprintf("%d", p.PID), Style: ui.Muted()}}, Width: 7, Align: ui.AlignRight})
+		if lay.trend > 0 {
+			cells = append(cells, ui.Cell{Width: 2 + lay.trend})
+		}
+		lines = append(lines, ui.Row(cells, width, nil))
+	}
+	if hidden > 0 {
+		more := ui.Row([]ui.Cell{
+			{Width: 2},
+			{Spans: []ui.Span{{Text: "└ ", Style: tree}, {Text: fmt.Sprintf("+%d more", hidden), Style: ui.Muted().Italic(true)}}},
+		}, width, nil)
+		lines = append(lines, more)
+	}
+	return lines
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/session"
 )
 
@@ -140,4 +141,56 @@ func TestTopModel_NarrowWidthDropsBarsAndTrend(t *testing.T) {
 
 func ansiStrip(s string) string {
 	return ansi.Strip(s)
+}
+
+func procRows() []session.SessionResources {
+	id := uint(7)
+	return []session.SessionResources{{
+		SessionID: &id, Name: "alpha", MuxSession: "alpha", Status: "active", CPUPercent: 60, RSSBytes: 900 << 20, Procs: 6,
+		Processes: []mux.ProcessUsage{
+			{PID: 11, Command: "zsh", CPUPercent: 0, RSSBytes: 2 << 20},
+			{PID: 12, Command: "claude", CPUPercent: 40, RSSBytes: 600 << 20},
+			{PID: 13, Command: "go", CPUPercent: 15, RSSBytes: 200 << 20},
+			{PID: 14, Command: "gopls", CPUPercent: 5, RSSBytes: 90 << 20},
+			{PID: 15, Command: "node", CPUPercent: 0, RSSBytes: 8 << 20},
+			{PID: 16, Command: "cat", CPUPercent: 0, RSSBytes: 1 << 20},
+		},
+	}}
+}
+
+func TestTopModel_ShowsBusiestProcessesUnderSessions(t *testing.T) {
+	m := newTopModel("0", time.Second)
+	next, _ := m.Update(resourcesMsg{resp: &session.SessionResourcesResponse{Sessions: procRows(), SampledAt: time.Now()}})
+	m = next.(topModel)
+
+	view := ansi.Strip(m.View())
+	assert.Contains(t, view, "├ claude")
+	assert.Less(t, strings.Index(view, "claude"), strings.Index(view, "├ go"))
+	assert.Less(t, strings.Index(view, "├ go"), strings.Index(view, "gopls"))
+	assert.Contains(t, view, "└ +2 more")
+	assert.NotContains(t, view, "├ cat")
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	view = ansi.Strip(next.(topModel).View())
+	assert.Less(t, strings.Index(view, "├ claude"), strings.Index(view, "├ go"))
+	assert.Less(t, strings.Index(view, "gopls"), strings.Index(view, "node"))
+
+	next, _ = next.(topModel).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	view = ansi.Strip(next.(topModel).View())
+	assert.NotContains(t, view, "claude")
+	assert.Contains(t, view, "alpha")
+}
+
+func TestSortProcesses(t *testing.T) {
+	procs := procRows()[0].Processes
+	pids := func(ps []mux.ProcessUsage) []int {
+		out := make([]int, len(ps))
+		for i, p := range ps {
+			out[i] = p.PID
+		}
+		return out
+	}
+	assert.Equal(t, []int{12, 13, 14, 15, 11, 16}, pids(sortProcesses(procs, sortCPU)))
+	assert.Equal(t, []int{12, 13, 14, 15, 11, 16}, pids(sortProcesses(procs, sortMem)))
+	assert.Equal(t, []int{16, 12, 13, 14, 15, 11}, pids(sortProcesses(procs, sortName)))
 }

@@ -53,7 +53,35 @@ func TestResourceSampler_AttributesSubtreesToPaneSessions(t *testing.T) {
 	assert.Equal(t, []Usage{
 		{Session: "alpha", CPUPercent: 153, RSSBytes: (2 + 600 + 4 + 300 + 2) * 1024, Procs: 5},
 		{Session: "beta", CPUPercent: 2, RSSBytes: (2 + 50) * 1024, Procs: 2},
-	}, usages)
+	}, totalsOnly(usages))
+}
+
+func TestResourceSampler_ListsSessionProcessesBusiestFirst(t *testing.T) {
+	s, _, _, _ := newSamplerForTest(procTable(nil))
+
+	usages, err := s.sample(context.Background())
+	require.NoError(t, err)
+
+	assert.Equal(t, []ProcessUsage{
+		{PID: 104, Command: "go", CPUPercent: 90, RSSBytes: 300 * 1024},
+		{PID: 103, Command: "zsh", CPUPercent: 50, RSSBytes: 4 * 1024},
+		{PID: 102, Command: "claude", CPUPercent: 13, RSSBytes: 600 * 1024},
+		{PID: 101, Command: "zsh", CPUPercent: 0, RSSBytes: 2 * 1024},
+		{PID: 301, Command: "zsh", CPUPercent: 0, RSSBytes: 2 * 1024},
+	}, usages[0].Processes)
+	assert.Equal(t, []ProcessUsage{
+		{PID: 202, Command: "nvim", CPUPercent: 2, RSSBytes: 50 * 1024},
+		{PID: 201, Command: "zsh", CPUPercent: 0, RSSBytes: 2 * 1024},
+	}, usages[1].Processes)
+}
+
+func totalsOnly(usages []Usage) []Usage {
+	out := make([]Usage, len(usages))
+	for i, u := range usages {
+		u.Processes = nil
+		out[i] = u
+	}
+	return out
 }
 
 func TestResourceSampler_SecondSampleUsesCPUTimeDelta(t *testing.T) {
@@ -119,5 +147,5 @@ func TestService_ResourceUsageUsesInjectedLister(t *testing.T) {
 
 	usages, err := svc.ResourceUsage(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, []Usage{{Session: "alpha", RSSBytes: 1024, Procs: 1}}, usages)
+	assert.Equal(t, []Usage{{Session: "alpha", RSSBytes: 1024, Procs: 1, Processes: []ProcessUsage{{PID: 101, RSSBytes: 1024}}}}, usages)
 }

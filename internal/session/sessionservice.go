@@ -222,6 +222,7 @@ func (s *SessionService) ResourceUsage(ctx context.Context) (*SessionResourcesRe
 			CPUPercent: u.CPUPercent,
 			RSSBytes:   u.RSSBytes,
 			Procs:      u.Procs,
+			Processes:  u.Processes,
 		}
 		if sess, ok := byMux[u.Session]; ok {
 			id := sess.ID
