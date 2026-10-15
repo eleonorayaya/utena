@@ -476,6 +476,11 @@ func (s *Service) ensurePlacedLocked(ctx context.Context) {
 }
 
 func (s *Service) OnAppEnd(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.connected.Store(false)
+	stopTimers(s.snapshots)
+	stopTimers(s.removals)
 	return nil
 }
 
@@ -519,10 +524,11 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	case EventDisconnected:
 		s.connected.Store(false)
 		err = s.flushRemovals()
+		stopTimers(s.snapshots)
 	case EventWindowCreated:
 		err = s.adopt(ctx, ev.WindowID)
 	case EventWindowRemoved:
-		err = s.windowRemoved(ctx, ev.WindowID)
+		err = s.windowRemoved(ev.WindowID)
 	case EventTabsChanged:
 		err = s.tabsChanged(ctx, ev.WindowID)
 	case EventFocusChanged:
@@ -557,7 +563,7 @@ func (s *Service) tabsChanged(ctx context.Context, windowID string) error {
 	return nil
 }
 
-func (s *Service) windowRemoved(ctx context.Context, windowID string) error {
+func (s *Service) windowRemoved(windowID string) error {
 	delete(s.links.links, windowID)
 	stopTimer(s.snapshots, windowID)
 	if _, ok := s.removals[windowID]; ok {
@@ -573,7 +579,7 @@ func (s *Service) windowRemoved(ctx context.Context, windowID string) error {
 			return
 		}
 		if err := s.store.DeleteByDriverWindowID(windowID); err != nil {
-			slog.WarnContext(ctx, "browser: forget closed window failed", "window", windowID, "error", err)
+			slog.WarnContext(context.Background(), "browser: forget closed window failed", "window", windowID, "error", err)
 		}
 	})
 	return nil
@@ -592,6 +598,12 @@ func stopTimer(timers map[string]*pendingTimer, key string) {
 	if t, ok := timers[key]; ok {
 		t.stop()
 		delete(timers, key)
+	}
+}
+
+func stopTimers(timers map[string]*pendingTimer) {
+	for key := range timers {
+		stopTimer(timers, key)
 	}
 }
 

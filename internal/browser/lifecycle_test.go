@@ -323,19 +323,67 @@ func TestWindowRemoved_StaleGraceTimerDoesNotDeleteReusedID(t *testing.T) {
 	assert.Equal(t, uint(2), got.SessionID)
 }
 
-func TestWindowRemoved_ConnectedInsideGraceMarksMissing(t *testing.T) {
+func TestWindowRemoved_ConnectedInsideGraceFlushesPendingRemoval(t *testing.T) {
 	h := newHarness(t)
 	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
 	require.NoError(t, err)
 	removeWindow(h, res.WindowID)
 
-	h.svc.handleEvent(context.Background(), Event{Type: EventConnected})
+	connectRun(h, "run-b")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 2, State: WindowOpen, DriverWindowID: res.WindowID}))
 	h.clock.fire()
 
+	got, err := h.store.GetByDriverWindowID(res.WindowID)
+	require.NoError(t, err)
+	assert.Equal(t, uint(2), got.SessionID)
 	missing, err := h.store.ListMissing()
 	require.NoError(t, err)
 	require.Len(t, missing, 1)
+	assert.Equal(t, uint(1), missing[0].SessionID)
 	assert.Equal(t, []string{prURL}, urlsOf(missing[0].Tabs))
+}
+
+func TestWindowRemoved_DuplicateEventKeepsOneTimer(t *testing.T) {
+	h := newHarness(t)
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+
+	removeWindow(h, res.WindowID)
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowRemoved, WindowID: res.WindowID})
+
+	require.Len(t, h.clock.live(), 1)
+	assert.Equal(t, 1, h.clock.fire())
+	all, err := h.store.ListBySession(1)
+	require.NoError(t, err)
+	assert.Empty(t, all)
+}
+
+func TestDisconnected_StopsPendingSnapshots(t *testing.T) {
+	h := newHarness(t)
+	w := ownWindow(t, h, 1, "https://a.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: w.ID})
+	require.Len(t, h.clock.live(), 1)
+
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+
+	assert.Empty(t, h.clock.live())
+	assert.Empty(t, h.svc.snapshots)
+}
+
+func TestOnAppEnd_DisconnectsAndStopsTimers(t *testing.T) {
+	h := newHarness(t)
+	snap := ownWindow(t, h, 1, "https://a.example.com")
+	gone := ownWindow(t, h, 2, "https://b.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: snap.ID})
+	removeWindow(h, gone.ID)
+	require.Len(t, h.clock.live(), 2)
+
+	require.NoError(t, h.svc.OnAppEnd(context.Background()))
+
+	assert.False(t, h.svc.Connected())
+	assert.Empty(t, h.clock.live())
+	assert.Empty(t, h.svc.snapshots)
+	assert.Empty(t, h.svc.removals)
 }
 
 func TestConnected_ReattachesRestoredWindowsAfterChromeRestart(t *testing.T) {
