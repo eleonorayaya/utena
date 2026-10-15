@@ -54,6 +54,17 @@ Links opened from a utena session land in that session's own Chrome window.
 3. `utena open <url>...` opens links in the current session's window; when the browser extension is connected, the TUI's `o` switches to the selected session (if it isn't attached) and opens its PR in that session's window. Otherwise `o` just opens the PR.
 4. If the daemon or extension is unavailable, links fall back to `/usr/bin/open`.
 
+After upgrading utena, reload the extension in `chrome://extensions`. The extension now speaks protocol 2, and the daemon reports an older one as outdated.
+
+Session windows outlive the session's time in the foreground:
+
+- **Archiving** a session saves its windows' tabs and closes the windows. **Reactivating** it brings them back with the same tabs and the same active tab (pinned tabs come back unpinned).
+- **Closing a window by hand** forgets it; it won't come back.
+- **Quitting Chrome** keeps the windows. When Chrome restarts and restores its windows, utena reattaches them to their sessions by matching their tabs. Windows it can't match are restored from their saved tabs the next time the session is attached or a link is opened for it.
+- **Deleting** a session closes its windows.
+
+Limitations: tab changes made in the last ~2 seconds before quitting Chrome may not be saved. Archiving while the extension is disconnected saves the last known tabs but leaves the windows open in Chrome.
+
 With [AeroSpace](https://github.com/nikitabobko/AeroSpace), the daemon also parks windows: the attached session's Chrome windows sit on the browser workspace, and every other session's windows are moved to the park workspace. When you switch sessions, the windows swap quietly. Swapping never changes focus, and Chrome windows no session owns are never moved. Opening a link from the attached session (or from outside any session) focuses its window through AeroSpace, which switches to that window's workspace; links from background sessions open without changing focus. A window created for a background session may flash on the browser workspace for a moment before it is parked. A window that can't be matched to an AeroSpace window unambiguously stays where it is until a later tab change or swap resolves it.
 
 | Flag | Env | Default | |
