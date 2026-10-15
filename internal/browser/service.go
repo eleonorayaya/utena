@@ -93,7 +93,6 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 				return OpenResult{}, err
 			}
 			activated = true
-			focus = true
 		default:
 			focus = attached
 		}

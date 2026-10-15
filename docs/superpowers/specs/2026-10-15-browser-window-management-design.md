@@ -341,7 +341,8 @@ Decided during review:
 - The Chrome driver coalesces connection-state events and never drops them. Window and tab events are tagged with the connection generation, and stale ones are discarded.
 - The extension does not reconnect on its own after a `"replaced"` close, but the 30s alarm still reconnects. Two profiles with the extension will therefore swap ownership roughly every 30s, so install it in one profile only.
 - Known edge: a slow Chrome that completes after the daemon's 15s (or the driver's 5s) timeout can lead to a duplicate open through the `/usr/bin/open` fallback. Accepted.
-- Known edge: with `activate`, a driver failure after the session switch cannot fall back, because the TUI popup is already gone; the link is dropped. Accepted.
+- Known edge: with `activate`, a driver failure after the session switch returns an error, so the TUI falls back to `/usr/bin/open` but does not quit; the popup stays open in the previous session. Accepted.
+- The extension drops (does not queue) events sent before its hello; the resync on `Connected` covers them.
 - The extension's endpoint is hardcoded to port 3333, so dev daemons on other ports always fall back.
 - The `--browser` flag is deferred until there is a second driver.
 - Root URLs (no path, such as `https://example.com/`) never dedup. Every open of one gets a new tab.

@@ -18,7 +18,12 @@ async function loadRun() {
 }
 
 function currentRun() {
-  if (!runPromise) runPromise = loadRun().catch(() => "");
+  if (!runPromise) {
+    runPromise = loadRun().catch(() => {
+      runPromise = null;
+      return "";
+    });
+  }
   return runPromise;
 }
 
