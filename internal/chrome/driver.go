@@ -102,7 +102,7 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 	run, err := readHello(ctx, ws)
 	if err != nil {
 		if errors.Is(err, errProtocolMismatch) {
-			d.outdated.Store(true)
+			d.markOutdated()
 		}
 		slog.Warn("chrome: extension rejected", "error", err)
 		_ = ws.Close(websocket.StatusPolicyViolation, err.Error())
@@ -136,6 +136,14 @@ func readHello(ctx context.Context, ws *websocket.Conn) (string, error) {
 		return "", fmt.Errorf("%w: extension protocol %d, daemon expects %d; reload the extension", errProtocolMismatch, m.Protocol, ProtocolVersion)
 	}
 	return m.Run, nil
+}
+
+func (d *Driver) markOutdated() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.conn == nil {
+		d.outdated.Store(true)
+	}
 }
 
 func (d *Driver) swap(c *conn) {

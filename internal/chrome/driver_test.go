@@ -208,6 +208,26 @@ func TestDriver_RejectsProtocolMismatch(t *testing.T) {
 	}
 }
 
+func TestDriver_MismatchWhileConnectedDoesNotSetOutdated(t *testing.T) {
+	d, srv, rec := newDriver(t)
+	startExt(t, srv, ProtocolVersion, nil)
+	waitConnected(t, rec)
+
+	ws, err := dial(t, srv, "chrome-extension://abc")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ws.CloseNow() })
+	ext := &fakeExt{ws: ws}
+	ext.send(t, map[string]any{"type": "hello", "protocol": ProtocolVersion + 1, "browser": "chrome"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for err == nil {
+		_, _, err = ws.Read(ctx)
+	}
+	assert.Equal(t, websocket.StatusPolicyViolation, websocket.CloseStatus(err))
+	assert.False(t, d.Outdated())
+}
+
 func TestDriver_NonProtocolHelloFailureDoesNotSetOutdated(t *testing.T) {
 	d, srv, _ := newDriver(t)
 	ws, err := dial(t, srv, "chrome-extension://abc")
