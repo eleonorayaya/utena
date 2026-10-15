@@ -630,13 +630,18 @@ func (c *client) openURL(sessionID uint, link string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		req := browser.OpenRequest{SessionID: sessionID, URL: link, Activate: true}
-		if _, err := browser.RequestOpen(ctx, http.DefaultClient, c.baseURL+"/browser", req); err != nil {
+		res, err := browser.RequestOpen(ctx, http.DefaultClient, c.baseURL+"/browser", req)
+		if err != nil {
 			log.Printf("[WARN] browser open via daemon failed, falling back: %v", err)
 			cmd := exec.Command("/usr/bin/open", link)
 			if err := cmd.Start(); err != nil {
 				return ui.OpenURLFailedMsg{Err: err}
 			}
 			go cmd.Wait()
+			return nil
+		}
+		if res.Activated {
+			return SessionSwitchedMsg{}
 		}
 		return nil
 	}

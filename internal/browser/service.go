@@ -33,10 +33,11 @@ func (r *OpenRequest) Bind(*http.Request) error {
 }
 
 type OpenResult struct {
-	WindowID string `json:"window_id"`
-	TabID    string `json:"tab_id"`
-	Created  bool   `json:"created"`
-	Focused  bool   `json:"focused"`
+	WindowID  string `json:"window_id"`
+	TabID     string `json:"tab_id"`
+	Created   bool   `json:"created"`
+	Focused   bool   `json:"focused"`
+	Activated bool   `json:"activated"`
 }
 
 type Service struct {
@@ -77,6 +78,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 	}
 
 	focus := true
+	activated := false
 	if req.SessionID != 0 {
 		attached, err := s.sessions.IsAttached(ctx, req.SessionID)
 		if err != nil {
@@ -86,7 +88,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 			if err := s.sessions.Activate(ctx, req.SessionID); err != nil {
 				return OpenResult{}, err
 			}
-			attached = true
+			attached, activated = true, true
 		}
 		focus = attached
 	}
@@ -106,7 +108,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 		return OpenResult{}, err
 	}
 
-	var res OpenResult
+	res := OpenResult{Activated: activated}
 	switch {
 	case !found:
 		w, err := s.driver.CreateWindow(ctx, []string{req.URL}, focus)
@@ -121,7 +123,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 				return OpenResult{}, err
 			}
 		}
-		res = OpenResult{WindowID: w.ID, Created: true}
+		res.WindowID, res.Created = w.ID, true
 		if len(w.Tabs) > 0 {
 			res.TabID = w.Tabs[0].ID
 		}

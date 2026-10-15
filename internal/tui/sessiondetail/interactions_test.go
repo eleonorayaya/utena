@@ -106,3 +106,10 @@ func TestDetail_PickerClosesWhenSessionDisappears(t *testing.T) {
 	m, _ = m.Update(provider.SessionsStateUpdatedMsg{})
 	assert.False(t, m.picker.IsOpen())
 }
+
+func TestDetail_QuitsAfterSessionSwitch(t *testing.T) {
+	m, _ := New().Update(SelectMsg{Session: richSession()})
+	_, cmd := m.Update(provider.SessionSwitchedMsg{})
+	require.NotNil(t, cmd)
+	assert.Equal(t, tea.QuitMsg{}, cmd())
+}

@@ -93,6 +93,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case ui.OpenURLFailedMsg:
 		m.setStatus("could not open PR: "+msg.Err.Error(), ui.StatusError)
 		return m, nil
+	case provider.SessionSwitchedMsg:
+		return m, tea.Quit
 	case provider.SessionsStateUpdatedMsg:
 		if m.sess == nil {
 			return m, nil

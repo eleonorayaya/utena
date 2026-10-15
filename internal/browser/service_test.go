@@ -175,3 +175,20 @@ func TestOpen_DriverNotConnectedIsUnavailable(t *testing.T) {
 	_, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
 	assert.ErrorIs(t, err, ErrUnavailable)
 }
+
+func TestOpen_ReportsActivatedOnlyWhenSwitching(t *testing.T) {
+	h := newHarness(t)
+	h.sessions.Attached = 2
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL, Activate: true})
+	require.NoError(t, err)
+	assert.True(t, res.Activated)
+
+	res, err = h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL, Activate: true})
+	require.NoError(t, err)
+	assert.False(t, res.Activated)
+
+	res, err = h.svc.Open(context.Background(), OpenRequest{SessionID: 3, URL: prURL})
+	require.NoError(t, err)
+	assert.False(t, res.Activated)
+}
