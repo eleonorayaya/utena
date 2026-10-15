@@ -1,0 +1,323 @@
+# Browser window management
+
+## Goal
+
+Give every utena session its own browser windows. Links that come from a session
+open in that session's windows. Switching sessions swaps which windows are visible
+on the browser workspace. Archiving a session snapshots its tabs and closes them,
+and they come back when the session is reactivated. The browser and the OS window
+manager are each reached through a generic `Driver` interface, following the
+`mux`/`tuios` split. Chrome and AeroSpace are the first drivers. Firefox is a
+planned second browser driver, and the interface is shaped with it in mind.
+
+## UX
+
+- **One or more windows per session, created lazily.** A session gets its first
+  window the first time something opens a link for it. Sessions that never browse
+  never get a window.
+- **Parking.** The attached session's windows live on the browser workspace (`2`).
+  Every other session-owned window lives on the park workspace (`P`). Unowned
+  windows (personal browsing) are never moved.
+- **A quiet swap.** Changing the attached session, whether through the utena popup,
+  Ctrl+B S or `utena attach`, swaps the windows but never changes focus. You stay in
+  the terminal.
+- **Link routing.** `utena shell-init` exports `BROWSER` pointing at `utena-open`,
+  so `gh … --web` and other tools that respect `$BROWSER` open in the calling
+  session's window (from `UTENA_SESSION_ID`). The TUI's `o` (open PR) uses the same
+  path.
+  - From the attached session: the link opens and AeroSpace focuses that window,
+    which jumps to workspace 2.
+  - From a background session: the link opens quietly in the parked window, with
+    no focus change.
+  - From outside any session: plain `/usr/bin/open`.
+  - `o`, or selecting a tab, on a session that isn't attached switches tuios to
+    that session and then opens it as the attached session. This is one daemon
+    call.
+- **Dedup by prefix.** If an open tab has the same host as the requested URL and its
+  path starts with the requested path (whole segments only, ignoring query and
+  fragment), that tab is focused as it is and not navigated. Otherwise a new tab
+  opens. `/pull/123` focuses `/pull/123/files`. `/pull/12` does not match
+  `/pull/123`.
+- **The link target** for a session with several windows is its most recently
+  focused open window.
+- **Ownership of new windows.** A window created while one of session S's windows
+  is focused (cmd-N, or dragging a tab out) belongs to S. A window created from an
+  unowned window stays unowned.
+- **Lifecycle.**
+  - Archive: snapshot every window's tabs, then close the windows.
+  - Delete: close the windows and drop their snapshots.
+  - Closing a window by hand while Chrome is running: that window is forgotten and
+    nothing is restored.
+  - Chrome quits or crashes: on restart, utena reattaches restored windows by URL
+    overlap. Windows that don't match become `missing` and are restored from their
+    snapshot.
+  - Restoring `missing` and `snapshotted` windows is lazy: it happens when the
+    session becomes attached, or when a link is opened for it.
+- **TUI.**
+  - The session list shows a marker for sessions with browser windows.
+  - The detail panel shows the tab count, the window state, and a tab list grouped
+    by window. A heading appears only when there are several windows.
+  - Selecting a tab activates it and focuses its window, switching sessions first
+    if needed.
+  - The footer warns when the extension is outdated.
+- **Graceful degradation.** `--wm none` keeps routing, tab lists and snapshots but
+  turns parking off. With no extension connected, `utena-open` falls back to
+  `/usr/bin/open`.
+
+## Packages
+
+```
+internal/browser    domain: BrowserWindow model, store, service, /browser controller, Driver interface, FakeDriver
+internal/chrome     browser.Driver over a WebSocket to the Chrome extension; exposes Handler()
+internal/wm         wm.Driver interface, types, FakeDriver, a no-op driver
+internal/aerospace  wm.Driver over the aerospace CLI
+extension/chrome    MV3 extension (manifest with a pinned key, background.js)
+```
+
+Only `internal/api/app.go` imports `chrome` and `aerospace`. `browser` depends on
+`wm`, `mux` and the eventbus, never on a concrete driver. `app.go` mounts
+`chrome.Driver.Handler()` at `/browser/chrome`.
+
+```go
+package browser
+
+type Driver interface {
+	AppBundleID() string
+	ListWindows(ctx context.Context) ([]Window, error)
+	CreateWindow(ctx context.Context, urls []string, focused bool) (Window, error)
+	CloseWindow(ctx context.Context, windowID string) error
+	OpenTab(ctx context.Context, windowID, url string) (Tab, error)
+	ActivateTab(ctx context.Context, windowID, tabID string) error
+	Subscribe(ctx context.Context, onEvent func(Event)) error
+}
+
+type Window struct {
+	ID      string
+	Focused bool
+	Tabs    []Tab
+}
+
+type Tab struct {
+	ID, URL, Title string
+	Active, Pinned bool
+}
+
+type EventType string
+
+const (
+	EventConnected     EventType = "connected"
+	EventDisconnected  EventType = "disconnected"
+	EventWindowCreated EventType = "window_created"
+	EventWindowRemoved EventType = "window_removed"
+	EventTabsChanged   EventType = "tabs_changed"
+	EventFocusChanged  EventType = "focus_changed"
+)
+
+type Event struct {
+	Type     EventType
+	WindowID string
+}
+```
+
+```go
+package wm
+
+type Driver interface {
+	ListWindows(bundleID string) ([]Window, error)
+	MoveToWorkspace(windowID, workspace string) error
+	FocusWindow(windowID string) error
+}
+
+type Window struct {
+	ID, Title, Workspace string
+}
+```
+
+Per-tab process attribution for `utena top` is out of scope. Stable Chrome has no
+API that maps tabs to process IDs. It is recorded as future work and is not part
+of the interface.
+
+## Data model
+
+```go
+type WindowState string
+
+const (
+	WindowOpen        WindowState = "open"
+	WindowMissing     WindowState = "missing"
+	WindowSnapshotted WindowState = "snapshotted"
+)
+
+type BrowserWindow struct { // table browser_windows
+	gorm.Model
+	SessionID     uint        `gorm:"index"`
+	State         WindowState
+	Tabs          []SavedTab  `gorm:"serializer:json"`
+	LastFocusedAt time.Time
+	SnapshotAt    time.Time
+}
+
+type SavedTab struct {
+	URL, Title     string
+	Active, Pinned bool
+}
+```
+
+- Having no row means no window: the session never needed one, or you closed it.
+- Whether a window is parked isn't stored. It follows from comparing the window's
+  session with the attached session.
+- Chrome window IDs and AeroSpace window IDs are kept only in memory:
+  `rowID → {chromeWindowID, wmWindowID}`. They are rebuilt on every `Connected`.
+- `Tabs` is a rolling snapshot, rewritten on `TabsChanged`, debounced by about 2
+  seconds.
+- Reattach: each live Chrome window is matched to the `open` or `missing` row with
+  the highest Jaccard overlap of URLs, if it reaches a threshold. Each window and
+  each row is used at most once. Ties stay unowned.
+
+## Event flow
+
+| Trigger | Source | Action |
+|---|---|---|
+| The attached session changes | `mux.client_session_changed`, `mux.client_attached` | Move the old session's windows to `P` and the new session's to `2`. Restore `missing`/`snapshotted` windows. Don't change focus |
+| A session is archived | new `session.archived` event | Snapshot and close all of its windows. Rows become `snapshotted` |
+| A session is deleted | new `session.deleted` event | Close the windows and delete the rows |
+| `Connected` | the extension's `hello` | Resync: list windows, reattach, link AeroSpace IDs, re-run the swap |
+| `WindowCreated` | extension | Inherit an owner from the previously focused window, link the AeroSpace ID, park the window if needed |
+| `WindowRemoved` | extension | Wait about 2 seconds. A disconnect in that window means Chrome quit, so mark `missing`. Otherwise it was a deliberate close, so delete the row |
+| `TabsChanged` / `FocusChanged` | extension | Debounced snapshot, and update `LastFocusedAt` |
+
+### `POST /browser/open {session_id?, url, activate?}`
+
+1. If `activate` is set, activate the session through the existing session/mux
+   path and run the swap right away. Don't wait for the tuios client to reattach.
+2. Find the target window: the most recently focused `open` window. If there is
+   none, restore `missing`/`snapshotted` windows. If there are still none,
+   `CreateWindow`.
+3. Look for a prefix-dedup match. Use `ActivateTab` if there is one, otherwise
+   `OpenTab`.
+4. If the session is attached, call `wm.FocusWindow`. Otherwise do nothing else.
+
+Returns `503` when no browser driver is connected.
+
+### Linking a Chrome window to an AeroSpace window
+
+An AeroSpace window's title is the active tab's title, with no browser suffix.
+This was checked against a live window. Matching works like this:
+
+1. Compare the active tab's title with `aerospace list-windows` titles, restricted
+   to the driver's bundle ID.
+2. If the titles are ambiguous, open a short-lived marker tab
+   (`data:text/html,<title>utena:<nonce></title>`) in that window, read the
+   AeroSpace ID, and close the marker tab.
+
+Links are made on `WindowCreated` and on reattach. AeroSpace IDs stay stable for a
+window's lifetime.
+
+### `utena-open` and `$BROWSER`
+
+- `tui:install` creates the symlink `~/.local/bin/utena-open → utena`. `utena`
+  handles `argv[0] == "utena-open"` as `utena open <url>`.
+- `shell-init` exports `BROWSER=$HOME/.local/bin/utena-open`. The path has no
+  spaces, which is safer for tools that don't split `$BROWSER` with shlex.
+- The TUI's `ui.OpenURL` calls the daemon, sending `activate` for a session that
+  isn't attached.
+- If the daemon can't be reached or returns `503`, it falls back to
+  `/usr/bin/open <url>`, which ignores `$BROWSER`, so it can't loop.
+
+## Extension
+
+- The source is `extension/chrome/`, an MV3 extension using the `tabs`, `windows`
+  and `alarms` APIs. A pinned `key` keeps its ID stable. It doesn't depend on
+  Chrome-only APIs, so a Firefox build can reuse it with its own manifest and a
+  `/browser/firefox` driver.
+- The protocol is JSON over `ws://localhost:3333/browser/chrome`:
+  - `{"type":"hello","protocol":1,"browser":"chrome"}`
+  - `{"type":"req","id":7,"method":"tabs.open","params":{…}}` and
+    `{"type":"res","id":7,"result":{…}}` or `"error"`
+  - `{"type":"event","event":"window.removed","data":{…}}`
+- On a protocol mismatch, the driver reports itself unavailable, logs a warning,
+  and the TUI footer shows "browser extension outdated, reload it".
+- Keepalive: a ping every 20 seconds. Reconnect backoff runs from 1 to 30 seconds.
+  A `chrome.alarms` alarm every 30 seconds and `runtime.onStartup` wake a
+  suspended service worker so it can reconnect.
+- Install: `task extension:install` copies the extension to
+  `~/.local/share/utena/chrome-extension`. Then, once: in `chrome://extensions`,
+  enable Developer mode and use Load unpacked.
+
+## Configuration
+
+Daemon flags, each with an env var override in the style of `--branch-prefix`:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--browser` | `chrome` | Which `browser.Driver` to build |
+| `--wm` | `aerospace` | Which `wm.Driver` to build. `none` turns parking off |
+| `--browser-workspace` | `2` | Where the attached session's windows live |
+| `--park-workspace` | `P` | Where all other session-owned windows live |
+
+## Dotfiles (companion change)
+
+- `programs/aerospace/contents/aerospace.toml.tmpl`:
+  - add `persistent-workspaces` including `P`;
+  - bind `alt-b` = `workspace P` and `alt-shift-b` =
+    `move-node-to-workspace P` in both the `main` and `term` modes;
+  - keep the Chrome `on-window-detected` rule limited to startup, so utena does
+    all other placement.
+
+## Risks, settled in a spike at the start of PR 1
+
+1. **Linking.** Is matching by title, with the marker tab as a fallback, reliable?
+   Does the marker tab stay invisible enough?
+2. **Telling a quit from a close.** Does Chrome fire `windows.onRemoved` for every
+   window before the socket drops when it quits? Tune the grace period for the
+   "removed, then disconnected" signal.
+3. **Background windows flashing.** A window created for a background session may
+   appear on the focused workspace for about 200 ms before it is parked. Try
+   `state: "minimized"`, then move it to `P` and restore it. If that doesn't work,
+   accept the flash.
+
+## Testing
+
+- `browser` service tests run against `browser.FakeDriver` and `wm.FakeDriver`
+  with in-memory SQLite:
+  - the swap on attach changes;
+  - prefix dedup (a table test, including the segment boundary);
+  - inheriting ownership from the focused window;
+  - quit versus close, using the grace period with an injectable clock;
+  - reattach matching, including ties;
+  - lazy restore;
+  - archive and delete;
+  - the decision whether to focus on `open`.
+- `chrome` driver tests run against an in-process WebSocket test client playing
+  the extension:
+  - request and response correlation;
+  - mapping events to `browser.Event`;
+  - rejecting a protocol mismatch;
+  - a disconnect producing `Disconnected`.
+- `aerospace` tests use a fake runner and parse real `list-windows --json`
+  output.
+- `utena-open` tests cover the fallback to `/usr/bin/open` on connection refused
+  and on `503`.
+- TUI tests cover the tab list rendering and the `o` and tab-select messages.
+- `task test` and `task lint` must pass. Do a manual smoke test with the real
+  Chrome and AeroSpace before each PR merges.
+
+## Delivery
+
+1. **The browser core.** The spike, `browser`, `chrome`, the extension,
+   `/browser/open`, `utena-open`, `$BROWSER` in `shell-init`, and the TUI `o`
+   rerouted. All of it works with `--wm none`.
+2. **Parking.** `wm` and `aerospace`, linking, the swap on attach change, and the
+   dotfiles AeroSpace change.
+3. **Lifecycle.** Snapshots, archive and delete, telling a quit from a close,
+   reattach, and lazy restore.
+4. **TUI.** The list marker, the detail panel's tab list, tab select, and the
+   footer warning for an outdated extension.
+
+## Out of scope
+
+- A Firefox driver. The interface allows for one.
+- Mapping tabs to processes in `utena top`.
+- Adopting or releasing windows from the TUI, and closing tabs from the TUI.
+- Taking over as the system-wide default browser, and kitty cmd-click routing.
+- Seed tabs on session create.
