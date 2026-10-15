@@ -63,7 +63,7 @@ Session windows outlive the session's time in the foreground:
 - **Quitting Chrome** keeps the windows. When Chrome restarts and restores its windows, utena reattaches them to their sessions by matching their tabs. Windows it can't match are restored from their saved tabs the next time the session is attached or a link is opened for it.
 - **Deleting** a session closes its windows.
 
-Limitations: tab changes made in the last ~2 seconds before quitting Chrome may not be saved. Archiving while the extension is disconnected saves the last known tabs but leaves the windows open in Chrome.
+Limitations: tab changes made in the last ~2 seconds before quitting Chrome may not be saved. Archiving while the extension is disconnected saves the last known tabs and closes the windows when the extension reconnects; if Chrome restarts first, the windows Chrome restores stay open as personal windows and reactivating the session opens new copies.
 
 With [AeroSpace](https://github.com/nikitabobko/AeroSpace), the daemon also parks windows: the attached session's Chrome windows sit on the browser workspace, and every other session's windows are moved to the park workspace. When you switch sessions, the windows swap quietly. Swapping never changes focus, and Chrome windows no session owns are never moved. Opening a link from the attached session (or from outside any session) focuses its window through AeroSpace, which switches to that window's workspace; links from background sessions open without changing focus. A window created for a background session may flash on the browser workspace for a moment before it is parked. A window that can't be matched to an AeroSpace window unambiguously stays where it is until a later tab change or swap resolves it.
 
