@@ -49,10 +49,18 @@ type Service struct {
 	connected           bool
 	lastFocusedWindowID string
 	prevFocusedWindowID string
+	unowned             map[string]struct{}
 }
 
 func NewService(driver Driver, store *Store, sessions Sessions) *Service {
-	return &Service{driver: driver, store: store, sessions: sessions, now: time.Now}
+	return &Service{driver: driver, store: store, sessions: sessions, now: time.Now, unowned: map[string]struct{}{}}
+}
+
+func driverErr(err error) error {
+	if errors.Is(err, ErrNotConnected) {
+		return ErrUnavailable
+	}
+	return err
 }
 
 func (s *Service) Connected() bool {
@@ -89,7 +97,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 
 	live, err := s.driver.ListWindows(ctx)
 	if err != nil {
-		return OpenResult{}, err
+		return OpenResult{}, driverErr(err)
 	}
 	target, found, err := s.targetWindow(req.SessionID, live)
 	if err != nil {
@@ -101,9 +109,11 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 	case !found:
 		w, err := s.driver.CreateWindow(ctx, []string{req.URL}, focus)
 		if err != nil {
-			return OpenResult{}, err
+			return OpenResult{}, driverErr(err)
 		}
-		if req.SessionID != 0 {
+		if req.SessionID == 0 {
+			s.unowned[w.ID] = struct{}{}
+		} else {
 			row := &BrowserWindow{SessionID: req.SessionID, State: WindowOpen, DriverWindowID: w.ID, LastFocusedAt: s.now()}
 			if err := s.store.Add(row); err != nil {
 				return OpenResult{}, err
@@ -117,13 +127,13 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 		res.WindowID = target.ID
 		if tab, ok := MatchTab(target.Tabs, req.URL); ok {
 			if err := s.driver.ActivateTab(ctx, target.ID, tab.ID); err != nil {
-				return OpenResult{}, err
+				return OpenResult{}, driverErr(err)
 			}
 			res.TabID = tab.ID
 		} else {
 			tab, err := s.driver.OpenTab(ctx, target.ID, req.URL)
 			if err != nil {
-				return OpenResult{}, err
+				return OpenResult{}, driverErr(err)
 			}
 			res.TabID = tab.ID
 		}
@@ -239,6 +249,9 @@ func (s *Service) resync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.unowned = map[string]struct{}{}
+	s.lastFocusedWindowID = ""
+	s.prevFocusedWindowID = ""
 	live := make(map[string]bool, len(windows))
 	for _, w := range windows {
 		live[w.ID] = true
@@ -250,6 +263,10 @@ func (s *Service) resync(ctx context.Context) error {
 }
 
 func (s *Service) adopt(windowID string) error {
+	if _, ok := s.unowned[windowID]; ok {
+		delete(s.unowned, windowID)
+		return nil
+	}
 	if _, err := s.store.GetByDriverWindowID(windowID); err == nil {
 		return nil
 	} else if !errors.Is(err, ErrWindowNotFound) {

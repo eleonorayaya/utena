@@ -101,3 +101,72 @@ func TestFollowEvents_DeliversDriverEvents(t *testing.T) {
 	require.Eventually(t, func() bool { return h.driver.Emit(Event{Type: EventConnected}) }, time.Second, 10*time.Millisecond)
 	assert.Eventually(t, h.svc.Connected, time.Second, 10*time.Millisecond)
 }
+
+func TestWindowCreated_DaemonCreatedUnownedWindowStaysUnowned(t *testing.T) {
+	h := newHarness(t)
+	owned := h.driver.AddWindow("https://a.example.com")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 3, State: WindowOpen, DriverWindowID: owned.ID}))
+	h.svc.handleEvent(context.Background(), Event{Type: EventFocusChanged, WindowID: owned.ID})
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	require.True(t, res.Created)
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: res.WindowID})
+
+	_, err = h.store.GetByDriverWindowID(res.WindowID)
+	assert.ErrorIs(t, err, ErrWindowNotFound)
+}
+
+func TestWindowCreated_DaemonCreatedUnownedWindowStaysUnownedWhenFocusArrivesFirst(t *testing.T) {
+	h := newHarness(t)
+	owned := h.driver.AddWindow("https://a.example.com")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 3, State: WindowOpen, DriverWindowID: owned.ID}))
+	h.svc.handleEvent(context.Background(), Event{Type: EventFocusChanged, WindowID: owned.ID})
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	require.True(t, res.Created)
+	h.svc.handleEvent(context.Background(), Event{Type: EventFocusChanged, WindowID: res.WindowID})
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: res.WindowID})
+
+	_, err = h.store.GetByDriverWindowID(res.WindowID)
+	assert.ErrorIs(t, err, ErrWindowNotFound)
+}
+
+func TestResync_TakesFocusFromDriver(t *testing.T) {
+	h := newHarness(t)
+	a := h.driver.AddWindow("https://a.example.com")
+	b := h.driver.AddWindow("https://b.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventFocusChanged, WindowID: a.ID})
+
+	h.driver.SetFocused(b.ID)
+	h.svc.handleEvent(context.Background(), Event{Type: EventConnected})
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	assert.Equal(t, b.ID, res.WindowID)
+}
+
+func TestResync_ClearsStaleFocusWhenNoWindowFocused(t *testing.T) {
+	h := newHarness(t)
+	b := h.driver.AddWindow("https://b.example.com")
+	a := h.driver.AddWindow("https://a.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventFocusChanged, WindowID: a.ID})
+
+	h.svc.handleEvent(context.Background(), Event{Type: EventConnected})
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	assert.Equal(t, b.ID, res.WindowID)
+}
+
+func TestOpen_NoSessionPrefersFocusedUnownedWindow(t *testing.T) {
+	h := newHarness(t)
+	h.driver.AddWindow("https://first.example.com")
+	second := h.driver.AddWindow("https://second.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventFocusChanged, WindowID: second.ID})
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	assert.Equal(t, second.ID, res.WindowID)
+}

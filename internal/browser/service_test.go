@@ -167,3 +167,11 @@ func TestOpen_NoSessionCreatesUnownedWindowWhenAllOwned(t *testing.T) {
 	_, err = h.store.GetByDriverWindowID(res.WindowID)
 	assert.ErrorIs(t, err, ErrWindowNotFound)
 }
+
+func TestOpen_DriverNotConnectedIsUnavailable(t *testing.T) {
+	h := newHarness(t)
+	h.driver.ListErr = ErrNotConnected
+
+	_, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	assert.ErrorIs(t, err, ErrUnavailable)
+}

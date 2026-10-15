@@ -11,7 +11,8 @@ type FakeDriver struct {
 	windows []Window
 	nextID  int
 	focused []string
-	onEvent func(Event)
+	events  chan Event
+	stopped chan struct{}
 	ListErr error
 }
 
@@ -29,7 +30,9 @@ func (f *FakeDriver) id(prefix string) string {
 func (f *FakeDriver) AddWindow(urls ...string) Window {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.addWindowLocked(urls)
+	w := f.addWindowLocked(urls)
+	w.Tabs = append([]Tab(nil), w.Tabs...)
+	return w
 }
 
 func (f *FakeDriver) addWindowLocked(urls []string) Window {
@@ -62,6 +65,14 @@ func (f *FakeDriver) Window(id string) (Window, bool) {
 		}
 	}
 	return Window{}, false
+}
+
+func (f *FakeDriver) SetFocused(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.windows {
+		f.windows[i].Focused = f.windows[i].ID == id
+	}
 }
 
 func (f *FakeDriver) Focused() []string {
@@ -135,25 +146,44 @@ func (f *FakeDriver) FocusWindow(ctx context.Context, windowID string) error {
 }
 
 func (f *FakeDriver) Subscribe(ctx context.Context, onEvent func(Event)) error {
+	events := make(chan Event)
+	stopped := make(chan struct{})
 	f.mu.Lock()
-	f.onEvent = onEvent
+	f.events = events
+	f.stopped = stopped
 	f.mu.Unlock()
-	<-ctx.Done()
-	f.mu.Lock()
-	f.onEvent = nil
-	f.mu.Unlock()
-	return ctx.Err()
+	defer func() {
+		f.mu.Lock()
+		if f.events == events {
+			f.events = nil
+			f.stopped = nil
+		}
+		f.mu.Unlock()
+		close(stopped)
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ev := <-events:
+			onEvent(ev)
+		}
+	}
 }
 
 func (f *FakeDriver) Emit(ev Event) bool {
 	f.mu.Lock()
-	onEvent := f.onEvent
+	events, stopped := f.events, f.stopped
 	f.mu.Unlock()
-	if onEvent == nil {
+	if events == nil {
 		return false
 	}
-	onEvent(ev)
-	return true
+	select {
+	case events <- ev:
+		return true
+	case <-stopped:
+		return false
+	}
 }
 
 type FakeSessions struct {
