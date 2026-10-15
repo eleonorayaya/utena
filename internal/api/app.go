@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"path/filepath"
 
+	"github.com/eleonorayaya/utena/internal/browser"
+	"github.com/eleonorayaya/utena/internal/chrome"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
@@ -27,6 +29,7 @@ type App struct {
 	Git       *git.GitModule
 	Workspace *workspace.WorkspaceModule
 	Session   *session.SessionModule
+	Browser   *browser.Module
 	Mux       *mux.Module
 	Claude    *claude.ClaudeModule
 	Jobs      *jobs.JobsModule
@@ -62,6 +65,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 		muxModule = mux.NewModule(tuios.NewDriver(), bus, database)
 	}
 	sessionModule := session.NewSessionModule(muxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir, cfg.SessionsRoot)
+	browserModule := browser.NewModule(chrome.NewDriver(), browserSessions{sessions: sessionModule.Service}, database)
 
 	jobsModule := jobs.NewJobsModule()
 	gitModule.RegisterJobs(jobsModule.Service)
@@ -73,6 +77,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 		Git:       gitModule,
 		Workspace: workspaceModule,
 		Session:   sessionModule,
+		Browser:   browserModule,
 		Mux:       muxModule,
 		Claude:    claude.NewClaudeModule(database),
 		Jobs:      jobsModule,
@@ -168,6 +173,7 @@ func (a *App) modules() []moduleEntry {
 		{"workspace", "/workspaces", a.Workspace},
 		{"claude", "/claude", a.Claude},
 		{"session", "/sessions", a.Session},
+		{"browser", "/browser", a.Browser},
 		{"jobs", "/jobs", a.Jobs},
 		{"monitor", "/monitor", a.Monitor},
 	}

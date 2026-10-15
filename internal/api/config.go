@@ -58,5 +58,5 @@ func LoadConfig(args []string) (Config, error) {
 }
 
 func (c Config) Addr() string {
-	return fmt.Sprintf(":%d", c.Port)
+	return fmt.Sprintf("127.0.0.1:%d", c.Port)
 }
