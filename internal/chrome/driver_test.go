@@ -466,3 +466,43 @@ func TestWindowTitle(t *testing.T) {
 		})
 	}
 }
+
+func (r *recorder) count(want browser.Event) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, ev := range r.events {
+		if ev == want {
+			n++
+		}
+	}
+	return n
+}
+
+func TestDriver_CoalescesQueuedTabsChanged(t *testing.T) {
+	d, srv, rec, gate := newBlockedDriver(t)
+	ext := startExt(t, srv, ProtocolVersion, nil)
+	waitConnected(t, rec)
+
+	ext.send(t, map[string]any{"type": "event", "event": "window.created", "data": map[string]any{"windowId": 1}})
+	require.Eventually(t, func() bool {
+		return rec.has(browser.Event{Type: browser.EventWindowCreated, WindowID: "1"})
+	}, 5*time.Second, 5*time.Millisecond)
+	for range 3 {
+		ext.send(t, map[string]any{"type": "event", "event": "tabs.changed", "data": map[string]any{"windowId": 7}})
+	}
+	ext.send(t, map[string]any{"type": "event", "event": "tabs.changed", "data": map[string]any{"windowId": 8}})
+	ext.send(t, map[string]any{"type": "event", "event": "window.removed", "data": map[string]any{"windowId": 9}})
+	require.Eventually(t, func() bool { return len(d.events) == 3 }, 5*time.Second, 5*time.Millisecond)
+	close(gate)
+
+	seven := browser.Event{Type: browser.EventTabsChanged, WindowID: "7"}
+	require.Eventually(t, func() bool {
+		return rec.has(browser.Event{Type: browser.EventWindowRemoved, WindowID: "9"})
+	}, 5*time.Second, 5*time.Millisecond)
+	assert.Equal(t, 1, rec.count(seven))
+	assert.Equal(t, 1, rec.count(browser.Event{Type: browser.EventTabsChanged, WindowID: "8"}))
+
+	ext.send(t, map[string]any{"type": "event", "event": "tabs.changed", "data": map[string]any{"windowId": 7}})
+	assert.Eventually(t, func() bool { return rec.count(seven) == 2 }, 5*time.Second, 5*time.Millisecond)
+}

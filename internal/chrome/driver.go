@@ -25,6 +25,9 @@ type Driver struct {
 	stateChanged chan struct{}
 	nextID       atomic.Int64
 	timeout      time.Duration
+
+	queuedMu   sync.Mutex
+	queuedTabs map[queuedEvent]struct{}
 }
 
 var (
@@ -48,6 +51,7 @@ type conn struct {
 func NewDriver() *Driver {
 	return &Driver{
 		events:       make(chan queuedEvent, 256),
+		queuedTabs:   map[queuedEvent]struct{}{},
 		stateChanged: make(chan struct{}, 1),
 		timeout:      5 * time.Second,
 	}
@@ -187,11 +191,31 @@ func (d *Driver) readLoop(ctx context.Context, c *conn) error {
 }
 
 func (d *Driver) emit(gen uint64, ev browser.Event) {
+	qe := queuedEvent{gen: gen, ev: ev}
+	coalesce := ev.Type == browser.EventTabsChanged
+	if coalesce {
+		d.queuedMu.Lock()
+		_, queued := d.queuedTabs[qe]
+		d.queuedTabs[qe] = struct{}{}
+		d.queuedMu.Unlock()
+		if queued {
+			return
+		}
+	}
 	select {
-	case d.events <- queuedEvent{gen: gen, ev: ev}:
+	case d.events <- qe:
 	default:
+		if coalesce {
+			d.dequeued(qe)
+		}
 		slog.Warn("chrome: event buffer full; dropping", "type", ev.Type)
 	}
+}
+
+func (d *Driver) dequeued(qe queuedEvent) {
+	d.queuedMu.Lock()
+	delete(d.queuedTabs, qe)
+	d.queuedMu.Unlock()
 }
 
 func (c *conn) resolve(m message) {
@@ -356,6 +380,9 @@ func (d *Driver) Subscribe(ctx context.Context, onEvent func(browser.Event)) err
 		case <-d.stateChanged:
 			syncState()
 		case qe := <-d.events:
+			if qe.ev.Type == browser.EventTabsChanged {
+				d.dequeued(qe)
+			}
 			select {
 			case <-d.stateChanged:
 			default:

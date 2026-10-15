@@ -7,17 +7,19 @@ import (
 )
 
 type FakeDriver struct {
-	mu       sync.Mutex
-	windows  []Window
-	nextID   int
-	focused  []string
-	closed   []string
-	events   chan Event
-	stopped  chan struct{}
-	ListErr  error
-	OnCreate func(Window)
-	OnFocus  func(windowID string)
-	OnClose  func(windowID string)
+	mu        sync.Mutex
+	windows   []Window
+	nextID    int
+	focused   []string
+	closed    []string
+	events    chan Event
+	stopped   chan struct{}
+	ListErr   error
+	CreateErr func(urls []string) error
+	CloseErr  error
+	OnCreate  func(Window)
+	OnFocus   func(windowID string)
+	OnClose   func(windowID string)
 }
 
 var _ Driver = (*FakeDriver)(nil)
@@ -128,6 +130,12 @@ func (f *FakeDriver) ListWindows(ctx context.Context) ([]Window, error) {
 
 func (f *FakeDriver) CreateWindow(ctx context.Context, urls []string, focused bool) (Window, error) {
 	f.mu.Lock()
+	if f.CreateErr != nil {
+		if err := f.CreateErr(urls); err != nil {
+			f.mu.Unlock()
+			return Window{}, err
+		}
+	}
 	w := f.addWindowLocked(urls)
 	if focused {
 		f.focused = append(f.focused, w.ID)
@@ -192,6 +200,10 @@ func (f *FakeDriver) Closed() []string {
 
 func (f *FakeDriver) CloseWindow(ctx context.Context, windowID string) error {
 	f.mu.Lock()
+	if f.CloseErr != nil {
+		f.mu.Unlock()
+		return f.CloseErr
+	}
 	idx := -1
 	for i, w := range f.windows {
 		if w.ID == windowID {

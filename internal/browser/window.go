@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"strings"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/common"
@@ -42,10 +43,15 @@ type BrowserState struct {
 func savedTabs(w Window) []SavedTab {
 	var out []SavedTab
 	for _, t := range w.Tabs {
-		if t.URL == "" || isBlankPage(t.URL) {
+		if !isWebURL(t.URL) {
 			continue
 		}
 		out = append(out, SavedTab{URL: t.URL, Title: t.Title, Active: t.Active, Pinned: t.Pinned})
 	}
 	return out
+}
+
+func isWebURL(u string) bool {
+	lower := strings.ToLower(u)
+	return strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://")
 }
