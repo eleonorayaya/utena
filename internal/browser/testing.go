@@ -1,0 +1,179 @@
+package browser
+
+import (
+	"context"
+	"fmt"
+	"sync"
+)
+
+type FakeDriver struct {
+	mu      sync.Mutex
+	windows []Window
+	nextID  int
+	focused []string
+	onEvent func(Event)
+	ListErr error
+}
+
+var _ Driver = (*FakeDriver)(nil)
+
+func NewFakeDriver() *FakeDriver {
+	return &FakeDriver{}
+}
+
+func (f *FakeDriver) id(prefix string) string {
+	f.nextID++
+	return fmt.Sprintf("%s%d", prefix, f.nextID)
+}
+
+func (f *FakeDriver) AddWindow(urls ...string) Window {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.addWindowLocked(urls)
+}
+
+func (f *FakeDriver) addWindowLocked(urls []string) Window {
+	w := Window{ID: f.id("w")}
+	for i, u := range urls {
+		w.Tabs = append(w.Tabs, Tab{ID: f.id("t"), URL: u, Active: i == len(urls)-1})
+	}
+	f.windows = append(f.windows, w)
+	return w
+}
+
+func (f *FakeDriver) RemoveWindow(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, w := range f.windows {
+		if w.ID == id {
+			f.windows = append(f.windows[:i], f.windows[i+1:]...)
+			return
+		}
+	}
+}
+
+func (f *FakeDriver) Window(id string) (Window, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, w := range f.windows {
+		if w.ID == id {
+			return w, true
+		}
+	}
+	return Window{}, false
+}
+
+func (f *FakeDriver) Focused() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.focused...)
+}
+
+func (f *FakeDriver) ListWindows(ctx context.Context) ([]Window, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ListErr != nil {
+		return nil, f.ListErr
+	}
+	out := make([]Window, len(f.windows))
+	for i, w := range f.windows {
+		w.Tabs = append([]Tab(nil), w.Tabs...)
+		out[i] = w
+	}
+	return out, nil
+}
+
+func (f *FakeDriver) CreateWindow(ctx context.Context, urls []string, focused bool) (Window, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	w := f.addWindowLocked(urls)
+	if focused {
+		f.focused = append(f.focused, w.ID)
+	}
+	return w, nil
+}
+
+func (f *FakeDriver) OpenTab(ctx context.Context, windowID, url string) (Tab, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.windows {
+		if f.windows[i].ID != windowID {
+			continue
+		}
+		for j := range f.windows[i].Tabs {
+			f.windows[i].Tabs[j].Active = false
+		}
+		t := Tab{ID: f.id("t"), URL: url, Active: true}
+		f.windows[i].Tabs = append(f.windows[i].Tabs, t)
+		return t, nil
+	}
+	return Tab{}, fmt.Errorf("no window %s", windowID)
+}
+
+func (f *FakeDriver) ActivateTab(ctx context.Context, windowID, tabID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.windows {
+		if f.windows[i].ID != windowID {
+			continue
+		}
+		for j := range f.windows[i].Tabs {
+			f.windows[i].Tabs[j].Active = f.windows[i].Tabs[j].ID == tabID
+		}
+		return nil
+	}
+	return fmt.Errorf("no window %s", windowID)
+}
+
+func (f *FakeDriver) FocusWindow(ctx context.Context, windowID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.focused = append(f.focused, windowID)
+	return nil
+}
+
+func (f *FakeDriver) Subscribe(ctx context.Context, onEvent func(Event)) error {
+	f.mu.Lock()
+	f.onEvent = onEvent
+	f.mu.Unlock()
+	<-ctx.Done()
+	f.mu.Lock()
+	f.onEvent = nil
+	f.mu.Unlock()
+	return ctx.Err()
+}
+
+func (f *FakeDriver) Emit(ev Event) bool {
+	f.mu.Lock()
+	onEvent := f.onEvent
+	f.mu.Unlock()
+	if onEvent == nil {
+		return false
+	}
+	onEvent(ev)
+	return true
+}
+
+type FakeSessions struct {
+	mu          sync.Mutex
+	Attached    uint
+	Activated   []uint
+	ActivateErr error
+}
+
+func (f *FakeSessions) IsAttached(ctx context.Context, sessionID uint) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.Attached == sessionID, nil
+}
+
+func (f *FakeSessions) Activate(ctx context.Context, sessionID uint) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ActivateErr != nil {
+		return f.ActivateErr
+	}
+	f.Activated = append(f.Activated, sessionID)
+	f.Attached = sessionID
+	return nil
+}
