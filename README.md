@@ -45,6 +45,15 @@ eval "$(utena shell-init)"
 
 This sets up environment variables needed for utena integrations (like Claude Code status tracking) when running inside tuios. It resolves `UTENA_SESSION_ID` from `$TUIOS_SESSION`, so panes you open by hand are attributed to the right session.
 
+#### Browser windows
+
+Links opened from a utena session land in that session's own Chrome window.
+
+1. Run `task extension:install`, then do the one-time Load unpacked step it prints (`chrome://extensions` → Developer mode → Load unpacked). Install it in one Chrome profile only.
+2. `eval "$(utena shell-init)"` sets `BROWSER` to `utena-open` inside tuios, so tools that open links route them through the daemon.
+3. `utena open <url>...` opens links in the current session's window; the TUI's `o` does the same for PRs.
+4. If the daemon or extension is unavailable, links fall back to `/usr/bin/open`.
+
 #### Claude Code integration
 
 Utena can track Claude Code session status (working, needs attention, completed) and display it in the TUI.

@@ -24,13 +24,14 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 
 1. **tuios → Daemon**: `mux.Service` holds a long-lived `Driver.Subscribe`; the tuios driver translates the tuios event stream into `mux.Event`s. Session created/closed and window events update `mux.Session` state and are republished on the eventbus (`mux.*` events). Every (re)subscribe emits `Resync`, which reloads from `ListSessions`/`ListWindows`.
 
-2. **TUI → Daemon**: The TUI makes HTTP requests to `http://localhost:3333/sessions`. Activating a session publishes `SessionActivated`; `utena attach` long-polls `GET /mux/activations/next` and restarts its `tuios attach` child on the new session, reporting attach/detach via `PUT /mux/hooks/{event}`
+2. **TUI → Daemon**: The TUI makes HTTP requests to `http://127.0.0.1:3333/sessions`. Activating a session publishes `SessionActivated`; `utena attach` long-polls `GET /mux/activations/next` and restarts its `tuios attach` child on the new session, reporting attach/detach via `PUT /mux/hooks/{event}`
 
-3. **Daemon API**: Uses chi router, serves on port 3333, mounts controllers:
+3. **Daemon API**: Uses chi router, serves on port 3333 and listens on 127.0.0.1 only (clients must use `127.0.0.1`, not `localhost`), mounts controllers:
    - `/sessions` - session management endpoints (`GET /sessions/resources` backs `utena top`)
    - `/mux` - client attach hooks, activation long-poll, session env lookup
    - `/claude` - Claude session endpoints
    - `/workspaces` - workspace management endpoints
+   - `/browser` - open links in session windows (`POST /open`), driver status, and the `/browser/chrome` extension websocket
 
 ### Go Module Structure
 
@@ -42,6 +43,8 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 - `internal/workspace/` - workspace discovery and management
 - `internal/mux/` - multiplexer-agnostic session domain: `mux.Session` model, store, service, `/mux` controller, `Driver` interface
 - `internal/tuios/` - `mux.Driver` over the tuios control socket, agent-pane tagging, tuios workspace CLI helpers
+- `internal/browser/` - browser-agnostic domain: session→window ownership, open/dedup/focus rules, `/browser` controller, `Driver` interface
+- `internal/chrome/` - `browser.Driver` over a websocket to the `extension/chrome` MV3 extension
 - `internal/claude/` - Claude session management
 - `internal/tui/` - Bubbletea TUI application
 - `internal/common/` - shared utilities
@@ -57,6 +60,8 @@ All domain data (workspaces, sessions, mux sessions, claude sessions) is stored 
 **Workspace Manager** (internal/workspace/workspace.go): Uses functional options pattern (`WithRootDir()`) to configure root directories for workspace discovery. Scans directories to find workspace folders.
 
 **Multiplexer** (internal/mux/, internal/tuios/): `mux` owns the domain — `mux.Service` creates/kills multiplexer sessions for utena sessions, tracks their status and windows, and serves attach hooks and activations. It talks to the multiplexer only through the `mux.Driver` interface. `internal/tuios` is the production Driver (only `internal/api/app.go` and `cmd/tui` import it); tests use `mux.FakeDriver`. Supporting another multiplexer means writing another Driver.
+
+**Browser** (internal/browser/, internal/chrome/): `browser` owns the domain — `browser.Service` links sessions to browser windows, opens links in the session's window (deduping by URL prefix and focusing), and serves the `/browser` routes. It talks to browsers only through the `browser.Driver` interface. `internal/chrome` is the production Driver (only `internal/api/app.go` imports it); tests use `browser.FakeDriver`. Events are delivered on the `Subscribe` goroutine, never on the driver's read loop, because `Service.Open` holds its lock across driver calls.
 
 ## Dependencies
 

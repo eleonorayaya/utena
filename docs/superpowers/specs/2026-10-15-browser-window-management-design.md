@@ -321,3 +321,25 @@ Daemon flags, each with an env var override in the style of `--branch-prefix`:
 - Adopting or releasing windows from the TUI, and closing tabs from the TUI.
 - Taking over as the system-wide default browser, and kitty cmd-click routing.
 - Seed tabs on session create.
+
+## PR 1 amendments
+
+The browser core departs from this design in a few small ways.
+
+From the implementation plan:
+
+- `browser.Driver` gains `FocusWindow`, which lets Chrome focus a window. AeroSpace follows macOS focus, so `wm.Driver` won't need a focus method.
+- Rows store `DriverWindowID` as a hint, so a daemon restart while Chrome keeps running keeps ownership. Rows whose window is gone on `Connected` become `missing`, with the ID cleared. Restoring them is PR 3.
+- Links from outside any session (`session_id` 0) go to an unowned Chrome window through the daemon, not straight to `/usr/bin/open`. That keeps personal links out of session windows.
+- There's no `--browser` flag yet. Chrome is the only driver, and with no extension connected the daemon returns 503, which triggers the fallback.
+- The extension has no pinned `key`. Without a native host, nothing needs a fixed extension ID. The WebSocket endpoint accepts only `chrome-extension://` origins, which web pages cannot forge.
+
+Decided during review:
+
+- The daemon binds `127.0.0.1` (it used to bind all interfaces), and every utena client (CLI, TUI, the `shell-init` curl, the Claude hook and the extension) uses `127.0.0.1`. The `/browser/chrome` websocket must not be reachable from the LAN, and `[::1]` must not be squattable. The dotfiles still use `localhost` in `programs/sketchybar/bar/utena.go` and in the tuios `after-attach` hook curl. That works through the fallback and switches over in the dotfiles change (PR 2).
+- `browser.Service` keeps the windows it creates for session-0 links unowned; the focused session never adopts them. `ErrNotConnected` from the driver surfaces as `ErrUnavailable` (503). A resync resets focus tracking.
+- The Chrome driver coalesces connection-state events and never drops them. Window and tab events are tagged with the connection generation, and stale ones are discarded.
+- The extension does not reconnect on its own after a `"replaced"` close, but the 30s alarm still reconnects. Two profiles with the extension will therefore swap ownership roughly every 30s, so install it in one profile only.
+- Known edge: a slow Chrome that completes after the daemon's 15s (or the driver's 5s) timeout can lead to a duplicate open through the `/usr/bin/open` fallback. Accepted.
+- The extension's endpoint is hardcoded to port 3333, so dev daemons on other ports always fall back.
+- The `--browser` flag is deferred until there is a second driver.
