@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -604,4 +605,170 @@ func TestConnected_NewRunDropsCachedLinks(t *testing.T) {
 	connectRun(h, "r2")
 
 	assert.Empty(t, h.svc.links.links)
+}
+
+func createEmptyWindow(h harness) Window {
+	w := h.driver.AddWindow("chrome://newtab/")
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: w.ID})
+	return w
+}
+
+func loadTabs(t *testing.T, h harness, windowID string, urls ...string) {
+	t.Helper()
+	for _, u := range urls {
+		_, err := h.driver.OpenTab(context.Background(), windowID, u)
+		require.NoError(t, err)
+	}
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: windowID})
+}
+
+func sessionOf(t *testing.T, h harness, windowID string) uint {
+	t.Helper()
+	got, err := h.store.GetByDriverWindowID(windowID)
+	if errors.Is(err, ErrWindowNotFound) {
+		return 0
+	}
+	require.NoError(t, err)
+	return got.SessionID
+}
+
+func TestWindowCreated_EmptyWhileRestoringDefersAdoptionUntilReattached(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	connectRun(h, "r1")
+	addMissing(t, h, 2, "https://a.example.com", "https://b.example.com")
+	focusedParent(t, h, 1)
+
+	w := createEmptyWindow(h)
+	assert.Equal(t, uint(0), sessionOf(t, h, w.ID))
+
+	loadTabs(t, h, w.ID, "https://a.example.com", "https://b.example.com")
+
+	assert.Equal(t, uint(2), sessionOf(t, h, w.ID))
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+	assert.Empty(t, h.svc.deferredAdopt)
+}
+
+func TestWindowCreated_EmptyWhileRestoringFallsBackToRecordedParent(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	connectRun(h, "r1")
+	addMissing(t, h, 2, "https://a.example.com")
+	focusedParent(t, h, 1)
+
+	w := createEmptyWindow(h)
+	focusedParent(t, h, 3)
+	drain(h.svc)
+	loadTabs(t, h, w.ID, "https://x.example.com")
+
+	got, err := h.store.GetByDriverWindowID(w.ID)
+	require.NoError(t, err)
+	assert.Equal(t, uint(1), got.SessionID)
+	assert.Equal(t, []string{"https://x.example.com"}, urlsOf(got.Tabs))
+	assert.Empty(t, h.svc.deferredAdopt)
+	select {
+	case <-h.svc.swapCh:
+	default:
+		t.Fatal("placement not signalled")
+	}
+}
+
+func TestWindowCreated_DeferredWindowWaitsWhileStillEmpty(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	connectRun(h, "r1")
+	focusedParent(t, h, 1)
+
+	w := createEmptyWindow(h)
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: w.ID})
+
+	assert.Equal(t, uint(0), sessionOf(t, h, w.ID))
+	assert.Contains(t, h.svc.deferredAdopt, w.ID)
+}
+
+func TestWindowCreated_DeferredWindowFallsBackToParentAfterRestoreWindow(t *testing.T) {
+	h := newHarness(t)
+	now := manualNow(h)
+	connectRun(h, "r1")
+	addMissing(t, h, 2, "https://a.example.com")
+	focusedParent(t, h, 1)
+
+	w := createEmptyWindow(h)
+	*now = now.Add(restoreWindow)
+	loadTabs(t, h, w.ID, "https://a.example.com")
+
+	assert.Equal(t, uint(1), sessionOf(t, h, w.ID))
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	assert.Len(t, missing, 1)
+}
+
+func TestWindowCreated_EmptyOutsideRestoreWindowAdoptsImmediately(t *testing.T) {
+	h := newHarness(t)
+	focusedParent(t, h, 1)
+
+	w := createEmptyWindow(h)
+
+	assert.Equal(t, uint(1), sessionOf(t, h, w.ID))
+	assert.Empty(t, h.svc.deferredAdopt)
+}
+
+func TestWindowRemoved_ClearsDeferredAdoption(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	connectRun(h, "r1")
+	focusedParent(t, h, 1)
+	w := createEmptyWindow(h)
+	require.Contains(t, h.svc.deferredAdopt, w.ID)
+
+	removeWindow(h, w.ID)
+
+	assert.Empty(t, h.svc.deferredAdopt)
+}
+
+func TestDisconnected_ClearsDeferredAdoption(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	connectRun(h, "r1")
+	focusedParent(t, h, 1)
+	w := createEmptyWindow(h)
+	require.Contains(t, h.svc.deferredAdopt, w.ID)
+
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+
+	assert.Empty(t, h.svc.deferredAdopt)
+}
+
+func TestReattach_NeverClaimsDaemonCreatedUnownedWindows(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	connectRun(h, "r1")
+	addMissing(t, h, 2, prURL)
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	require.True(t, res.Created)
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: res.WindowID})
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: res.WindowID})
+
+	assert.Equal(t, uint(0), sessionOf(t, h, res.WindowID))
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	assert.Len(t, missing, 1)
+
+	removeWindow(h, res.WindowID)
+	assert.Empty(t, h.svc.daemonUnowned)
+}
+
+func TestConnected_NewRunClearsDaemonUnownedAndDeferred(t *testing.T) {
+	h := newHarness(t)
+	h.svc.daemonUnowned["w1"] = struct{}{}
+	h.svc.deferredAdopt["w2"] = 1
+
+	connectRun(h, "r1")
+
+	assert.Empty(t, h.svc.daemonUnowned)
+	assert.Empty(t, h.svc.deferredAdopt)
 }

@@ -42,6 +42,14 @@ func urlSet(urls []string) map[string]bool {
 	return set
 }
 
+func windowURLs(w Window) []string {
+	urls := make([]string, 0, len(w.Tabs))
+	for _, t := range w.Tabs {
+		urls = append(urls, t.URL)
+	}
+	return urls
+}
+
 func jaccard(a, b map[string]bool) float64 {
 	if len(a) == 0 || len(b) == 0 {
 		return 0
@@ -61,11 +69,7 @@ func matchRestored(rows []BrowserWindow, windows []Window, owned map[string]bool
 		if owned[w.ID] {
 			continue
 		}
-		urls := make([]string, 0, len(w.Tabs))
-		for _, t := range w.Tabs {
-			urls = append(urls, t.URL)
-		}
-		if set := urlSet(urls); len(set) > 0 {
+		if set := urlSet(windowURLs(w)); len(set) > 0 {
 			windowSets[w.ID] = set
 		}
 	}

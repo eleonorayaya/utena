@@ -92,6 +92,8 @@ type Service struct {
 	snapshots           map[string]*pendingTimer
 	removals            map[string]*pendingTimer
 	restoreUntil        time.Time
+	deferredAdopt       map[string]uint
+	daemonUnowned       map[string]struct{}
 }
 
 func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driver, layout Layout) *Service {
@@ -105,6 +107,9 @@ func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driv
 		now:      time.Now,
 		swapCh:   make(chan struct{}, 1),
 		unowned:  map[string]struct{}{},
+
+		deferredAdopt: map[string]uint{},
+		daemonUnowned: map[string]struct{}{},
 
 		afterFunc: func(d time.Duration, f func()) func() bool {
 			return time.AfterFunc(d, f).Stop
@@ -203,6 +208,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 		}
 		if req.SessionID == 0 {
 			s.unowned[w.ID] = struct{}{}
+			s.daemonUnowned[w.ID] = struct{}{}
 		} else {
 			now := s.now()
 			row := &BrowserWindow{SessionID: req.SessionID, State: WindowOpen, DriverWindowID: w.ID, LastFocusedAt: now, Tabs: savedTabs(w), SnapshotAt: now}
@@ -525,6 +531,7 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 		s.connected.Store(false)
 		err = s.flushRemovals()
 		stopTimers(s.snapshots)
+		clear(s.deferredAdopt)
 	case EventWindowCreated:
 		err = s.adopt(ctx, ev.WindowID)
 	case EventWindowRemoved:
@@ -547,6 +554,9 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 }
 
 func (s *Service) tabsChanged(ctx context.Context, windowID string) error {
+	if parent, ok := s.deferredAdopt[windowID]; ok {
+		return s.adoptDeferred(ctx, windowID, parent)
+	}
 	if _, err := s.store.GetByDriverWindowID(windowID); errors.Is(err, ErrWindowNotFound) {
 		if _, ok := s.unowned[windowID]; ok {
 			return nil
@@ -565,6 +575,8 @@ func (s *Service) tabsChanged(ctx context.Context, windowID string) error {
 
 func (s *Service) windowRemoved(windowID string) error {
 	delete(s.links.links, windowID)
+	delete(s.deferredAdopt, windowID)
+	delete(s.daemonUnowned, windowID)
 	stopTimer(s.snapshots, windowID)
 	if _, ok := s.removals[windowID]; ok {
 		return nil
@@ -694,6 +706,8 @@ func (s *Service) trackRun(run string) (bool, error) {
 	}
 	s.run = run
 	s.links.links = nil
+	clear(s.deferredAdopt)
+	clear(s.daemonUnowned)
 	return true, nil
 }
 
@@ -739,8 +753,15 @@ func (s *Service) reattach(windows []Window) error {
 	return errors.Join(errs...)
 }
 
+func (s *Service) restoring() bool {
+	return s.now().Before(s.restoreUntil)
+}
+
 func (s *Service) reattachLate(ctx context.Context, windowID string) (bool, error) {
-	if !s.now().Before(s.restoreUntil) {
+	if !s.restoring() {
+		return false, nil
+	}
+	if _, ok := s.daemonUnowned[windowID]; ok {
 		return false, nil
 	}
 	rows, err := s.store.ListMissing()
@@ -755,6 +776,9 @@ func (s *Service) reattachLate(ctx context.Context, windowID string) (bool, erro
 	if err != nil {
 		return false, err
 	}
+	for id := range s.daemonUnowned {
+		owned[id] = true
+	}
 	rowID, ok := matchRestored(rows, live, owned, reattachThreshold)[windowID]
 	if !ok {
 		return false, nil
@@ -764,6 +788,19 @@ func (s *Service) reattachLate(ctx context.Context, windowID string) (bool, erro
 	}
 	s.signal()
 	return true, s.snapshot(ctx, windowID)
+}
+
+func (s *Service) hasComparableURLs(ctx context.Context, windowID string) (bool, error) {
+	live, err := s.driver.ListWindows(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, w := range live {
+		if w.ID == windowID {
+			return len(urlSet(windowURLs(w))) > 0, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) seedAttached(ctx context.Context) error {
@@ -788,21 +825,58 @@ func (s *Service) adopt(ctx context.Context, windowID string) error {
 	} else if !errors.Is(err, ErrWindowNotFound) {
 		return err
 	}
+	parent, err := s.parentSession(windowID)
+	if err != nil {
+		return err
+	}
+	if s.restoring() {
+		comparable, err := s.hasComparableURLs(ctx, windowID)
+		if err != nil {
+			return err
+		}
+		if !comparable {
+			s.deferredAdopt[windowID] = parent
+			return nil
+		}
+		if reattached, err := s.reattachLate(ctx, windowID); reattached || err != nil {
+			return err
+		}
+	}
+	return s.adoptInto(ctx, windowID, parent)
+}
+
+func (s *Service) adoptDeferred(ctx context.Context, windowID string, parent uint) error {
+	comparable, err := s.hasComparableURLs(ctx, windowID)
+	if err != nil || !comparable {
+		return err
+	}
+	delete(s.deferredAdopt, windowID)
 	if reattached, err := s.reattachLate(ctx, windowID); reattached || err != nil {
 		return err
 	}
+	return s.adoptInto(ctx, windowID, parent)
+}
+
+func (s *Service) parentSession(windowID string) (uint, error) {
 	parentID := s.lastFocusedWindowID
 	if parentID == windowID {
 		parentID = s.prevFocusedWindowID
 	}
 	parent, err := s.store.GetByDriverWindowID(parentID)
 	if errors.Is(err, ErrWindowNotFound) {
-		return nil
+		return 0, nil
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if err := s.store.Add(&BrowserWindow{SessionID: parent.SessionID, State: WindowOpen, DriverWindowID: windowID, LastFocusedAt: s.now()}); err != nil {
+	return parent.SessionID, nil
+}
+
+func (s *Service) adoptInto(ctx context.Context, windowID string, sessionID uint) error {
+	if sessionID == 0 {
+		return nil
+	}
+	if err := s.store.Add(&BrowserWindow{SessionID: sessionID, State: WindowOpen, DriverWindowID: windowID, LastFocusedAt: s.now()}); err != nil {
 		return err
 	}
 	s.signal()
