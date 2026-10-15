@@ -10,7 +10,7 @@ import (
 )
 
 func newTestStore(t *testing.T) *Store {
-	return NewStore(testdb.New(t, &BrowserWindow{}))
+	return NewStore(testdb.New(t, &BrowserWindow{}, &BrowserState{}))
 }
 
 func TestStore_ListOpenBySessionOrdersByFocus(t *testing.T) {
@@ -84,4 +84,17 @@ func TestStore_MarkMissingExcept(t *testing.T) {
 	assert.Equal(t, "live", rows[0].DriverWindowID)
 	_, err = s.GetByDriverWindowID("gone")
 	assert.ErrorIs(t, err, ErrWindowNotFound)
+}
+
+func TestStore_RunIDRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	run, err := s.RunID()
+	require.NoError(t, err)
+	assert.Empty(t, run)
+
+	require.NoError(t, s.SetRunID("a"))
+	require.NoError(t, s.SetRunID("b"))
+	run, err = s.RunID()
+	require.NoError(t, err)
+	assert.Equal(t, "b", run)
 }

@@ -50,6 +50,8 @@ type Service struct {
 	lastFocusedWindowID string
 	prevFocusedWindowID string
 	unowned             map[string]struct{}
+	run                 string
+	runLoaded           bool
 }
 
 func NewService(driver Driver, store *Store, sessions Sessions) *Service {
@@ -222,7 +224,7 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	switch ev.Type {
 	case EventConnected:
 		s.connected = true
-		err = s.resync(ctx)
+		err = errors.Join(s.trackRun(ev.Run), s.resync(ctx))
 	case EventDisconnected:
 		s.connected = false
 	case EventWindowCreated:
@@ -242,6 +244,30 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	if err != nil {
 		slog.WarnContext(ctx, "browser event handler failed", "type", ev.Type, "window", ev.WindowID, "error", err)
 	}
+}
+
+func (s *Service) trackRun(run string) error {
+	if run == "" {
+		return nil
+	}
+	if !s.runLoaded {
+		stored, err := s.store.RunID()
+		if err != nil {
+			return err
+		}
+		s.run, s.runLoaded = stored, true
+	}
+	if run == s.run {
+		return nil
+	}
+	if err := s.store.MarkMissingExcept(nil); err != nil {
+		return err
+	}
+	if err := s.store.SetRunID(run); err != nil {
+		return err
+	}
+	s.run = run
+	return nil
 }
 
 func (s *Service) resync(ctx context.Context) error {

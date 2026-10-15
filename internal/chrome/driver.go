@@ -40,6 +40,7 @@ type queuedEvent struct {
 type conn struct {
 	ws      *websocket.Conn
 	gen     uint64
+	run     string
 	mu      sync.Mutex
 	pending map[int64]chan message
 }
@@ -74,13 +75,14 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 	ws.SetReadLimit(4 << 20)
 	ctx := r.Context()
 
-	if err := readHello(ctx, ws); err != nil {
+	run, err := readHello(ctx, ws)
+	if err != nil {
 		slog.Warn("chrome: extension rejected", "error", err)
 		_ = ws.Close(websocket.StatusPolicyViolation, err.Error())
 		return
 	}
 
-	c := &conn{ws: ws, pending: make(map[int64]chan message)}
+	c := &conn{ws: ws, run: run, pending: make(map[int64]chan message)}
 	d.swap(c)
 	slog.Info("chrome extension connected")
 	err = d.readLoop(ctx, c)
@@ -88,24 +90,24 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 	slog.Info("chrome extension disconnected", "reason", err)
 }
 
-func readHello(ctx context.Context, ws *websocket.Conn) error {
+func readHello(ctx context.Context, ws *websocket.Conn) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	_, data, err := ws.Read(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var m message
 	if err := json.Unmarshal(data, &m); err != nil {
-		return err
+		return "", err
 	}
 	if m.Type != "hello" {
-		return fmt.Errorf("expected hello, got %q", m.Type)
+		return "", fmt.Errorf("expected hello, got %q", m.Type)
 	}
 	if m.Protocol != ProtocolVersion {
-		return fmt.Errorf("extension protocol %d, daemon expects %d; reload the extension", m.Protocol, ProtocolVersion)
+		return "", fmt.Errorf("extension protocol %d, daemon expects %d; reload the extension", m.Protocol, ProtocolVersion)
 	}
-	return nil
+	return m.Run, nil
 }
 
 func (d *Driver) swap(c *conn) {
@@ -141,10 +143,13 @@ func (d *Driver) signalState() {
 	}
 }
 
-func (d *Driver) connectionState() (bool, uint64) {
+func (d *Driver) connectionState() (bool, uint64, string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.conn != nil, d.generation
+	if d.conn == nil {
+		return false, d.generation, ""
+	}
+	return true, d.generation, d.conn.run
 }
 
 func (d *Driver) readLoop(ctx context.Context, c *conn) error {
@@ -312,11 +317,11 @@ func (d *Driver) Subscribe(ctx context.Context, onEvent func(browser.Event)) err
 	var deliveredGen uint64
 	deliveredConnected := false
 	syncState := func() {
-		connected, gen := d.connectionState()
+		connected, gen, run := d.connectionState()
 		switch {
 		case connected && gen != deliveredGen:
 			deliveredGen, deliveredConnected = gen, true
-			onEvent(browser.Event{Type: browser.EventConnected})
+			onEvent(browser.Event{Type: browser.EventConnected, Run: run})
 		case !connected && deliveredConnected:
 			deliveredConnected = false
 			onEvent(browser.Event{Type: browser.EventDisconnected})

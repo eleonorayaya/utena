@@ -170,3 +170,68 @@ func TestOpen_NoSessionPrefersFocusedUnownedWindow(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, second.ID, res.WindowID)
 }
+
+func connectRun(h harness, run string) {
+	h.svc.handleEvent(context.Background(), Event{Type: EventConnected, Run: run})
+}
+
+func TestConnected_SameRunKeepsLiveRows(t *testing.T) {
+	h := newHarness(t)
+	connectRun(h, "run-a")
+	w := h.driver.AddWindow("https://a.example.com")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: w.ID}))
+
+	connectRun(h, "run-a")
+
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, w.ID, rows[0].DriverWindowID)
+}
+
+func TestConnected_NewRunForgetsAllWindowsEvenWhenIDsCollide(t *testing.T) {
+	h := newHarness(t)
+	connectRun(h, "run-a")
+	w := h.driver.AddWindow("https://a.example.com")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: w.ID}))
+
+	connectRun(h, "run-b")
+
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}
+
+func TestConnected_EmptyRunKeepsLiveRows(t *testing.T) {
+	h := newHarness(t)
+	connectRun(h, "run-a")
+	w := h.driver.AddWindow("https://a.example.com")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: w.ID}))
+
+	connectRun(h, "")
+
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+}
+
+func TestConnected_RunPersistsAcrossServices(t *testing.T) {
+	h := newHarness(t)
+	connectRun(h, "run-a")
+	w := h.driver.AddWindow("https://a.example.com")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: w.ID}))
+
+	restarted := NewService(h.driver, h.store, h.sessions)
+	restarted.handleEvent(context.Background(), Event{Type: EventConnected, Run: "run-a"})
+
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+
+	again := NewService(h.driver, h.store, h.sessions)
+	again.handleEvent(context.Background(), Event{Type: EventConnected, Run: "run-b"})
+
+	rows, err = h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}

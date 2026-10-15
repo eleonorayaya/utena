@@ -4,6 +4,6 @@
   "version": "0.1.0",
   "description": "Lets the utena daemon route links into per-session browser windows.",
   "minimum_chrome_version": "116",
-  "permissions": ["tabs", "alarms"],
+  "permissions": ["tabs", "alarms", "storage"],
   "background": { "service_worker": "background.js" }
 }

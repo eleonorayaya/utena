@@ -19,7 +19,7 @@ type harness struct {
 
 func newHarness(t *testing.T) harness {
 	t.Helper()
-	store := NewStore(testdb.New(t, &BrowserWindow{}))
+	store := NewStore(testdb.New(t, &BrowserWindow{}, &BrowserState{}))
 	driver := NewFakeDriver()
 	sessions := &FakeSessions{}
 	svc := NewService(driver, store, sessions)

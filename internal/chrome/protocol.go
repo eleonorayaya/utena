@@ -20,6 +20,7 @@ type message struct {
 	Data     json.RawMessage `json:"data,omitempty"`
 	Protocol int             `json:"protocol,omitempty"`
 	Browser  string          `json:"browser,omitempty"`
+	Run      string          `json:"run,omitempty"`
 }
 
 type wireTab struct {

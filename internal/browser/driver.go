@@ -50,4 +50,5 @@ const (
 type Event struct {
 	Type     EventType
 	WindowID string
+	Run      string
 }

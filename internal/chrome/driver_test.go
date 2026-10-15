@@ -393,3 +393,17 @@ func TestTranslateEvent(t *testing.T) {
 		}
 	}
 }
+
+func TestDriver_ConnectedCarriesRunFromHello(t *testing.T) {
+	_, srv, rec := newDriver(t)
+	ws, err := dial(t, srv, "chrome-extension://abc")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ws.CloseNow() })
+	ext := &fakeExt{ws: ws}
+	ext.send(t, map[string]any{"type": "hello", "protocol": ProtocolVersion, "browser": "chrome", "run": "run-1"})
+	go ext.serve()
+
+	require.Eventually(t, func() bool {
+		return rec.has(browser.Event{Type: browser.EventConnected, Run: "run-1"})
+	}, 5*time.Second, 5*time.Millisecond)
+}

@@ -86,3 +86,18 @@ func (s *Store) MarkMissingExcept(live map[string]bool) error {
 	}
 	return nil
 }
+
+const browserStateID = 1
+
+func (s *Store) RunID() (string, error) {
+	var st BrowserState
+	err := s.db.Where("id = ?", browserStateID).First(&st).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	return st.RunID, err
+}
+
+func (s *Store) SetRunID(run string) error {
+	return s.db.Save(&BrowserState{ID: browserStateID, RunID: run}).Error
+}

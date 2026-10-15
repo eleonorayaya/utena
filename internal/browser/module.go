@@ -32,5 +32,5 @@ func (m *Module) Routes() chi.Router {
 }
 
 func (m *Module) Models() []any {
-	return []any{&BrowserWindow{}}
+	return []any{&BrowserWindow{}, &BrowserState{}}
 }

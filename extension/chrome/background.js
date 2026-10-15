@@ -4,18 +4,37 @@ const PING_MS = 20000;
 const MAX_BACKOFF_MS = 30000;
 
 let socket = null;
+let ready = false;
 let backoff = 1000;
 let retryTimer = null;
+let runPromise = null;
+
+async function loadRun() {
+  const { run } = await chrome.storage.session.get("run");
+  if (run) return run;
+  const fresh = crypto.randomUUID();
+  await chrome.storage.session.set({ run: fresh });
+  return fresh;
+}
+
+function currentRun() {
+  if (!runPromise) runPromise = loadRun().catch(() => "");
+  return runPromise;
+}
 
 function connect() {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
   clearTimeout(retryTimer);
   const ws = new WebSocket(ENDPOINT);
   socket = ws;
+  ready = false;
   let ping = null;
-  ws.onopen = () => {
+  ws.onopen = async () => {
     backoff = 1000;
-    send({ type: "hello", protocol: PROTOCOL, browser: "chrome" });
+    const run = await currentRun();
+    if (socket !== ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "hello", protocol: PROTOCOL, browser: "chrome", run }));
+    ready = true;
     ping = setInterval(() => send({ type: "ping" }), PING_MS);
   };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
@@ -23,6 +42,7 @@ function connect() {
     clearInterval(ping);
     if (socket !== ws) return;
     socket = null;
+    ready = false;
     if (e.reason === "replaced") return;
     retryTimer = setTimeout(connect, backoff);
     backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
@@ -30,7 +50,7 @@ function connect() {
 }
 
 function send(msg) {
-  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg));
+  if (ready && socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg));
 }
 
 function emit(event, data) {

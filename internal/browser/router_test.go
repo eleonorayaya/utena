@@ -26,7 +26,7 @@ func (h *httpFake) Handler() http.Handler {
 func newTestServer(t *testing.T) (*httptest.Server, *Module, *httpFake) {
 	t.Helper()
 	driver := &httpFake{FakeDriver: NewFakeDriver()}
-	m := NewModule(driver, &FakeSessions{}, testdb.New(t, &BrowserWindow{}))
+	m := NewModule(driver, &FakeSessions{}, testdb.New(t, &BrowserWindow{}, &BrowserState{}))
 	srv := httptest.NewServer(m.Routes())
 	t.Cleanup(srv.Close)
 	return srv, m, driver
