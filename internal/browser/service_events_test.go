@@ -192,17 +192,21 @@ func TestConnected_SameRunKeepsLiveRows(t *testing.T) {
 	assert.Equal(t, w.ID, rows[0].DriverWindowID)
 }
 
-func TestConnected_NewRunForgetsAllWindowsEvenWhenIDsCollide(t *testing.T) {
+func TestConnected_NewRunDoesNotTrustCollidingWindowIDs(t *testing.T) {
 	h := newHarness(t)
 	connectRun(h, "run-a")
-	w := h.driver.AddWindow("https://a.example.com")
-	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: w.ID}))
+	w := h.driver.AddWindow("https://b.example.com")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: w.ID, Tabs: []SavedTab{{URL: "https://a.example.com"}}}))
 
 	connectRun(h, "run-b")
 
 	rows, err := h.store.ListOpenBySession(1)
 	require.NoError(t, err)
 	assert.Empty(t, rows)
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	require.Len(t, missing, 1)
+	assert.Equal(t, []string{"https://a.example.com"}, urlsOf(missing[0].Tabs))
 }
 
 func TestConnected_EmptyRunKeepsLiveRows(t *testing.T) {

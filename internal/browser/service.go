@@ -30,6 +30,7 @@ const (
 	createdLinkWait = 1500 * time.Millisecond
 	snapshotDelay   = 2 * time.Second
 	removeGrace     = 2 * time.Second
+	restoreWindow   = 2 * time.Minute
 )
 
 type pendingTimer struct {
@@ -77,6 +78,7 @@ type Service struct {
 	afterFunc     func(time.Duration, func()) func() bool
 	snapshotDelay time.Duration
 	removeGrace   time.Duration
+	restoreWindow time.Duration
 
 	mu                  sync.Mutex
 	connected           atomic.Bool
@@ -89,6 +91,7 @@ type Service struct {
 	placedFor           uint
 	snapshots           map[string]*pendingTimer
 	removals            map[string]*pendingTimer
+	restoreUntil        time.Time
 }
 
 func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driver, layout Layout) *Service {
@@ -108,6 +111,7 @@ func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driv
 		},
 		snapshotDelay: snapshotDelay,
 		removeGrace:   removeGrace,
+		restoreWindow: restoreWindow,
 		snapshots:     map[string]*pendingTimer{},
 		removals:      map[string]*pendingTimer{},
 	}
@@ -505,7 +509,12 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	switch ev.Type {
 	case EventConnected:
 		s.connected.Store(true)
-		err = errors.Join(s.flushRemovals(), s.trackRun(ev.Run), s.resync(ctx))
+		flushErr := s.flushRemovals()
+		restarted, runErr := s.trackRun(ev.Run)
+		if restarted {
+			s.restoreUntil = s.now().Add(s.restoreWindow)
+		}
+		err = errors.Join(flushErr, runErr, s.resync(ctx, restarted))
 		s.signal()
 	case EventDisconnected:
 		s.connected.Store(false)
@@ -515,7 +524,7 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	case EventWindowRemoved:
 		err = s.windowRemoved(ctx, ev.WindowID)
 	case EventTabsChanged:
-		err = s.tabsChanged(ev.WindowID)
+		err = s.tabsChanged(ctx, ev.WindowID)
 	case EventFocusChanged:
 		if ev.WindowID == "" {
 			return
@@ -531,9 +540,13 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	}
 }
 
-func (s *Service) tabsChanged(windowID string) error {
+func (s *Service) tabsChanged(ctx context.Context, windowID string) error {
 	if _, err := s.store.GetByDriverWindowID(windowID); errors.Is(err, ErrWindowNotFound) {
-		return nil
+		if _, ok := s.unowned[windowID]; ok {
+			return nil
+		}
+		_, err := s.reattachLate(ctx, windowID)
+		return err
 	} else if err != nil {
 		return err
 	}
@@ -647,32 +660,32 @@ func (s *Service) snapshotOwned(windows []Window) error {
 	return errors.Join(errs...)
 }
 
-func (s *Service) trackRun(run string) error {
+func (s *Service) trackRun(run string) (bool, error) {
 	if run == "" {
-		return nil
+		return false, nil
 	}
 	if !s.runLoaded {
 		stored, err := s.store.RunID()
 		if err != nil {
-			return err
+			return false, err
 		}
 		s.run, s.runLoaded = stored, true
 	}
 	if run == s.run {
-		return nil
+		return false, nil
 	}
 	if err := s.store.MarkMissingExcept(nil); err != nil {
-		return err
+		return false, err
 	}
 	if err := s.store.SetRunID(run); err != nil {
-		return err
+		return false, err
 	}
 	s.run = run
 	s.links.links = nil
-	return nil
+	return true, nil
 }
 
-func (s *Service) resync(ctx context.Context) error {
+func (s *Service) resync(ctx context.Context, restarted bool) error {
 	windows, err := s.driver.ListWindows(ctx)
 	if err != nil {
 		return err
@@ -690,7 +703,11 @@ func (s *Service) resync(ctx context.Context) error {
 	if err := s.store.MarkMissingExcept(live); err != nil {
 		return errors.Join(err, s.seedAttached(ctx))
 	}
-	return errors.Join(s.reattach(windows), s.snapshotOwned(windows), s.seedAttached(ctx))
+	var reattachErr error
+	if restarted {
+		reattachErr = s.reattach(windows)
+	}
+	return errors.Join(reattachErr, s.snapshotOwned(windows), s.seedAttached(ctx))
 }
 
 func (s *Service) reattach(windows []Window) error {
@@ -708,6 +725,33 @@ func (s *Service) reattach(windows []Window) error {
 		errs = append(errs, s.store.Reopen(rowID, windowID, now))
 	}
 	return errors.Join(errs...)
+}
+
+func (s *Service) reattachLate(ctx context.Context, windowID string) (bool, error) {
+	if !s.now().Before(s.restoreUntil) {
+		return false, nil
+	}
+	rows, err := s.store.ListMissing()
+	if err != nil || len(rows) == 0 {
+		return false, err
+	}
+	live, err := s.driver.ListWindows(ctx)
+	if err != nil {
+		return false, err
+	}
+	owned, err := s.store.OwnedDriverWindowIDs()
+	if err != nil {
+		return false, err
+	}
+	rowID, ok := matchRestored(rows, live, owned, reattachThreshold)[windowID]
+	if !ok {
+		return false, nil
+	}
+	if err := s.store.Reopen(rowID, windowID, s.now()); err != nil {
+		return false, err
+	}
+	s.signal()
+	return true, s.snapshot(ctx, windowID)
 }
 
 func (s *Service) seedAttached(ctx context.Context) error {
@@ -730,6 +774,9 @@ func (s *Service) adopt(ctx context.Context, windowID string) error {
 	if _, err := s.store.GetByDriverWindowID(windowID); err == nil {
 		return nil
 	} else if !errors.Is(err, ErrWindowNotFound) {
+		return err
+	}
+	if reattached, err := s.reattachLate(ctx, windowID); reattached || err != nil {
 		return err
 	}
 	parentID := s.lastFocusedWindowID

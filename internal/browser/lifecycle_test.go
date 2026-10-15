@@ -402,21 +402,150 @@ func TestConnected_ReattachesRestoredWindowsAfterChromeRestart(t *testing.T) {
 	assert.Equal(t, "2", h.wm.Workspace("wm-"+personal.ID))
 }
 
-func TestConnected_ReattachSkipsWindowsOwnedByOpenRows(t *testing.T) {
+func manualNow(h harness) *time.Time {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	h.svc.now = func() time.Time { return now }
+	return &now
+}
+
+func addMissing(t *testing.T, h harness, sessionID uint, urls ...string) {
+	t.Helper()
+	row := &BrowserWindow{SessionID: sessionID, State: WindowMissing}
+	for _, u := range urls {
+		row.Tabs = append(row.Tabs, SavedTab{URL: u})
+	}
+	require.NoError(t, h.store.Add(row))
+}
+
+func focusedParent(t *testing.T, h harness, sessionID uint) Window {
+	t.Helper()
+	parent := ownWindow(t, h, sessionID, "https://parent.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventFocusChanged, WindowID: parent.ID})
+	return parent
+}
+
+func TestConnected_SameRunReconnectDoesNotReattach(t *testing.T) {
 	h := newHarness(t)
 	connectRun(h, "r1")
-	live := ownWindow(t, h, 1, "https://a.example.com")
-	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 2, State: WindowMissing, Tabs: []SavedTab{{URL: "https://a.example.com"}}}))
+	addMissing(t, h, 2, "https://a.example.com")
+	w := h.driver.AddWindow("https://a.example.com")
 
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
 	connectRun(h, "r1")
 
-	got, err := h.store.GetByDriverWindowID(live.ID)
+	owned, err := h.store.OwnedDriverWindowIDs()
+	require.NoError(t, err)
+	assert.False(t, owned[w.ID])
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	assert.Len(t, missing, 1)
+}
+
+func TestWindowCreated_LateRestoredWindowReattachesBeforeAdoption(t *testing.T) {
+	h := newHarness(t)
+	now := manualNow(h)
+	connectRun(h, "r1")
+	addMissing(t, h, 2, "https://a.example.com", "https://b.example.com")
+	focusedParent(t, h, 1)
+	*now = now.Add(restoreWindow - time.Second)
+	drain(h.svc)
+
+	w := h.driver.AddWindow("https://a.example.com", "https://b.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: w.ID})
+
+	got, err := h.store.GetByDriverWindowID(w.ID)
+	require.NoError(t, err)
+	assert.Equal(t, uint(2), got.SessionID)
+	assert.Equal(t, *now, got.SnapshotAt.UTC())
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	assert.Empty(t, missing)
+	select {
+	case <-h.svc.swapCh:
+	default:
+		t.Fatal("placement not signalled")
+	}
+}
+
+func TestTabsChanged_LateRestoredWindowReattachesOnceTabsLoad(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	connectRun(h, "r1")
+	addMissing(t, h, 2, "https://a.example.com", "https://b.example.com")
+
+	w := h.driver.AddWindow()
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: w.ID})
+	_, err := h.store.GetByDriverWindowID(w.ID)
+	require.ErrorIs(t, err, ErrWindowNotFound)
+
+	_, err = h.driver.OpenTab(context.Background(), w.ID, "https://a.example.com")
+	require.NoError(t, err)
+	_, err = h.driver.OpenTab(context.Background(), w.ID, "https://b.example.com")
+	require.NoError(t, err)
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: w.ID})
+
+	got, err := h.store.GetByDriverWindowID(w.ID)
+	require.NoError(t, err)
+	assert.Equal(t, uint(2), got.SessionID)
+	assert.Equal(t, []string{"https://a.example.com", "https://b.example.com"}, urlsOf(got.Tabs))
+}
+
+func TestWindowCreated_AfterRestoreWindowAdoptsNormally(t *testing.T) {
+	h := newHarness(t)
+	now := manualNow(h)
+	connectRun(h, "r1")
+	addMissing(t, h, 2, "https://a.example.com")
+	focusedParent(t, h, 1)
+	*now = now.Add(restoreWindow)
+
+	w := h.driver.AddWindow("https://a.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: w.ID})
+
+	got, err := h.store.GetByDriverWindowID(w.ID)
 	require.NoError(t, err)
 	assert.Equal(t, uint(1), got.SessionID)
 	missing, err := h.store.ListMissing()
 	require.NoError(t, err)
-	require.Len(t, missing, 1)
-	assert.Equal(t, uint(2), missing[0].SessionID)
+	assert.Len(t, missing, 1)
+
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: w.ID})
+	got, err = h.store.GetByDriverWindowID(w.ID)
+	require.NoError(t, err)
+	assert.Equal(t, uint(1), got.SessionID)
+}
+
+func TestTabsChanged_AfterRestoreWindowDoesNotReattach(t *testing.T) {
+	h := newHarness(t)
+	now := manualNow(h)
+	connectRun(h, "r1")
+	addMissing(t, h, 2, "https://a.example.com")
+	*now = now.Add(restoreWindow)
+
+	w := h.driver.AddWindow("https://a.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: w.ID})
+
+	_, err := h.store.GetByDriverWindowID(w.ID)
+	assert.ErrorIs(t, err, ErrWindowNotFound)
+}
+
+func TestWindowCreated_SameRunReconnectDoesNotOpenRestoreWindow(t *testing.T) {
+	h := newHarness(t)
+	now := manualNow(h)
+	connectRun(h, "r1")
+	*now = now.Add(restoreWindow)
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+	connectRun(h, "r1")
+	addMissing(t, h, 2, "https://a.example.com")
+
+	w := h.driver.AddWindow("https://a.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: w.ID})
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: w.ID})
+
+	_, err := h.store.GetByDriverWindowID(w.ID)
+	assert.ErrorIs(t, err, ErrWindowNotFound)
 }
 
 func TestConnected_NewRunDropsCachedLinks(t *testing.T) {
