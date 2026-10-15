@@ -15,6 +15,8 @@ type Driver interface {
 	ActivateTab(ctx context.Context, windowID, tabID string) error
 	FocusWindow(ctx context.Context, windowID string) error
 	Subscribe(ctx context.Context, onEvent func(Event)) error
+	AppBundleID() string
+	WindowTitle(w Window) string
 }
 
 type HTTPDriver interface {
@@ -26,6 +28,15 @@ type Window struct {
 	ID      string `json:"id"`
 	Focused bool   `json:"focused"`
 	Tabs    []Tab  `json:"tabs"`
+}
+
+func (w Window) ActiveTab() (Tab, bool) {
+	for _, t := range w.Tabs {
+		if t.Active {
+			return t, true
+		}
+	}
+	return Tab{}, false
 }
 
 type Tab struct {

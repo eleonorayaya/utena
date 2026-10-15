@@ -407,3 +407,39 @@ func TestDriver_ConnectedCarriesRunFromHello(t *testing.T) {
 		return rec.has(browser.Event{Type: browser.EventConnected, Run: "run-1"})
 	}, 5*time.Second, 5*time.Millisecond)
 }
+
+func TestAppBundleID(t *testing.T) {
+	assert.Equal(t, "com.google.Chrome", NewDriver().AppBundleID())
+}
+
+func TestWindowTitle(t *testing.T) {
+	cases := map[string]struct {
+		window browser.Window
+		want   string
+	}{
+		"active tab": {
+			window: browser.Window{ID: "1", Tabs: []browser.Tab{
+				{ID: "1", Title: "Other"},
+				{ID: "2", Title: "Extensions - utena", Active: true},
+			}},
+			want: "Extensions - utena - Google Chrome",
+		},
+		"no active tab": {
+			window: browser.Window{ID: "1", Tabs: []browser.Tab{{ID: "1", Title: "Other"}}},
+			want:   "",
+		},
+		"no tabs": {
+			window: browser.Window{ID: "1"},
+			want:   "",
+		},
+		"empty title": {
+			window: browser.Window{ID: "1", Tabs: []browser.Tab{{ID: "1", Active: true}}},
+			want:   "",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, NewDriver().WindowTitle(tc.window))
+		})
+	}
+}

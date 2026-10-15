@@ -57,6 +57,18 @@ func (d *Driver) Name() string {
 	return "chrome"
 }
 
+func (d *Driver) AppBundleID() string {
+	return "com.google.Chrome"
+}
+
+func (d *Driver) WindowTitle(w browser.Window) string {
+	t, ok := w.ActiveTab()
+	if !ok || t.Title == "" {
+		return ""
+	}
+	return t.Title + " - Google Chrome"
+}
+
 func (d *Driver) Handler() http.Handler {
 	return http.HandlerFunc(d.serve)
 }

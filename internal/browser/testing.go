@@ -67,6 +67,33 @@ func (f *FakeDriver) Window(id string) (Window, bool) {
 	return Window{}, false
 }
 
+func (f *FakeDriver) SetTitle(windowID, title string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.windows {
+		if f.windows[i].ID != windowID {
+			continue
+		}
+		for j := range f.windows[i].Tabs {
+			if f.windows[i].Tabs[j].Active {
+				f.windows[i].Tabs[j].Title = title
+			}
+		}
+	}
+}
+
+func (f *FakeDriver) AppBundleID() string {
+	return "fake.browser"
+}
+
+func (f *FakeDriver) WindowTitle(w Window) string {
+	t, ok := w.ActiveTab()
+	if !ok || t.Title == "" {
+		return ""
+	}
+	return t.Title + " - Fake"
+}
+
 func (f *FakeDriver) SetFocused(id string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
