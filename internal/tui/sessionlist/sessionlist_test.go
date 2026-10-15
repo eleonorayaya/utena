@@ -326,3 +326,15 @@ func TestSessionList_OutdatedWarningDoesNotClobberActionStatus(t *testing.T) {
 	m, _, _ = m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
 	assert.Contains(t, m.Status().Text, "browser extension outdated")
 }
+
+func TestSessionList_SplitPreviewShowsBrowserSection(t *testing.T) {
+	m, _ := New().Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{withClaude(7, "web", claude.StatusIdle)}})
+	m, _ = m.Update(provider.BrowserStateUpdatedMsg{State: browser.SessionsView{Sessions: map[uint]browser.SessionBrowser{
+		7: {State: "open", TabCount: 1, Windows: []browser.WindowView{{ID: "w1", State: "open", Tabs: []browser.TabView{{ID: "t1", Title: "Preview tab", URL: "https://x.example.com", Active: true}}}}},
+	}}})
+	out := m.View()
+	assert.Contains(t, out, "Browser")
+	assert.Contains(t, out, "Preview tab")
+	assert.NotContains(t, out, "▌ ●")
+}

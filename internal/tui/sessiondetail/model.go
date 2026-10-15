@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/addworkspaceform"
 	"github.com/eleonorayaya/utena/internal/tui/blockerform"
@@ -19,7 +20,8 @@ type Model struct {
 	sess                   *session.Session
 	pendingDeleteID        uint
 	interactive            bool
-	blockerCursor          int
+	cursor                 int
+	browserState           browser.SessionsView
 	pendingBlockerDeleteID uint
 	width                  int
 	height                 int
@@ -48,30 +50,76 @@ func (m Model) Init() (Model, tea.Cmd) {
 	if m.sess == nil {
 		return m, nil
 	}
-	return m, provider.RequestSessionsState()
+	return m, tea.Batch(provider.RequestSessionsState(), provider.RequestBrowserState())
 }
 
-func (m *Model) clampBlockerCursor() {
-	n := len(m.sess.OpenBlockers())
-	if m.blockerCursor >= n {
-		m.blockerCursor = n - 1
+type tabRef struct {
+	windowID string
+	tabID    string
+}
+
+func focusable(w browser.WindowView, t browser.TabView) bool {
+	return w.ID != "" && t.ID != ""
+}
+
+func (m Model) sessionBrowser() browser.SessionBrowser {
+	if m.sess == nil {
+		return browser.SessionBrowser{}
 	}
-	if m.blockerCursor < 0 {
-		m.blockerCursor = 0
+	return m.browserState.Sessions[m.sess.ID]
+}
+
+func (m Model) selectableTabs() []tabRef {
+	var out []tabRef
+	for _, w := range m.sessionBrowser().Windows {
+		for _, t := range w.Tabs {
+			if focusable(w, t) {
+				out = append(out, tabRef{windowID: w.ID, tabID: t.ID})
+			}
+		}
 	}
+	return out
+}
+
+func (m Model) minCursor() int {
+	if len(m.sess.OpenBlockers()) > 0 {
+		return 0
+	}
+	return -1
+}
+
+func (m *Model) clampCursor() {
+	last := len(m.sess.OpenBlockers()) + len(m.selectableTabs()) - 1
+	m.cursor = max(min(m.cursor, last), m.minCursor())
 }
 
 func (m Model) selectedBlocker() *session.SessionBlocker {
 	open := m.sess.OpenBlockers()
-	if m.blockerCursor < 0 || m.blockerCursor >= len(open) {
+	if m.cursor < 0 || m.cursor >= len(open) {
 		return nil
 	}
-	b := open[m.blockerCursor]
+	b := open[m.cursor]
 	return &b
 }
 
+func (m Model) selectedTab() *tabRef {
+	if m.sess == nil {
+		return nil
+	}
+	i := m.cursor - len(m.sess.OpenBlockers())
+	tabs := m.selectableTabs()
+	if m.cursor < 0 || i < 0 || i >= len(tabs) {
+		return nil
+	}
+	return &tabs[i]
+}
+
 func (m Model) Keys() help.KeyMap {
-	return keys
+	k := keys
+	if m.selectedTab() != nil {
+		k.Activate = openTabKey
+	}
+	return k
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -85,10 +133,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.sess = &s
 		m.pendingDeleteID = 0
 		m.interactive = true
-		m.blockerCursor = 0
+		m.cursor = m.minCursor()
 		m.pendingBlockerDeleteID = 0
 		m.picker = m.picker.Close()
 		m.setStatus("", ui.StatusInfo)
+		return m, provider.RequestBrowserState()
+	case provider.BrowserStateUpdatedMsg:
+		m.browserState = msg.State
+		if m.sess != nil {
+			m.clampCursor()
+		}
+		return m, nil
+	case provider.ErrMsg:
+		m.setStatus(msg.Err.Error(), ui.StatusError)
 		return m, nil
 	case ui.OpenURLFailedMsg:
 		m.setStatus("could not open PR: "+msg.Err.Error(), ui.StatusError)
@@ -113,7 +170,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.picker = m.picker.Close()
 		}
-		m.clampBlockerCursor()
+		m.clampCursor()
 		return m, nil
 	case tea.KeyMsg:
 		return m.onKeyMsg(msg)
@@ -146,15 +203,13 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, router.Back()
 
 	case key.Matches(msg, keys.Up):
-		if m.blockerCursor > 0 {
-			m.blockerCursor--
-		}
+		m.cursor--
+		m.clampCursor()
 		return m, nil
 
 	case key.Matches(msg, keys.Down):
-		if m.blockerCursor < len(m.sess.OpenBlockers())-1 {
-			m.blockerCursor++
-		}
+		m.cursor++
+		m.clampCursor()
 		return m, nil
 
 	case key.Matches(msg, keys.Block):
@@ -186,6 +241,9 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, keys.Activate):
+		if t := m.selectedTab(); t != nil {
+			return m, provider.FocusTab(m.sess.ID, t.windowID, t.tabID)
+		}
 		if m.sess.IsAttached {
 			return m, nil
 		}

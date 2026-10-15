@@ -442,6 +442,6 @@ func (m Model) View() string {
 	}
 	divider := strings.Join(divLines, "\n")
 
-	panelStr := ui.FitHeight(sessiondetail.RenderPanel(m.selectedSession(), panelW, h), h)
+	panelStr := ui.FitHeight(sessiondetail.RenderPanelWithBrowser(m.selectedSession(), m.browserState, panelW, h), h)
 	return lipgloss.JoinHorizontal(lipgloss.Top, listStr, divider, panelStr)
 }

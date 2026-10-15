@@ -39,8 +39,8 @@ var keys = keyMap{
 	Archive:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archive")),
 	Delete:        key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 	AddWorkspace:  key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "add workspace")),
-	Up:            key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "prev blocker")),
-	Down:          key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "next blocker")),
+	Up:            key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "prev item")),
+	Down:          key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "next item")),
 	Block:         key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "block")),
 	Resolve:       key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "resolve blocker")),
 	RemoveBlocker: key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "delete blocker")),
@@ -48,3 +48,5 @@ var keys = keyMap{
 }
 
 var _ help.KeyMap = keys
+
+var openTabKey = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open tab"))

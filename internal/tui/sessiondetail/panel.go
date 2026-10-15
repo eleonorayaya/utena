@@ -2,10 +2,12 @@ package sessiondetail
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
@@ -55,7 +57,11 @@ func statusPill(status session.SessionStatus) string {
 }
 
 func RenderPanel(s *session.Session, width, height int) string {
-	m := Model{sess: s, width: width, height: height}
+	return RenderPanelWithBrowser(s, browser.SessionsView{}, width, height)
+}
+
+func RenderPanelWithBrowser(s *session.Session, state browser.SessionsView, width, height int) string {
+	m := Model{sess: s, browserState: state, width: width, height: height}
 	return m.View()
 }
 
@@ -88,7 +94,7 @@ func (m Model) View() string {
 			text := valueStyle().Render(fmt.Sprintf("%s · %s · %s", bl.Kind, ui.SingleLine(bl.Label()), common.TimeAgo(bl.CreatedAt)))
 			if m.interactive {
 				gutter := "  "
-				if i == m.blockerCursor {
+				if i == m.cursor {
 					gutter = lipgloss.NewStyle().Foreground(theme.Current.Primary).Render("▌ ")
 				}
 				text = gutter + text
@@ -101,6 +107,11 @@ func (m Model) View() string {
 
 	if rows := workspaceRows(s, bw); len(rows) > 0 {
 		body = append(body, sectionRule(sectionTitleStyle().Render("Workspaces"), mutedStyle().Render(fmt.Sprint(len(rows))), bw))
+		body = append(body, rows...)
+		body = append(body, "")
+	}
+
+	if rows := m.browserRows(bw); len(rows) > 0 {
 		body = append(body, rows...)
 		body = append(body, "")
 	}
@@ -322,4 +333,79 @@ func prLine(pr git.PullRequest, width int) string {
 	title := ui.Truncate(ui.SingleLine(pr.Title), titleW)
 	title += strings.Repeat(" ", max(titleW-lipgloss.Width(title), 0))
 	return "  " + num + numPad + "  " + titleStyle.Render(title) + "  " + checksGlyph(pr.ChecksState) + "  " + badge
+}
+
+func tabCountText(n int) string {
+	if n == 1 {
+		return "1 tab"
+	}
+	return fmt.Sprintf("%d tabs", n)
+}
+
+func tabHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(u.Hostname(), "www.")
+}
+
+func (m Model) browserRows(width int) []string {
+	sb := m.sessionBrowser()
+	if len(sb.Windows) == 0 {
+		return nil
+	}
+	rows := []string{sectionRule(sectionTitleStyle().Render("Browser"), mutedStyle().Render(tabCountText(sb.TabCount)+" · "+sb.State), width)}
+	selectable := len(m.sess.OpenBlockers())
+	for i, w := range sb.Windows {
+		if len(sb.Windows) > 1 {
+			heading := fmt.Sprintf("window %d", i+1)
+			if w.State != string(browser.WindowOpen) {
+				heading += " · " + w.State
+			}
+			rows = append(rows, "  "+mutedStyle().Render(heading))
+		}
+		for _, t := range w.Tabs {
+			selected := false
+			if focusable(w, t) {
+				selected = m.interactive && m.cursor == selectable
+				selectable++
+			}
+			rows = append(rows, tabLine(t, w.State == string(browser.WindowOpen), selected, width))
+		}
+	}
+	return rows
+}
+
+func tabLine(t browser.TabView, live, selected bool, width int) string {
+	gutter := "  "
+	if selected {
+		gutter = lipgloss.NewStyle().Foreground(theme.Current.Primary).Render("▌ ")
+	}
+	titleStyle := valueStyle()
+	markerStyle := lipgloss.NewStyle().Foreground(theme.Current.AccentBlue)
+	if !live {
+		titleStyle = mutedStyle()
+		markerStyle = mutedStyle()
+	}
+	marker := " "
+	if t.Active {
+		marker = markerStyle.Render("●")
+	}
+	title := ui.SingleLine(t.Title)
+	if title == "" {
+		title = ui.SingleLine(t.URL)
+	}
+	avail := max(width-4, 1)
+	host := tabHost(t.URL)
+	hostW := min(lipgloss.Width(host), avail/3)
+	titleW := avail
+	if hostW > 0 {
+		titleW = max(avail-hostW-2, 1)
+	}
+	line := gutter + marker + " " + titleStyle.Render(ui.Truncate(title, titleW))
+	if hostW > 0 {
+		line += "  " + mutedStyle().Render(ui.Truncate(host, hostW))
+	}
+	return line
 }

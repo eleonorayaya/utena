@@ -42,7 +42,7 @@ func TestDetail_OpenPR(t *testing.T) {
 	assert.Nil(t, cmd)
 	require.True(t, m.picker.IsOpen())
 	m, _ = m.Update(runeKey("j"))
-	assert.Equal(t, 0, m.blockerCursor)
+	assert.Equal(t, -1, m.cursor)
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	assert.Equal(t, provider.OpenURLIntentMsg{SessionID: 1, URL: "https://github.com/o/api-service/pull/4847"}, cmd())
