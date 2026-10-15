@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 
@@ -125,17 +124,6 @@ func (p PRPicker) renderLine(i, width int) string {
 }
 
 type OpenURLFailedMsg struct{ Err error }
-
-func OpenURL(url string) tea.Cmd {
-	return func() tea.Msg {
-		cmd := exec.Command("open", url)
-		if err := cmd.Start(); err != nil {
-			return OpenURLFailedMsg{Err: err}
-		}
-		go cmd.Wait()
-		return nil
-	}
-}
 
 func (p PRPicker) Sync(prs []git.PullRequest) PRPicker {
 	if !p.open {

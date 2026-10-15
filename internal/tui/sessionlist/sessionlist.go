@@ -35,6 +35,7 @@ type Model struct {
 	statusMsg        string
 	statusKind       ui.StatusKind
 	picker           ui.PRPicker
+	pickerSessionID  uint
 	width            int
 	height           int
 }
@@ -206,7 +207,7 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.picker, url = m.picker.Update(msg)
 		m.clampOffset()
 		if url != "" {
-			return m, ui.OpenURL(url), true
+			return m, provider.OpenURL(m.pickerSessionID, url), true
 		}
 		return m, nil, true
 	}
@@ -322,9 +323,10 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			m.setStatus("no open pull requests", ui.StatusInfo)
 			return m, nil, true
 		case 1:
-			return m, ui.OpenURL(prs[0].HTMLURL), true
+			return m, provider.OpenURL(sel.ID, prs[0].HTMLURL), true
 		default:
 			m.picker = ui.NewPRPicker(prs)
+			m.pickerSessionID = sel.ID
 			m.clampOffset()
 			return m, nil, true
 		}

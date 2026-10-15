@@ -21,6 +21,15 @@ func ActivateSession(id uint) tea.Cmd {
 	return func() tea.Msg { return activateSessionMsg{id: id} }
 }
 
+type OpenURLIntentMsg struct {
+	SessionID uint
+	URL       string
+}
+
+func OpenURL(sessionID uint, url string) tea.Cmd {
+	return func() tea.Msg { return OpenURLIntentMsg{SessionID: sessionID, URL: url} }
+}
+
 type SessionWorkspaceSpec struct {
 	WorkspaceID uint
 	Branch      string
@@ -194,6 +203,9 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, func() tea.Msg {
 			return p.client.activateSession(id)()
 		}
+
+	case OpenURLIntentMsg:
+		return p, p.client.openURL(msg.SessionID, msg.URL)
 
 	case repairSessionIntentMsg:
 		id := msg.id

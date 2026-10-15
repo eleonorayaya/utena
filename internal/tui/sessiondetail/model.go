@@ -128,7 +128,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		var url string
 		m.picker, url = m.picker.Update(msg)
 		if url != "" {
-			return m, ui.OpenURL(url)
+			return m, provider.OpenURL(m.sess.ID, url)
 		}
 		return m, nil
 	}
@@ -196,7 +196,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.setStatus("no open pull requests", ui.StatusInfo)
 			return m, nil
 		case 1:
-			return m, ui.OpenURL(prs[0].HTMLURL)
+			return m, provider.OpenURL(m.sess.ID, prs[0].HTMLURL)
 		default:
 			m.picker = ui.NewPRPicker(prs)
 			return m, nil

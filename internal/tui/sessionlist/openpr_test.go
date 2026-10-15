@@ -47,7 +47,8 @@ func TestOpenPR_SingleOpensDirectly(t *testing.T) {
 	m := listWith(t, withPRs(withClaude(1, "a", claude.StatusIdle), git.PullRequest{Number: 1, State: git.PRStateOpen, HTMLURL: "u1"}))
 	m, cmd, handled := pressO(m)
 	assert.True(t, handled)
-	assert.NotNil(t, cmd)
+	require.NotNil(t, cmd)
+	assert.Equal(t, provider.OpenURLIntentMsg{SessionID: 1, URL: "u1"}, cmd())
 	assert.False(t, m.picker.IsOpen())
 }
 
@@ -59,7 +60,7 @@ func TestOpenPR_EmptyURLIsNotOpenable(t *testing.T) {
 }
 
 func TestOpenPR_SeveralOpensPickerThenChooses(t *testing.T) {
-	m := listWith(t, withPRs(withClaude(1, "a", claude.StatusIdle),
+	m := listWith(t, withPRs(withClaude(7, "a", claude.StatusIdle),
 		git.PullRequest{Number: 1, State: git.PRStateOpen, HTMLURL: "u1"},
 		git.PullRequest{Number: 2, State: git.PRStateDraft, HTMLURL: "u2"}))
 	m, cmd, _ := pressO(m)
@@ -72,7 +73,8 @@ func TestOpenPR_SeveralOpensPickerThenChooses(t *testing.T) {
 	assert.Equal(t, "a", m.selectedSession().Name)
 
 	m, cmd, _ = m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyEnter})
-	assert.NotNil(t, cmd)
+	require.NotNil(t, cmd)
+	assert.Equal(t, provider.OpenURLIntentMsg{SessionID: 7, URL: "u2"}, cmd())
 	assert.False(t, m.picker.IsOpen())
 }
 

@@ -33,7 +33,8 @@ func TestDetail_OpenPR(t *testing.T) {
 	s := richSession()
 	m, _ := New().Update(SelectMsg{Session: s})
 	_, cmd := m.Update(runeKey("o"))
-	assert.NotNil(t, cmd)
+	require.NotNil(t, cmd)
+	assert.Equal(t, provider.OpenURLIntentMsg{SessionID: 1, URL: "https://github.com/o/api-service/pull/4847"}, cmd())
 
 	s.PullRequests = append(s.PullRequests, git.PullRequest{Number: 1, State: git.PRStateOpen, HTMLURL: "u1"})
 	m, _ = New().Update(SelectMsg{Session: s})
@@ -43,7 +44,8 @@ func TestDetail_OpenPR(t *testing.T) {
 	m, _ = m.Update(runeKey("j"))
 	assert.Equal(t, 0, m.blockerCursor)
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	assert.NotNil(t, cmd)
+	require.NotNil(t, cmd)
+	assert.Equal(t, provider.OpenURLIntentMsg{SessionID: 1, URL: "https://github.com/o/api-service/pull/4847"}, cmd())
 }
 
 func TestDetail_EscClosesPickerBeforeGoingBack(t *testing.T) {
