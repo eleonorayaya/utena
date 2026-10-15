@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/eleonorayaya/utena/internal/db"
+	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/eleonorayaya/utena/internal/wm"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -13,8 +15,14 @@ type Module struct {
 	Router     *Router
 }
 
-func NewModule(driver Driver, sessions Sessions, database db.Database) *Module {
-	service := NewService(driver, NewStore(database), sessions)
+func NewModule(driver Driver, sessions Sessions, wmDriver wm.Driver, layout Layout, bus eventbus.EventBus, database db.Database) *Module {
+	service := NewService(driver, NewStore(database), sessions, wmDriver, layout)
+	bus.Subscribe(eventbus.SessionAttached, func(ctx context.Context, e eventbus.Event) error {
+		if ev, ok := e.Data.(eventbus.SessionAttachedEvent); ok {
+			service.SetAttached(ev.SessionID)
+		}
+		return nil
+	})
 	controller := NewController(service)
 	return &Module{Service: service, Controller: controller, Router: NewRouter(controller, driver)}
 }

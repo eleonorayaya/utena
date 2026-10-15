@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/wm"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -221,14 +223,14 @@ func TestConnected_RunPersistsAcrossServices(t *testing.T) {
 	w := h.driver.AddWindow("https://a.example.com")
 	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: w.ID}))
 
-	restarted := NewService(h.driver, h.store, h.sessions)
+	restarted := NewService(h.driver, h.store, h.sessions, wm.None{}, Layout{BrowserWorkspace: "2", ParkWorkspace: "P"})
 	restarted.handleEvent(context.Background(), Event{Type: EventConnected, Run: "run-a"})
 
 	rows, err := h.store.ListOpenBySession(1)
 	require.NoError(t, err)
 	assert.Len(t, rows, 1)
 
-	again := NewService(h.driver, h.store, h.sessions)
+	again := NewService(h.driver, h.store, h.sessions, wm.None{}, Layout{BrowserWorkspace: "2", ParkWorkspace: "P"})
 	again.handleEvent(context.Background(), Event{Type: EventConnected, Run: "run-b"})
 
 	rows, err = h.store.ListOpenBySession(1)

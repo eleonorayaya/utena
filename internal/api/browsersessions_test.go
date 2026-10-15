@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/eleonorayaya/utena/internal/browser"
+	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,4 +32,21 @@ func TestBrowserSessions_UnknownSessionIsBrowserNotFound(t *testing.T) {
 	app, _, _, _, _ := setupTestRouter(t)
 	_, err := browserSessions{sessions: app.Session.Service}.IsAttached(context.Background(), 9999)
 	assert.ErrorIs(t, err, browser.ErrSessionNotFound)
+}
+
+func TestBrowserSessions_AttachedReturnsAttachedSession(t *testing.T) {
+	app, _, _, _, _ := setupTestRouter(t)
+	b := browserSessions{sessions: app.Session.Service}
+
+	id, err := b.Attached(context.Background())
+	require.NoError(t, err)
+	assert.Zero(t, id)
+
+	require.NoError(t, app.Session.Store.Add(&session.Session{Name: "detached", Status: session.StatusActive}))
+	attached := &session.Session{Name: "attached", Status: session.StatusActive, IsAttached: true}
+	require.NoError(t, app.Session.Store.Add(attached))
+
+	id, err = b.Attached(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, attached.ID, id)
 }

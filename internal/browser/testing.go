@@ -7,13 +7,14 @@ import (
 )
 
 type FakeDriver struct {
-	mu      sync.Mutex
-	windows []Window
-	nextID  int
-	focused []string
-	events  chan Event
-	stopped chan struct{}
-	ListErr error
+	mu       sync.Mutex
+	windows  []Window
+	nextID   int
+	focused  []string
+	events   chan Event
+	stopped  chan struct{}
+	ListErr  error
+	OnCreate func(Window)
 }
 
 var _ Driver = (*FakeDriver)(nil)
@@ -124,12 +125,16 @@ func (f *FakeDriver) ListWindows(ctx context.Context) ([]Window, error) {
 
 func (f *FakeDriver) CreateWindow(ctx context.Context, urls []string, focused bool) (Window, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	w := f.addWindowLocked(urls)
 	if focused {
 		f.focused = append(f.focused, w.ID)
 	}
 	w.Tabs = append([]Tab(nil), w.Tabs...)
+	onCreate := f.OnCreate
+	f.mu.Unlock()
+	if onCreate != nil {
+		onCreate(w)
+	}
 	return w, nil
 }
 
@@ -215,7 +220,7 @@ func (f *FakeDriver) Emit(ev Event) bool {
 
 type FakeSessions struct {
 	mu            sync.Mutex
-	Attached      uint
+	AttachedID    uint
 	Activated     []uint
 	ActivateErr   error
 	IsAttachedErr error
@@ -229,7 +234,7 @@ func (f *FakeSessions) IsAttached(ctx context.Context, sessionID uint) (bool, er
 	if f.IsAttachedErr != nil {
 		return false, f.IsAttachedErr
 	}
-	return f.Attached == sessionID, nil
+	return f.AttachedID == sessionID, nil
 }
 
 func (f *FakeSessions) Activate(ctx context.Context, sessionID uint) error {
@@ -239,6 +244,12 @@ func (f *FakeSessions) Activate(ctx context.Context, sessionID uint) error {
 		return f.ActivateErr
 	}
 	f.Activated = append(f.Activated, sessionID)
-	f.Attached = sessionID
+	f.AttachedID = sessionID
 	return nil
+}
+
+func (f *FakeSessions) Attached(ctx context.Context) (uint, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.AttachedID, nil
 }

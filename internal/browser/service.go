@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/eleonorayaya/utena/internal/wm"
 )
 
 var (
@@ -20,6 +22,17 @@ var (
 type Sessions interface {
 	IsAttached(ctx context.Context, sessionID uint) (bool, error)
 	Activate(ctx context.Context, sessionID uint) error
+	Attached(ctx context.Context) (uint, error)
+}
+
+const (
+	createdLinkPoll = 100 * time.Millisecond
+	createdLinkWait = 1500 * time.Millisecond
+)
+
+type Layout struct {
+	BrowserWorkspace string
+	ParkWorkspace    string
 }
 
 type OpenRequest struct {
@@ -48,7 +61,12 @@ type Service struct {
 	driver   Driver
 	store    *Store
 	sessions Sessions
+	wm       wm.Driver
+	wmInert  bool
+	layout   Layout
 	now      func() time.Time
+	attached atomic.Uint64
+	swapCh   chan struct{}
 
 	mu                  sync.Mutex
 	connected           atomic.Bool
@@ -57,10 +75,34 @@ type Service struct {
 	unowned             map[string]struct{}
 	run                 string
 	runLoaded           bool
+	links               linker
 }
 
-func NewService(driver Driver, store *Store, sessions Sessions) *Service {
-	return &Service{driver: driver, store: store, sessions: sessions, now: time.Now, unowned: map[string]struct{}{}}
+func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driver, layout Layout) *Service {
+	_, inert := wmDriver.(wm.None)
+	return &Service{
+		driver:   driver,
+		store:    store,
+		sessions: sessions,
+		wm:       wmDriver,
+		wmInert:  inert,
+		layout:   layout,
+		now:      time.Now,
+		swapCh:   make(chan struct{}, 1),
+		unowned:  map[string]struct{}{},
+	}
+}
+
+func (s *Service) SetAttached(sessionID uint) {
+	s.attached.Store(uint64(sessionID))
+	s.signal()
+}
+
+func (s *Service) signal() {
+	select {
+	case s.swapCh <- struct{}{}:
+	default:
+	}
 }
 
 func driverErr(err error) error {
@@ -93,6 +135,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 				return OpenResult{}, err
 			}
 			activated = true
+			s.attached.Store(uint64(req.SessionID))
 		default:
 			focus = attached
 		}
@@ -116,6 +159,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 	res := OpenResult{Activated: activated}
 	switch {
 	case !found:
+		before, track := s.wmSnapshot(ctx, req.SessionID)
 		w, err := s.driver.CreateWindow(ctx, []string{req.URL}, focus)
 		if err != nil {
 			return OpenResult{}, driverErr(err)
@@ -127,6 +171,10 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 			if err := s.store.Add(row); err != nil {
 				return OpenResult{}, err
 			}
+			if track {
+				s.linkCreated(ctx, w.ID, before)
+			}
+			s.signal()
 		}
 		res.WindowID, res.Created = w.ID, true
 		if len(w.Tabs) > 0 {
@@ -156,6 +204,37 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 		}
 	}
 	return res, nil
+}
+
+func (s *Service) wmSnapshot(ctx context.Context, sessionID uint) ([]wm.Window, bool) {
+	if sessionID == 0 || s.wmInert {
+		return nil, false
+	}
+	before, err := s.wm.ListWindows(ctx, s.driver.AppBundleID())
+	if err != nil {
+		slog.WarnContext(ctx, "browser: list wm windows failed", "error", err)
+		return nil, false
+	}
+	return before, true
+}
+
+func (s *Service) linkCreated(ctx context.Context, windowID string, before []wm.Window) {
+	deadline := time.Now().Add(createdLinkWait)
+	for {
+		after, err := s.wm.ListWindows(ctx, s.driver.AppBundleID())
+		if err == nil && s.links.linkCreated(windowID, before, after) {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			slog.DebugContext(ctx, "browser: created window not linked", "window", windowID, "error", err)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(createdLinkPoll):
+		}
+	}
 }
 
 func (s *Service) targetWindow(sessionID uint, live []Window) (Window, bool, error) {
@@ -194,6 +273,71 @@ func (s *Service) targetWindow(sessionID uint, live []Window) (Window, bool, err
 
 func (s *Service) OnAppStart(ctx context.Context) error {
 	go s.followEvents(ctx)
+	go s.placeLoop(ctx)
+	return nil
+}
+
+func (s *Service) placeLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.swapCh:
+			if err := s.place(ctx); err != nil {
+				slog.WarnContext(ctx, "browser: placement failed", "error", err)
+			}
+		}
+	}
+}
+
+func (s *Service) place(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.connected.Load() || s.wmInert {
+		return nil
+	}
+	attached := uint(s.attached.Load())
+
+	live, err := s.driver.ListWindows(ctx)
+	if err != nil {
+		return err
+	}
+	wmWindows, err := s.wm.ListWindows(ctx, s.driver.AppBundleID())
+	if err != nil {
+		return err
+	}
+	rows, err := s.store.ListOpen()
+	if err != nil {
+		return err
+	}
+
+	want := make([]string, 0, len(rows))
+	for _, r := range rows {
+		want = append(want, r.DriverWindowID)
+	}
+	links := s.links.resolve(live, s.driver.WindowTitle, wmWindows, want)
+	workspaces := make(map[string]string, len(wmWindows))
+	for _, w := range wmWindows {
+		workspaces[w.ID] = w.Workspace
+	}
+
+	for _, r := range rows {
+		wmID, ok := links[r.DriverWindowID]
+		if !ok {
+			slog.DebugContext(ctx, "browser: window not linked to wm window", "window", r.DriverWindowID, "session", r.SessionID)
+			continue
+		}
+		target := s.layout.ParkWorkspace
+		if attached != 0 && r.SessionID == attached {
+			target = s.layout.BrowserWorkspace
+		}
+		if workspaces[wmID] == target {
+			continue
+		}
+		if err := s.wm.MoveToWorkspace(ctx, wmID, target); err != nil {
+			slog.WarnContext(ctx, "browser: move window failed", "window", r.DriverWindowID, "wm_window", wmID, "workspace", target, "error", err)
+		}
+	}
 	return nil
 }
 
@@ -232,12 +376,15 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	case EventConnected:
 		s.connected.Store(true)
 		err = errors.Join(s.trackRun(ev.Run), s.resync(ctx))
+		s.signal()
 	case EventDisconnected:
 		s.connected.Store(false)
 	case EventWindowCreated:
 		err = s.adopt(ev.WindowID)
 	case EventWindowRemoved:
 		err = s.store.DeleteByDriverWindowID(ev.WindowID)
+	case EventTabsChanged:
+		err = s.signalIfUnlinked(ev.WindowID)
 	case EventFocusChanged:
 		if ev.WindowID == "" {
 			return
@@ -251,6 +398,19 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	if err != nil {
 		slog.WarnContext(ctx, "browser event handler failed", "type", ev.Type, "window", ev.WindowID, "error", err)
 	}
+}
+
+func (s *Service) signalIfUnlinked(windowID string) error {
+	if _, ok := s.links.links[windowID]; ok {
+		return nil
+	}
+	if _, err := s.store.GetByDriverWindowID(windowID); errors.Is(err, ErrWindowNotFound) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	s.signal()
+	return nil
 }
 
 func (s *Service) trackRun(run string) error {
@@ -292,7 +452,19 @@ func (s *Service) resync(ctx context.Context) error {
 			s.lastFocusedWindowID = w.ID
 		}
 	}
-	return s.store.MarkMissingExcept(live)
+	return errors.Join(s.store.MarkMissingExcept(live), s.seedAttached(ctx))
+}
+
+func (s *Service) seedAttached(ctx context.Context) error {
+	if s.attached.Load() != 0 {
+		return nil
+	}
+	id, err := s.sessions.Attached(ctx)
+	if err != nil {
+		return err
+	}
+	s.attached.CompareAndSwap(0, uint64(id))
+	return nil
 }
 
 func (s *Service) adopt(windowID string) error {
@@ -316,5 +488,9 @@ func (s *Service) adopt(windowID string) error {
 	if err != nil {
 		return err
 	}
-	return s.store.Add(&BrowserWindow{SessionID: parent.SessionID, State: WindowOpen, DriverWindowID: windowID, LastFocusedAt: s.now()})
+	if err := s.store.Add(&BrowserWindow{SessionID: parent.SessionID, State: WindowOpen, DriverWindowID: windowID, LastFocusedAt: s.now()}); err != nil {
+		return err
+	}
+	s.signal()
+	return nil
 }

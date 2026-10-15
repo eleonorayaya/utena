@@ -26,3 +26,16 @@ func (b browserSessions) Activate(ctx context.Context, sessionID uint) error {
 	_, err := b.sessions.ActivateSession(ctx, sessionID)
 	return err
 }
+
+func (b browserSessions) Attached(ctx context.Context) (uint, error) {
+	sessions, err := b.sessions.ListSessions(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, s := range sessions {
+		if s.IsAttached {
+			return s.ID, nil
+		}
+	}
+	return 0, nil
+}

@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/eleonorayaya/utena/internal/db/testdb"
+	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/eleonorayaya/utena/internal/wm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,7 +28,7 @@ func (h *httpFake) Handler() http.Handler {
 func newTestServer(t *testing.T) (*httptest.Server, *Module, *httpFake) {
 	t.Helper()
 	driver := &httpFake{FakeDriver: NewFakeDriver()}
-	m := NewModule(driver, &FakeSessions{}, testdb.New(t, &BrowserWindow{}, &BrowserState{}))
+	m := NewModule(driver, &FakeSessions{}, wm.None{}, Layout{BrowserWorkspace: "2", ParkWorkspace: "P"}, eventbus.NewEventBus(), testdb.New(t, &BrowserWindow{}, &BrowserState{}))
 	srv := httptest.NewServer(m.Routes())
 	t.Cleanup(srv.Close)
 	return srv, m, driver

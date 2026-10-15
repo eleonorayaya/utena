@@ -18,6 +18,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tuios"
+	"github.com/eleonorayaya/utena/internal/wm"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/afero"
@@ -65,7 +66,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 		muxModule = mux.NewModule(tuios.NewDriver(), bus, database)
 	}
 	sessionModule := session.NewSessionModule(muxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir, cfg.SessionsRoot)
-	browserModule := browser.NewModule(chrome.NewDriver(), browserSessions{sessions: sessionModule.Service}, database)
+	browserModule := browser.NewModule(chrome.NewDriver(), browserSessions{sessions: sessionModule.Service}, wm.None{}, browser.Layout{BrowserWorkspace: "2", ParkWorkspace: "P"}, bus, database)
 
 	jobsModule := jobs.NewJobsModule()
 	gitModule.RegisterJobs(jobsModule.Service)

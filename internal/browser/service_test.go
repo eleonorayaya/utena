@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/db/testdb"
+	"github.com/eleonorayaya/utena/internal/wm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +24,7 @@ func newHarness(t *testing.T) harness {
 	store := NewStore(testdb.New(t, &BrowserWindow{}, &BrowserState{}))
 	driver := NewFakeDriver()
 	sessions := &FakeSessions{}
-	svc := NewService(driver, store, sessions)
+	svc := NewService(driver, store, sessions, wm.None{}, Layout{BrowserWorkspace: "2", ParkWorkspace: "P"})
 	svc.handleEvent(context.Background(), Event{Type: EventConnected})
 	return harness{svc: svc, driver: driver, sessions: sessions, store: store}
 }
@@ -39,7 +40,7 @@ func TestOpen_UnavailableWhenDisconnected(t *testing.T) {
 
 func TestOpen_BackgroundSessionCreatesWindowQuietly(t *testing.T) {
 	h := newHarness(t)
-	h.sessions.Attached = 2
+	h.sessions.AttachedID = 2
 
 	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
 	require.NoError(t, err)
@@ -55,7 +56,7 @@ func TestOpen_BackgroundSessionCreatesWindowQuietly(t *testing.T) {
 
 func TestOpen_AttachedSessionFocuses(t *testing.T) {
 	h := newHarness(t)
-	h.sessions.Attached = 1
+	h.sessions.AttachedID = 1
 
 	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
 	require.NoError(t, err)
@@ -119,7 +120,7 @@ func TestOpen_SkipsRowsWhoseWindowIsGone(t *testing.T) {
 
 func TestOpen_ActivateSwitchesThenFocuses(t *testing.T) {
 	h := newHarness(t)
-	h.sessions.Attached = 2
+	h.sessions.AttachedID = 2
 
 	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL, Activate: true})
 	require.NoError(t, err)
@@ -129,7 +130,7 @@ func TestOpen_ActivateSwitchesThenFocuses(t *testing.T) {
 
 func TestOpen_ActivateSkippedWhenAlreadyAttached(t *testing.T) {
 	h := newHarness(t)
-	h.sessions.Attached = 1
+	h.sessions.AttachedID = 1
 	_, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL, Activate: true})
 	require.NoError(t, err)
 	assert.Empty(t, h.sessions.Activated)
@@ -179,7 +180,7 @@ func TestOpen_DriverNotConnectedIsUnavailable(t *testing.T) {
 
 func TestOpen_ReportsActivatedOnlyWhenSwitching(t *testing.T) {
 	h := newHarness(t)
-	h.sessions.Attached = 2
+	h.sessions.AttachedID = 2
 
 	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL, Activate: true})
 	require.NoError(t, err)
