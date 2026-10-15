@@ -15,6 +15,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const testRestoreWindow = 2 * time.Minute
+
 type fakeTimer struct {
 	d       time.Duration
 	f       func()
@@ -500,7 +502,7 @@ func TestWindowCreated_LateRestoredWindowReattachesBeforeAdoption(t *testing.T) 
 	addMissing(t, h, 2, "https://a.example.com", "https://b.example.com")
 	connectRun(h, "r1")
 	focusedParent(t, h, 1)
-	*now = now.Add(restoreWindow - time.Second)
+	*now = now.Add(testRestoreWindow - time.Second)
 	drain(h.svc)
 
 	w := h.driver.AddWindow("https://a.example.com", "https://b.example.com")
@@ -552,7 +554,7 @@ func TestWindowCreated_AfterRestoreWindowAdoptsNormally(t *testing.T) {
 	addMissing(t, h, 2, "https://a.example.com")
 	connectRun(h, "r1")
 	focusedParent(t, h, 1)
-	*now = now.Add(restoreWindow)
+	*now = now.Add(testRestoreWindow)
 
 	w := h.driver.AddWindow("https://a.example.com")
 	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: w.ID})
@@ -575,7 +577,7 @@ func TestTabsChanged_AfterRestoreWindowDoesNotReattach(t *testing.T) {
 	now := manualNow(h)
 	addMissing(t, h, 2, "https://a.example.com")
 	connectRun(h, "r1")
-	*now = now.Add(restoreWindow)
+	*now = now.Add(testRestoreWindow)
 
 	w := h.driver.AddWindow("https://a.example.com")
 	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: w.ID})
@@ -588,7 +590,7 @@ func TestWindowCreated_SameRunReconnectDoesNotOpenRestoreWindow(t *testing.T) {
 	h := newHarness(t)
 	now := manualNow(h)
 	connectRun(h, "r1")
-	*now = now.Add(restoreWindow)
+	*now = now.Add(testRestoreWindow)
 	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
 	addMissing(t, h, 2, "https://a.example.com")
 	connectRun(h, "r1")
@@ -701,7 +703,7 @@ func TestWindowCreated_DeferredWindowFallsBackToParentAfterRestoreWindow(t *test
 	focusedParent(t, h, 1)
 
 	w := createEmptyWindow(h)
-	*now = now.Add(restoreWindow)
+	*now = now.Add(testRestoreWindow)
 	loadTabs(t, h, w.ID, "https://a.example.com")
 
 	assert.Equal(t, uint(1), sessionOf(t, h, w.ID))
@@ -871,7 +873,7 @@ func TestTabsChanged_DeferredWindowStillEmptyAfterRestoreWindowAdoptsParent(t *t
 	w := createEmptyWindow(h)
 	require.Contains(t, h.svc.deferredAdopt, w.ID)
 
-	*now = now.Add(restoreWindow)
+	*now = now.Add(testRestoreWindow)
 	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: w.ID})
 
 	assert.Equal(t, uint(1), sessionOf(t, h, w.ID))
@@ -1287,6 +1289,20 @@ func TestRestore_RestoredWindowIsNotAdoptedByFocusedSession(t *testing.T) {
 	assert.Len(t, threeRows, 1)
 }
 
+func TestNewService_RestoreWindowDisabledByDefault(t *testing.T) {
+	h := newHarness(t)
+	h.svc.restoreWindow = NewService(h.driver, h.store, h.sessions, wm.None{}, Layout{}).restoreWindow
+	connectRun(h, "run-a")
+	addMissing(t, h, 1, "https://a.example.com/x")
+	connectRun(h, "run-b")
+
+	assert.False(t, h.svc.restoring())
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: "https://a.example.com/x"})
+	require.NoError(t, err)
+	assert.False(t, res.Created)
+	assert.Equal(t, uint(1), sessionOf(t, h, res.WindowID))
+}
+
 func TestOpen_SnapshottedSessionRestoresAndOpensInRestoredWindow(t *testing.T) {
 	h := newHarness(t)
 	addSnapshotted(t, h, 1, time.Time{}, SavedTab{URL: prURL + "/files"}, SavedTab{URL: "https://a.example.com", Active: true})
@@ -1636,7 +1652,7 @@ func TestConnected_RestoreWindowEndSignalsPlacement(t *testing.T) {
 
 	var end *fakeTimer
 	for _, tm := range h.clock.live() {
-		if tm.d == restoreWindow {
+		if tm.d == testRestoreWindow {
 			end = tm
 		}
 	}

@@ -30,7 +30,6 @@ const (
 	createdLinkWait = 1500 * time.Millisecond
 	snapshotDelay   = 2 * time.Second
 	removeGrace     = 2 * time.Second
-	restoreWindow   = 2 * time.Minute
 )
 
 type pendingTimer struct {
@@ -140,7 +139,6 @@ func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driv
 		},
 		snapshotDelay: snapshotDelay,
 		removeGrace:   removeGrace,
-		restoreWindow: restoreWindow,
 		snapshots:     map[string]*pendingTimer{},
 		removals:      map[string]*pendingTimer{},
 	}
@@ -822,7 +820,7 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 		s.connected.Store(true)
 		flushErr := s.flushRemovals()
 		restarted, runErr := s.trackRun(ev.Run)
-		if restarted {
+		if restarted && s.restoreWindow > 0 {
 			s.restoreUntil = s.now().Add(s.restoreWindow)
 			if s.restoreTimer != nil {
 				s.restoreTimer()

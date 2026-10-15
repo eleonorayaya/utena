@@ -28,6 +28,7 @@ func newHarness(t *testing.T) harness {
 	clock := &fakeClock{}
 	svc := NewService(driver, store, sessions, wm.None{}, Layout{BrowserWorkspace: "2", ParkWorkspace: "P"})
 	svc.afterFunc = clock.afterFunc
+	svc.restoreWindow = testRestoreWindow
 	svc.handleEvent(context.Background(), Event{Type: EventConnected})
 	return harness{svc: svc, driver: driver, sessions: sessions, store: store, clock: clock}
 }
