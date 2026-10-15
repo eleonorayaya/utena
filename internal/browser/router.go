@@ -21,6 +21,8 @@ func (rt *Router) Routes() chi.Router {
 		r.Use(rejectCrossOrigin)
 		r.Post("/open", rt.controller.HandleOpen)
 		r.Get("/status", rt.controller.HandleStatus)
+		r.Get("/sessions", rt.controller.HandleSessions)
+		r.Post("/focus", rt.controller.HandleFocus)
 	})
 	if hd, ok := rt.driver.(HTTPDriver); ok {
 		r.Handle("/"+hd.Name(), hd.Handler())

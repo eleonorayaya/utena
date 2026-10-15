@@ -103,6 +103,12 @@ func (s *Store) SaveTabs(driverWindowID string, tabs []SavedTab, at time.Time) e
 		Updates(&BrowserWindow{Tabs: tabs, SnapshotAt: at}).Error
 }
 
+func (s *Store) ListAll() ([]BrowserWindow, error) {
+	var rows []BrowserWindow
+	err := s.db.Order("session_id, id").Find(&rows).Error
+	return rows, err
+}
+
 func (s *Store) ListRestorable(sessionID uint) ([]BrowserWindow, error) {
 	var rows []BrowserWindow
 	err := s.db.Where("session_id = ? AND state IN ?", sessionID, []WindowState{WindowMissing, WindowSnapshotted}).
