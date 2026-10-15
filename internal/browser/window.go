@@ -1,7 +1,6 @@
 package browser
 
 import (
-	"strings"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/common"
@@ -43,7 +42,7 @@ type BrowserState struct {
 func savedTabs(w Window) []SavedTab {
 	var out []SavedTab
 	for _, t := range w.Tabs {
-		if t.URL == "" || strings.HasPrefix(t.URL, "chrome://newtab") {
+		if t.URL == "" || isNewTab(t.URL) {
 			continue
 		}
 		out = append(out, SavedTab{URL: t.URL, Title: t.Title, Active: t.Active, Pinned: t.Pinned})

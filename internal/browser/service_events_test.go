@@ -221,7 +221,7 @@ func TestConnected_EmptyRunKeepsLiveRows(t *testing.T) {
 func TestConnected_RunPersistsAcrossServices(t *testing.T) {
 	h := newHarness(t)
 	connectRun(h, "run-a")
-	w := h.driver.AddWindow("https://a.example.com")
+	w := h.driver.AddWindow("chrome://newtab/")
 	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: w.ID}))
 
 	restarted := NewService(h.driver, h.store, h.sessions, wm.None{}, Layout{BrowserWorkspace: "2", ParkWorkspace: "P"})

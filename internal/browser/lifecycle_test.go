@@ -337,3 +337,94 @@ func TestWindowRemoved_ConnectedInsideGraceMarksMissing(t *testing.T) {
 	require.Len(t, missing, 1)
 	assert.Equal(t, []string{prURL}, urlsOf(missing[0].Tabs))
 }
+
+func TestConnected_ReattachesRestoredWindowsAfterChromeRestart(t *testing.T) {
+	h := newPlaceHarness(t)
+	connectRun(h.harness, "r1")
+	oldA := h.own(t, 1, "a", "2")
+	oldB := h.own(t, 2, "b", "P")
+	connectRun(h.harness, "r1")
+	open, err := h.store.ListOpen()
+	require.NoError(t, err)
+	require.Len(t, open, 2)
+	for _, r := range open {
+		require.NotEmpty(t, r.Tabs)
+	}
+
+	for _, r := range open {
+		removeWindow(h.harness, r.DriverWindowID)
+	}
+	h.wm.Remove(oldA)
+	h.wm.Remove(oldB)
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	require.Len(t, missing, 2)
+
+	newA := h.driver.AddWindow("https://a.example.com", "https://a2.example.com")
+	h.driver.SetTitle(newA.ID, "a")
+	h.wm.Add("wm-"+newA.ID, "a - Fake", "P")
+	newB := h.driver.AddWindow("https://b.example.com")
+	h.driver.SetTitle(newB.ID, "b")
+	h.wm.Add("wm-"+newB.ID, "b - Fake", "2")
+	personal := h.driver.AddWindow("https://personal.example.com")
+	h.driver.SetTitle(personal.ID, "personal")
+	h.wm.Add("wm-"+personal.ID, "personal - Fake", "2")
+	h.svc.SetAttached(1)
+	drain(h.svc)
+
+	connectRun(h.harness, "r2")
+
+	rowsA, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	require.Len(t, rowsA, 1)
+	assert.Equal(t, newA.ID, rowsA[0].DriverWindowID)
+	assert.Equal(t, []string{"https://a.example.com", "https://a2.example.com"}, urlsOf(rowsA[0].Tabs))
+	rowsB, err := h.store.ListOpenBySession(2)
+	require.NoError(t, err)
+	require.Len(t, rowsB, 1)
+	assert.Equal(t, newB.ID, rowsB[0].DriverWindowID)
+	missing, err = h.store.ListMissing()
+	require.NoError(t, err)
+	assert.Empty(t, missing)
+	owned, err := h.store.OwnedDriverWindowIDs()
+	require.NoError(t, err)
+	assert.False(t, owned[personal.ID])
+
+	select {
+	case <-h.svc.swapCh:
+	default:
+		t.Fatal("placement not signalled")
+	}
+	require.NoError(t, h.svc.place(context.Background()))
+	assert.Equal(t, "2", h.wm.Workspace("wm-"+newA.ID))
+	assert.Equal(t, "P", h.wm.Workspace("wm-"+newB.ID))
+	assert.Equal(t, "2", h.wm.Workspace("wm-"+personal.ID))
+}
+
+func TestConnected_ReattachSkipsWindowsOwnedByOpenRows(t *testing.T) {
+	h := newHarness(t)
+	connectRun(h, "r1")
+	live := ownWindow(t, h, 1, "https://a.example.com")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 2, State: WindowMissing, Tabs: []SavedTab{{URL: "https://a.example.com"}}}))
+
+	connectRun(h, "r1")
+
+	got, err := h.store.GetByDriverWindowID(live.ID)
+	require.NoError(t, err)
+	assert.Equal(t, uint(1), got.SessionID)
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	require.Len(t, missing, 1)
+	assert.Equal(t, uint(2), missing[0].SessionID)
+}
+
+func TestConnected_NewRunDropsCachedLinks(t *testing.T) {
+	h := newHarness(t)
+	connectRun(h, "r1")
+	h.svc.links.links = map[string]string{"w1": "wm-1"}
+
+	connectRun(h, "r2")
+
+	assert.Empty(t, h.svc.links.links)
+}

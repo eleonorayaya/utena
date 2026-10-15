@@ -668,6 +668,7 @@ func (s *Service) trackRun(run string) error {
 		return err
 	}
 	s.run = run
+	s.links.links = nil
 	return nil
 }
 
@@ -689,7 +690,24 @@ func (s *Service) resync(ctx context.Context) error {
 	if err := s.store.MarkMissingExcept(live); err != nil {
 		return errors.Join(err, s.seedAttached(ctx))
 	}
-	return errors.Join(s.snapshotOwned(windows), s.seedAttached(ctx))
+	return errors.Join(s.reattach(windows), s.snapshotOwned(windows), s.seedAttached(ctx))
+}
+
+func (s *Service) reattach(windows []Window) error {
+	rows, err := s.store.ListMissing()
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	owned, err := s.store.OwnedDriverWindowIDs()
+	if err != nil {
+		return err
+	}
+	now := s.now()
+	var errs []error
+	for windowID, rowID := range matchRestored(rows, windows, owned, reattachThreshold) {
+		errs = append(errs, s.store.Reopen(rowID, windowID, now))
+	}
+	return errors.Join(errs...)
 }
 
 func (s *Service) seedAttached(ctx context.Context) error {
