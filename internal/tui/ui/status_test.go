@@ -6,6 +6,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/git"
+	"github.com/eleonorayaya/utena/internal/session"
+	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -65,4 +67,22 @@ func TestPRCountSpans(t *testing.T) {
 
 func TestSectionHeader(t *testing.T) {
 	assert.Equal(t, "Needs you 2", SectionHeader("Needs you", 2))
+}
+
+func TestSessionGlyph(t *testing.T) {
+	cases := map[session.SessionStatus]string{
+		session.StatusActive:    "●",
+		session.StatusCompleted: "✓",
+		session.StatusCreating:  "◐",
+		session.StatusPending:   "◐",
+		session.StatusBroken:    "✕",
+		session.StatusInactive:  "○",
+		session.StatusArchived:  "○",
+		"unmanaged":             "◌",
+	}
+	for status, want := range cases {
+		assert.Equal(t, want, SessionGlyph(status).Text, status)
+	}
+	assert.Equal(t, theme.Current.Error, SessionStatusColor(session.StatusBroken))
+	assert.Equal(t, theme.Current.TextMuted, SessionStatusColor("unmanaged"))
 }

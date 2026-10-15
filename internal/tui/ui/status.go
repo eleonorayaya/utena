@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/git"
+	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
@@ -106,4 +107,38 @@ func PRCountSpans(ready, draft int) []Span {
 func SectionHeader(title string, count int) string {
 	return lipgloss.NewStyle().Foreground(theme.Current.Primary).Bold(true).Render(title) +
 		fg(theme.Current.TextMuted).Render(fmt.Sprintf(" %d", count))
+}
+
+func SessionStatusColor(status session.SessionStatus) lipgloss.Color {
+	switch status {
+	case session.StatusActive:
+		return theme.Current.StatusReady
+	case session.StatusCompleted:
+		return theme.Current.StatusDone
+	case session.StatusCreating:
+		return theme.Current.StatusActive
+	case session.StatusPending:
+		return theme.Current.StatusPending
+	case session.StatusBroken:
+		return theme.Current.Error
+	default:
+		return theme.Current.TextMuted
+	}
+}
+
+func SessionGlyph(status session.SessionStatus) Span {
+	glyph := "◌"
+	switch status {
+	case session.StatusActive:
+		glyph = "●"
+	case session.StatusCompleted:
+		glyph = "✓"
+	case session.StatusCreating, session.StatusPending:
+		glyph = "◐"
+	case session.StatusBroken:
+		glyph = "✕"
+	case session.StatusInactive, session.StatusArchived:
+		glyph = "○"
+	}
+	return Span{Text: glyph, Style: fg(SessionStatusColor(status))}
 }

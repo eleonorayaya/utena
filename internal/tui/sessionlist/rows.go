@@ -17,10 +17,8 @@ const (
 
 func nameStyle(s session.Session, selected bool) lipgloss.Style {
 	switch s.Status {
-	case session.StatusBroken:
-		return lipgloss.NewStyle().Foreground(theme.Current.Error)
-	case session.StatusCreating:
-		return lipgloss.NewStyle().Foreground(theme.Current.StatusActive)
+	case session.StatusBroken, session.StatusCreating:
+		return lipgloss.NewStyle().Foreground(ui.SessionStatusColor(s.Status))
 	}
 	if selected {
 		return lipgloss.NewStyle().Foreground(theme.Current.TextEmphasis).Bold(true)

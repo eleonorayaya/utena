@@ -88,7 +88,7 @@ Flow:
 
 Processes that leave the pane's process tree (daemonized and reparented to launchd) are not counted, nor is the tuios daemon itself.
 
-See: `internal/mux/resources.go`, `internal/tuios/driver.go`, `cmd/tui/top.go`
+See: `internal/mux/resources.go`, `internal/tuios/driver.go`, `internal/tui/top/`, `cmd/tui/top.go`
 
 ### Daemon → Claude (Session Events)
 

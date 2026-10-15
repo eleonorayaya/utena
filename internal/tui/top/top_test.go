@@ -1,4 +1,4 @@
-package main
+package top
 
 import (
 	"bytes"
@@ -36,22 +36,15 @@ func names(rows []session.SessionResources) []string {
 
 func TestSortResources(t *testing.T) {
 	rows := topRows()
-	assert.Equal(t, []string{"scratch", "alpha", "beta"}, names(sortResources(rows, sortCPU)))
-	assert.Equal(t, []string{"alpha", "scratch", "beta"}, names(sortResources(rows, sortMem)))
-	assert.Equal(t, []string{"alpha", "beta", "scratch"}, names(sortResources(rows, sortName)))
+	assert.Equal(t, []string{"scratch", "alpha", "beta"}, names(SortResources(rows, SortCPU)))
+	assert.Equal(t, []string{"alpha", "scratch", "beta"}, names(SortResources(rows, SortMem)))
+	assert.Equal(t, []string{"alpha", "beta", "scratch"}, names(SortResources(rows, SortName)))
 	assert.Equal(t, []string{"alpha", "scratch", "beta"}, names(rows))
-}
-
-func TestFormatBytes(t *testing.T) {
-	assert.Equal(t, "512B", formatBytes(512))
-	assert.Equal(t, "1.5KiB", formatBytes(1536))
-	assert.Equal(t, "10.0MiB", formatBytes(10<<20))
-	assert.Equal(t, "3.0GiB", formatBytes(3<<30))
 }
 
 func TestWriteResourcesTSV(t *testing.T) {
 	var buf bytes.Buffer
-	require.NoError(t, writeResourcesTSV(&buf, sortResources(topRows(), sortCPU)))
+	require.NoError(t, WriteTSV(&buf, SortResources(topRows(), SortCPU)))
 	assert.Equal(t, "name\tstatus\tcpu_pct\trss_bytes\tprocs\n"+
 		"scratch\tunmanaged\t80.0\t10485760\t2\n"+
 		"alpha\tactive\t12.0\t3221225472\t9\n"+
@@ -60,14 +53,14 @@ func TestWriteResourcesTSV(t *testing.T) {
 
 func TestTopModel_FetchRenderSortAndQuit(t *testing.T) {
 	sampled := time.Date(2026, 10, 14, 9, 30, 0, 0, time.Local)
-	m := newTopModel("0", time.Second)
+	m := New(time.Second, nil)
 	m.fetch = func() (*session.SessionResourcesResponse, error) {
 		return &session.SessionResourcesResponse{Sessions: topRows(), SampledAt: sampled}, nil
 	}
 
 	msg := m.Init()()
 	next, cmd := m.Update(msg)
-	m = next.(topModel)
+	m = next.(Model)
 	require.NotNil(t, cmd)
 
 	view := m.View()
@@ -78,7 +71,7 @@ func TestTopModel_FetchRenderSortAndQuit(t *testing.T) {
 	assert.Contains(t, view, "12 procs")
 
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
-	m = next.(topModel)
+	m = next.(Model)
 	view = m.View()
 	assert.Contains(t, view, "MEM ▼")
 	assert.NotContains(t, view, "CPU ▼")
@@ -90,10 +83,10 @@ func TestTopModel_FetchRenderSortAndQuit(t *testing.T) {
 }
 
 func TestTopModel_KeepsLastRowsOnError(t *testing.T) {
-	m := newTopModel("0", time.Second)
+	m := New(time.Second, nil)
 	next, _ := m.Update(loaded(topRows()))
-	next, cmd := next.(topModel).Update(resourcesMsg{err: errors.New("daemon down")})
-	m = next.(topModel)
+	next, cmd := next.(Model).Update(resourcesMsg{err: errors.New("daemon down")})
+	m = next.(Model)
 	require.NotNil(t, cmd)
 
 	view := m.View()
@@ -101,38 +94,24 @@ func TestTopModel_KeepsLastRowsOnError(t *testing.T) {
 	assert.Contains(t, view, "daemon down")
 }
 
-func TestMeter(t *testing.T) {
-	assert.Equal(t, "··········", ansi.Strip(meter(0, 10, lipgloss.NewStyle())))
-	assert.Equal(t, "█████·····", ansi.Strip(meter(0.5, 10, lipgloss.NewStyle())))
-	assert.Equal(t, "██▌·", ansi.Strip(meter(0.625, 4, lipgloss.NewStyle())))
-	assert.Equal(t, "████", ansi.Strip(meter(3, 4, lipgloss.NewStyle())))
-}
-
-func TestSparkline(t *testing.T) {
-	assert.Equal(t, "", sparkline(nil, 5))
-	assert.Equal(t, "▁▁▁", sparkline([]float64{0, 0, 0}, 5))
-	assert.Equal(t, "▁▅█", sparkline([]float64{0, 50, 100}, 5))
-	assert.Equal(t, "▅█", sparkline([]float64{0, 50, 100}, 2))
-}
-
 func TestTopModel_HistoryFollowsSessionsAndIsBounded(t *testing.T) {
-	m := newTopModel("0", time.Second)
-	for i := 0; i < topHistoryLen+5; i++ {
+	m := New(time.Second, nil)
+	for i := 0; i < historyLen+5; i++ {
 		next, _ := m.Update(loaded(topRows()))
-		m = next.(topModel)
+		m = next.(Model)
 	}
-	assert.Len(t, m.history["alpha"], topHistoryLen)
+	assert.Len(t, m.history["alpha"], historyLen)
 
 	next, _ := m.Update(loaded(topRows()[:1]))
-	m = next.(topModel)
+	m = next.(Model)
 	assert.NotContains(t, m.history, "beta")
 }
 
 func TestTopModel_NarrowWidthDropsBarsAndTrend(t *testing.T) {
-	m := newTopModel("0", time.Second)
+	m := New(time.Second, nil)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 20})
-	next, _ = next.(topModel).Update(loaded(topRows()))
-	view := next.(topModel).View()
+	next, _ = next.(Model).Update(loaded(topRows()))
+	view := next.(Model).View()
 	assert.NotContains(t, view, "TREND")
 	for _, line := range strings.Split(view, "\n") {
 		assert.LessOrEqual(t, lipgloss.Width(line), 70, line)
@@ -155,9 +134,9 @@ func procRows() []session.SessionResources {
 }
 
 func TestTopModel_ShowsBusiestProcessesUnderSessions(t *testing.T) {
-	m := newTopModel("0", time.Second)
+	m := New(time.Second, nil)
 	next, _ := m.Update(loaded(procRows()))
-	m = next.(topModel)
+	m = next.(Model)
 
 	view := ansi.Strip(m.View())
 	assert.Contains(t, view, "├ claude")
@@ -167,12 +146,12 @@ func TestTopModel_ShowsBusiestProcessesUnderSessions(t *testing.T) {
 	assert.NotContains(t, view, "├ cat")
 
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
-	view = ansi.Strip(next.(topModel).View())
+	view = ansi.Strip(next.(Model).View())
 	assert.Less(t, strings.Index(view, "├ claude"), strings.Index(view, "├ go"))
 	assert.Less(t, strings.Index(view, "gopls"), strings.Index(view, "node"))
 
-	next, _ = next.(topModel).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
-	view = ansi.Strip(next.(topModel).View())
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	view = ansi.Strip(next.(Model).View())
 	assert.NotContains(t, view, "claude")
 	assert.Contains(t, view, "alpha")
 }
@@ -186,9 +165,9 @@ func TestSortProcesses(t *testing.T) {
 		}
 		return out
 	}
-	assert.Equal(t, []int{12, 13, 14, 15, 11, 16}, pids(sortProcesses(procs, sortCPU)))
-	assert.Equal(t, []int{12, 13, 14, 15, 11, 16}, pids(sortProcesses(procs, sortMem)))
-	assert.Equal(t, []int{16, 12, 13, 14, 15, 11}, pids(sortProcesses(procs, sortName)))
+	assert.Equal(t, []int{12, 13, 14, 15, 11, 16}, pids(sortProcesses(procs, SortCPU)))
+	assert.Equal(t, []int{12, 13, 14, 15, 11, 16}, pids(sortProcesses(procs, SortMem)))
+	assert.Equal(t, []int{16, 12, 13, 14, 15, 11}, pids(sortProcesses(procs, SortName)))
 }
 
 func loaded(rows []session.SessionResources) resourcesMsg {

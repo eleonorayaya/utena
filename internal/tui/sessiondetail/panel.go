@@ -38,23 +38,10 @@ func workspaceStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(theme.Current.Tertiary).Bold(true)
 }
 
-func statusColor(status session.SessionStatus) lipgloss.Color {
-	switch status {
-	case session.StatusCreating:
-		return theme.Current.StatusActive
-	case session.StatusBroken:
-		return theme.Current.Error
-	case session.StatusPending:
-		return theme.Current.StatusPending
-	default:
-		return theme.Current.TextMuted
-	}
-}
-
 func statusPill(status session.SessionStatus) string {
 	return lipgloss.NewStyle().
 		Foreground(theme.Current.TextOnPrimary).
-		Background(statusColor(status)).
+		Background(ui.SessionStatusColor(status)).
 		Bold(true).
 		Render(" " + string(status) + " ")
 }
