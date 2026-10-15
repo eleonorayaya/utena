@@ -136,6 +136,8 @@ func procRows() []session.SessionResources {
 func TestTopModel_ShowsBusiestProcessesUnderSessions(t *testing.T) {
 	m := New(time.Second, nil)
 	next, _ := m.Update(loaded(procRows()))
+	assert.NotContains(t, ansi.Strip(next.(Model).View()), "claude")
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	m = next.(Model)
 
 	view := ansi.Strip(m.View())

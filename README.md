@@ -33,7 +33,7 @@ The tuios side (the `prefix+p` popup, the `custom/utena` dock cell running `uten
 
 #### Resource usage
 
-`utena top` shows live CPU, memory and process counts per session (`c`/`m`/`n` sort, `q` quits). `utena top --once` prints one tab-separated snapshot. Sessions tuios runs that utena doesn't manage are listed as `unmanaged`.
+`utena top` shows live CPU, memory and process counts per session (`c`/`m`/`n` sort, `p` shows each session's busiest processes, `q` quits). `utena top --once` prints one tab-separated snapshot. Sessions tuios runs that utena doesn't manage are listed as `unmanaged`.
 
 #### Shell initialization
 

@@ -104,11 +104,10 @@ type Model struct {
 
 func New(interval time.Duration, fetch func() (*session.SessionResourcesResponse, error)) Model {
 	return Model{
-		interval:  interval,
-		sortBy:    SortCPU,
-		showProcs: true,
-		history:   make(map[string][]float64),
-		fetch:     fetch,
+		interval: interval,
+		sortBy:   SortCPU,
+		history:  make(map[string][]float64),
+		fetch:    fetch,
 	}
 }
 
