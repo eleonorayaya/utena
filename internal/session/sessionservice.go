@@ -200,17 +200,17 @@ func (s *SessionService) ResourceUsage(ctx context.Context) (*SessionResourcesRe
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := s.store.List()
+	names := make([]string, len(usages))
+	for i, u := range usages {
+		names[i] = u.Session
+	}
+	refs, err := s.store.ListByMuxNames(names)
 	if err != nil {
 		return nil, err
 	}
-	byMux := make(map[string]*Session)
-	for i := range sessions {
-		sess := &sessions[i]
-		if sess.MuxSession == nil || sess.Status == StatusDeleted {
-			continue
-		}
-		byMux[sess.MuxSession.Name] = sess
+	byMux := make(map[string]MuxSessionRef, len(refs))
+	for _, ref := range refs {
+		byMux[ref.MuxName] = ref
 	}
 
 	rows := make([]SessionResources, 0, len(usages))
@@ -224,11 +224,10 @@ func (s *SessionService) ResourceUsage(ctx context.Context) (*SessionResourcesRe
 			Procs:      u.Procs,
 			Processes:  u.Processes,
 		}
-		if sess, ok := byMux[u.Session]; ok {
-			id := sess.ID
-			row.SessionID = &id
-			row.Name = sess.Name
-			row.Status = string(sess.Status)
+		if ref, ok := byMux[u.Session]; ok {
+			row.SessionID = &ref.ID
+			row.Name = ref.Name
+			row.Status = string(ref.Status)
 		}
 		rows = append(rows, row)
 	}

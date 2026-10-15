@@ -9,11 +9,11 @@ import (
 )
 
 type Usage struct {
-	Session    string         `json:"session"`
-	CPUPercent float64        `json:"cpu_pct"`
-	RSSBytes   int64          `json:"rss_bytes"`
-	Procs      int            `json:"procs"`
-	Processes  []ProcessUsage `json:"processes"`
+	Session    string
+	CPUPercent float64
+	RSSBytes   int64
+	Procs      int
+	Processes  []ProcessUsage
 }
 
 type ProcessUsage struct {
@@ -66,48 +66,38 @@ func (s *resourceSampler) sample(ctx context.Context) ([]Usage, error) {
 	s.prev = next
 	s.mu.Unlock()
 
+	owners := attribute(procs, shells)
 	byName := make(map[string]*Usage)
-	for _, p := range attribute(procs, shells) {
-		u := byName[p.session]
-		if u == nil {
-			u = &Usage{Session: p.session}
-			byName[p.session] = u
+	for _, p := range procs {
+		name, ok := owners[p.PID]
+		if !ok {
+			continue
 		}
-		u.CPUPercent += cpu[p.proc.PID]
-		u.RSSBytes += p.proc.RSSBytes
+		u := byName[name]
+		if u == nil {
+			u = &Usage{Session: name}
+			byName[name] = u
+		}
+		u.CPUPercent += cpu[p.PID]
+		u.RSSBytes += p.RSSBytes
 		u.Procs++
 		u.Processes = append(u.Processes, ProcessUsage{
-			PID:        p.proc.PID,
-			Command:    commandName(p.proc.Command),
-			CPUPercent: cpu[p.proc.PID],
-			RSSBytes:   p.proc.RSSBytes,
+			PID:        p.PID,
+			Command:    commandName(p.Command),
+			CPUPercent: cpu[p.PID],
+			RSSBytes:   p.RSSBytes,
 		})
 	}
 
 	usages := make([]Usage, 0, len(byName))
 	for _, u := range byName {
-		sort.Slice(u.Processes, func(i, j int) bool {
-			a, b := u.Processes[i], u.Processes[j]
-			if a.CPUPercent != b.CPUPercent {
-				return a.CPUPercent > b.CPUPercent
-			}
-			if a.RSSBytes != b.RSSBytes {
-				return a.RSSBytes > b.RSSBytes
-			}
-			return a.PID < b.PID
-		})
 		usages = append(usages, *u)
 	}
 	sort.Slice(usages, func(i, j int) bool { return usages[i].Session < usages[j].Session })
 	return usages, nil
 }
 
-type attributed struct {
-	proc    Process
-	session string
-}
-
-func attribute(procs []Process, shells map[int]string) []attributed {
+func attribute(procs []Process, shells map[int]string) map[int]string {
 	parent := make(map[int]int, len(procs))
 	for _, p := range procs {
 		parent[p.PID] = p.PPID
@@ -122,7 +112,7 @@ func attribute(procs []Process, shells map[int]string) []attributed {
 			return name
 		}
 		ppid, ok := parent[pid]
-		if !ok || ppid == pid || ppid <= 1 || depth > len(procs) {
+		if !ok || ppid <= 1 || depth > len(procs) {
 			return ""
 		}
 		name := resolve(ppid, depth+1)
@@ -130,10 +120,10 @@ func attribute(procs []Process, shells map[int]string) []attributed {
 		return name
 	}
 
-	var out []attributed
+	out := make(map[int]string)
 	for _, p := range procs {
 		if name := resolve(p.PID, 0); name != "" {
-			out = append(out, attributed{proc: p, session: name})
+			out[p.PID] = name
 		}
 	}
 	return out
@@ -141,7 +131,7 @@ func attribute(procs []Process, shells map[int]string) []attributed {
 
 func commandName(command string) string {
 	if command == "" {
-		return ""
+		return "?"
 	}
 	return filepath.Base(command)
 }

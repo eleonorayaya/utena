@@ -91,7 +91,7 @@ func TestTopModel_FetchRenderSortAndQuit(t *testing.T) {
 
 func TestTopModel_KeepsLastRowsOnError(t *testing.T) {
 	m := newTopModel("0", time.Second)
-	next, _ := m.Update(resourcesMsg{resp: &session.SessionResourcesResponse{Sessions: topRows(), SampledAt: time.Now()}})
+	next, _ := m.Update(loaded(topRows()))
 	next, cmd := next.(topModel).Update(resourcesMsg{err: errors.New("daemon down")})
 	m = next.(topModel)
 	require.NotNil(t, cmd)
@@ -102,10 +102,10 @@ func TestTopModel_KeepsLastRowsOnError(t *testing.T) {
 }
 
 func TestMeter(t *testing.T) {
-	assert.Equal(t, "··········", ansiStrip(meter(0, 10, lipgloss.NewStyle())))
-	assert.Equal(t, "█████·····", ansiStrip(meter(0.5, 10, lipgloss.NewStyle())))
-	assert.Equal(t, "██▌·", ansiStrip(meter(0.625, 4, lipgloss.NewStyle())))
-	assert.Equal(t, "████", ansiStrip(meter(3, 4, lipgloss.NewStyle())))
+	assert.Equal(t, "··········", ansi.Strip(meter(0, 10, lipgloss.NewStyle())))
+	assert.Equal(t, "█████·····", ansi.Strip(meter(0.5, 10, lipgloss.NewStyle())))
+	assert.Equal(t, "██▌·", ansi.Strip(meter(0.625, 4, lipgloss.NewStyle())))
+	assert.Equal(t, "████", ansi.Strip(meter(3, 4, lipgloss.NewStyle())))
 }
 
 func TestSparkline(t *testing.T) {
@@ -118,12 +118,12 @@ func TestSparkline(t *testing.T) {
 func TestTopModel_HistoryFollowsSessionsAndIsBounded(t *testing.T) {
 	m := newTopModel("0", time.Second)
 	for i := 0; i < topHistoryLen+5; i++ {
-		next, _ := m.Update(resourcesMsg{resp: &session.SessionResourcesResponse{Sessions: topRows(), SampledAt: time.Now()}})
+		next, _ := m.Update(loaded(topRows()))
 		m = next.(topModel)
 	}
 	assert.Len(t, m.history["alpha"], topHistoryLen)
 
-	next, _ := m.Update(resourcesMsg{resp: &session.SessionResourcesResponse{Sessions: topRows()[:1], SampledAt: time.Now()}})
+	next, _ := m.Update(loaded(topRows()[:1]))
 	m = next.(topModel)
 	assert.NotContains(t, m.history, "beta")
 }
@@ -131,16 +131,12 @@ func TestTopModel_HistoryFollowsSessionsAndIsBounded(t *testing.T) {
 func TestTopModel_NarrowWidthDropsBarsAndTrend(t *testing.T) {
 	m := newTopModel("0", time.Second)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 20})
-	next, _ = next.(topModel).Update(resourcesMsg{resp: &session.SessionResourcesResponse{Sessions: topRows(), SampledAt: time.Now()}})
+	next, _ = next.(topModel).Update(loaded(topRows()))
 	view := next.(topModel).View()
 	assert.NotContains(t, view, "TREND")
 	for _, line := range strings.Split(view, "\n") {
 		assert.LessOrEqual(t, lipgloss.Width(line), 70, line)
 	}
-}
-
-func ansiStrip(s string) string {
-	return ansi.Strip(s)
 }
 
 func procRows() []session.SessionResources {
@@ -160,7 +156,7 @@ func procRows() []session.SessionResources {
 
 func TestTopModel_ShowsBusiestProcessesUnderSessions(t *testing.T) {
 	m := newTopModel("0", time.Second)
-	next, _ := m.Update(resourcesMsg{resp: &session.SessionResourcesResponse{Sessions: procRows(), SampledAt: time.Now()}})
+	next, _ := m.Update(loaded(procRows()))
 	m = next.(topModel)
 
 	view := ansi.Strip(m.View())
@@ -193,4 +189,8 @@ func TestSortProcesses(t *testing.T) {
 	assert.Equal(t, []int{12, 13, 14, 15, 11, 16}, pids(sortProcesses(procs, sortCPU)))
 	assert.Equal(t, []int{12, 13, 14, 15, 11, 16}, pids(sortProcesses(procs, sortMem)))
 	assert.Equal(t, []int{16, 12, 13, 14, 15, 11}, pids(sortProcesses(procs, sortName)))
+}
+
+func loaded(rows []session.SessionResources) resourcesMsg {
+	return resourcesMsg{resp: &session.SessionResourcesResponse{Sessions: rows, SampledAt: time.Now()}}
 }

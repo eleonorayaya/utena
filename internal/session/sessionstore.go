@@ -117,6 +117,26 @@ func (s *SessionStore) List(statuses ...SessionStatus) ([]Session, error) {
 	return sessions, nil
 }
 
+type MuxSessionRef struct {
+	ID      uint
+	Name    string
+	Status  SessionStatus
+	MuxName string
+}
+
+func (s *SessionStore) ListByMuxNames(muxNames []string) ([]MuxSessionRef, error) {
+	var refs []MuxSessionRef
+	if len(muxNames) == 0 {
+		return refs, nil
+	}
+	err := s.db.Model(&Session{}).
+		Select("sessions.id, sessions.name, sessions.status, mux_sessions.name AS mux_name").
+		Joins("JOIN mux_sessions ON mux_sessions.id = sessions.mux_session_id AND mux_sessions.deleted_at IS NULL").
+		Where("sessions.status <> ? AND mux_sessions.name IN ?", StatusDeleted, muxNames).
+		Scan(&refs).Error
+	return refs, err
+}
+
 func (s *SessionStore) ListByWorkspace(workspaceID uint) ([]Session, error) {
 	var sessions []Session
 	if err := s.loaded().

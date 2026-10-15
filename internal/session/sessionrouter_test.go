@@ -461,7 +461,7 @@ func TestSessionRouter_ListResources(t *testing.T) {
 	scratch, managed := resp.Sessions[0], resp.Sessions[1]
 	require.Equal(t, SessionResources{
 		Name: "scratch", MuxSession: "scratch", Status: ResourceStatusUnmanaged, CPUPercent: 3, RSSBytes: 2048, Procs: 1,
-		Processes: []mux.ProcessUsage{{PID: 21, CPUPercent: 3, RSSBytes: 2048}},
+		Processes: []mux.ProcessUsage{{PID: 21, Command: "?", CPUPercent: 3, RSSBytes: 2048}},
 	}, scratch)
 	require.NotNil(t, managed.SessionID)
 	require.Equal(t, alpha.ID, *managed.SessionID)
@@ -471,5 +471,31 @@ func TestSessionRouter_ListResources(t *testing.T) {
 	require.InDelta(t, 41, managed.CPUPercent, 0.001)
 	require.Equal(t, int64(5120), managed.RSSBytes)
 	require.Equal(t, 2, managed.Procs)
-	require.Equal(t, []int{12, 11}, []int{managed.Processes[0].PID, managed.Processes[1].PID})
+	require.Equal(t, []int{11, 12}, []int{managed.Processes[0].PID, managed.Processes[1].PID})
+}
+
+func TestSessionRouter_ListResources_DeletedSessionIsUnmanaged(t *testing.T) {
+	router, sessionStore, _, driver, ws1ID, _ := setupSessionRouter(t)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	muxSession := &mux.Session{Name: "utena-gone", Status: mux.StatusActive}
+	require.NoError(t, mux.NewStore(sessionStore.db).Add(muxSession))
+	gone := &Session{Name: "gone", Status: StatusDeleted, LastUsedAt: time.Now(), MuxSessionID: &muxSession.ID}
+	addTestSession(t, sessionStore, swStore, gone, ws1ID)
+
+	driver.SetPaneShell(11, "utena-gone")
+	lister := &mux.FakeProcessLister{}
+	lister.SetProcesses([]mux.Process{{PID: 10, PPID: 1, Command: "tuios"}, {PID: 11, PPID: 10, Command: "/bin/zsh"}})
+	router.controller.service.muxService.SetProcessLister(lister)
+
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, httptest.NewRequest("GET", "/resources", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var resp SessionResourcesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Sessions, 1)
+	require.Nil(t, resp.Sessions[0].SessionID)
+	require.Equal(t, ResourceStatusUnmanaged, resp.Sessions[0].Status)
+	require.Equal(t, "utena-gone", resp.Sessions[0].Name)
 }

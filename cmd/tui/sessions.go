@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -78,7 +80,11 @@ func fetchSessions(port string) ([]session.Session, error) {
 }
 
 func fetchSessionListResponse(port string, timeout time.Duration) (*session.SessionListResponse, error) {
-	url := fmt.Sprintf("http://localhost:%s/sessions", port)
+	return getJSON[session.SessionListResponse](port, "/sessions", timeout)
+}
+
+func getJSON[T any](port, path string, timeout time.Duration) (*T, error) {
+	url := fmt.Sprintf("http://localhost:%s%s", port, path)
 	client := &http.Client{Timeout: timeout}
 	res, err := client.Get(url)
 	if err != nil {
@@ -87,12 +93,13 @@ func fetchSessionListResponse(port string, timeout time.Duration) (*session.Sess
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch sessions: unexpected status %d", res.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 512))
+		return nil, fmt.Errorf("GET %s: status %d: %s", path, res.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	var resp session.SessionListResponse
-	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+	var out T
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		return nil, err
 	}
-	return &resp, nil
+	return &out, nil
 }
