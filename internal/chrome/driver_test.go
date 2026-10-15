@@ -181,11 +181,59 @@ func TestDriver_CallWithoutConnection(t *testing.T) {
 
 func TestDriver_RejectsProtocolMismatch(t *testing.T) {
 	d, srv, rec := newDriver(t)
-	startExt(t, srv, ProtocolVersion+1, nil)
-	time.Sleep(50 * time.Millisecond)
+	ws, err := dial(t, srv, "chrome-extension://abc")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ws.CloseNow() })
+	ext := &fakeExt{ws: ws}
+	ext.send(t, map[string]any{"type": "hello", "protocol": ProtocolVersion + 1, "browser": "chrome"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for err == nil {
+		_, _, err = ws.Read(ctx)
+	}
+	assert.Equal(t, websocket.StatusPolicyViolation, websocket.CloseStatus(err))
 	assert.False(t, rec.has(browser.Event{Type: browser.EventConnected}))
-	_, err := d.ListWindows(context.Background())
+	_, err = d.ListWindows(context.Background())
 	assert.ErrorIs(t, err, browser.ErrNotConnected)
+}
+
+func TestDriver_DropsEventsFromReplacedConnection(t *testing.T) {
+	d, srv, rec, gate := newBlockedDriver(t)
+	old := startExt(t, srv, ProtocolVersion, nil)
+	waitConnected(t, rec)
+
+	for i := 1; i <= 5; i++ {
+		old.send(t, map[string]any{"type": "event", "event": "window.created", "data": map[string]any{"windowId": i}})
+	}
+	require.Eventually(t, func() bool { return len(d.events) == 4 }, 5*time.Second, 5*time.Millisecond)
+
+	fresh := startExt(t, srv, ProtocolVersion, nil)
+	require.Eventually(t, func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.generation == 2
+	}, 5*time.Second, 5*time.Millisecond)
+	fresh.send(t, map[string]any{"type": "event", "event": "window.created", "data": map[string]any{"windowId": 100}})
+	close(gate)
+
+	require.Eventually(t, func() bool {
+		return rec.has(browser.Event{Type: browser.EventWindowCreated, WindowID: "100"})
+	}, 5*time.Second, 5*time.Millisecond)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	lastConnected := -1
+	for i, ev := range rec.events {
+		if ev.Type == browser.EventConnected {
+			lastConnected = i
+		}
+	}
+	require.Positive(t, lastConnected)
+	assert.Equal(t, []browser.Event{
+		{Type: browser.EventConnected},
+		{Type: browser.EventWindowCreated, WindowID: "100"},
+	}, rec.events[lastConnected:])
 }
 
 func TestDriver_ListWindows(t *testing.T) {

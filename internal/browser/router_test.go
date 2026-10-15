@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/eleonorayaya/utena/internal/db/testdb"
@@ -13,12 +14,12 @@ import (
 
 type httpFake struct {
 	*FakeDriver
-	hits int
+	hits atomic.Int32
 }
 
 func (h *httpFake) Name() string { return "fake" }
 func (h *httpFake) Handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.hits++ })
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.hits.Add(1) })
 }
 
 func newTestServer(t *testing.T) (*httptest.Server, *Module, *httpFake) {
@@ -58,7 +59,7 @@ func TestRouter_MountsDriverHandler(t *testing.T) {
 	res, err := srv.Client().Get(srv.URL + "/fake")
 	require.NoError(t, err)
 	res.Body.Close()
-	assert.Equal(t, 1, driver.hits)
+	assert.Equal(t, int32(1), driver.hits.Load())
 }
 
 func TestRouter_Status(t *testing.T) {

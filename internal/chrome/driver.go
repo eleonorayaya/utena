@@ -21,7 +21,7 @@ type Driver struct {
 	mu           sync.Mutex
 	conn         *conn
 	generation   uint64
-	events       chan browser.Event
+	events       chan queuedEvent
 	stateChanged chan struct{}
 	nextID       atomic.Int64
 	timeout      time.Duration
@@ -32,15 +32,21 @@ var (
 	_ browser.HTTPDriver = (*Driver)(nil)
 )
 
+type queuedEvent struct {
+	gen uint64
+	ev  browser.Event
+}
+
 type conn struct {
 	ws      *websocket.Conn
+	gen     uint64
 	mu      sync.Mutex
 	pending map[int64]chan message
 }
 
 func NewDriver() *Driver {
 	return &Driver{
-		events:       make(chan browser.Event, 256),
+		events:       make(chan queuedEvent, 256),
 		stateChanged: make(chan struct{}, 1),
 		timeout:      5 * time.Second,
 	}
@@ -64,6 +70,7 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("chrome: accept websocket failed", "error", err)
 		return
 	}
+	defer func() { _ = ws.CloseNow() }()
 	ws.SetReadLimit(4 << 20)
 	ctx := r.Context()
 
@@ -106,11 +113,12 @@ func (d *Driver) swap(c *conn) {
 	old := d.conn
 	d.conn = c
 	d.generation++
+	c.gen = d.generation
 	d.mu.Unlock()
-	if old != nil {
-		_ = old.ws.Close(websocket.StatusNormalClosure, "replaced")
-	}
 	d.signalState()
+	if old != nil {
+		go func() { _ = old.ws.Close(websocket.StatusNormalClosure, "replaced") }()
+	}
 }
 
 func (d *Driver) drop(c *conn) {
@@ -155,15 +163,15 @@ func (d *Driver) readLoop(ctx context.Context, c *conn) error {
 			c.resolve(m)
 		case "event":
 			if ev, ok := translateEvent(m); ok {
-				d.emit(ev)
+				d.emit(c.gen, ev)
 			}
 		}
 	}
 }
 
-func (d *Driver) emit(ev browser.Event) {
+func (d *Driver) emit(gen uint64, ev browser.Event) {
 	select {
-	case d.events <- ev:
+	case d.events <- queuedEvent{gen: gen, ev: ev}:
 	default:
 		slog.Warn("chrome: event buffer full; dropping", "type", ev.Type)
 	}
@@ -322,13 +330,15 @@ func (d *Driver) Subscribe(ctx context.Context, onEvent func(browser.Event)) err
 			return ctx.Err()
 		case <-d.stateChanged:
 			syncState()
-		case ev := <-d.events:
+		case qe := <-d.events:
 			select {
 			case <-d.stateChanged:
-				syncState()
 			default:
 			}
-			onEvent(ev)
+			syncState()
+			if deliveredConnected && qe.gen == deliveredGen {
+				onEvent(qe.ev)
+			}
 		}
 	}
 }
