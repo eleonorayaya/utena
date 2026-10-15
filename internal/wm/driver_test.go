@@ -90,7 +90,18 @@ func TestFakeDriver_FocusWindowRecords(t *testing.T) {
 func TestFakeDriver_FocusErr(t *testing.T) {
 	f := NewFakeDriver()
 	f.FocusErr = errors.New("boom")
+	attempts := 0
+	f.OnFocus = func(string) { attempts++ }
 
 	assert.ErrorIs(t, f.FocusWindow(context.Background(), "1"), f.FocusErr)
 	assert.Empty(t, f.Focused())
+	assert.Equal(t, 1, attempts)
+}
+
+func TestFakeDriver_ListErr(t *testing.T) {
+	f := NewFakeDriver()
+	f.ListErr = errors.New("boom")
+
+	_, err := f.ListWindows(context.Background(), "")
+	assert.ErrorIs(t, err, f.ListErr)
 }

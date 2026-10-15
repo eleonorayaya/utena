@@ -9,7 +9,7 @@
 **Tech Stack:** Go, chi, GORM/SQLite, `github.com/coder/websocket` (already a dependency), bubbletea, plain JS (Chrome MV3 service worker).
 
 **Spec:** `docs/superpowers/specs/2026-10-15-browser-window-management-design.md`. This plan departs from the spec in a few small ways for PR 1. Task 12 records them in the spec:
-- `browser.Driver` gains `FocusWindow`, which lets Chrome focus a window. AeroSpace follows macOS focus, so `wm.Driver` won't need a focus method.
+- `browser.Driver` gains `FocusWindow`, which lets Chrome focus a window. AeroSpace follows macOS focus, so `wm.Driver` won't need a focus method. (superseded in PR 2: focus goes through `wm.FocusWindow`; see spec PR 2 amendments)
 - Rows store `DriverWindowID` as a hint, so a daemon restart while Chrome keeps running keeps ownership. Rows whose window is gone on `Connected` become `missing`, with the ID cleared. Restoring them is PR 3.
 - Links from outside any session (`session_id` 0) go to an unowned Chrome window through the daemon, not straight to `/usr/bin/open`. That keeps personal links out of session windows.
 - There's no `--browser` flag yet. Chrome is the only driver, and with no extension connected the daemon returns 503, which triggers the fallback.

@@ -506,10 +506,14 @@ func TestOpen_WMFocusErrorIsLoggedNotReturned(t *testing.T) {
 	h.driver.SetTitle(personal.ID, "personal")
 	h.wm.Add("wm-personal", "personal - Fake", "3")
 	h.wm.FocusErr = errors.New("aerospace broke")
+	var attempted []string
+	h.wm.OnFocus = func(id string) { attempted = append(attempted, id) }
 
 	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
 	require.NoError(t, err)
 	assert.True(t, res.Focused)
+	assert.Equal(t, []string{"wm-personal"}, attempted)
+	assert.Empty(t, h.wm.Focused())
 }
 
 func TestOpen_CreatedUnownedWindowFocusesLinkedWMWindow(t *testing.T) {
@@ -523,5 +527,123 @@ func TestOpen_CreatedUnownedWindowFocusesLinkedWMWindow(t *testing.T) {
 	assert.Equal(t, []string{"wm-" + res.WindowID}, h.wm.Focused())
 
 	require.NoError(t, h.svc.place(context.Background()))
+	assert.Empty(t, h.wm.Moves())
+}
+
+func TestOpen_StaleAttachedPlacesBeforeFocusing(t *testing.T) {
+	h := newPlaceHarness(t)
+	a := h.own(t, 1, "a", "2")
+	b := h.own(t, 2, "b", "P")
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+	drain(h.svc)
+	h.sessions.AttachedID = 2
+	workspaceAtFocus := ""
+	h.wm.OnFocus = func(string) { workspaceAtFocus = h.wm.Workspace(b) }
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 2, URL: prURL})
+	require.NoError(t, err)
+	assert.True(t, res.Focused)
+	assert.Equal(t, []string{b}, h.wm.Focused())
+	assert.Equal(t, "2", workspaceAtFocus)
+	assert.Equal(t, "P", h.wm.Workspace(a))
+	assert.Equal(t, uint64(2), h.svc.attached.Load())
+}
+
+func TestOpen_ParkedWindowIsMovedBeforeFocusing(t *testing.T) {
+	h := newPlaceHarness(t)
+	personal := h.driver.AddWindow("https://personal.example.com")
+	h.driver.SetTitle(personal.ID, "personal")
+	h.wm.Add("wm-personal", "personal - Fake", "P")
+	workspaceAtFocus := ""
+	h.wm.OnFocus = func(string) { workspaceAtFocus = h.wm.Workspace("wm-personal") }
+
+	_, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"wm-personal"}, h.wm.Focused())
+	assert.Equal(t, "2", workspaceAtFocus)
+}
+
+func TestOpen_ParkedWindowThatCannotMoveIsNotFocused(t *testing.T) {
+	h := newPlaceHarness(t)
+	personal := h.driver.AddWindow("https://personal.example.com")
+	h.driver.SetTitle(personal.ID, "personal")
+	h.wm.Add("wm-personal", "personal - Fake", "P")
+	h.wm.MoveErr = errors.New("aerospace broke")
+
+	_, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	assert.Empty(t, h.wm.Focused())
+}
+
+func TestOpen_CreatedWindowWithoutCreatedLinkIsNotWMFocused(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.sessions.AttachedID = 1
+	h.svc.SetAttached(1)
+	h.driver.OnCreate = func(w Window) {
+		h.driver.AddWindow("https://other.example.com")
+		h.wm.Add("wm-"+w.ID, "", "2")
+	}
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	require.True(t, res.Created)
+	assert.True(t, res.Focused)
+	assert.Empty(t, h.wm.Focused())
+}
+
+func TestOpen_CreatedLinkStopsPollingOnWMListError(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.driver.OnCreate = func(Window) { h.wm.ListErr = errors.New("aerospace broke") }
+
+	start := time.Now()
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	assert.True(t, res.Created)
+	assert.Less(t, time.Since(start), createdLinkWait/2)
+}
+
+func TestOpen_ActivatedSessionWithoutWindowCreatesAndFocuses(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.sessions.AttachedID = 2
+	h.svc.SetAttached(2)
+	h.driver.OnCreate = func(w Window) { h.wm.Add("wm-"+w.ID, "", "2") }
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL, Activate: true})
+	require.NoError(t, err)
+	require.True(t, res.Created)
+	assert.True(t, res.Activated)
+	assert.True(t, res.Focused)
+	assert.Equal(t, []string{"wm-" + res.WindowID}, h.wm.Focused())
+}
+
+func TestOpen_WMListErrorDuringFocusIsLoggedNotReturned(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.own(t, 1, "a", "2")
+	h.sessions.AttachedID = 1
+	h.svc.SetAttached(1)
+	h.wm.ListErr = errors.New("aerospace broke")
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	assert.True(t, res.Focused)
+	assert.Empty(t, h.wm.Focused())
+}
+
+func TestPlace_UnownedCreatedLinkIsNotTakenByOwnedTitleMatch(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.driver.OnCreate = func(w Window) { h.wm.Add("wm-"+w.ID, "shared - Fake", "3") }
+	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
+	require.NoError(t, err)
+	require.Equal(t, "wm-"+res.WindowID, h.svc.links.links[res.WindowID])
+
+	owned := h.driver.AddWindow("https://owned.example.com")
+	h.driver.SetTitle(owned.ID, "shared")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 2, State: WindowOpen, DriverWindowID: owned.ID}))
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	assert.NotContains(t, h.svc.links.links, owned.ID)
 	assert.Empty(t, h.wm.Moves())
 }

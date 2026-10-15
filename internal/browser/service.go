@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -148,6 +147,11 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 			focus = attached
 		}
 	}
+	placeFirst := activated
+	if focus && req.SessionID != 0 && uint(s.attached.Load()) != req.SessionID {
+		s.SetAttached(req.SessionID)
+		placeFirst = true
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -165,7 +169,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 	}
 
 	res := OpenResult{Activated: activated}
-	var wmID string
+	var wmTarget wm.Window
 	wmFound := false
 	switch {
 	case !found:
@@ -187,20 +191,26 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 			s.linkCreated(ctx, w.ID, before, live)
 		}
 		if focus {
-			wmID, wmFound = s.wmFocusTarget(ctx, w, live)
+			wmTarget, wmFound = s.wmFocusTarget(ctx, func([]wm.Window) (string, bool) {
+				wmID, ok := s.links.links[w.ID]
+				return wmID, ok
+			})
 		}
 		res.WindowID, res.Created = w.ID, true
 		if len(w.Tabs) > 0 {
 			res.TabID = w.Tabs[0].ID
 		}
 	default:
-		if activated {
+		if placeFirst {
 			if err := s.placeLocked(ctx); err != nil {
 				slog.WarnContext(ctx, "browser: placement before focus failed", "error", err)
 			}
 		}
 		if focus {
-			wmID, wmFound = s.wmFocusTarget(ctx, target, live)
+			wmTarget, wmFound = s.wmFocusTarget(ctx, func(wmWindows []wm.Window) (string, bool) {
+				wmID, ok := s.links.resolve(live, s.driver.WindowTitle, wmWindows, []string{target.ID})[target.ID]
+				return wmID, ok
+			})
 		}
 		res.WindowID = target.ID
 		if tab, ok := MatchTab(target.Tabs, req.URL); ok {
@@ -228,9 +238,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 		case !wmFound:
 			slog.WarnContext(ctx, "browser: no wm window to focus", "window", res.WindowID)
 		default:
-			if err := s.wm.FocusWindow(ctx, wmID); err != nil {
-				slog.WarnContext(ctx, "browser: wm focus window failed", "window", res.WindowID, "wm_window", wmID, "error", err)
-			} else {
+			if s.wmFocus(ctx, res.WindowID, wmTarget) {
 				res.Focused = true
 			}
 		}
@@ -238,21 +246,39 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 	return res, nil
 }
 
-func (s *Service) wmFocusTarget(ctx context.Context, w Window, live []Window) (string, bool) {
+func (s *Service) wmFocus(ctx context.Context, windowID string, target wm.Window) bool {
+	if target.Workspace == s.layout.ParkWorkspace {
+		if err := s.wm.MoveToWorkspace(ctx, target.ID, s.layout.BrowserWorkspace); err != nil {
+			slog.WarnContext(ctx, "browser: unpark before focus failed", "window", windowID, "wm_window", target.ID, "error", err)
+			return false
+		}
+	}
+	if err := s.wm.FocusWindow(ctx, target.ID); err != nil {
+		slog.WarnContext(ctx, "browser: wm focus window failed", "window", windowID, "wm_window", target.ID, "error", err)
+		return false
+	}
+	return true
+}
+
+func (s *Service) wmFocusTarget(ctx context.Context, link func([]wm.Window) (string, bool)) (wm.Window, bool) {
 	if s.wmInert {
-		return "", false
+		return wm.Window{}, false
 	}
 	wmWindows, err := s.wm.ListWindows(ctx, s.driver.AppBundleID())
 	if err != nil {
 		slog.WarnContext(ctx, "browser: list wm windows failed", "error", err)
-		return "", false
+		return wm.Window{}, false
 	}
-	chrome := live
-	if !slices.ContainsFunc(live, func(l Window) bool { return l.ID == w.ID }) {
-		chrome = append(slices.Clone(live), w)
+	wmID, ok := link(wmWindows)
+	if !ok {
+		return wm.Window{}, false
 	}
-	wmID, ok := s.links.resolve(chrome, s.driver.WindowTitle, wmWindows, []string{w.ID})[w.ID]
-	return wmID, ok
+	for _, w := range wmWindows {
+		if w.ID == wmID {
+			return w, true
+		}
+	}
+	return wm.Window{}, false
 }
 
 func (s *Service) wmSnapshot(ctx context.Context) ([]wm.Window, bool) {
@@ -271,7 +297,11 @@ func (s *Service) linkCreated(ctx context.Context, windowID string, before []wm.
 	deadline := time.Now().Add(createdLinkWait)
 	for {
 		after, err := s.wm.ListWindows(ctx, s.driver.AppBundleID())
-		if err == nil && s.links.linkCreated(windowID, before, after) {
+		if err != nil {
+			slog.WarnContext(ctx, "browser: list wm windows failed; created window not linked", "window", windowID, "error", err)
+			return
+		}
+		if s.links.linkCreated(windowID, before, after) {
 			if !s.onlyNewBrowserWindow(ctx, windowID, live) {
 				delete(s.links.links, windowID)
 				slog.DebugContext(ctx, "browser: created window link dropped; another browser window appeared", "window", windowID)
@@ -279,7 +309,7 @@ func (s *Service) linkCreated(ctx context.Context, windowID string, before []wm.
 			return
 		}
 		if !time.Now().Before(deadline) {
-			slog.DebugContext(ctx, "browser: created window not linked", "window", windowID, "error", err)
+			slog.DebugContext(ctx, "browser: created window not linked", "window", windowID)
 			return
 		}
 		select {

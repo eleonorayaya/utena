@@ -17,6 +17,7 @@ type FakeDriver struct {
 	moves    []Move
 	focused  []string
 	MoveErr  error
+	ListErr  error
 	FocusErr error
 	OnFocus  func(windowID string)
 }
@@ -67,6 +68,9 @@ func (f *FakeDriver) Moves() []Move {
 func (f *FakeDriver) ListWindows(ctx context.Context, bundleID string) ([]Window, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.ListErr != nil {
+		return nil, f.ListErr
+	}
 	return append([]Window(nil), f.windows...), nil
 }
 
@@ -93,17 +97,16 @@ func (f *FakeDriver) Focused() []string {
 
 func (f *FakeDriver) FocusWindow(ctx context.Context, windowID string) error {
 	f.mu.Lock()
-	if f.FocusErr != nil {
-		f.mu.Unlock()
-		return f.FocusErr
+	err := f.FocusErr
+	if err == nil {
+		f.focused = append(f.focused, windowID)
 	}
-	f.focused = append(f.focused, windowID)
 	onFocus := f.OnFocus
 	f.mu.Unlock()
 	if onFocus != nil {
 		onFocus(windowID)
 	}
-	return nil
+	return err
 }
 
 func (f *FakeDriver) indexLocked(id string) int {
