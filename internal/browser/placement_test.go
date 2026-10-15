@@ -24,10 +24,12 @@ func newPlaceHarness(t *testing.T) placeHarness {
 	driver := NewFakeDriver()
 	sessions := &FakeSessions{}
 	wmd := wm.NewFakeDriver()
+	clock := &fakeClock{}
 	svc := NewService(driver, store, sessions, wmd, Layout{BrowserWorkspace: "2", ParkWorkspace: "P"})
+	svc.afterFunc = clock.afterFunc
 	svc.handleEvent(context.Background(), Event{Type: EventConnected})
 	drain(svc)
-	return placeHarness{harness: harness{svc: svc, driver: driver, sessions: sessions, store: store}, wm: wmd}
+	return placeHarness{harness: harness{svc: svc, driver: driver, sessions: sessions, store: store, clock: clock}, wm: wmd}
 }
 
 func drain(s *Service) {

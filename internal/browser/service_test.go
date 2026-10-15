@@ -17,6 +17,7 @@ type harness struct {
 	driver   *FakeDriver
 	sessions *FakeSessions
 	store    *Store
+	clock    *fakeClock
 }
 
 func newHarness(t *testing.T) harness {
@@ -24,9 +25,11 @@ func newHarness(t *testing.T) harness {
 	store := NewStore(testdb.New(t, &BrowserWindow{}, &BrowserState{}))
 	driver := NewFakeDriver()
 	sessions := &FakeSessions{}
+	clock := &fakeClock{}
 	svc := NewService(driver, store, sessions, wm.None{}, Layout{BrowserWorkspace: "2", ParkWorkspace: "P"})
+	svc.afterFunc = clock.afterFunc
 	svc.handleEvent(context.Background(), Event{Type: EventConnected})
-	return harness{svc: svc, driver: driver, sessions: sessions, store: store}
+	return harness{svc: svc, driver: driver, sessions: sessions, store: store, clock: clock}
 }
 
 const prURL = "https://github.com/o/r/pull/1"

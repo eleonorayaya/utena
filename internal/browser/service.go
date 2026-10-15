@@ -28,7 +28,12 @@ type Sessions interface {
 const (
 	createdLinkPoll = 100 * time.Millisecond
 	createdLinkWait = 1500 * time.Millisecond
+	snapshotDelay   = 2 * time.Second
 )
+
+type pendingTimer struct {
+	stop func() bool
+}
 
 type Layout struct {
 	BrowserWorkspace string
@@ -68,6 +73,9 @@ type Service struct {
 	attached atomic.Uint64
 	swapCh   chan struct{}
 
+	afterFunc     func(time.Duration, func()) func() bool
+	snapshotDelay time.Duration
+
 	mu                  sync.Mutex
 	connected           atomic.Bool
 	lastFocusedWindowID string
@@ -77,6 +85,7 @@ type Service struct {
 	runLoaded           bool
 	links               linker
 	placedFor           uint
+	snapshots           map[string]*pendingTimer
 }
 
 func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driver, layout Layout) *Service {
@@ -90,6 +99,12 @@ func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driv
 		now:      time.Now,
 		swapCh:   make(chan struct{}, 1),
 		unowned:  map[string]struct{}{},
+
+		afterFunc: func(d time.Duration, f func()) func() bool {
+			return time.AfterFunc(d, f).Stop
+		},
+		snapshotDelay: snapshotDelay,
+		snapshots:     map[string]*pendingTimer{},
 	}
 }
 
@@ -180,7 +195,8 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 		if req.SessionID == 0 {
 			s.unowned[w.ID] = struct{}{}
 		} else {
-			row := &BrowserWindow{SessionID: req.SessionID, State: WindowOpen, DriverWindowID: w.ID, LastFocusedAt: s.now()}
+			now := s.now()
+			row := &BrowserWindow{SessionID: req.SessionID, State: WindowOpen, DriverWindowID: w.ID, LastFocusedAt: now, Tabs: savedTabs(w), SnapshotAt: now}
 			if err := s.store.Add(row); err != nil {
 				return OpenResult{}, err
 			}
@@ -489,11 +505,11 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	case EventDisconnected:
 		s.connected.Store(false)
 	case EventWindowCreated:
-		err = s.adopt(ev.WindowID)
+		err = s.adopt(ctx, ev.WindowID)
 	case EventWindowRemoved:
 		err = s.store.DeleteByDriverWindowID(ev.WindowID)
 	case EventTabsChanged:
-		err = s.signalIfUnlinked(ev.WindowID)
+		err = s.tabsChanged(ev.WindowID)
 	case EventFocusChanged:
 		if ev.WindowID == "" {
 			return
@@ -509,17 +525,82 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	}
 }
 
-func (s *Service) signalIfUnlinked(windowID string) error {
-	if _, ok := s.links.links[windowID]; ok {
-		return nil
-	}
+func (s *Service) tabsChanged(windowID string) error {
 	if _, err := s.store.GetByDriverWindowID(windowID); errors.Is(err, ErrWindowNotFound) {
 		return nil
 	} else if err != nil {
 		return err
 	}
-	s.signal()
+	s.scheduleSnapshot(windowID)
+	if _, ok := s.links.links[windowID]; !ok {
+		s.signal()
+	}
 	return nil
+}
+
+func (s *Service) schedule(timers map[string]*pendingTimer, key string, d time.Duration, f func()) {
+	t := &pendingTimer{}
+	timers[key] = t
+	t.stop = s.afterFunc(d, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if timers[key] != t {
+			return
+		}
+		delete(timers, key)
+		f()
+	})
+}
+
+func (s *Service) scheduleSnapshot(windowID string) {
+	if _, ok := s.snapshots[windowID]; ok {
+		return
+	}
+	s.schedule(s.snapshots, windowID, s.snapshotDelay, func() {
+		if !s.connected.Load() {
+			return
+		}
+		ctx := context.Background()
+		if err := s.snapshot(ctx, windowID); err != nil {
+			slog.WarnContext(ctx, "browser: snapshot failed", "window", windowID, "error", err)
+		}
+	})
+}
+
+func (s *Service) snapshot(ctx context.Context, windowID string) error {
+	live, err := s.driver.ListWindows(ctx)
+	if err != nil {
+		return err
+	}
+	for _, w := range live {
+		if w.ID == windowID {
+			return s.saveTabs(w, s.now())
+		}
+	}
+	return nil
+}
+
+func (s *Service) saveTabs(w Window, at time.Time) error {
+	tabs := savedTabs(w)
+	if len(tabs) == 0 {
+		return nil
+	}
+	return s.store.SaveTabs(w.ID, tabs, at)
+}
+
+func (s *Service) snapshotOwned(windows []Window) error {
+	owned, err := s.store.OwnedDriverWindowIDs()
+	if err != nil {
+		return err
+	}
+	now := s.now()
+	var errs []error
+	for _, w := range windows {
+		if owned[w.ID] {
+			errs = append(errs, s.saveTabs(w, now))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (s *Service) trackRun(run string) error {
@@ -561,7 +642,10 @@ func (s *Service) resync(ctx context.Context) error {
 			s.lastFocusedWindowID = w.ID
 		}
 	}
-	return errors.Join(s.store.MarkMissingExcept(live), s.seedAttached(ctx))
+	if err := s.store.MarkMissingExcept(live); err != nil {
+		return errors.Join(err, s.seedAttached(ctx))
+	}
+	return errors.Join(s.snapshotOwned(windows), s.seedAttached(ctx))
 }
 
 func (s *Service) seedAttached(ctx context.Context) error {
@@ -576,7 +660,7 @@ func (s *Service) seedAttached(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) adopt(windowID string) error {
+func (s *Service) adopt(ctx context.Context, windowID string) error {
 	if _, ok := s.unowned[windowID]; ok {
 		delete(s.unowned, windowID)
 		return nil
@@ -601,5 +685,5 @@ func (s *Service) adopt(windowID string) error {
 		return err
 	}
 	s.signal()
-	return nil
+	return s.snapshot(ctx, windowID)
 }
