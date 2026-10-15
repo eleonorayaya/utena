@@ -235,9 +235,17 @@ func TestStore_MarkSnapshotted(t *testing.T) {
 	s := newTestStore(t)
 	w := &BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: "a"}
 	require.NoError(t, s.Add(w))
+	other := &BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: "b"}
+	require.NoError(t, s.Add(other))
 	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 
 	require.NoError(t, s.MarkSnapshotted(w.ID, sampleTabs(), at))
+
+	untouched := getRow(t, s, other.ID)
+	assert.Equal(t, WindowOpen, untouched.State)
+	assert.Equal(t, "b", untouched.DriverWindowID)
+	assert.Empty(t, untouched.Tabs)
+	assert.True(t, untouched.SnapshotAt.IsZero())
 
 	got := getRow(t, s, w.ID)
 	assert.Equal(t, WindowSnapshotted, got.State)
@@ -250,9 +258,16 @@ func TestStore_Reopen(t *testing.T) {
 	s := newTestStore(t)
 	w := &BrowserWindow{SessionID: 1, State: WindowSnapshotted, Tabs: sampleTabs()}
 	require.NoError(t, s.Add(w))
+	other := &BrowserWindow{SessionID: 1, State: WindowMissing, Tabs: sampleTabs()}
+	require.NoError(t, s.Add(other))
 	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 
 	require.NoError(t, s.Reopen(w.ID, "z", at))
+
+	untouched := getRow(t, s, other.ID)
+	assert.Equal(t, WindowMissing, untouched.State)
+	assert.Empty(t, untouched.DriverWindowID)
+	assert.True(t, untouched.LastFocusedAt.IsZero())
 
 	got, err := s.GetByDriverWindowID("z")
 	require.NoError(t, err)
@@ -260,6 +275,18 @@ func TestStore_Reopen(t *testing.T) {
 	assert.Equal(t, WindowOpen, got.State)
 	assert.True(t, got.LastFocusedAt.Equal(at))
 	assert.Equal(t, sampleTabs(), got.Tabs)
+}
+
+func TestStore_ReopenWithoutDriverWindowIDIsNoop(t *testing.T) {
+	s := newTestStore(t)
+	w := &BrowserWindow{SessionID: 1, State: WindowSnapshotted, Tabs: sampleTabs()}
+	require.NoError(t, s.Add(w))
+
+	require.NoError(t, s.Reopen(w.ID, "", time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)))
+
+	got := getRow(t, s, w.ID)
+	assert.Equal(t, WindowSnapshotted, got.State)
+	assert.True(t, got.LastFocusedAt.IsZero())
 }
 
 func TestStore_MarkMissingByDriverWindowID(t *testing.T) {

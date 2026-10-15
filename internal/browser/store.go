@@ -125,6 +125,9 @@ func (s *Store) MarkSnapshotted(id uint, tabs []SavedTab, at time.Time) error {
 }
 
 func (s *Store) Reopen(id uint, driverWindowID string, at time.Time) error {
+	if driverWindowID == "" {
+		return nil
+	}
 	return s.db.Model(&BrowserWindow{}).
 		Where("id = ?", id).
 		Updates(map[string]any{"state": WindowOpen, "driver_window_id": driverWindowID, "last_focused_at": at}).Error
