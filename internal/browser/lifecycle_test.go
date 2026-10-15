@@ -12,6 +12,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/wm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type fakeTimer struct {
@@ -478,8 +479,8 @@ func focusedParent(t *testing.T, h harness, sessionID uint) Window {
 
 func TestConnected_SameRunReconnectDoesNotReattach(t *testing.T) {
 	h := newHarness(t)
-	connectRun(h, "r1")
 	addMissing(t, h, 2, "https://a.example.com")
+	connectRun(h, "r1")
 	w := h.driver.AddWindow("https://a.example.com")
 
 	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
@@ -496,8 +497,8 @@ func TestConnected_SameRunReconnectDoesNotReattach(t *testing.T) {
 func TestWindowCreated_LateRestoredWindowReattachesBeforeAdoption(t *testing.T) {
 	h := newHarness(t)
 	now := manualNow(h)
-	connectRun(h, "r1")
 	addMissing(t, h, 2, "https://a.example.com", "https://b.example.com")
+	connectRun(h, "r1")
 	focusedParent(t, h, 1)
 	*now = now.Add(restoreWindow - time.Second)
 	drain(h.svc)
@@ -525,8 +526,8 @@ func TestWindowCreated_LateRestoredWindowReattachesBeforeAdoption(t *testing.T) 
 func TestTabsChanged_LateRestoredWindowReattachesOnceTabsLoad(t *testing.T) {
 	h := newHarness(t)
 	manualNow(h)
-	connectRun(h, "r1")
 	addMissing(t, h, 2, "https://a.example.com", "https://b.example.com")
+	connectRun(h, "r1")
 
 	w := h.driver.AddWindow()
 	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: w.ID})
@@ -548,8 +549,8 @@ func TestTabsChanged_LateRestoredWindowReattachesOnceTabsLoad(t *testing.T) {
 func TestWindowCreated_AfterRestoreWindowAdoptsNormally(t *testing.T) {
 	h := newHarness(t)
 	now := manualNow(h)
-	connectRun(h, "r1")
 	addMissing(t, h, 2, "https://a.example.com")
+	connectRun(h, "r1")
 	focusedParent(t, h, 1)
 	*now = now.Add(restoreWindow)
 
@@ -572,8 +573,8 @@ func TestWindowCreated_AfterRestoreWindowAdoptsNormally(t *testing.T) {
 func TestTabsChanged_AfterRestoreWindowDoesNotReattach(t *testing.T) {
 	h := newHarness(t)
 	now := manualNow(h)
-	connectRun(h, "r1")
 	addMissing(t, h, 2, "https://a.example.com")
+	connectRun(h, "r1")
 	*now = now.Add(restoreWindow)
 
 	w := h.driver.AddWindow("https://a.example.com")
@@ -589,8 +590,8 @@ func TestWindowCreated_SameRunReconnectDoesNotOpenRestoreWindow(t *testing.T) {
 	connectRun(h, "r1")
 	*now = now.Add(restoreWindow)
 	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
-	connectRun(h, "r1")
 	addMissing(t, h, 2, "https://a.example.com")
+	connectRun(h, "r1")
 
 	w := h.driver.AddWindow("https://a.example.com")
 	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: w.ID})
@@ -638,8 +639,8 @@ func sessionOf(t *testing.T, h harness, windowID string) uint {
 func TestWindowCreated_EmptyWhileRestoringDefersAdoptionUntilReattached(t *testing.T) {
 	h := newHarness(t)
 	manualNow(h)
-	connectRun(h, "r1")
 	addMissing(t, h, 2, "https://a.example.com", "https://b.example.com")
+	connectRun(h, "r1")
 	focusedParent(t, h, 1)
 
 	w := createEmptyWindow(h)
@@ -657,8 +658,8 @@ func TestWindowCreated_EmptyWhileRestoringDefersAdoptionUntilReattached(t *testi
 func TestWindowCreated_EmptyWhileRestoringFallsBackToRecordedParent(t *testing.T) {
 	h := newHarness(t)
 	manualNow(h)
-	connectRun(h, "r1")
 	addMissing(t, h, 2, "https://a.example.com")
+	connectRun(h, "r1")
 	focusedParent(t, h, 1)
 
 	w := createEmptyWindow(h)
@@ -681,6 +682,7 @@ func TestWindowCreated_EmptyWhileRestoringFallsBackToRecordedParent(t *testing.T
 func TestWindowCreated_DeferredWindowWaitsWhileStillEmpty(t *testing.T) {
 	h := newHarness(t)
 	manualNow(h)
+	addMissing(t, h, 2, "https://a.example.com")
 	connectRun(h, "r1")
 	focusedParent(t, h, 1)
 
@@ -694,8 +696,8 @@ func TestWindowCreated_DeferredWindowWaitsWhileStillEmpty(t *testing.T) {
 func TestWindowCreated_DeferredWindowFallsBackToParentAfterRestoreWindow(t *testing.T) {
 	h := newHarness(t)
 	now := manualNow(h)
-	connectRun(h, "r1")
 	addMissing(t, h, 2, "https://a.example.com")
+	connectRun(h, "r1")
 	focusedParent(t, h, 1)
 
 	w := createEmptyWindow(h)
@@ -721,6 +723,7 @@ func TestWindowCreated_EmptyOutsideRestoreWindowAdoptsImmediately(t *testing.T) 
 func TestWindowRemoved_ClearsDeferredAdoption(t *testing.T) {
 	h := newHarness(t)
 	manualNow(h)
+	addMissing(t, h, 2, "https://a.example.com")
 	connectRun(h, "r1")
 	focusedParent(t, h, 1)
 	w := createEmptyWindow(h)
@@ -731,24 +734,207 @@ func TestWindowRemoved_ClearsDeferredAdoption(t *testing.T) {
 	assert.Empty(t, h.svc.deferredAdopt)
 }
 
-func TestDisconnected_ClearsDeferredAdoption(t *testing.T) {
+func TestConnected_SameRunReconnectResolvesDeferredWindows(t *testing.T) {
 	h := newHarness(t)
 	manualNow(h)
+	addMissing(t, h, 2, "https://a.example.com", "https://b.example.com")
+	addMissing(t, h, 3, "https://z.example.com")
+	connectRun(h, "r1")
+	focusedParent(t, h, 1)
+	loaded := createEmptyWindow(h)
+	waiting := createEmptyWindow(h)
+	gone := createEmptyWindow(h)
+	require.Len(t, h.svc.deferredAdopt, 3)
+
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+	assert.Len(t, h.svc.deferredAdopt, 3)
+	for _, u := range []string{"https://a.example.com", "https://b.example.com"} {
+		_, err := h.driver.OpenTab(context.Background(), loaded.ID, u)
+		require.NoError(t, err)
+	}
+	h.driver.RemoveWindow(gone.ID)
+	connectRun(h, "r1")
+
+	assert.Equal(t, uint(2), sessionOf(t, h, loaded.ID))
+	assert.Equal(t, map[string]uint{waiting.ID: 1}, h.svc.deferredAdopt)
+}
+
+func TestReattachLate_WindowRejectedAtConnectedStaysUnowned(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	addMissing(t, h, 2, prURL)
+	personal := h.driver.AddWindow("https://mail.example.com")
+	connectRun(h, "r1")
+	require.Contains(t, h.svc.reattachRejected, personal.ID)
+
+	_, err := h.driver.OpenTab(context.Background(), personal.ID, prURL)
+	require.NoError(t, err)
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: personal.ID})
+
+	assert.Equal(t, uint(0), sessionOf(t, h, personal.ID))
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	assert.Len(t, missing, 1)
+}
+
+func TestReattachLate_WindowEmptyAtConnectedCanStillReattach(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	addMissing(t, h, 2, prURL)
+	empty := h.driver.AddWindow("chrome://newtab/")
+	connectRun(h, "r1")
+	require.NotContains(t, h.svc.reattachRejected, empty.ID)
+
+	loadTabs(t, h, empty.ID, prURL)
+
+	assert.Equal(t, uint(2), sessionOf(t, h, empty.ID))
+}
+
+func TestReattachRejected_ClearedOnRemovalAndRunChange(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	addMissing(t, h, 2, prURL)
+	a := h.driver.AddWindow("https://mail.example.com")
+	b := h.driver.AddWindow("https://news.example.com")
+	connectRun(h, "r1")
+	require.Len(t, h.svc.reattachRejected, 2)
+
+	removeWindow(h, a.ID)
+	assert.NotContains(t, h.svc.reattachRejected, a.ID)
+	h.driver.RemoveWindow(b.ID)
+	connectRun(h, "r2")
+	assert.Empty(t, h.svc.reattachRejected)
+}
+
+func TestWindowCreated_ComparableNonMatchingWindowStaysUnownedWhileRestoring(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	addMissing(t, h, 2, "https://a.example.com")
+	connectRun(h, "r1")
+	focusedParent(t, h, 1)
+
+	w := h.driver.AddWindow("https://x.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: w.ID})
+
+	assert.Equal(t, uint(0), sessionOf(t, h, w.ID))
+	assert.Empty(t, h.svc.deferredAdopt)
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	assert.Len(t, missing, 1)
+}
+
+func TestWindowCreated_EmptyAfterRestartWithNothingMissingAdoptsImmediately(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	connectRun(h, "r1")
+	focusedParent(t, h, 1)
+
+	w := createEmptyWindow(h)
+
+	assert.Equal(t, uint(1), sessionOf(t, h, w.ID))
+	assert.Empty(t, h.svc.deferredAdopt)
+	assert.True(t, h.svc.restoreUntil.IsZero())
+}
+
+func TestConnected_ReattachingEveryMissingRowEndsRestoreWindow(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	addMissing(t, h, 2, "https://a.example.com")
+	w := h.driver.AddWindow("https://a.example.com")
+
+	connectRun(h, "r1")
+
+	assert.Equal(t, uint(2), sessionOf(t, h, w.ID))
+	assert.True(t, h.svc.restoreUntil.IsZero())
+}
+
+func TestReattachLate_LastMissingRowEndsRestoreWindow(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	addMissing(t, h, 2, "https://a.example.com")
+	connectRun(h, "r1")
+	require.False(t, h.svc.restoreUntil.IsZero())
+
+	w := h.driver.AddWindow("https://a.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: w.ID})
+
+	assert.Equal(t, uint(2), sessionOf(t, h, w.ID))
+	assert.True(t, h.svc.restoreUntil.IsZero())
+}
+
+func TestTabsChanged_DeferredWindowStillEmptyAfterRestoreWindowAdoptsParent(t *testing.T) {
+	h := newHarness(t)
+	now := manualNow(h)
+	addMissing(t, h, 2, "https://a.example.com")
 	connectRun(h, "r1")
 	focusedParent(t, h, 1)
 	w := createEmptyWindow(h)
 	require.Contains(t, h.svc.deferredAdopt, w.ID)
 
-	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+	*now = now.Add(restoreWindow)
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: w.ID})
 
+	assert.Equal(t, uint(1), sessionOf(t, h, w.ID))
 	assert.Empty(t, h.svc.deferredAdopt)
+}
+
+func TestSavedTabs_SkipsAboutPages(t *testing.T) {
+	w := Window{Tabs: []Tab{{URL: "about:blank"}, {URL: "https://a.example.com"}, {URL: "chrome://newtab/"}}}
+
+	assert.Equal(t, []string{"https://a.example.com"}, urlsOf(savedTabs(w)))
+	assert.Empty(t, normalizeURL("about:blank"))
+	assert.Empty(t, normalizeURL("About:Blank"))
+	assert.Empty(t, urlSet([]string{"about:blank", "chrome://newtab/"}))
+}
+
+func TestWindowCreated_AboutBlankWhileRestoringIsDeferred(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	addMissing(t, h, 2, "https://a.example.com")
+	connectRun(h, "r1")
+	focusedParent(t, h, 1)
+
+	w := h.driver.AddWindow("about:blank")
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: w.ID})
+
+	assert.Contains(t, h.svc.deferredAdopt, w.ID)
+}
+
+func TestRestore_ReopenFailureClosesOrphanedWindow(t *testing.T) {
+	h := newHarness(t)
+	addSnapshotted(t, h, 1, time.Time{}, SavedTab{URL: "https://a.example.com"})
+	fail := false
+	require.NoError(t, h.store.db.Model(&BrowserWindow{}).Callback().Update().Before("gorm:update").Register("test:fail_update", func(tx *gorm.DB) {
+		if fail {
+			_ = tx.AddError(errors.New("store broke"))
+		}
+	}))
+	fail = true
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	live, err := h.driver.ListWindows(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, live)
+	closed := h.driver.Closed()
+	require.Len(t, closed, 1)
+	assert.Contains(t, h.svc.closing, closed[0])
+	fail = false
+	restorable, err := h.store.ListRestorable(1)
+	require.NoError(t, err)
+	assert.Len(t, restorable, 1)
+
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowRemoved, WindowID: closed[0]})
+	assert.Empty(t, h.svc.closing)
+	assert.Empty(t, h.clock.live())
 }
 
 func TestReattach_NeverClaimsDaemonCreatedUnownedWindows(t *testing.T) {
 	h := newHarness(t)
 	manualNow(h)
-	connectRun(h, "r1")
 	addMissing(t, h, 2, prURL)
+	connectRun(h, "r1")
 
 	res, err := h.svc.Open(context.Background(), OpenRequest{URL: prURL})
 	require.NoError(t, err)
@@ -1046,8 +1232,8 @@ func TestRestore_DisconnectedIsNoop(t *testing.T) {
 func TestRestore_SkipsMissingRowsWhileChromeIsRestoring(t *testing.T) {
 	h := newHarness(t)
 	manualNow(h)
-	connectRun(h, "r1")
 	addMissing(t, h, 1, "https://a.example.com")
+	connectRun(h, "r1")
 	addSnapshotted(t, h, 1, time.Time{}, SavedTab{URL: "https://b.example.com"})
 
 	h.svc.SetAttached(1)
@@ -1080,6 +1266,7 @@ func TestRestore_RestoresMissingRowsOutsideRestoreWindow(t *testing.T) {
 func TestRestore_RestoredWindowIsNotAdoptedByFocusedSession(t *testing.T) {
 	h := newHarness(t)
 	manualNow(h)
+	addMissing(t, h, 5, "https://unrelated.example.com")
 	connectRun(h, "r1")
 	focusedParent(t, h, 3)
 	addSnapshotted(t, h, 1, time.Time{})

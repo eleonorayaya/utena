@@ -14,12 +14,13 @@ type restoreCandidate struct {
 	score    float64
 }
 
-func isNewTab(u string) bool {
-	return strings.HasPrefix(u, "chrome://newtab")
+func isBlankPage(u string) bool {
+	lower := strings.ToLower(u)
+	return strings.HasPrefix(lower, "chrome://newtab") || strings.HasPrefix(lower, "about:")
 }
 
 func normalizeURL(raw string) string {
-	if raw == "" || isNewTab(raw) {
+	if raw == "" || isBlankPage(raw) {
 		return ""
 	}
 	u, err := url.Parse(raw)

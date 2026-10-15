@@ -42,7 +42,7 @@ type BrowserState struct {
 func savedTabs(w Window) []SavedTab {
 	var out []SavedTab
 	for _, t := range w.Tabs {
-		if t.URL == "" || isNewTab(t.URL) {
+		if t.URL == "" || isBlankPage(t.URL) {
 			continue
 		}
 		out = append(out, SavedTab{URL: t.URL, Title: t.Title, Active: t.Active, Pinned: t.Pinned})
