@@ -1240,6 +1240,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 	if err := s.store.HardDelete(id); err != nil {
 		return err
 	}
+	s.publishLifecycle(ctx, eventbus.SessionDeleted, id)
 
 	for i := range session.Worktrees {
 		wt := session.Worktrees[i].Worktree
@@ -1496,6 +1497,15 @@ func (s *SessionService) publishSessionAttached(ctx context.Context, sessionID u
 	}
 }
 
+func (s *SessionService) publishLifecycle(ctx context.Context, eventType string, sessionID uint) {
+	if err := s.eventBus.Publish(ctx, eventbus.Event{
+		Type: eventType,
+		Data: eventbus.SessionLifecycleEvent{SessionID: sessionID},
+	}); err != nil {
+		slog.Warn("failed to publish session lifecycle event", "type", eventType, "session", sessionID, "error", err)
+	}
+}
+
 func (s *SessionService) handleMuxClientDetached(ctx context.Context, event eventbus.Event) error {
 	data, ok := event.Data.(eventbus.MuxHookEvent)
 	if !ok {
@@ -1545,6 +1555,7 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 	if err := s.store.Update(sess); err != nil {
 		return nil, err
 	}
+	s.publishLifecycle(ctx, eventbus.SessionArchived, sess.ID)
 	return sess, nil
 }
 

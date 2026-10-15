@@ -9,6 +9,8 @@ const (
 
 	SessionActivated = "session.activated"
 	SessionAttached  = "session.attached"
+	SessionArchived  = "session.archived"
+	SessionDeleted   = "session.deleted"
 
 	SessionNotification = "session.notification"
 )
@@ -22,6 +24,10 @@ type SessionActivatedEvent struct {
 }
 
 type SessionIDEvent struct {
+	SessionID uint
+}
+
+type SessionLifecycleEvent struct {
 	SessionID uint
 }
 
