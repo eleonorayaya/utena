@@ -72,7 +72,7 @@ func setupTestRouterWithBus(t *testing.T) (*App, chi.Router, *mux.FakeDriver, ui
 	gormDB, err := db.OpenInMemorySQLite()
 	require.NoError(t, err)
 
-	cfg := Config{ConfigDir: "/config", SessionsRoot: t.TempDir()}
+	cfg := Config{ConfigDir: "/config", SessionsRoot: t.TempDir(), WM: "none"}
 	bus := eventbus.NewEventBus()
 	database := db.NewDB(gormDB)
 	mock := mux.NewFakeDriver()

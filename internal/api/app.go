@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 
+	"github.com/eleonorayaya/utena/internal/aerospace"
 	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/chrome"
 	"github.com/eleonorayaya/utena/internal/claude"
@@ -66,7 +67,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 		muxModule = mux.NewModule(tuios.NewDriver(), bus, database)
 	}
 	sessionModule := session.NewSessionModule(muxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir, cfg.SessionsRoot)
-	browserModule := browser.NewModule(chrome.NewDriver(), browserSessions{sessions: sessionModule.Service}, wm.None{}, browser.Layout{BrowserWorkspace: "2", ParkWorkspace: "P"}, bus, database)
+	browserModule := browser.NewModule(chrome.NewDriver(), browserSessions{sessions: sessionModule.Service}, newWMDriver(cfg.WM), browser.Layout{BrowserWorkspace: cfg.BrowserWorkspace, ParkWorkspace: cfg.ParkWorkspace}, bus, database)
 
 	jobsModule := jobs.NewJobsModule()
 	gitModule.RegisterJobs(jobsModule.Service)
@@ -89,6 +90,13 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 	database.RegisterPreMigrations(app.collectPreMigrations()...)
 
 	return app
+}
+
+func newWMDriver(name string) wm.Driver {
+	if name == "aerospace" {
+		return aerospace.NewDriver()
+	}
+	return wm.None{}
 }
 
 func (a *App) OnStart(ctx context.Context) error {

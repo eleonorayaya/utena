@@ -8,11 +8,14 @@ import (
 )
 
 type Config struct {
-	Port         int
-	ConfigDir    string
-	PrettyLogs   bool
-	BranchPrefix string
-	SessionsRoot string
+	Port             int
+	ConfigDir        string
+	PrettyLogs       bool
+	BranchPrefix     string
+	SessionsRoot     string
+	WM               string
+	BrowserWorkspace string
+	ParkWorkspace    string
 }
 
 func LoadConfig(args []string) (Config, error) {
@@ -31,6 +34,9 @@ func LoadConfig(args []string) (Config, error) {
 	fs.BoolVar(&cfg.PrettyLogs, "pretty-logs", false, "enable pretty log output")
 	fs.StringVar(&cfg.BranchPrefix, "branch-prefix", "eqt/", "prefix for git branches created with worktrees")
 	fs.StringVar(&cfg.SessionsRoot, "sessions-root", defaultSessionsRoot, "directory that holds multi-workspace session roots")
+	fs.StringVar(&cfg.WM, "wm", "aerospace", "window manager driver: aerospace or none")
+	fs.StringVar(&cfg.BrowserWorkspace, "browser-workspace", "2", "workspace for the attached session's browser windows")
+	fs.StringVar(&cfg.ParkWorkspace, "park-workspace", "P", "workspace for other sessions' browser windows")
 
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -52,6 +58,19 @@ func LoadConfig(args []string) (Config, error) {
 	}
 	if v := os.Getenv("UTENA_SESSIONS_ROOT"); v != "" {
 		cfg.SessionsRoot = v
+	}
+	if v := os.Getenv("UTENA_WM"); v != "" {
+		cfg.WM = v
+	}
+	if v := os.Getenv("UTENA_BROWSER_WORKSPACE"); v != "" {
+		cfg.BrowserWorkspace = v
+	}
+	if v := os.Getenv("UTENA_PARK_WORKSPACE"); v != "" {
+		cfg.ParkWorkspace = v
+	}
+
+	if cfg.WM != "aerospace" && cfg.WM != "none" {
+		return Config{}, fmt.Errorf("invalid window manager %q: must be aerospace or none", cfg.WM)
 	}
 
 	return cfg, nil
