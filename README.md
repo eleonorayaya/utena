@@ -29,7 +29,7 @@ The daemon talks to the tuios daemon over its control socket (`$TUIOS_SOCKET`, e
 
 Start your terminal with `utena attach` instead of `tuios attach`. The utena daemon never starts tuios itself (a launchd-started tuios would give every pane and popup launchd's minimal environment), so `utena attach` is also what brings the tuios daemon up. It runs `tuios attach` and reattaches to whatever session you pick in the utena TUI (tuios has no programmatic `switch-client`, so the wrapper restarts the client on the chosen session).
 
-The tuios side (the `prefix+p` popup, the `custom/utena` dock cell running `utena status-line`, and an `after-attach` hook that keeps the attached session accurate when you switch with `Ctrl+B S`) is deployed from dotfiles: `programs/tuios/contents/config.toml`.
+The tuios side (the `prefix+p` popup, the `custom/utena` dock cell running `utena status-line`, and an `after-attach` hook that keeps the attached session accurate however the tuios client switches sessions) is deployed from dotfiles: `programs/tuios/contents/config.toml`.
 
 #### Resource usage
 
@@ -53,6 +53,16 @@ Links opened from a utena session land in that session's own Chrome window.
 2. `eval "$(utena shell-init)"` sets `BROWSER` to `utena-open` inside tuios, so tools that open links route them through the daemon.
 3. `utena open <url>...` opens links in the current session's window; when the browser extension is connected, the TUI's `o` switches to the selected session (if it isn't attached) and opens its PR in that session's window. Otherwise `o` just opens the PR.
 4. If the daemon or extension is unavailable, links fall back to `/usr/bin/open`.
+
+With [AeroSpace](https://github.com/nikitabobko/AeroSpace), the daemon also parks windows: the attached session's Chrome windows sit on the browser workspace, and every other session's windows are moved to the park workspace. When you switch sessions, the windows swap quietly. Focus never changes, and Chrome windows no session owns are never moved. A window created for a background session may flash on the browser workspace for a moment before it is parked. A window that can't be matched to an AeroSpace window unambiguously stays where it is until a later tab change or swap resolves it.
+
+| Flag | Env | Default | |
+|---|---|---|---|
+| `--wm` | `UTENA_WM` | `aerospace` | `aerospace` or `none`; `none` turns parking off |
+| `--browser-workspace` | `UTENA_BROWSER_WORKSPACE` | `2` | workspace for the attached session's windows |
+| `--park-workspace` | `UTENA_PARK_WORKSPACE` | `P` | workspace for every other session's windows |
+
+The dotfiles AeroSpace config (`programs/aerospace/contents/aerospace.toml.tmpl`) binds `alt-b` to view workspace `P` and `alt-shift-b` to park the focused window on `P`. AeroSpace creates `P` on demand. A session-owned window you move by hand goes back to its workspace the next time placement runs.
 
 #### Claude Code integration
 

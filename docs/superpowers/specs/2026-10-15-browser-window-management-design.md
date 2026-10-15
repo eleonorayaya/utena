@@ -377,3 +377,23 @@ Decided during review:
 - `/browser/open` and `/browser/status` reject any request that carries an `Origin` header with 403. Utena's own clients never send one, and this stops web pages from posting to the daemon. The `/browser/chrome` websocket keeps its `chrome-extension://` origin check instead.
 - An unknown `session_id` falls back to an unowned window, the same as `session_id` 0.
 - Archived sessions can still get a new window. `missing` rows aren't cleaned up until PR 3.
+
+## PR 2 amendments
+
+Parking departs from this design in these ways (see `docs/superpowers/plans/2026-10-15-browser-parking.md`):
+
+- `wm.Driver` has only `ListWindows(ctx, bundleID)` and `MoveToWorkspace(ctx, windowID, workspace)`. There is no focus method: AeroSpace follows Chrome's own focus (smoke finding). `wm.None` (`--wm none`) is inert, and placement is skipped entirely with it.
+- `browser.Driver` gained `AppBundleID()` and `WindowTitle(Window) string`, the title the OS shows for a window (for Chrome, `"<active tab title> - Google Chrome"`). The title format stays inside the driver.
+- The swap trigger is a new `session.attached` eventbus event, published by `SessionService` after every store update that sets `IsAttached`. `browser.Service.SetAttached` stores the ID in an `atomic.Uint64` (never under the service lock, since `Open` can hold it for seconds) and signals a 1-slot channel. A single worker runs placement and coalesces signals. On `Connected` the attached ID is seeded from the session store with a compare-and-swap, so a concurrent `SetAttached` wins.
+- Detach never clears the attached session. There is no `SessionAttached{0}`; the last attached session's windows stay on the browser workspace.
+- Linking order replaces §Linking:
+  1. a cached link that is still live;
+  2. for windows utena creates, the one AeroSpace window that appeared since a snapshot taken just before `CreateWindow`, polled for up to 1.5 s, ignoring wm IDs already linked. The diff is also checked on the Chrome side: if any other Chrome window appeared in the meantime, the link is dropped, because the new wm window may be that one's;
+  3. an exact title match among unlinked wm windows, only when no other unlinked Chrome window (wanted or not) has the same title.
+- There is no elimination step. AeroSpace lists Chrome windows the extension never reports (popups, picture-in-picture, undocked DevTools, other profiles), and AeroSpace can lag behind the extension, so "the last unlinked window" may be a foreign one.
+- An ambiguous window is not moved. It is logged at debug level and retried on the next `TabsChanged` for that window (only while it is owned but unlinked) or the next swap. The marker-tab fallback is deferred until real ambiguity shows up.
+- An activating `Open` that reuses an existing window runs placement synchronously, under its lock, before it changes tabs or focuses. Focusing a window still parked on `P` would otherwise pull the user's view to `P`, and placing first keeps the window's title matching its wm title.
+- Placement moves only session-owned windows that are on the wrong workspace, never focuses anything, and never moves unowned windows.
+- Creating windows minimized is not attempted (risk 3). A background-session window may briefly appear on `2`, where the dotfiles `on-window-detected` rule puts it, before it is moved to `P`.
+- Dotfiles: `alt-b` (`workspace P`) and `alt-shift-b` (`move-node-to-workspace P`) in both `main` and `term` modes. No `persistent-workspaces` entry; AeroSpace creates `P` on demand.
+- The flags are `--wm aerospace|none` (`UTENA_WM`), `--browser-workspace` (`UTENA_BROWSER_WORKSPACE`, default `2`) and `--park-workspace` (`UTENA_PARK_WORKSPACE`, default `P`). Any other `--wm` value is a config error. Only `internal/api` imports `internal/aerospace`.

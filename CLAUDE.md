@@ -45,6 +45,8 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 - `internal/tuios/` - `mux.Driver` over the tuios control socket, agent-pane tagging, tuios workspace CLI helpers
 - `internal/browser/` - browser-agnostic domain: session→window ownership, open/dedup/focus rules, `/browser` controller, `Driver` interface
 - `internal/chrome/` - `browser.Driver` over a websocket to the `extension/chrome` MV3 extension
+- `internal/wm/` - window-manager seam: `wm.Driver` interface (list windows by app bundle ID, move a window to a workspace), `wm.FakeDriver`, and the inert `wm.None`
+- `internal/aerospace/` - `wm.Driver` over the `aerospace` CLI
 - `internal/claude/` - Claude session management
 - `internal/tui/` - Bubbletea TUI application
 - `internal/common/` - shared utilities
@@ -62,6 +64,8 @@ All domain data (workspaces, sessions, mux sessions, claude sessions) is stored 
 **Multiplexer** (internal/mux/, internal/tuios/): `mux` owns the domain — `mux.Service` creates/kills multiplexer sessions for utena sessions, tracks their status and windows, and serves attach hooks and activations. It talks to the multiplexer only through the `mux.Driver` interface. `internal/tuios` is the production Driver (only `internal/api/app.go` and `cmd/tui` import it); tests use `mux.FakeDriver`. Supporting another multiplexer means writing another Driver.
 
 **Browser** (internal/browser/, internal/chrome/): `browser` owns the domain — `browser.Service` links sessions to browser windows, opens links in the session's window (deduping by URL prefix and focusing), and serves the `/browser` routes. It talks to browsers only through the `browser.Driver` interface. `internal/chrome` is the production Driver (only `internal/api/app.go` imports it); tests use `browser.FakeDriver`. Events are delivered on the `Subscribe` goroutine, never on the driver's read loop, because `Service.Open` holds its lock across driver calls.
+
+Window placement goes through a second seam, `wm.Driver` (internal/wm/). `internal/aerospace` is the production wm driver (only `internal/api` imports it); tests use `wm.FakeDriver`, and `wm.None` (`--wm none`) makes placement inert. `session.SessionService` publishes `session.attached` whenever the attached session changes; `browser.Module` subscribes and calls `Service.SetAttached`, which stores the ID atomically and signals a coalescing placement worker without taking the service lock. The worker links session-owned Chrome windows to wm windows (cached link, created-window diff, or a unique exact title; never by elimination, and ambiguous windows are left alone) and moves only misplaced ones: the attached session's windows to the browser workspace, every other owned window to the park workspace. Placement never focuses anything and never moves unowned windows. The daemon flags `--wm` (`aerospace`|`none`), `--browser-workspace` and `--park-workspace` (env `UTENA_WM`, `UTENA_BROWSER_WORKSPACE`, `UTENA_PARK_WORKSPACE`) live in `internal/api/config.go`.
 
 ## Dependencies
 
