@@ -2,12 +2,14 @@ const PROTOCOL = 2;
 const ENDPOINT = "ws://127.0.0.1:3333/browser/chrome";
 const PING_MS = 20000;
 const MAX_BACKOFF_MS = 30000;
+const CONNECT_TIMEOUT_MS = 10000;
 
 let socket = null;
 let ready = false;
 let backoff = 1000;
 let retryTimer = null;
 let runPromise = null;
+let connectStartedAt = 0;
 
 async function loadRun() {
   const { run } = await chrome.storage.session.get("run");
@@ -27,14 +29,39 @@ function currentRun() {
   return runPromise;
 }
 
+function scheduleRetry() {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(connect, backoff);
+  backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+}
+
+function abandon(ws) {
+  if (socket !== ws) return false;
+  socket = null;
+  ready = false;
+  try {
+    ws.close();
+  } catch (_) {}
+  return true;
+}
+
+function stuckConnecting() {
+  return !!socket && socket.readyState === WebSocket.CONNECTING && Date.now() - connectStartedAt > CONNECT_TIMEOUT_MS;
+}
+
 function connect() {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
   clearTimeout(retryTimer);
   const ws = new WebSocket(ENDPOINT);
   socket = ws;
   ready = false;
+  connectStartedAt = Date.now();
   let ping = null;
+  const connectTimer = setTimeout(() => {
+    if (ws.readyState === WebSocket.CONNECTING && abandon(ws)) scheduleRetry();
+  }, CONNECT_TIMEOUT_MS);
   ws.onopen = async () => {
+    clearTimeout(connectTimer);
     backoff = 1000;
     const run = await currentRun();
     if (socket !== ws || ws.readyState !== WebSocket.OPEN) return;
@@ -44,13 +71,13 @@ function connect() {
   };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
   ws.onclose = (e) => {
+    clearTimeout(connectTimer);
     clearInterval(ping);
     if (socket !== ws) return;
     socket = null;
     ready = false;
     if (e.reason === "replaced") return;
-    retryTimer = setTimeout(connect, backoff);
-    backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+    scheduleRetry();
   };
 }
 
@@ -126,7 +153,9 @@ chrome.tabs.onMoved.addListener((_, info) => tabsChanged(info.windowId));
 
 chrome.alarms.create("utena-reconnect", { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener((a) => {
-  if (a.name === "utena-reconnect") connect();
+  if (a.name !== "utena-reconnect") return;
+  if (stuckConnecting()) abandon(socket);
+  connect();
 });
 chrome.runtime.onStartup.addListener(connect);
 chrome.runtime.onInstalled.addListener(connect);
