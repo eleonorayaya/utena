@@ -276,6 +276,33 @@ Daemon flags, each with an env var override in the style of `--branch-prefix`:
    `state: "minimized"`, then move it to `P` and restore it. If that doesn't work,
    accept the flash.
 
+### PR 1 smoke findings (2026-10-15)
+
+- The AeroSpace window title is `<active tab title> - Google Chrome`. Title matching
+  must strip the ` - Google Chrome` suffix. An earlier sample without the suffix was
+  misleading.
+- AeroSpace follows Chrome's native focus. `chrome.windows.update({focused: true})`
+  on a window in workspace `2` switches AeroSpace to `2`. Focus therefore needs no
+  `wm` method, which confirms PR 1 amendment 1.
+- A window created with `focused: false` for a background session does not take
+  focus. AeroSpace places it on the focused workspace (`T`) unless an
+  `on-window-detected` rule moves it. The dotfiles rule now sends every new Chrome
+  window to `2`, with no focus-follow. PR 2 still has to move background-session
+  windows to `P`.
+- The IDs Chrome's AppleScript uses for windows (`window id N`) are the same as the
+  extension's window IDs. That is a usable debugging and fallback path.
+- These were confirmed live:
+  - prefix dedup reuses an existing tab;
+  - a different URL opens a new tab;
+  - a background session never steals focus;
+  - a session-0 link goes to an unowned window and focuses it;
+  - a window created from a session window is adopted by that session, and closing
+    it deletes its row.
+- Still open:
+  - quit versus close on cmd-Q (risk 2);
+  - minimized creation to avoid the flash (risk 3);
+  - marker-tab linking (risk 1). These carry over to PRs 2 and 3.
+
 ## Testing
 
 - `browser` service tests run against `browser.FakeDriver` and `wm.FakeDriver`
