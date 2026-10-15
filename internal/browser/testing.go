@@ -11,11 +11,13 @@ type FakeDriver struct {
 	windows  []Window
 	nextID   int
 	focused  []string
+	closed   []string
 	events   chan Event
 	stopped  chan struct{}
 	ListErr  error
 	OnCreate func(Window)
 	OnFocus  func(windowID string)
+	OnClose  func(windowID string)
 }
 
 var _ Driver = (*FakeDriver)(nil)
@@ -178,6 +180,35 @@ func (f *FakeDriver) FocusWindow(ctx context.Context, windowID string) error {
 	f.mu.Unlock()
 	if onFocus != nil {
 		onFocus(windowID)
+	}
+	return nil
+}
+
+func (f *FakeDriver) Closed() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.closed...)
+}
+
+func (f *FakeDriver) CloseWindow(ctx context.Context, windowID string) error {
+	f.mu.Lock()
+	idx := -1
+	for i, w := range f.windows {
+		if w.ID == windowID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		f.mu.Unlock()
+		return fmt.Errorf("no window %s", windowID)
+	}
+	f.windows = append(f.windows[:idx], f.windows[idx+1:]...)
+	f.closed = append(f.closed, windowID)
+	onClose := f.OnClose
+	f.mu.Unlock()
+	if onClose != nil {
+		onClose(windowID)
 	}
 	return nil
 }

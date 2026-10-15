@@ -325,6 +325,14 @@ func (d *Driver) FocusWindow(ctx context.Context, windowID string) error {
 	return d.call(ctx, "windows.focus", map[string]any{"windowId": wid}, nil)
 }
 
+func (d *Driver) CloseWindow(ctx context.Context, windowID string) error {
+	wid, err := parseID(windowID)
+	if err != nil {
+		return err
+	}
+	return d.call(ctx, "windows.remove", map[string]any{"windowId": wid}, nil)
+}
+
 func (d *Driver) Subscribe(ctx context.Context, onEvent func(browser.Event)) error {
 	var deliveredGen uint64
 	deliveredConnected := false

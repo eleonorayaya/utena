@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -180,22 +181,44 @@ func TestDriver_CallWithoutConnection(t *testing.T) {
 }
 
 func TestDriver_RejectsProtocolMismatch(t *testing.T) {
-	d, srv, rec := newDriver(t)
-	ws, err := dial(t, srv, "chrome-extension://abc")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ws.CloseNow() })
-	ext := &fakeExt{ws: ws}
-	ext.send(t, map[string]any{"type": "hello", "protocol": ProtocolVersion + 1, "browser": "chrome"})
+	for _, protocol := range []int{1, ProtocolVersion + 1} {
+		t.Run(strconv.Itoa(protocol), func(t *testing.T) {
+			d, srv, rec := newDriver(t)
+			ws, err := dial(t, srv, "chrome-extension://abc")
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = ws.CloseNow() })
+			ext := &fakeExt{ws: ws}
+			ext.send(t, map[string]any{"type": "hello", "protocol": protocol, "browser": "chrome"})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for err == nil {
-		_, _, err = ws.Read(ctx)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			for err == nil {
+				_, _, err = ws.Read(ctx)
+			}
+			assert.Equal(t, websocket.StatusPolicyViolation, websocket.CloseStatus(err))
+			assert.False(t, rec.has(browser.Event{Type: browser.EventConnected}))
+			_, err = d.ListWindows(context.Background())
+			assert.ErrorIs(t, err, browser.ErrNotConnected)
+		})
 	}
-	assert.Equal(t, websocket.StatusPolicyViolation, websocket.CloseStatus(err))
-	assert.False(t, rec.has(browser.Event{Type: browser.EventConnected}))
-	_, err = d.ListWindows(context.Background())
-	assert.ErrorIs(t, err, browser.ErrNotConnected)
+}
+
+func TestDriver_CloseWindow(t *testing.T) {
+	d, srv, rec := newDriver(t)
+	var gotMethod string
+	var got map[string]any
+	startExt(t, srv, ProtocolVersion, func(method string, params json.RawMessage) (any, string) {
+		gotMethod = method
+		_ = json.Unmarshal(params, &got)
+		return map[string]any{}, ""
+	})
+	waitConnected(t, rec)
+
+	require.NoError(t, d.CloseWindow(context.Background(), "4"))
+	assert.Equal(t, "windows.remove", gotMethod)
+	assert.Equal(t, map[string]any{"windowId": float64(4)}, got)
+
+	assert.Error(t, d.CloseWindow(context.Background(), "nope"))
 }
 
 func TestDriver_DropsEventsFromReplacedConnection(t *testing.T) {

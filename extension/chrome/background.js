@@ -1,4 +1,4 @@
-const PROTOCOL = 1;
+const PROTOCOL = 2;
 const ENDPOINT = "ws://127.0.0.1:3333/browser/chrome";
 const PING_MS = 20000;
 const MAX_BACKOFF_MS = 30000;
@@ -79,6 +79,10 @@ const methods = {
     toWindow(await chrome.windows.create({ url: urls, focused: !!focused, type: "normal" })),
   "windows.focus": async ({ windowId }) => {
     await chrome.windows.update(windowId, { focused: true });
+    return {};
+  },
+  "windows.remove": async ({ windowId }) => {
+    await chrome.windows.remove(windowId);
     return {};
   },
   "tabs.create": async ({ windowId, url }) => toTab(await chrome.tabs.create({ windowId, url, active: true })),
