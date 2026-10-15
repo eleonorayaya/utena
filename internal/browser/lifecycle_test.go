@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/db/testdb"
+	"github.com/eleonorayaya/utena/internal/eventbus"
+	"github.com/eleonorayaya/utena/internal/wm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -771,4 +774,443 @@ func TestConnected_NewRunClearsDaemonUnownedAndDeferred(t *testing.T) {
 
 	assert.Empty(t, h.svc.daemonUnowned)
 	assert.Empty(t, h.svc.deferredAdopt)
+}
+
+func addSnapshotted(t *testing.T, h harness, sessionID uint, lastFocused time.Time, tabs ...SavedTab) *BrowserWindow {
+	t.Helper()
+	row := &BrowserWindow{SessionID: sessionID, State: WindowSnapshotted, Tabs: tabs, LastFocusedAt: lastFocused}
+	require.NoError(t, h.store.Add(row))
+	return row
+}
+
+func rowsOf(t *testing.T, h harness, sessionID uint) []BrowserWindow {
+	t.Helper()
+	rows, err := h.store.ListBySession(sessionID)
+	require.NoError(t, err)
+	return rows
+}
+
+func tabURLs(w Window) []string {
+	out := make([]string, 0, len(w.Tabs))
+	for _, t := range w.Tabs {
+		out = append(out, t.URL)
+	}
+	return out
+}
+
+func activeURL(t *testing.T, h harness, windowID string) string {
+	t.Helper()
+	w, ok := h.driver.Window(windowID)
+	require.True(t, ok)
+	tab, ok := w.ActiveTab()
+	require.True(t, ok)
+	return tab.URL
+}
+
+func TestArchive_SnapshotsClosesAndKeepsRow(t *testing.T) {
+	h := newHarness(t)
+	w := ownWindow(t, h, 1, "https://a.example.com")
+	_, err := h.driver.OpenTab(context.Background(), w.ID, "https://b.example.com")
+	require.NoError(t, err)
+	other := ownWindow(t, h, 2, "https://other.example.com")
+
+	require.NoError(t, h.svc.Archive(context.Background(), 1))
+
+	assert.Equal(t, []string{w.ID}, h.driver.Closed())
+	rows := rowsOf(t, h, 1)
+	require.Len(t, rows, 1)
+	assert.Equal(t, WindowSnapshotted, rows[0].State)
+	assert.Empty(t, rows[0].DriverWindowID)
+	assert.Equal(t, []string{"https://a.example.com", "https://b.example.com"}, urlsOf(rows[0].Tabs))
+	assert.True(t, rows[0].Tabs[1].Active)
+	assert.False(t, rows[0].SnapshotAt.IsZero())
+	assert.Equal(t, uint(2), sessionOf(t, h, other.ID))
+}
+
+func TestArchive_EmptyWindowKeepsSavedTabs(t *testing.T) {
+	h := newHarness(t)
+	w := h.driver.AddWindow("chrome://newtab/")
+	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: w.ID, Tabs: []SavedTab{{URL: "https://b.example.com"}}}))
+
+	require.NoError(t, h.svc.Archive(context.Background(), 1))
+
+	rows := rowsOf(t, h, 1)
+	require.Len(t, rows, 1)
+	assert.Equal(t, WindowSnapshotted, rows[0].State)
+	assert.Equal(t, []string{"https://b.example.com"}, urlsOf(rows[0].Tabs))
+}
+
+func TestArchive_OwnWindowRemovedIsIgnored(t *testing.T) {
+	h := newHarness(t)
+	w := ownWindow(t, h, 1, "https://a.example.com")
+	require.NoError(t, h.svc.Archive(context.Background(), 1))
+
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowRemoved, WindowID: w.ID})
+	assert.Empty(t, h.clock.live())
+	assert.Empty(t, h.svc.closing)
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+	h.clock.fire()
+
+	rows := rowsOf(t, h, 1)
+	require.Len(t, rows, 1)
+	assert.Equal(t, WindowSnapshotted, rows[0].State)
+	assert.Equal(t, []string{"https://a.example.com"}, urlsOf(rows[0].Tabs))
+}
+
+func TestArchive_DisconnectedMarksSnapshottedKeepingSavedTabs(t *testing.T) {
+	h := newHarness(t)
+	w := ownWindow(t, h, 1, "https://a.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventConnected})
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+	_, err := h.driver.OpenTab(context.Background(), w.ID, "https://b.example.com")
+	require.NoError(t, err)
+
+	require.NoError(t, h.svc.Archive(context.Background(), 1))
+
+	assert.Empty(t, h.driver.Closed())
+	rows := rowsOf(t, h, 1)
+	require.Len(t, rows, 1)
+	assert.Equal(t, WindowSnapshotted, rows[0].State)
+	assert.Equal(t, []string{"https://a.example.com"}, urlsOf(rows[0].Tabs))
+}
+
+func TestArchive_MissingRowsBecomeSnapshotted(t *testing.T) {
+	h := newHarness(t)
+	addMissing(t, h, 1, "https://a.example.com")
+
+	require.NoError(t, h.svc.Archive(context.Background(), 1))
+
+	rows := rowsOf(t, h, 1)
+	require.Len(t, rows, 1)
+	assert.Equal(t, WindowSnapshotted, rows[0].State)
+	assert.Equal(t, []string{"https://a.example.com"}, urlsOf(rows[0].Tabs))
+}
+
+func TestArchive_WindowClosedByHandIsStillForgotten(t *testing.T) {
+	h := newHarness(t)
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+	removeWindow(h, res.WindowID)
+
+	require.NoError(t, h.svc.Archive(context.Background(), 1))
+	assert.Equal(t, 1, h.clock.fire())
+
+	assert.Empty(t, rowsOf(t, h, 1))
+}
+
+func TestArchive_AttachedSessionIsNotRestoredByPlacement(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.own(t, 1, "a", "2")
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	require.NoError(t, h.svc.Archive(context.Background(), 1))
+	require.NoError(t, h.svc.place(context.Background()))
+
+	assert.Equal(t, uint64(0), h.svc.attached.Load())
+	live, err := h.driver.ListWindows(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, live)
+	rows := rowsOf(t, h.harness, 1)
+	require.Len(t, rows, 1)
+	assert.Equal(t, WindowSnapshotted, rows[0].State)
+}
+
+func TestDelete_ClosesWindowsAndDropsRows(t *testing.T) {
+	h := newHarness(t)
+	a := ownWindow(t, h, 1, "https://a.example.com")
+	b := ownWindow(t, h, 1, "https://b.example.com")
+	addMissing(t, h, 1, "https://c.example.com")
+	other := ownWindow(t, h, 2, "https://other.example.com")
+
+	require.NoError(t, h.svc.Delete(context.Background(), 1))
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowRemoved, WindowID: a.ID})
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowRemoved, WindowID: b.ID})
+
+	assert.ElementsMatch(t, []string{a.ID, b.ID}, h.driver.Closed())
+	assert.Empty(t, rowsOf(t, h, 1))
+	assert.Empty(t, h.clock.live())
+	assert.Empty(t, h.svc.closing)
+	assert.Equal(t, uint(2), sessionOf(t, h, other.ID))
+}
+
+func TestDelete_DisconnectedDropsRowsWithoutClosing(t *testing.T) {
+	h := newHarness(t)
+	ownWindow(t, h, 1, "https://a.example.com")
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+
+	require.NoError(t, h.svc.Delete(context.Background(), 1))
+
+	assert.Empty(t, h.driver.Closed())
+	assert.Empty(t, rowsOf(t, h, 1))
+}
+
+func TestPlace_AttachingArchivedSessionRestoresAndPlacesWindows(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.driver.OnCreate = func(w Window) { h.wm.Add("wm-"+w.ID, "", "P") }
+	base := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	addSnapshotted(t, h.harness, 1, base,
+		SavedTab{URL: "https://a.example.com"},
+		SavedTab{URL: "https://b.example.com", Active: true},
+		SavedTab{URL: "https://c.example.com"},
+	)
+	addSnapshotted(t, h.harness, 1, base.Add(time.Minute), SavedTab{URL: "https://d.example.com", Active: true})
+	addSnapshotted(t, h.harness, 2, base, SavedTab{URL: "https://other.example.com"})
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	byURL := map[string]string{}
+	for _, r := range rows {
+		w, ok := h.driver.Window(r.DriverWindowID)
+		require.True(t, ok)
+		byURL[w.Tabs[0].URL] = w.ID
+		assert.Equal(t, "wm-"+w.ID, h.svc.links.links[w.ID])
+		assert.Equal(t, "2", h.wm.Workspace("wm-"+w.ID))
+	}
+	abc, _ := h.driver.Window(byURL["https://a.example.com"])
+	assert.Equal(t, []string{"https://a.example.com", "https://b.example.com", "https://c.example.com"}, tabURLs(abc))
+	assert.Equal(t, "https://b.example.com", activeURL(t, h.harness, abc.ID))
+	assert.Equal(t, byURL["https://d.example.com"], rows[0].DriverWindowID)
+	assert.Empty(t, h.driver.Focused())
+	assert.Empty(t, h.wm.Focused())
+	restorable, err := h.store.ListRestorable(2)
+	require.NoError(t, err)
+	assert.Len(t, restorable, 1)
+}
+
+func TestPlace_SessionWithLiveWindowIsNotRestored(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.own(t, 1, "a", "2")
+	addSnapshotted(t, h.harness, 1, time.Time{}, SavedTab{URL: "https://b.example.com"})
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	live, err := h.driver.ListWindows(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, live, 1)
+}
+
+func TestPlace_RestoresWithoutWindowManager(t *testing.T) {
+	h := newHarness(t)
+	addSnapshotted(t, h, 1, time.Time{}, SavedTab{URL: "https://a.example.com"})
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+}
+
+func TestRestore_EmptySnapshotOpensNewTab(t *testing.T) {
+	h := newHarness(t)
+	addSnapshotted(t, h, 1, time.Time{})
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	w, ok := h.driver.Window(rows[0].DriverWindowID)
+	require.True(t, ok)
+	assert.Equal(t, []string{"chrome://newtab/"}, tabURLs(w))
+}
+
+func TestRestore_DisconnectedIsNoop(t *testing.T) {
+	h := newHarness(t)
+	addSnapshotted(t, h, 1, time.Time{}, SavedTab{URL: "https://a.example.com"})
+	h.svc.handleEvent(context.Background(), Event{Type: EventDisconnected})
+
+	h.svc.mu.Lock()
+	restored, err := h.svc.restoreLocked(context.Background(), 1)
+	h.svc.mu.Unlock()
+	require.NoError(t, err)
+	assert.Empty(t, restored)
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+	live, err := h.driver.ListWindows(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, live)
+	restorable, err := h.store.ListRestorable(1)
+	require.NoError(t, err)
+	assert.Len(t, restorable, 1)
+}
+
+func TestRestore_SkipsMissingRowsWhileChromeIsRestoring(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	connectRun(h, "r1")
+	addMissing(t, h, 1, "https://a.example.com")
+	addSnapshotted(t, h, 1, time.Time{}, SavedTab{URL: "https://b.example.com"})
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	live, err := h.driver.ListWindows(context.Background())
+	require.NoError(t, err)
+	require.Len(t, live, 1)
+	assert.Equal(t, []string{"https://b.example.com"}, tabURLs(live[0]))
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	assert.Len(t, missing, 1)
+}
+
+func TestRestore_RestoresMissingRowsOutsideRestoreWindow(t *testing.T) {
+	h := newHarness(t)
+	addMissing(t, h, 1, "https://a.example.com")
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	missing, err := h.store.ListMissing()
+	require.NoError(t, err)
+	assert.Empty(t, missing)
+}
+
+func TestRestore_RestoredWindowIsNotAdoptedByFocusedSession(t *testing.T) {
+	h := newHarness(t)
+	manualNow(h)
+	connectRun(h, "r1")
+	focusedParent(t, h, 3)
+	addSnapshotted(t, h, 1, time.Time{})
+
+	h.svc.SetAttached(1)
+	require.NoError(t, h.svc.place(context.Background()))
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	id := rows[0].DriverWindowID
+	h.svc.handleEvent(context.Background(), Event{Type: EventWindowCreated, WindowID: id})
+	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: id})
+
+	assert.Equal(t, uint(1), sessionOf(t, h, id))
+	assert.Empty(t, h.svc.deferredAdopt)
+	threeRows, err := h.store.ListOpenBySession(3)
+	require.NoError(t, err)
+	assert.Len(t, threeRows, 1)
+}
+
+func TestOpen_SnapshottedSessionRestoresAndOpensInRestoredWindow(t *testing.T) {
+	h := newHarness(t)
+	addSnapshotted(t, h, 1, time.Time{}, SavedTab{URL: prURL + "/files"}, SavedTab{URL: "https://a.example.com", Active: true})
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+
+	live, err := h.driver.ListWindows(context.Background())
+	require.NoError(t, err)
+	require.Len(t, live, 1)
+	assert.Equal(t, live[0].ID, res.WindowID)
+	assert.False(t, res.Created)
+	assert.Equal(t, []string{prURL + "/files", "https://a.example.com"}, tabURLs(live[0]))
+	assert.Equal(t, live[0].Tabs[0].ID, res.TabID)
+	assert.Equal(t, prURL+"/files", activeURL(t, h, res.WindowID))
+	assert.Equal(t, uint(1), sessionOf(t, h, res.WindowID))
+}
+
+func TestOpen_RestoredTargetIsMostRecentlyFocusedWindow(t *testing.T) {
+	h := newHarness(t)
+	base := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	addSnapshotted(t, h, 1, base.Add(time.Minute), SavedTab{URL: "https://recent.example.com"})
+	addSnapshotted(t, h, 1, base, SavedTab{URL: "https://old.example.com"})
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+
+	w, ok := h.driver.Window(res.WindowID)
+	require.True(t, ok)
+	assert.Equal(t, []string{"https://recent.example.com", prURL}, tabURLs(w))
+	live, err := h.driver.ListWindows(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, live, 2)
+	rows, err := h.store.ListOpenBySession(1)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.Equal(t, res.WindowID, rows[0].DriverWindowID)
+}
+
+func TestOpen_AttachedSessionFocusesRestoredWindow(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.driver.OnCreate = func(w Window) { h.wm.Add("wm-"+w.ID, "", "P") }
+	h.sessions.AttachedID = 1
+	h.svc.SetAttached(1)
+	drain(h.svc)
+	addSnapshotted(t, h.harness, 1, time.Time{}, SavedTab{URL: "https://a.example.com"})
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+
+	assert.True(t, res.Focused)
+	assert.Equal(t, []string{res.WindowID}, h.driver.Focused())
+	assert.Equal(t, []string{"wm-" + res.WindowID}, h.wm.Focused())
+	assert.Equal(t, "2", h.wm.Workspace("wm-"+res.WindowID))
+}
+
+func TestOpen_BackgroundSessionRestoresWithoutFocus(t *testing.T) {
+	h := newPlaceHarness(t)
+	h.driver.OnCreate = func(w Window) { h.wm.Add("wm-"+w.ID, "", "2") }
+	h.sessions.AttachedID = 2
+	h.svc.SetAttached(2)
+	drain(h.svc)
+	addSnapshotted(t, h.harness, 1, time.Time{}, SavedTab{URL: "https://a.example.com"})
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	require.NoError(t, err)
+
+	assert.False(t, res.Focused)
+	assert.Empty(t, h.driver.Focused())
+	assert.Empty(t, h.wm.Focused())
+	assert.Len(t, h.svc.swapCh, 1)
+	require.NoError(t, h.svc.place(context.Background()))
+	assert.Equal(t, "P", h.wm.Workspace("wm-"+res.WindowID))
+}
+
+func TestModule_LifecycleEventsDoNotBlockPublisher(t *testing.T) {
+	bus := eventbus.NewEventBus()
+	driver := NewFakeDriver()
+	m := NewModule(driver, &FakeSessions{}, wm.None{}, Layout{BrowserWorkspace: "2", ParkWorkspace: "P"}, bus, testdb.New(t, &BrowserWindow{}, &BrowserState{}))
+	m.Service.handleEvent(context.Background(), Event{Type: EventConnected})
+	archived := driver.AddWindow("https://a.example.com")
+	require.NoError(t, m.Service.store.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: archived.ID}))
+	deleted := driver.AddWindow("https://b.example.com")
+	require.NoError(t, m.Service.store.Add(&BrowserWindow{SessionID: 2, State: WindowOpen, DriverWindowID: deleted.ID}))
+
+	m.Service.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		_ = bus.Publish(context.Background(), eventbus.Event{Type: eventbus.SessionArchived, Data: eventbus.SessionLifecycleEvent{SessionID: 1}})
+		_ = bus.Publish(context.Background(), eventbus.Event{Type: eventbus.SessionDeleted, Data: eventbus.SessionLifecycleEvent{SessionID: 2}})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("publish blocked on the service lock")
+	}
+	m.Service.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go m.Service.lifecycleLoop(ctx)
+
+	assert.Eventually(t, func() bool { return len(driver.Closed()) == 2 }, time.Second, 10*time.Millisecond)
+	assert.Eventually(t, func() bool {
+		m.Service.mu.Lock()
+		defer m.Service.mu.Unlock()
+		one, err := m.Service.store.ListBySession(1)
+		require.NoError(t, err)
+		two, err := m.Service.store.ListBySession(2)
+		require.NoError(t, err)
+		return len(one) == 1 && one[0].State == WindowSnapshotted && len(two) == 0
+	}, time.Second, 10*time.Millisecond)
 }

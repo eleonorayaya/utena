@@ -37,6 +37,11 @@ type pendingTimer struct {
 	stop func() bool
 }
 
+type lifecycleOp struct {
+	sessionID uint
+	deleted   bool
+}
+
 type Layout struct {
 	BrowserWorkspace string
 	ParkWorkspace    string
@@ -75,6 +80,10 @@ type Service struct {
 	attached atomic.Uint64
 	swapCh   chan struct{}
 
+	lifecycleMu sync.Mutex
+	lifecycle   []lifecycleOp
+	lifecycleCh chan struct{}
+
 	afterFunc     func(time.Duration, func()) func() bool
 	snapshotDelay time.Duration
 	removeGrace   time.Duration
@@ -94,6 +103,7 @@ type Service struct {
 	restoreUntil        time.Time
 	deferredAdopt       map[string]uint
 	daemonUnowned       map[string]struct{}
+	closing             map[string]struct{}
 }
 
 func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driver, layout Layout) *Service {
@@ -107,6 +117,9 @@ func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driv
 		now:      time.Now,
 		swapCh:   make(chan struct{}, 1),
 		unowned:  map[string]struct{}{},
+
+		lifecycleCh: make(chan struct{}, 1),
+		closing:     map[string]struct{}{},
 
 		deferredAdopt: map[string]uint{},
 		daemonUnowned: map[string]struct{}{},
@@ -194,6 +207,26 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 	target, found, err := s.targetWindow(req.SessionID, live)
 	if err != nil {
 		return OpenResult{}, err
+	}
+	if !found && req.SessionID != 0 {
+		restored, err := s.restoreLocked(ctx, req.SessionID)
+		if len(restored) == 0 && err != nil {
+			return OpenResult{}, err
+		}
+		if err != nil {
+			slog.WarnContext(ctx, "browser: restore incomplete", "session", req.SessionID, "error", err)
+		}
+		if len(restored) > 0 {
+			if live, err = s.driver.ListWindows(ctx); err != nil {
+				return OpenResult{}, driverErr(err)
+			}
+			target, found = restored[0], true
+			for _, w := range live {
+				if w.ID == target.ID {
+					target = w
+				}
+			}
+		}
 	}
 
 	res := OpenResult{Activated: activated}
@@ -400,7 +433,229 @@ func (s *Service) targetWindow(sessionID uint, live []Window) (Window, bool, err
 func (s *Service) OnAppStart(ctx context.Context) error {
 	go s.followEvents(ctx)
 	go s.placeLoop(ctx)
+	go s.lifecycleLoop(ctx)
 	return nil
+}
+
+func (s *Service) QueueArchive(sessionID uint) {
+	s.enqueue(lifecycleOp{sessionID: sessionID})
+}
+
+func (s *Service) QueueDelete(sessionID uint) {
+	s.enqueue(lifecycleOp{sessionID: sessionID, deleted: true})
+}
+
+func (s *Service) enqueue(op lifecycleOp) {
+	s.lifecycleMu.Lock()
+	s.lifecycle = append(s.lifecycle, op)
+	s.lifecycleMu.Unlock()
+	select {
+	case s.lifecycleCh <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Service) lifecycleLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.lifecycleCh:
+			s.lifecycleMu.Lock()
+			ops := s.lifecycle
+			s.lifecycle = nil
+			s.lifecycleMu.Unlock()
+			for _, op := range ops {
+				if err := s.runLifecycle(ctx, op); err != nil {
+					slog.WarnContext(ctx, "browser: session lifecycle failed", "session", op.sessionID, "deleted", op.deleted, "error", err)
+				}
+			}
+		}
+	}
+}
+
+func (s *Service) runLifecycle(ctx context.Context, op lifecycleOp) error {
+	if op.deleted {
+		return s.Delete(ctx, op.sessionID)
+	}
+	return s.Archive(ctx, op.sessionID)
+}
+
+func (s *Service) Archive(ctx context.Context, sessionID uint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.attached.CompareAndSwap(uint64(sessionID), 0)
+
+	rows, err := s.store.ListOpenBySession(sessionID)
+	if err != nil {
+		return err
+	}
+	live := map[string]Window{}
+	if s.connected.Load() {
+		windows, err := s.driver.ListWindows(ctx)
+		if err != nil {
+			return driverErr(err)
+		}
+		for _, w := range windows {
+			live[w.ID] = w
+		}
+	}
+
+	now := s.now()
+	var errs []error
+	for _, r := range rows {
+		if _, ok := s.removals[r.DriverWindowID]; ok {
+			continue
+		}
+		w, ok := live[r.DriverWindowID]
+		if !ok {
+			errs = append(errs, s.store.MarkSnapshotted(r.ID, r.Tabs, r.SnapshotAt))
+			continue
+		}
+		tabs, at := savedTabs(w), now
+		if len(tabs) == 0 {
+			tabs, at = r.Tabs, r.SnapshotAt
+		}
+		if err := s.store.MarkSnapshotted(r.ID, tabs, at); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		errs = append(errs, s.closeWindow(ctx, w.ID))
+	}
+
+	restorable, err := s.store.ListRestorable(sessionID)
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	for _, r := range restorable {
+		if r.State == WindowMissing {
+			errs = append(errs, s.store.MarkSnapshotted(r.ID, r.Tabs, r.SnapshotAt))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Service) Delete(ctx context.Context, sessionID uint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.attached.CompareAndSwap(uint64(sessionID), 0)
+
+	var errs []error
+	if s.connected.Load() {
+		rows, err := s.store.ListOpenBySession(sessionID)
+		if err != nil {
+			return err
+		}
+		windows, err := s.driver.ListWindows(ctx)
+		if err != nil {
+			return driverErr(err)
+		}
+		live := make(map[string]bool, len(windows))
+		for _, w := range windows {
+			live[w.ID] = true
+		}
+		for _, r := range rows {
+			if live[r.DriverWindowID] {
+				errs = append(errs, s.closeWindow(ctx, r.DriverWindowID))
+			}
+		}
+	}
+	return errors.Join(append(errs, s.store.DeleteBySession(sessionID))...)
+}
+
+func (s *Service) closeWindow(ctx context.Context, windowID string) error {
+	stopTimer(s.snapshots, windowID)
+	s.closing[windowID] = struct{}{}
+	if err := s.driver.CloseWindow(ctx, windowID); err != nil {
+		delete(s.closing, windowID)
+		return driverErr(err)
+	}
+	return nil
+}
+
+func (s *Service) restoreLocked(ctx context.Context, sessionID uint) ([]Window, error) {
+	if !s.connected.Load() {
+		return nil, nil
+	}
+	rows, err := s.store.ListRestorable(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	restoring := s.restoring()
+	var restored []Window
+	var errs []error
+	for _, r := range rows {
+		if restoring && r.State == WindowMissing {
+			continue
+		}
+		w, err := s.restoreRow(ctx, r)
+		if err != nil {
+			return restored, errors.Join(append(errs, driverErr(err))...)
+		}
+		restored = append(restored, w)
+		errs = append(errs, s.activateSaved(ctx, r, w), s.snapshot(ctx, w.ID))
+	}
+	if len(restored) > 0 {
+		s.signal()
+	}
+	return restored, errors.Join(errs...)
+}
+
+func (s *Service) restoreRow(ctx context.Context, r BrowserWindow) (Window, error) {
+	urls := make([]string, 0, len(r.Tabs))
+	for _, t := range r.Tabs {
+		urls = append(urls, t.URL)
+	}
+	if len(urls) == 0 {
+		urls = []string{"chrome://newtab/"}
+	}
+	live, err := s.driver.ListWindows(ctx)
+	if err != nil {
+		return Window{}, err
+	}
+	before, track := s.wmSnapshot(ctx)
+	w, err := s.driver.CreateWindow(ctx, urls, false)
+	if err != nil {
+		return Window{}, err
+	}
+	if err := s.store.Reopen(r.ID, w.ID, r.LastFocusedAt); err != nil {
+		return w, err
+	}
+	if track {
+		s.linkCreated(ctx, w.ID, before, live)
+	}
+	return w, nil
+}
+
+func (s *Service) activateSaved(ctx context.Context, r BrowserWindow, w Window) error {
+	for i, t := range r.Tabs {
+		if t.Active && i < len(w.Tabs) {
+			return driverErr(s.driver.ActivateTab(ctx, w.ID, w.Tabs[i].ID))
+		}
+	}
+	return nil
+}
+
+func (s *Service) restoreAttached(ctx context.Context, attached uint) error {
+	rows, err := s.store.ListOpenBySession(attached)
+	if err != nil {
+		return err
+	}
+	if len(rows) > 0 {
+		live, err := s.driver.ListWindows(ctx)
+		if err != nil {
+			return err
+		}
+		for _, w := range live {
+			for _, r := range rows {
+				if r.DriverWindowID == w.ID {
+					return nil
+				}
+			}
+		}
+	}
+	_, err = s.restoreLocked(ctx, attached)
+	return err
 }
 
 func (s *Service) placeLoop(ctx context.Context) {
@@ -423,10 +678,18 @@ func (s *Service) place(ctx context.Context) error {
 }
 
 func (s *Service) placeLocked(ctx context.Context) error {
-	if !s.connected.Load() || s.wmInert {
+	if !s.connected.Load() {
 		return nil
 	}
 	attached := uint(s.attached.Load())
+	if attached != 0 {
+		if err := s.restoreAttached(ctx, attached); err != nil {
+			slog.WarnContext(ctx, "browser: restore attached session failed", "session", attached, "error", err)
+		}
+	}
+	if s.wmInert {
+		return nil
+	}
 
 	live, err := s.driver.ListWindows(ctx)
 	if err != nil {
@@ -532,6 +795,7 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 		err = s.flushRemovals()
 		stopTimers(s.snapshots)
 		clear(s.deferredAdopt)
+		clear(s.closing)
 	case EventWindowCreated:
 		err = s.adopt(ctx, ev.WindowID)
 	case EventWindowRemoved:
@@ -578,6 +842,10 @@ func (s *Service) windowRemoved(windowID string) error {
 	delete(s.deferredAdopt, windowID)
 	delete(s.daemonUnowned, windowID)
 	stopTimer(s.snapshots, windowID)
+	if _, ok := s.closing[windowID]; ok {
+		delete(s.closing, windowID)
+		return nil
+	}
 	if _, ok := s.removals[windowID]; ok {
 		return nil
 	}
