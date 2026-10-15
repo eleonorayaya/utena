@@ -51,7 +51,7 @@ Links opened from a utena session land in that session's own Chrome window.
 
 1. Run `task extension:install`, then do the one-time Load unpacked step it prints (`chrome://extensions` → Developer mode → Load unpacked). Install it in one Chrome profile only.
 2. `eval "$(utena shell-init)"` sets `BROWSER` to `utena-open` inside tuios, so tools that open links route them through the daemon.
-3. `utena open <url>...` opens links in the current session's window; the TUI's `o` switches to the selected session (if it isn't attached) and opens its PR in that session's window.
+3. `utena open <url>...` opens links in the current session's window; when the browser extension is connected, the TUI's `o` switches to the selected session (if it isn't attached) and opens its PR in that session's window. Otherwise `o` just opens the PR.
 4. If the daemon or extension is unavailable, links fall back to `/usr/bin/open`.
 
 #### Claude Code integration

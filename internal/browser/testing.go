@@ -187,10 +187,11 @@ func (f *FakeDriver) Emit(ev Event) bool {
 }
 
 type FakeSessions struct {
-	mu          sync.Mutex
-	Attached    uint
-	Activated   []uint
-	ActivateErr error
+	mu            sync.Mutex
+	Attached      uint
+	Activated     []uint
+	ActivateErr   error
+	IsAttachedErr error
 }
 
 var _ Sessions = (*FakeSessions)(nil)
@@ -198,6 +199,9 @@ var _ Sessions = (*FakeSessions)(nil)
 func (f *FakeSessions) IsAttached(ctx context.Context, sessionID uint) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.IsAttachedErr != nil {
+		return false, f.IsAttachedErr
+	}
 	return f.Attached == sessionID, nil
 }
 

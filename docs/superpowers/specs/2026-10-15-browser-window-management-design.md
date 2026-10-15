@@ -230,7 +230,7 @@ window's lifetime.
   and `alarms` APIs. A pinned `key` keeps its ID stable. It doesn't depend on
   Chrome-only APIs, so a Firefox build can reuse it with its own manifest and a
   `/browser/firefox` driver.
-- The protocol is JSON over `ws://localhost:3333/browser/chrome`:
+- The protocol is JSON over `ws://127.0.0.1:3333/browser/chrome`:
   - `{"type":"hello","protocol":1,"browser":"chrome"}`
   - `{"type":"req","id":7,"method":"tabs.open","params":{…}}` and
     `{"type":"res","id":7,"result":{…}}` or `"error"`
@@ -344,3 +344,8 @@ Decided during review:
 - Known edge: with `activate`, a driver failure after the session switch cannot fall back, because the TUI popup is already gone; the link is dropped. Accepted.
 - The extension's endpoint is hardcoded to port 3333, so dev daemons on other ports always fall back.
 - The `--browser` flag is deferred until there is a second driver.
+- Root URLs (no path, such as `https://example.com/`) never dedup. Every open of one gets a new tab.
+- Chrome window IDs restart with each browser run. The extension keeps a per-run ID in `chrome.storage.session` and sends it in `hello` as `run`. The daemon persists the last run ID in a single-row `browser_states` table. On `Connected` with a non-empty run that differs from the stored one, every open row becomes `missing` before the usual resync, so a reused window ID never inherits an old owner. `storage.session` is also cleared when the extension is reloaded or updated, which forgets ownership even though Chrome kept its windows. That fails safe. An extension that sends no `run` keeps the old behavior. The protocol version doesn't change.
+- `/browser/open` and `/browser/status` reject any request that carries an `Origin` header with 403. Utena's own clients never send one, and this stops web pages from posting to the daemon. The `/browser/chrome` websocket keeps its `chrome-extension://` origin check instead.
+- An unknown `session_id` falls back to an unowned window, the same as `session_id` 0.
+- Archived sessions can still get a new window. `missing` rows aren't cleaned up until PR 3.

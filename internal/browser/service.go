@@ -8,10 +8,14 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-var ErrUnavailable = errors.New("browser unavailable")
+var (
+	ErrUnavailable     = errors.New("browser unavailable")
+	ErrSessionNotFound = errors.New("browser: session not found")
+)
 
 type Sessions interface {
 	IsAttached(ctx context.Context, sessionID uint) (bool, error)
@@ -47,7 +51,7 @@ type Service struct {
 	now      func() time.Time
 
 	mu                  sync.Mutex
-	connected           bool
+	connected           atomic.Bool
 	lastFocusedWindowID string
 	prevFocusedWindowID string
 	unowned             map[string]struct{}
@@ -67,9 +71,7 @@ func driverErr(err error) error {
 }
 
 func (s *Service) Connected() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.connected
+	return s.connected.Load()
 }
 
 func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error) {
@@ -81,21 +83,25 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 	activated := false
 	if req.SessionID != 0 {
 		attached, err := s.sessions.IsAttached(ctx, req.SessionID)
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrSessionNotFound):
+			req.SessionID = 0
+		case err != nil:
 			return OpenResult{}, err
-		}
-		if req.Activate && !attached {
+		case req.Activate && !attached:
 			if err := s.sessions.Activate(ctx, req.SessionID); err != nil {
 				return OpenResult{}, err
 			}
-			attached, activated = true, true
+			activated = true
+			focus = true
+		default:
+			focus = attached
 		}
-		focus = attached
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.connected {
+	if !s.connected.Load() {
 		return OpenResult{}, ErrUnavailable
 	}
 
@@ -225,10 +231,10 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	var err error
 	switch ev.Type {
 	case EventConnected:
-		s.connected = true
+		s.connected.Store(true)
 		err = errors.Join(s.trackRun(ev.Run), s.resync(ctx))
 	case EventDisconnected:
-		s.connected = false
+		s.connected.Store(false)
 	case EventWindowCreated:
 		err = s.adopt(ev.WindowID)
 	case EventWindowRemoved:

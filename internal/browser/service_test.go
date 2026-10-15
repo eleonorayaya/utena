@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/eleonorayaya/utena/internal/db/testdb"
 	"github.com/stretchr/testify/assert"
@@ -191,4 +192,43 @@ func TestOpen_ReportsActivatedOnlyWhenSwitching(t *testing.T) {
 	res, err = h.svc.Open(context.Background(), OpenRequest{SessionID: 3, URL: prURL})
 	require.NoError(t, err)
 	assert.False(t, res.Activated)
+}
+
+func TestOpen_UnknownSessionFallsBackToUnownedWindow(t *testing.T) {
+	h := newHarness(t)
+	h.sessions.IsAttachedErr = ErrSessionNotFound
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 42, URL: prURL, Activate: true})
+	require.NoError(t, err)
+	assert.True(t, res.Created)
+	assert.True(t, res.Focused)
+	assert.False(t, res.Activated)
+	assert.Empty(t, h.sessions.Activated)
+	rows, err := h.store.ListOpenBySession(42)
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+	_, err = h.store.GetByDriverWindowID(res.WindowID)
+	assert.ErrorIs(t, err, ErrWindowNotFound)
+}
+
+func TestOpen_IsAttachedErrorAborts(t *testing.T) {
+	h := newHarness(t)
+	h.sessions.IsAttachedErr = errors.New("db down")
+	_, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 1, URL: prURL})
+	assert.Error(t, err)
+}
+
+func TestConnected_DoesNotWaitForServiceLock(t *testing.T) {
+	h := newHarness(t)
+	h.svc.mu.Lock()
+	defer h.svc.mu.Unlock()
+
+	done := make(chan bool, 1)
+	go func() { done <- h.svc.Connected() }()
+	select {
+	case connected := <-done:
+		assert.True(t, connected)
+	case <-time.After(time.Second):
+		t.Fatal("Connected blocked on the service lock")
+	}
 }
