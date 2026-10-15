@@ -53,6 +53,21 @@ func TestStore_OwnedDriverWindowIDs(t *testing.T) {
 	assert.Equal(t, map[string]bool{"a": true}, owned)
 }
 
+func TestStore_ListOpen(t *testing.T) {
+	s := newTestStore(t)
+	require.NoError(t, s.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: "a"}))
+	require.NoError(t, s.Add(&BrowserWindow{SessionID: 2, State: WindowOpen, DriverWindowID: "b"}))
+	require.NoError(t, s.Add(&BrowserWindow{SessionID: 3, State: WindowMissing}))
+
+	rows, err := s.ListOpen()
+	require.NoError(t, err)
+	got := map[string]uint{}
+	for _, r := range rows {
+		got[r.DriverWindowID] = r.SessionID
+	}
+	assert.Equal(t, map[string]uint{"a": 1, "b": 2}, got)
+}
+
 func TestStore_DeleteByDriverWindowID(t *testing.T) {
 	s := newTestStore(t)
 	require.NoError(t, s.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: "a"}))

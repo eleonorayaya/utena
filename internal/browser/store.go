@@ -42,6 +42,12 @@ func (s *Store) ListOpenBySession(sessionID uint) ([]BrowserWindow, error) {
 	return rows, err
 }
 
+func (s *Store) ListOpen() ([]BrowserWindow, error) {
+	var rows []BrowserWindow
+	err := s.db.Where("state = ?", WindowOpen).Order("id").Find(&rows).Error
+	return rows, err
+}
+
 func (s *Store) OwnedDriverWindowIDs() (map[string]bool, error) {
 	var rows []BrowserWindow
 	if err := s.db.Where("state = ?", WindowOpen).Find(&rows).Error; err != nil {
