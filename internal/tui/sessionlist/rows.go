@@ -49,5 +49,6 @@ func (m Model) renderRow(s session.Session, selected bool, width int) string {
 		{Spans: []ui.Span{attached}, Width: attachedColW},
 		{Spans: ui.PRCountSpans(ready, draft), Width: prColW},
 		{Spans: []ui.Span{{Text: ui.ShortAgo(s.LastUsedAt), Style: muted}}, Width: timeColW, Align: ui.AlignRight},
+		{Width: gutterColW},
 	}, width, bg)
 }

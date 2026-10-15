@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -173,4 +174,13 @@ func TestList_FilteringHighlightsFirstMatchWhenListStartsWithHeader(t *testing.T
 func TestClamp(t *testing.T) {
 	assert.Equal(t, 5, lipgloss.Width(Clamp(strings.Repeat("x", 20), 5)))
 	assert.Equal(t, "abc", Clamp("abc", 0))
+}
+
+func TestSelectableRow_PadsBothEdgesInsideRow(t *testing.T) {
+	cells := []Cell{{Spans: []Span{{Text: "name"}}}, {Spans: []Span{{Text: "3h"}}, Width: 3, Align: AlignRight}}
+	for _, selected := range []bool{true, false} {
+		row := SelectableRow(cells, selected, 20)
+		assert.Equal(t, 20, lipgloss.Width(row))
+		assert.True(t, strings.HasSuffix(ansi.Strip(row), " 3h  "), "%q", ansi.Strip(row))
+	}
 }

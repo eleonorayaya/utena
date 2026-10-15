@@ -18,7 +18,10 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 )
 
-const splitThreshold = 90
+const (
+	splitThreshold = 90
+	listGutter     = 2
+)
 
 type Model struct {
 	sessions         []session.Session
@@ -408,7 +411,7 @@ func (m Model) renderList(width int) string {
 func (m Model) View() string {
 	listW := m.width
 	if m.isSplit() {
-		listW = m.listWidth()
+		listW = m.listWidth() - listGutter
 	}
 	listStr := m.renderList(listW)
 	if m.picker.IsOpen() {
@@ -420,11 +423,11 @@ func (m Model) View() string {
 		return listStr
 	}
 
-	panelW := m.width - listW - 2
+	panelW := m.width - listW - listGutter - 2
 	divStyle := lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant)
 	divLines := make([]string, h)
 	for i := range divLines {
-		divLines[i] = divStyle.Render("│ ")
+		divLines[i] = strings.Repeat(" ", listGutter) + divStyle.Render("│ ")
 	}
 	divider := strings.Join(divLines, "\n")
 

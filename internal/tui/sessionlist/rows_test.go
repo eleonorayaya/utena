@@ -22,7 +22,7 @@ func TestRenderRow_Columns(t *testing.T) {
 	assert.True(t, strings.HasPrefix(out, "  ✓ checkout-flow-redesign"))
 	assert.Contains(t, out, "◆")
 	assert.Contains(t, out, "●1 ◌1")
-	assert.True(t, strings.HasSuffix(out, " 45m"))
+	assert.True(t, strings.HasSuffix(out, " 45m  "))
 }
 
 func TestRenderRow_SelectedHasGutterBar(t *testing.T) {

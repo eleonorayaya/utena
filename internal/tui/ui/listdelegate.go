@@ -57,5 +57,6 @@ func SelectableRow(cells []Cell, selected bool, width int) string {
 		gutter = Span{Text: "▌ ", Style: fg(theme.Current.Primary)}
 	}
 	all := append([]Cell{{Spans: []Span{gutter}, Width: GutterWidth}}, cells...)
+	all = append(all, Cell{Width: GutterWidth})
 	return Row(all, width, bg)
 }

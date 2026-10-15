@@ -7,6 +7,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
@@ -279,4 +282,23 @@ func TestSessionList_ViewFitsHeightWithBlockedHeaderMidWindow(t *testing.T) {
 	}
 	m.rebuildFiltered()
 	assert.LessOrEqual(t, strings.Count(m.View(), "\n")+1, m.height)
+}
+
+func TestSplitView_ListHasGutterBeforeDivider(t *testing.T) {
+	a, b := withClaude(1, "a", claude.StatusReadyForReview), withClaude(2, "b", claude.StatusWorking)
+	a.LastUsedAt = time.Now().Add(-3 * time.Hour)
+	b.LastUsedAt = time.Now().Add(-20 * time.Minute)
+	m := listWith(t, a, b)
+	listW := m.listWidth()
+	for i, line := range strings.Split(ansi.Strip(m.View()), "\n") {
+		cols := []rune(line)
+		require.Greater(t, len(cols), listW+2, "line %d", i)
+		assert.Equal(t, "  │", string(cols[listW-2:listW+1]), "line %d: %q", i, line)
+	}
+	for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
+		if cols := []rune(l); strings.Contains(l, "3h") || strings.Contains(l, "20m") {
+			assert.Equal(t, "    │", string(cols[listW-4:listW+1]), "%q", l)
+		}
+	}
+	assert.Equal(t, 120, lipgloss.Width(strings.Split(m.View(), "\n")[0]))
 }
