@@ -176,7 +176,7 @@ Commit: `feat(browser): link browser windows to window-manager windows`
 
 **State:**
 - `attached`, an `atomic.Uint64`, **not** guarded by `s.mu`: `Open` can hold `s.mu` for seconds, and `SetAttached` must never wait on it. Seed it when connected: in `resync`, if `attached == 0`, ask `Sessions.Attached(ctx)` and store it with `CompareAndSwap(0, id)`, so a concurrent `SetAttached` wins. `Sessions.Attached` is backed by `SessionService.AttachedSessionID`, a store query that selects only the attached session's ID.
-- Add `Attached(ctx) (uint, error)` to the `Sessions` interface. It returns the currently attached session ID, or 0. Implement it in `internal/api/browsersessions.go` by listing sessions and finding the one with `IsAttached`; check `SessionService` for an existing helper first. Add it to `FakeSessions`, backed by the existing `Attached` field.
+- Add `Attached(ctx) (uint, error)` to the `Sessions` interface. It returns the currently attached session ID, or 0. Implement it in `internal/api/browsersessions.go` with `SessionService.AttachedSessionID`, a narrow store query (most recently used attached session). Add it to `FakeSessions`, backed by the `AttachedID` field.
 - `linker` (Task 5).
 - `swapCh chan struct{}`, a 1-slot channel.
 

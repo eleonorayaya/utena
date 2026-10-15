@@ -226,7 +226,7 @@ func sessionConflictMessage(session *Session) string {
 
 func (s *SessionStore) AttachedID() (uint, error) {
 	var ids []uint
-	if err := s.db.Model(&Session{}).Where("is_attached = ?", true).Order("id").Limit(1).Pluck("id", &ids).Error; err != nil {
+	if err := s.db.Model(&Session{}).Where("is_attached = ?", true).Order("last_used_at DESC").Limit(1).Pluck("id", &ids).Error; err != nil {
 		return 0, err
 	}
 	if len(ids) == 0 {
