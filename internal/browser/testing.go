@@ -57,6 +57,7 @@ func (f *FakeDriver) Window(id string) (Window, bool) {
 	defer f.mu.Unlock()
 	for _, w := range f.windows {
 		if w.ID == id {
+			w.Tabs = append([]Tab(nil), w.Tabs...)
 			return w, true
 		}
 	}
@@ -90,6 +91,7 @@ func (f *FakeDriver) CreateWindow(ctx context.Context, urls []string, focused bo
 	if focused {
 		f.focused = append(f.focused, w.ID)
 	}
+	w.Tabs = append([]Tab(nil), w.Tabs...)
 	return w, nil
 }
 
@@ -160,6 +162,8 @@ type FakeSessions struct {
 	Activated   []uint
 	ActivateErr error
 }
+
+var _ Sessions = (*FakeSessions)(nil)
 
 func (f *FakeSessions) IsAttached(ctx context.Context, sessionID uint) (bool, error) {
 	f.mu.Lock()
