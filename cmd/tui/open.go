@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/eleonorayaya/utena/internal/browser"
+	"github.com/eleonorayaya/utena/internal/session"
 )
 
 const browserAlias = "utena-open"
@@ -25,7 +25,7 @@ func openCmd() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
-			base := fmt.Sprintf("http://127.0.0.1:%s", port)
+			base := daemonURL(port)
 			sessionID := sessionIDFromEnv()
 			for _, u := range args {
 				if err := openURL(cmd.Context(), base, sessionID, u, systemOpen); err != nil {
@@ -52,7 +52,7 @@ func systemOpen(url string) error {
 }
 
 func sessionIDFromEnv() uint {
-	id, err := strconv.ParseUint(os.Getenv("UTENA_SESSION_ID"), 10, 64)
+	id, err := strconv.ParseUint(os.Getenv(session.EnvSessionID), 10, 64)
 	if err != nil {
 		return 0
 	}

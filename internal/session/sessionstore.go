@@ -98,6 +98,17 @@ func (s *SessionStore) GetByID(id uint) (*Session, error) {
 	return &session, nil
 }
 
+func (s *SessionStore) IsAttached(id uint) (bool, error) {
+	var session Session
+	if err := s.db.Model(&Session{}).Select("is_attached").First(&session, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, ErrSessionNotFound
+		}
+		return false, err
+	}
+	return session.IsAttached, nil
+}
+
 func (s *SessionStore) List(statuses ...SessionStatus) ([]Session, error) {
 	var sessions []Session
 	q := s.loaded()

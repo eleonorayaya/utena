@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -633,12 +632,7 @@ func (c *client) openURL(sessionID uint, link string) tea.Cmd {
 		res, err := browser.RequestOpen(ctx, http.DefaultClient, c.baseURL+"/browser", req)
 		if err != nil {
 			log.Printf("[WARN] browser open via daemon failed, falling back: %v", err)
-			cmd := exec.Command("/usr/bin/open", link)
-			if err := cmd.Start(); err != nil {
-				return ui.OpenURLFailedMsg{Err: err}
-			}
-			go cmd.Wait()
-			return nil
+			return ui.OpenURL(link)()
 		}
 		if res.Activated {
 			return SessionSwitchedMsg{}

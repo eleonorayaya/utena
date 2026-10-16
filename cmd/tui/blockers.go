@@ -126,7 +126,7 @@ func sessionsBlockCmd() *cobra.Command {
 				return err
 			}
 			return blockerRequest(http.MethodPost,
-				fmt.Sprintf("http://127.0.0.1:%s/sessions/%d/blockers", port, sess.ID),
+				fmt.Sprintf("%s/sessions/%d/blockers", daemonURL(port), sess.ID),
 				session.AddBlockerRequest{Kind: session.BlockerKind(kind), Note: note, URL: url})
 		},
 	}
@@ -213,7 +213,7 @@ func sessionsUnblockCmd() *cobra.Command {
 
 			for _, id := range ids {
 				if err := blockerRequest(http.MethodPut,
-					fmt.Sprintf("http://127.0.0.1:%s/sessions/%d/blockers/%d/resolve", port, sess.ID, id), nil); err != nil {
+					fmt.Sprintf("%s/sessions/%d/blockers/%d/resolve", daemonURL(port), sess.ID, id), nil); err != nil {
 					return err
 				}
 			}

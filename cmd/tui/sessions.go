@@ -69,7 +69,7 @@ func filterSessions(sessions []session.Session, all bool) []session.Session {
 func fetchSessions(port string) ([]session.Session, error) {
 	resp, err := fetchSessionListResponse(port, 10*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("could not reach utena daemon at http://127.0.0.1:%s/sessions (is it running?): %w", port, err)
+		return nil, fmt.Errorf("could not reach utena daemon at %s/sessions (is it running?): %w", daemonURL(port), err)
 	}
 
 	sessions := make([]session.Session, len(resp.Sessions))
@@ -84,7 +84,7 @@ func fetchSessionListResponse(port string, timeout time.Duration) (*session.Sess
 }
 
 func getJSON[T any](port, path string, timeout time.Duration) (*T, error) {
-	url := fmt.Sprintf("http://127.0.0.1:%s%s", port, path)
+	url := daemonURL(port) + path
 	client := &http.Client{Timeout: timeout}
 	res, err := client.Get(url)
 	if err != nil {
@@ -102,4 +102,8 @@ func getJSON[T any](port, path string, timeout time.Duration) (*T, error) {
 		return nil, err
 	}
 	return &out, nil
+}
+
+func daemonURL(port string) string {
+	return "http://127.0.0.1:" + port
 }

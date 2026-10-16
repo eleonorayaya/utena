@@ -285,6 +285,10 @@ func (s *SessionService) GetSession(ctx context.Context, id uint) (*Session, err
 	return sess, nil
 }
 
+func (s *SessionService) IsAttached(id uint) (bool, error) {
+	return s.store.IsAttached(id)
+}
+
 func (s *SessionService) findSessionByMuxName(muxName string) (*Session, error) {
 	ts, err := s.muxService.GetSessionByName(muxName)
 	if err != nil {

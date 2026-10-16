@@ -15,14 +15,11 @@ type browserSessions struct {
 var _ browser.Sessions = browserSessions{}
 
 func (b browserSessions) IsAttached(ctx context.Context, sessionID uint) (bool, error) {
-	s, err := b.sessions.GetSession(ctx, sessionID)
+	attached, err := b.sessions.IsAttached(sessionID)
 	if errors.Is(err, session.ErrSessionNotFound) {
 		return false, browser.ErrSessionNotFound
 	}
-	if err != nil {
-		return false, err
-	}
-	return s.IsAttached, nil
+	return attached, err
 }
 
 func (b browserSessions) Activate(ctx context.Context, sessionID uint) error {
