@@ -69,6 +69,10 @@ func (d *Driver) Outdated() bool {
 	return d.outdated.Load()
 }
 
+func (d *Driver) UpdateHint() string {
+	return "reload it in chrome://extensions"
+}
+
 func (d *Driver) AppBundleID() string {
 	return "com.google.Chrome"
 }

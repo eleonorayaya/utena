@@ -14,6 +14,7 @@ const (
 	CategoryNotFound ErrorCategory = iota
 	CategoryInvalidRequest
 	CategoryConflict
+	CategoryUnavailable
 )
 
 type AppError struct {
@@ -47,6 +48,10 @@ func NewInvalidRequest(msg string) *AppError {
 
 func NewConflict(msg string) *AppError {
 	return &AppError{Category: CategoryConflict, Message: msg}
+}
+
+func NewUnavailable(msg string) *AppError {
+	return &AppError{Category: CategoryUnavailable, Message: msg}
 }
 
 func WrapNotFound(msg string, err error) *AppError {
@@ -90,6 +95,9 @@ func RenderError(w http.ResponseWriter, r *http.Request, err error) {
 		case CategoryConflict:
 			statusCode = http.StatusConflict
 			statusText = "Conflict."
+		case CategoryUnavailable:
+			statusCode = http.StatusServiceUnavailable
+			statusText = "Service unavailable."
 		default:
 			statusCode = http.StatusInternalServerError
 			statusText = "Internal server error."

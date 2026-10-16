@@ -37,6 +37,10 @@ func (f *FakeDriver) Outdated() bool {
 	return f.outdated.Load()
 }
 
+func (f *FakeDriver) UpdateHint() string {
+	return "reload the fake extension"
+}
+
 func NewFakeDriver() *FakeDriver {
 	return &FakeDriver{}
 }

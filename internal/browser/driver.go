@@ -22,6 +22,7 @@ type Driver interface {
 
 type StatusReporter interface {
 	Outdated() bool
+	UpdateHint() string
 }
 
 type HTTPDriver interface {

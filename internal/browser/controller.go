@@ -2,7 +2,6 @@ package browser
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"time"
 
@@ -29,10 +28,6 @@ func (c *Controller) HandleOpen(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	res, err := c.service.Open(ctx, *req)
-	if errors.Is(err, ErrUnavailable) {
-		renderUnavailable(w, r, err)
-		return
-	}
 	if err != nil {
 		common.RenderError(w, r, err)
 		return
@@ -59,18 +54,9 @@ func (c *Controller) HandleFocus(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	res, err := c.service.FocusTab(ctx, *req)
-	if errors.Is(err, ErrUnavailable) {
-		renderUnavailable(w, r, err)
-		return
-	}
 	if err != nil {
 		common.RenderError(w, r, err)
 		return
 	}
 	render.JSON(w, r, res)
-}
-
-func renderUnavailable(w http.ResponseWriter, r *http.Request, err error) {
-	render.Status(r, http.StatusServiceUnavailable)
-	render.JSON(w, r, map[string]string{"error": err.Error()})
 }

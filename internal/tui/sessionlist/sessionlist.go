@@ -22,7 +22,7 @@ import (
 const (
 	splitThreshold  = 90
 	listGutter      = 2
-	outdatedWarning = "browser extension outdated — reload it in chrome://extensions"
+	outdatedWarning = "browser extension outdated"
 )
 
 type Model struct {
@@ -100,7 +100,11 @@ func (m Model) Status() ui.Status {
 		return ui.Status{Text: "↑/↓ choose · enter open · esc cancel", Kind: ui.StatusInfo}
 	}
 	if m.statusMsg == "" && m.browserState.Outdated {
-		return ui.Status{Text: outdatedWarning, Kind: ui.StatusWarning}
+		text := outdatedWarning
+		if m.browserState.UpdateHint != "" {
+			text += " — " + m.browserState.UpdateHint
+		}
+		return ui.Status{Text: text, Kind: ui.StatusWarning}
 	}
 	return ui.Status{Text: m.statusMsg, Kind: m.statusKind}
 }

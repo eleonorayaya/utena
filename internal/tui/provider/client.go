@@ -661,28 +661,9 @@ func (c *client) focusTab(sessionID uint, windowID, tabID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		body, err := json.Marshal(browser.FocusRequest{SessionID: sessionID, WindowID: windowID, TabID: tabID})
-		if err != nil {
-			return browserFocusFailedMsg{err}
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/browser/focus", bytes.NewReader(body))
-		if err != nil {
-			return browserFocusFailedMsg{err}
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		res, err := http.DefaultClient.Do(req)
+		out, err := browser.RequestFocus(ctx, http.DefaultClient, c.baseURL+"/browser", browser.FocusRequest{SessionID: sessionID, WindowID: windowID, TabID: tabID})
 		if err != nil {
 			log.Printf("[ERROR] focus tab %s/%s: %v", windowID, tabID, err)
-			return browserFocusFailedMsg{err}
-		}
-		defer res.Body.Close()
-
-		if res.StatusCode != http.StatusOK {
-			return browserFocusFailedMsg{parseAPIError(res, "focus tab").Err}
-		}
-		var out browser.FocusResult
-		if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 			return browserFocusFailedMsg{err}
 		}
 		if out.Activated {

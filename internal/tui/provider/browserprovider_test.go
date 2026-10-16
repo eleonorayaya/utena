@@ -82,7 +82,9 @@ func TestFocusTab_ErrorReturnsErrMsg(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "browser unavailable"})
 	})
-	assert.Equal(t, browserFocusFailedMsg{err: errors.New("browser unavailable")}, newClient(srv.URL).focusTab(7, "w1", "t1")())
+	msg, ok := newClient(srv.URL).focusTab(7, "w1", "t1")().(browserFocusFailedMsg)
+	require.True(t, ok)
+	assert.ErrorIs(t, msg.err, browser.ErrUnavailable)
 }
 
 func TestBrowserProvider_FailedFocusRefetchesAndReportsError(t *testing.T) {

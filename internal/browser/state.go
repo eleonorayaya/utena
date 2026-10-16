@@ -14,9 +14,10 @@ import (
 const liveStateTimeout = time.Second
 
 type SessionsView struct {
-	Connected bool                    `json:"connected"`
-	Outdated  bool                    `json:"outdated"`
-	Sessions  map[uint]SessionBrowser `json:"sessions"`
+	Connected  bool                    `json:"connected"`
+	Outdated   bool                    `json:"outdated"`
+	UpdateHint string                  `json:"update_hint,omitempty"`
+	Sessions   map[uint]SessionBrowser `json:"sessions"`
 }
 
 type SessionBrowser struct {
@@ -69,6 +70,13 @@ func (s *Service) Outdated() bool {
 	return ok && r.Outdated()
 }
 
+func (s *Service) updateHint() string {
+	if r, ok := s.driver.(StatusReporter); ok && r.Outdated() {
+		return r.UpdateHint()
+	}
+	return ""
+}
+
 func stateRank(state WindowState) int {
 	switch state {
 	case WindowOpen:
@@ -82,7 +90,7 @@ func stateRank(state WindowState) int {
 }
 
 func (s *Service) BrowserSessions(ctx context.Context) SessionsView {
-	view := SessionsView{Connected: s.Connected(), Outdated: s.Outdated(), Sessions: map[uint]SessionBrowser{}}
+	view := SessionsView{Connected: s.Connected(), Outdated: s.Outdated(), UpdateHint: s.updateHint(), Sessions: map[uint]SessionBrowser{}}
 	rows, err := s.store.ListAll()
 	if err != nil {
 		slog.WarnContext(ctx, "browser: list windows for state failed", "error", err)

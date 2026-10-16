@@ -11,11 +11,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/wm"
 )
 
 var (
-	ErrUnavailable     = errors.New("browser unavailable")
+	ErrUnavailable     = common.NewUnavailable("browser unavailable")
 	ErrSessionNotFound = errors.New("browser: session not found")
 )
 

@@ -306,7 +306,7 @@ func TestSplitView_ListHasGutterBeforeDivider(t *testing.T) {
 }
 
 func outdatedState() provider.BrowserStateUpdatedMsg {
-	return provider.BrowserStateUpdatedMsg{State: browser.SessionsView{Outdated: true, Sessions: map[uint]browser.SessionBrowser{}}}
+	return provider.BrowserStateUpdatedMsg{State: browser.SessionsView{Outdated: true, UpdateHint: "reload it in chrome://extensions", Sessions: map[uint]browser.SessionBrowser{}}}
 }
 
 func TestSessionList_OutdatedExtensionWarning(t *testing.T) {
