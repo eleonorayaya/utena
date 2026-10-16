@@ -76,6 +76,7 @@ type Service struct {
 	run                 string
 	runLoaded           bool
 	links               linker
+	placedFor           uint
 }
 
 func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driver, layout Layout) *Service {
@@ -147,10 +148,8 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 			focus = attached
 		}
 	}
-	placeFirst := activated
 	if focus && req.SessionID != 0 && uint(s.attached.Load()) != req.SessionID {
 		s.SetAttached(req.SessionID)
-		placeFirst = true
 	}
 
 	s.mu.Lock()
@@ -201,12 +200,8 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 			res.TabID = w.Tabs[0].ID
 		}
 	default:
-		if placeFirst {
-			if err := s.placeLocked(ctx); err != nil {
-				slog.WarnContext(ctx, "browser: placement before focus failed", "error", err)
-			}
-		}
 		if focus {
+			s.ensurePlacedLocked(ctx)
 			wmTarget, wmFound = s.wmFocusTarget(ctx, func(wmWindows []wm.Window) (string, bool) {
 				wmID, ok := s.links.resolve(live, s.driver.WindowTitle, wmWindows, []string{target.ID})[target.ID]
 				return wmID, ok
@@ -442,7 +437,17 @@ func (s *Service) placeLocked(ctx context.Context) error {
 			slog.WarnContext(ctx, "browser: move window failed", "window", r.DriverWindowID, "wm_window", wmID, "workspace", target, "error", err)
 		}
 	}
+	s.placedFor = attached
 	return nil
+}
+
+func (s *Service) ensurePlacedLocked(ctx context.Context) {
+	if s.placedFor == uint(s.attached.Load()) {
+		return
+	}
+	if err := s.placeLocked(ctx); err != nil {
+		slog.WarnContext(ctx, "browser: placement before focus failed", "error", err)
+	}
 }
 
 func (s *Service) OnAppEnd(ctx context.Context) error {

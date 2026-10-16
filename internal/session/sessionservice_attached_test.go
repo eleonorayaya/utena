@@ -9,15 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func recordSessionAttached(service *SessionService) func() []eventbus.SessionAttachedEvent {
-	var got []eventbus.SessionAttachedEvent
+func recordSessionAttached(service *SessionService) func() []eventbus.SessionIDEvent {
+	var got []eventbus.SessionIDEvent
 	service.eventBus.Subscribe(eventbus.SessionAttached, func(_ context.Context, event eventbus.Event) error {
-		if data, ok := event.Data.(eventbus.SessionAttachedEvent); ok {
+		if data, ok := event.Data.(eventbus.SessionIDEvent); ok {
 			got = append(got, data)
 		}
 		return nil
 	})
-	return func() []eventbus.SessionAttachedEvent { return got }
+	return func() []eventbus.SessionIDEvent { return got }
 }
 
 func addAttachableSession(t *testing.T, service *SessionService, store *SessionStore, wsID uint, name string) *Session {
@@ -42,7 +42,7 @@ func TestSessionService_ClientSessionChanged_PublishesSessionAttached(t *testing
 	})
 	require.NoError(t, err)
 
-	require.Equal(t, []eventbus.SessionAttachedEvent{{SessionID: sess.ID}}, got())
+	require.Equal(t, []eventbus.SessionIDEvent{{SessionID: sess.ID}}, got())
 }
 
 func TestSessionService_ClientAttached_PublishesSessionAttached(t *testing.T) {
@@ -56,7 +56,7 @@ func TestSessionService_ClientAttached_PublishesSessionAttached(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.Equal(t, []eventbus.SessionAttachedEvent{{SessionID: sess.ID}}, got())
+	require.Equal(t, []eventbus.SessionIDEvent{{SessionID: sess.ID}}, got())
 }
 
 func TestSessionService_ClientHooks_UnknownSessionPublishesNothing(t *testing.T) {
@@ -80,7 +80,7 @@ func TestSessionService_ActivateSession_PublishesSessionAttached(t *testing.T) {
 	_, err := service.ActivateSession(context.Background(), sess.ID)
 	require.NoError(t, err)
 
-	require.Equal(t, []eventbus.SessionAttachedEvent{{SessionID: sess.ID}}, got())
+	require.Equal(t, []eventbus.SessionIDEvent{{SessionID: sess.ID}}, got())
 }
 
 func TestSessionService_ActivateSession_AlreadyAttachedPublishesNothing(t *testing.T) {

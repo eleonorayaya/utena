@@ -21,7 +21,7 @@ type SessionActivatedEvent struct {
 	SessionName string
 }
 
-type SessionAttachedEvent struct {
+type SessionIDEvent struct {
 	SessionID uint
 }
 

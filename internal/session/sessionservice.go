@@ -1490,7 +1490,7 @@ func (s *SessionService) handleMuxClientAttached(ctx context.Context, event even
 func (s *SessionService) publishSessionAttached(ctx context.Context, sessionID uint) {
 	if err := s.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionAttached,
-		Data: eventbus.SessionAttachedEvent{SessionID: sessionID},
+		Data: eventbus.SessionIDEvent{SessionID: sessionID},
 	}); err != nil {
 		slog.Warn("failed to publish session attached event", "session", sessionID, "error", err)
 	}

@@ -313,11 +313,11 @@ func TestTabsChanged_SignalsOnlyForOwnedUnlinkedWindows(t *testing.T) {
 	assert.Empty(t, h.svc.swapCh)
 }
 
-func TestModule_SessionAttachedEventSetsAttached(t *testing.T) {
+func TestModule_SessionIDEventSetsAttached(t *testing.T) {
 	bus := eventbus.NewEventBus()
 	m := NewModule(NewFakeDriver(), &FakeSessions{}, wm.NewFakeDriver(), Layout{BrowserWorkspace: "2", ParkWorkspace: "P"}, bus, testdb.New(t, &BrowserWindow{}, &BrowserState{}))
 
-	require.NoError(t, bus.Publish(context.Background(), eventbus.Event{Type: eventbus.SessionAttached, Data: eventbus.SessionAttachedEvent{SessionID: 7}}))
+	require.NoError(t, bus.Publish(context.Background(), eventbus.Event{Type: eventbus.SessionAttached, Data: eventbus.SessionIDEvent{SessionID: 7}}))
 
 	assert.Equal(t, uint64(7), m.Service.attached.Load())
 	assert.Len(t, m.Service.swapCh, 1)
