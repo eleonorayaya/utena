@@ -1,4 +1,4 @@
-package chrome
+package webext
 
 import (
 	"encoding/json"

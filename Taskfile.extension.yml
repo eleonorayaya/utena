@@ -2,11 +2,43 @@ version: '3'
 
 vars:
   EXTENSION_DIR: '{{.HOME}}/.local/share/utena/chrome-extension'
+  FIREFOX_DIR: '{{.HOME}}/.local/share/utena/firefox-extension'
+  FIREFOX_DIST: '{{.HOME}}/.local/share/utena/firefox-dist'
+  WEB_EXT: npx --yes web-ext@10.8.0
 
 tasks:
   install:
     desc: Copy the Chrome extension to a stable path for "Load unpacked"
     cmds:
       - mkdir -p {{shellQuote .EXTENSION_DIR}}
-      - cp extension/chrome/manifest.json extension/chrome/background.js {{shellQuote .EXTENSION_DIR}}/
+      - cp extension/chrome/manifest.json extension/background.js {{shellQuote .EXTENSION_DIR}}/
       - echo "Reload the utena extension in chrome://extensions (first time{{":"}} Developer mode → Load unpacked → {{.EXTENSION_DIR}})"
+
+  firefox:stage:
+    internal: true
+    cmds:
+      - rm -rf {{shellQuote .FIREFOX_DIR}}
+      - mkdir -p {{shellQuote .FIREFOX_DIR}}
+      - cp extension/firefox/manifest.json extension/background.js {{shellQuote .FIREFOX_DIR}}/
+
+  firefox:lint:
+    desc: Lint the Firefox extension with web-ext
+    cmds:
+      - task: firefox:stage
+      - '{{.WEB_EXT}} lint --source-dir {{shellQuote .FIREFOX_DIR}}'
+
+  firefox:sign:
+    desc: Sign the Firefox extension as an unlisted AMO add-on (needs WEB_EXT_API_KEY and WEB_EXT_API_SECRET)
+    preconditions:
+      - sh: '[ -n "$WEB_EXT_API_KEY" ] && [ -n "$WEB_EXT_API_SECRET" ]'
+        msg: 'Set WEB_EXT_API_KEY and WEB_EXT_API_SECRET to your addons.mozilla.org API credentials (https://addons.mozilla.org/developers/addon/api/key/)'
+    cmds:
+      - task: firefox:stage
+      - mkdir -p {{shellQuote .FIREFOX_DIST}}
+      - '{{.WEB_EXT}} sign --channel unlisted --source-dir {{shellQuote .FIREFOX_DIR}} --artifacts-dir {{shellQuote .FIREFOX_DIST}}'
+      - task: firefox:install
+
+  firefox:install:
+    desc: Open the newest signed Firefox extension in Firefox to install it
+    cmds:
+      - open -a Firefox "$(ls -t {{shellQuote .FIREFOX_DIST}}/*.xpi | head -1)"

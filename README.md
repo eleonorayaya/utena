@@ -47,32 +47,40 @@ This sets up environment variables needed for utena integrations (like Claude Co
 
 #### Browser windows
 
-Links opened from a utena session land in that session's own Chrome window.
+Links opened from a utena session land in that session's own browser window. The daemon drives one browser, Chrome or Firefox:
 
-1. Run `task extension:install`, then do the one-time Load unpacked step it prints (`chrome://extensions` → Developer mode → Load unpacked). Install it in one Chrome profile only.
+| Flag | Env | Default | |
+|---|---|---|---|
+| `--browser` | `UTENA_BROWSER` | `chrome` | `chrome` or `firefox` |
+
+Without the flag, the daemon reads the default from `~/.config/utena/daemon.json` (`{"browser": "firefox"}`); the env var overrides both. The dotfiles personal profile writes that file. Restart the daemon after changing it.
+
+1. Install the extension in one browser profile only.
+   - **Chrome:** run `task extension:install`, then do the one-time Load unpacked step it prints (`chrome://extensions` → Developer mode → Load unpacked).
+   - **Firefox:** release Firefox only keeps signed add-ons, so the extension is signed as an unlisted add-on on addons.mozilla.org. Create API credentials at https://addons.mozilla.org/developers/addon/api/key/, export them as `WEB_EXT_API_KEY` and `WEB_EXT_API_SECRET`, and run `task extension:firefox:sign`. It signs the extension (Mozilla's automated review takes a few minutes) and opens the `.xpi` in Firefox to install. Bump the version in `extension/firefox/manifest.json` before signing a changed extension; AMO won't sign a version twice. `task extension:firefox:lint` checks it without signing.
 2. `eval "$(utena shell-init)"` sets `BROWSER` to `utena-open` inside tuios, so tools that open links route them through the daemon.
 3. `utena open <url>...` opens links in the current session's window; when the browser extension is connected, the TUI's `o` switches to the selected session (if it isn't attached) and opens its PR in that session's window. Otherwise `o` just opens the PR.
 4. If the daemon or extension is unavailable, links fall back to `/usr/bin/open`.
 
-After upgrading utena, reload the extension in `chrome://extensions`. The extension now speaks protocol 2, and the daemon reports an older one as outdated.
+After upgrading utena, reload the Chrome extension in `chrome://extensions`, or sign and install the new Firefox build. The extension speaks protocol 2, and the daemon reports an older one as outdated.
 
 Session windows outlive the session's time in the foreground:
 
 - **Archiving** a session saves its windows' tabs and closes the windows. **Reactivating** it brings them back with the same tabs and the same active tab (pinned tabs come back unpinned).
 - **Closing a window by hand** forgets it; it won't come back.
-- **Quitting Chrome** keeps the windows. When Chrome restarts and restores its windows, utena reattaches them to their sessions by matching their tabs. Windows it can't match are restored from their saved tabs the next time the session is attached or a link is opened for it.
+- **Quitting the browser** keeps the windows. When it restarts and restores its windows, utena reattaches them to their sessions by matching their tabs. Windows it can't match are restored from their saved tabs the next time the session is attached or a link is opened for it.
 - **Deleting** a session closes its windows.
 
 The TUI shows each session's browser windows:
 
-- **Session list:** a `◫` next to the attached marker means the session has browser windows. It is blue when a window is open, and muted when the windows are only saved (Chrome quit, or the session was archived).
+- **Session list:** a `◫` next to the attached marker means the session has browser windows. It is blue when a window is open, and muted when the windows are only saved (the browser quit, or the session was archived).
 - **Session detail:** a **Browser** section, after Workspaces, shows the tab count and the best window state, then one line per tab (`●` marks a window's active tab), grouped under `window N` when there is more than one window. Saved tabs are muted.
 - **Opening a tab:** `↓`/`j` moves from blockers into the open windows' tabs. `enter` on a tab activates it and focuses its window, switching to the session first if it isn't attached (the TUI then closes, as with `o`). With nothing selected, `enter` still switches to the session. Saved tabs can't be selected.
-- **Outdated extension:** when an extension with an older protocol tries to connect and none is connected, the session list footer shows "browser extension outdated — reload it in chrome://extensions" until a current extension connects.
+- **Outdated extension:** when an extension with an older protocol tries to connect and none is connected, the session list footer shows "browser extension outdated", followed by the driver's fix (Chrome: "reload it in chrome://extensions"), until a current extension connects.
 
-Limitations: tab changes made in the last ~2 seconds before quitting Chrome may not be saved. Archiving while the extension is disconnected saves the last known tabs and closes the windows when the extension reconnects; if Chrome restarts first, the windows Chrome restores stay open as personal windows and reactivating the session opens new copies.
+Limitations: tab changes made in the last ~2 seconds before quitting the browser may not be saved. Archiving while the extension is disconnected saves the last known tabs and closes the windows when the extension reconnects; if the browser restarts first, the windows it restores stay open as personal windows and reactivating the session opens new copies.
 
-With [AeroSpace](https://github.com/nikitabobko/AeroSpace), the daemon also parks windows: the attached session's Chrome windows sit on the browser workspace, and every other session's windows are moved to the park workspace. When you switch sessions, the windows swap quietly. Swapping never changes focus, and Chrome windows no session owns are never moved. Opening a link from the attached session (or from outside any session) focuses its window through AeroSpace, which switches to that window's workspace; links from background sessions open without changing focus. A window created for a background session may flash on the browser workspace for a moment before it is parked. A window that can't be matched to an AeroSpace window unambiguously stays where it is until a later tab change or swap resolves it.
+With [AeroSpace](https://github.com/nikitabobko/AeroSpace), the daemon also parks windows: the attached session's browser windows sit on the browser workspace, and every other session's windows are moved to the park workspace. When you switch sessions, the windows swap quietly. Swapping never changes focus, and browser windows no session owns are never moved. Opening a link from the attached session (or from outside any session) focuses its window through AeroSpace, which switches to that window's workspace; links from background sessions open without changing focus. A window created for a background session may flash on the browser workspace for a moment before it is parked. A window that can't be matched to an AeroSpace window unambiguously stays where it is until a later tab change or swap resolves it.
 
 | Flag | Env | Default | |
 |---|---|---|---|

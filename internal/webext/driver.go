@@ -1,4 +1,4 @@
-package chrome
+package webext
 
 import (
 	"context"
@@ -17,7 +17,16 @@ import (
 	"github.com/eleonorayaya/utena/internal/browser"
 )
 
+type Browser struct {
+	Name         string
+	BundleID     string
+	OriginScheme string
+	UpdateHint   string
+	TitleSuffix  string
+}
+
 type Driver struct {
+	browser      Browser
 	mu           sync.Mutex
 	conn         *conn
 	generation   uint64
@@ -52,8 +61,9 @@ type conn struct {
 	pending map[int64]chan message
 }
 
-func NewDriver() *Driver {
+func NewDriver(b Browser) *Driver {
 	return &Driver{
+		browser:      b,
 		events:       make(chan queuedEvent, 256),
 		queuedTabs:   map[queuedEvent]struct{}{},
 		stateChanged: make(chan struct{}, 1),
@@ -62,7 +72,7 @@ func NewDriver() *Driver {
 }
 
 func (d *Driver) Name() string {
-	return "chrome"
+	return d.browser.Name
 }
 
 func (d *Driver) Outdated() bool {
@@ -70,11 +80,11 @@ func (d *Driver) Outdated() bool {
 }
 
 func (d *Driver) UpdateHint() string {
-	return "reload it in chrome://extensions"
+	return d.browser.UpdateHint
 }
 
 func (d *Driver) AppBundleID() string {
-	return "com.google.Chrome"
+	return d.browser.BundleID
 }
 
 func (d *Driver) WindowTitle(w browser.Window) string {
@@ -82,7 +92,7 @@ func (d *Driver) WindowTitle(w browser.Window) string {
 	if !ok || t.Title == "" {
 		return ""
 	}
-	return t.Title + " - Google Chrome"
+	return t.Title + d.browser.TitleSuffix
 }
 
 func (d *Driver) Handler() http.Handler {
@@ -90,25 +100,25 @@ func (d *Driver) Handler() http.Handler {
 }
 
 func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
-	if !strings.HasPrefix(r.Header.Get("Origin"), "chrome-extension://") {
+	if !strings.HasPrefix(r.Header.Get("Origin"), d.browser.OriginScheme) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
-		slog.Warn("chrome: accept websocket failed", "error", err)
+		slog.Warn("browser extension: accept websocket failed", "browser", d.browser.Name, "error", err)
 		return
 	}
 	defer func() { _ = ws.CloseNow() }()
 	ws.SetReadLimit(4 << 20)
 	ctx := r.Context()
 
-	run, err := readHello(ctx, ws)
+	run, err := readHello(ctx, ws, d.browser.Name)
 	if err != nil {
 		if errors.Is(err, errProtocolMismatch) {
 			d.markOutdated()
 		}
-		slog.Warn("chrome: extension rejected", "error", err)
+		slog.Warn("browser extension rejected", "browser", d.browser.Name, "error", err)
 		_ = ws.Close(websocket.StatusPolicyViolation, err.Error())
 		return
 	}
@@ -116,13 +126,13 @@ func (d *Driver) serve(w http.ResponseWriter, r *http.Request) {
 
 	c := &conn{ws: ws, run: run, pending: make(map[int64]chan message)}
 	d.swap(c)
-	slog.Info("chrome extension connected")
+	slog.Info("browser extension connected", "browser", d.browser.Name)
 	err = d.readLoop(ctx, c)
 	d.drop(c)
-	slog.Info("chrome extension disconnected", "reason", err)
+	slog.Info("browser extension disconnected", "browser", d.browser.Name, "reason", err)
 }
 
-func readHello(ctx context.Context, ws *websocket.Conn) (string, error) {
+func readHello(ctx context.Context, ws *websocket.Conn, name string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	_, data, err := ws.Read(ctx)
@@ -135,6 +145,9 @@ func readHello(ctx context.Context, ws *websocket.Conn) (string, error) {
 	}
 	if m.Type != "hello" {
 		return "", fmt.Errorf("expected hello, got %q", m.Type)
+	}
+	if m.Browser != name {
+		return "", fmt.Errorf("extension is for %q, daemon drives %q", m.Browser, name)
 	}
 	if m.Protocol != ProtocolVersion {
 		return "", fmt.Errorf("%w: extension protocol %d, daemon expects %d; reload the extension", errProtocolMismatch, m.Protocol, ProtocolVersion)
@@ -200,7 +213,7 @@ func (d *Driver) readLoop(ctx context.Context, c *conn) error {
 		}
 		var m message
 		if err := json.Unmarshal(data, &m); err != nil {
-			slog.Warn("chrome: bad frame", "error", err)
+			slog.Warn("browser extension: bad frame", "error", err)
 			continue
 		}
 		switch m.Type {
@@ -232,7 +245,7 @@ func (d *Driver) emit(gen uint64, ev browser.Event) {
 		if coalesce {
 			d.dequeued(qe)
 		}
-		slog.Warn("chrome: event buffer full; dropping", "type", ev.Type)
+		slog.Warn("browser extension: event buffer full; dropping", "type", ev.Type)
 	}
 }
 
@@ -300,7 +313,7 @@ func (d *Driver) call(ctx context.Context, method string, params, out any) error
 			return browser.ErrNotConnected
 		}
 		if res.Error != "" {
-			return fmt.Errorf("chrome %s: %s", method, res.Error)
+			return fmt.Errorf("%s %s: %s", d.browser.Name, method, res.Error)
 		}
 		if out == nil {
 			return nil
@@ -314,7 +327,7 @@ func (d *Driver) call(ctx context.Context, method string, params, out any) error
 func parseID(id string) (int64, error) {
 	n, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("invalid chrome id %q", id)
+		return 0, fmt.Errorf("invalid browser id %q", id)
 	}
 	return n, nil
 }

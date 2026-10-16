@@ -1,4 +1,4 @@
-package chrome
+package webext
 
 import (
 	"context"
@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var testBrowser = Browser{Name: "chrome", BundleID: "com.google.Chrome", OriginScheme: "chrome-extension://", UpdateHint: "reload it", TitleSuffix: " - Google Chrome"}
 
 type incoming struct {
 	Type   string          `json:"type"`
@@ -113,7 +115,7 @@ func (r *recorder) connectionEvents() []browser.EventType {
 
 func newDriver(t *testing.T) (*Driver, *httptest.Server, *recorder) {
 	t.Helper()
-	d := NewDriver()
+	d := NewDriver(testBrowser)
 	srv := httptest.NewServer(d.Handler())
 	t.Cleanup(srv.Close)
 	rec := &recorder{}
@@ -125,7 +127,7 @@ func newDriver(t *testing.T) (*Driver, *httptest.Server, *recorder) {
 
 func newBlockedDriver(t *testing.T) (*Driver, *httptest.Server, *recorder, chan struct{}) {
 	t.Helper()
-	d := NewDriver()
+	d := NewDriver(testBrowser)
 	srv := httptest.NewServer(d.Handler())
 	t.Cleanup(srv.Close)
 	rec := &recorder{}
@@ -172,6 +174,23 @@ func TestDriver_RejectsNonExtensionOrigin(t *testing.T) {
 	_, srv, _ := newDriver(t)
 	_, err := dial(t, srv, "https://evil.example.com")
 	assert.Error(t, err)
+}
+
+func TestDriver_RejectsOtherBrowsersExtension(t *testing.T) {
+	_, srv, rec := newDriver(t)
+	ws, err := dial(t, srv, "chrome-extension://abc")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ws.CloseNow() })
+	ext := &fakeExt{ws: ws}
+	ext.send(t, map[string]any{"type": "hello", "protocol": ProtocolVersion, "browser": "firefox"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for err == nil {
+		_, _, err = ws.Read(ctx)
+	}
+	assert.Equal(t, websocket.StatusPolicyViolation, websocket.CloseStatus(err))
+	assert.False(t, rec.has(browser.Event{Type: browser.EventConnected}))
 }
 
 func TestDriver_CallWithoutConnection(t *testing.T) {
@@ -246,7 +265,7 @@ func TestDriver_NonProtocolHelloFailureDoesNotSetOutdated(t *testing.T) {
 }
 
 func TestDriver_ImplementsStatusReporter(t *testing.T) {
-	var d browser.Driver = NewDriver()
+	var d browser.Driver = NewDriver(testBrowser)
 	_, ok := d.(browser.StatusReporter)
 	assert.True(t, ok)
 }
@@ -427,7 +446,7 @@ func TestDriver_ReconnectWhileBlockedEndsConnected(t *testing.T) {
 }
 
 func TestDriver_SubscribeAfterConnectEmitsConnected(t *testing.T) {
-	d := NewDriver()
+	d := NewDriver(testBrowser)
 	srv := httptest.NewServer(d.Handler())
 	t.Cleanup(srv.Close)
 	startExt(t, srv, ProtocolVersion, nil)
@@ -480,7 +499,7 @@ func TestDriver_ConnectedCarriesRunFromHello(t *testing.T) {
 }
 
 func TestAppBundleID(t *testing.T) {
-	assert.Equal(t, "com.google.Chrome", NewDriver().AppBundleID())
+	assert.Equal(t, "com.google.Chrome", NewDriver(testBrowser).AppBundleID())
 }
 
 func TestWindowTitle(t *testing.T) {
@@ -510,7 +529,7 @@ func TestWindowTitle(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, NewDriver().WindowTitle(tc.window))
+			assert.Equal(t, tc.want, NewDriver(testBrowser).WindowTitle(tc.window))
 		})
 	}
 }

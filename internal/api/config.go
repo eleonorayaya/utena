@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -14,6 +16,7 @@ type Config struct {
 	BranchPrefix     string
 	SessionsRoot     string
 	WM               string
+	Browser          string
 	BrowserWorkspace string
 	ParkWorkspace    string
 }
@@ -35,12 +38,16 @@ func LoadConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.BranchPrefix, "branch-prefix", "eqt/", "prefix for git branches created with worktrees")
 	fs.StringVar(&cfg.SessionsRoot, "sessions-root", defaultSessionsRoot, "directory that holds multi-workspace session roots")
 	fs.StringVar(&cfg.WM, "wm", "aerospace", "window manager driver: aerospace or none")
+	fs.StringVar(&cfg.Browser, "browser", "chrome", "browser driver: chrome or firefox")
 	fs.StringVar(&cfg.BrowserWorkspace, "browser-workspace", "2", "workspace for the attached session's browser windows")
 	fs.StringVar(&cfg.ParkWorkspace, "park-workspace", "P", "workspace for other sessions' browser windows")
 
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
+
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 
 	if v := os.Getenv("UTENA_PORT"); v != "" {
 		if _, err := fmt.Sscanf(v, "%d", &cfg.Port); err != nil {
@@ -49,6 +56,15 @@ func LoadConfig(args []string) (Config, error) {
 	}
 	if v := os.Getenv("UTENA_DATA_DIR"); v != "" {
 		cfg.ConfigDir = v
+	}
+	if !set["browser"] {
+		file, err := loadDaemonFile(cfg.ConfigDir)
+		if err != nil {
+			return Config{}, err
+		}
+		if file.Browser != "" {
+			cfg.Browser = file.Browser
+		}
 	}
 	if os.Getenv("UTENA_LOG_PRETTY") == "true" {
 		cfg.PrettyLogs = true
@@ -62,6 +78,9 @@ func LoadConfig(args []string) (Config, error) {
 	if v := os.Getenv("UTENA_WM"); v != "" {
 		cfg.WM = v
 	}
+	if v := os.Getenv("UTENA_BROWSER"); v != "" {
+		cfg.Browser = v
+	}
 	if v := os.Getenv("UTENA_BROWSER_WORKSPACE"); v != "" {
 		cfg.BrowserWorkspace = v
 	}
@@ -69,11 +88,33 @@ func LoadConfig(args []string) (Config, error) {
 		cfg.ParkWorkspace = v
 	}
 
+	if cfg.Browser != "chrome" && cfg.Browser != "firefox" {
+		return Config{}, fmt.Errorf("invalid browser %q: must be chrome or firefox", cfg.Browser)
+	}
 	if cfg.WM != "aerospace" && cfg.WM != "none" {
 		return Config{}, fmt.Errorf("invalid window manager %q: must be aerospace or none", cfg.WM)
 	}
 
 	return cfg, nil
+}
+
+type daemonFile struct {
+	Browser string `json:"browser"`
+}
+
+func loadDaemonFile(dir string) (daemonFile, error) {
+	var f daemonFile
+	data, err := os.ReadFile(filepath.Join(dir, "daemon.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return f, nil
+	}
+	if err != nil {
+		return f, fmt.Errorf("reading daemon.json: %w", err)
+	}
+	if err := json.Unmarshal(data, &f); err != nil {
+		return f, fmt.Errorf("parsing daemon.json: %w", err)
+	}
+	return f, nil
 }
 
 func (c Config) Addr() string {

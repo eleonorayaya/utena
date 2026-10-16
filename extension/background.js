@@ -1,5 +1,7 @@
 const PROTOCOL = 2;
-const ENDPOINT = "ws://127.0.0.1:3333/browser/chrome";
+const api = globalThis.browser ?? globalThis.chrome;
+const BROWSER = location.protocol === "moz-extension:" ? "firefox" : "chrome";
+const ENDPOINT = `ws://127.0.0.1:3333/browser/${BROWSER}`;
 const PING_MS = 20000;
 const MAX_BACKOFF_MS = 30000;
 const CONNECT_TIMEOUT_MS = 10000;
@@ -12,10 +14,11 @@ let runPromise = null;
 let connectStartedAt = 0;
 
 async function loadRun() {
-  const { run } = await chrome.storage.session.get("run");
+  if (!api.storage.session) return crypto.randomUUID();
+  const { run } = await api.storage.session.get("run");
   if (run) return run;
   const fresh = crypto.randomUUID();
-  await chrome.storage.session.set({ run: fresh });
+  await api.storage.session.set({ run: fresh });
   return fresh;
 }
 
@@ -65,7 +68,7 @@ function connect() {
     backoff = 1000;
     const run = await currentRun();
     if (socket !== ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: "hello", protocol: PROTOCOL, browser: "chrome", run }));
+    ws.send(JSON.stringify({ type: "hello", protocol: PROTOCOL, browser: BROWSER, run }));
     ready = true;
     ping = setInterval(() => send({ type: "ping" }), PING_MS);
   };
@@ -99,22 +102,22 @@ function toWindow(w) {
 
 const methods = {
   "windows.list": async () => {
-    const wins = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
+    const wins = await api.windows.getAll({ populate: true, windowTypes: ["normal"] });
     return { windows: wins.map(toWindow) };
   },
   "windows.create": async ({ urls, focused }) =>
-    toWindow(await chrome.windows.create({ url: urls, focused: !!focused, type: "normal" })),
+    toWindow(await api.windows.create({ url: urls, focused: !!focused, type: "normal" })),
   "windows.focus": async ({ windowId }) => {
-    await chrome.windows.update(windowId, { focused: true });
+    await api.windows.update(windowId, { focused: true });
     return {};
   },
   "windows.remove": async ({ windowId }) => {
-    await chrome.windows.remove(windowId);
+    await api.windows.remove(windowId);
     return {};
   },
-  "tabs.create": async ({ windowId, url }) => toTab(await chrome.tabs.create({ windowId, url, active: true })),
+  "tabs.create": async ({ windowId, url }) => toTab(await api.tabs.create({ windowId, url, active: true })),
   "tabs.activate": async ({ tabId }) => {
-    await chrome.tabs.update(tabId, { active: true });
+    await api.tabs.update(tabId, { active: true });
     return {};
   },
 };
@@ -133,30 +136,37 @@ async function handle(msg) {
   }
 }
 
-const normalOnly = { windowTypes: ["normal"] };
-chrome.windows.onCreated.addListener((w) => emit("window.created", { windowId: w.id }), normalOnly);
-chrome.windows.onRemoved.addListener((id) => emit("window.removed", { windowId: id }), normalOnly);
-chrome.windows.onFocusChanged.addListener((id) => emit("window.focused", { windowId: id }), normalOnly);
+function onNormalWindows(event, listener) {
+  try {
+    event.addListener(listener, { windowTypes: ["normal"] });
+  } catch (_) {
+    event.addListener(listener);
+  }
+}
+
+onNormalWindows(api.windows.onCreated, (w) => emit("window.created", { windowId: w.id }));
+onNormalWindows(api.windows.onRemoved, (id) => emit("window.removed", { windowId: id }));
+onNormalWindows(api.windows.onFocusChanged, (id) => emit("window.focused", { windowId: id }));
 
 const tabsChanged = (windowId) => emit("tabs.changed", { windowId });
-chrome.tabs.onCreated.addListener((t) => tabsChanged(t.windowId));
-chrome.tabs.onRemoved.addListener((_, info) => {
+api.tabs.onCreated.addListener((t) => tabsChanged(t.windowId));
+api.tabs.onRemoved.addListener((_, info) => {
   if (!info.isWindowClosing) tabsChanged(info.windowId);
 });
-chrome.tabs.onUpdated.addListener((_, change, t) => {
+api.tabs.onUpdated.addListener((_, change, t) => {
   if (change.url || change.title) tabsChanged(t.windowId);
 });
-chrome.tabs.onActivated.addListener((info) => tabsChanged(info.windowId));
-chrome.tabs.onAttached.addListener((_, info) => tabsChanged(info.newWindowId));
-chrome.tabs.onDetached.addListener((_, info) => tabsChanged(info.oldWindowId));
-chrome.tabs.onMoved.addListener((_, info) => tabsChanged(info.windowId));
+api.tabs.onActivated.addListener((info) => tabsChanged(info.windowId));
+api.tabs.onAttached.addListener((_, info) => tabsChanged(info.newWindowId));
+api.tabs.onDetached.addListener((_, info) => tabsChanged(info.oldWindowId));
+api.tabs.onMoved.addListener((_, info) => tabsChanged(info.windowId));
 
-chrome.alarms.create("utena-reconnect", { periodInMinutes: 0.5 });
-chrome.alarms.onAlarm.addListener((a) => {
+api.alarms.create("utena-reconnect", { periodInMinutes: 0.5 });
+api.alarms.onAlarm.addListener((a) => {
   if (a.name !== "utena-reconnect") return;
   if (stuckConnecting()) abandon(socket);
   connect();
 });
-chrome.runtime.onStartup.addListener(connect);
-chrome.runtime.onInstalled.addListener(connect);
+api.runtime.onStartup.addListener(connect);
+api.runtime.onInstalled.addListener(connect);
 connect();
