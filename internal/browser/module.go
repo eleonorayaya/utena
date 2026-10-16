@@ -24,13 +24,13 @@ func NewModule(driver Driver, sessions Sessions, wmDriver wm.Driver, layout Layo
 		return nil
 	})
 	bus.Subscribe(eventbus.SessionArchived, func(ctx context.Context, e eventbus.Event) error {
-		if ev, ok := e.Data.(eventbus.SessionLifecycleEvent); ok {
+		if ev, ok := e.Data.(eventbus.SessionIDEvent); ok {
 			service.QueueArchive(ev.SessionID)
 		}
 		return nil
 	})
 	bus.Subscribe(eventbus.SessionDeleted, func(ctx context.Context, e eventbus.Event) error {
-		if ev, ok := e.Data.(eventbus.SessionLifecycleEvent); ok {
+		if ev, ok := e.Data.(eventbus.SessionIDEvent); ok {
 			service.QueueDelete(ev.SessionID)
 		}
 		return nil

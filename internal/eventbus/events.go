@@ -27,10 +27,6 @@ type SessionIDEvent struct {
 	SessionID uint
 }
 
-type SessionLifecycleEvent struct {
-	SessionID uint
-}
-
 type SessionNotificationEvent struct {
 	SessionID uint   `json:"session_id"`
 	Type      string `json:"type"`

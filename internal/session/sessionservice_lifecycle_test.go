@@ -9,15 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func recordLifecycle(service *SessionService, eventType string) func() []eventbus.SessionLifecycleEvent {
-	var got []eventbus.SessionLifecycleEvent
+func recordLifecycle(service *SessionService, eventType string) func() []eventbus.SessionIDEvent {
+	var got []eventbus.SessionIDEvent
 	service.eventBus.Subscribe(eventType, func(_ context.Context, event eventbus.Event) error {
-		if data, ok := event.Data.(eventbus.SessionLifecycleEvent); ok {
+		if data, ok := event.Data.(eventbus.SessionIDEvent); ok {
 			got = append(got, data)
 		}
 		return nil
 	})
-	return func() []eventbus.SessionLifecycleEvent { return got }
+	return func() []eventbus.SessionIDEvent { return got }
 }
 
 func TestSessionService_ArchiveSession_PublishesSessionArchived(t *testing.T) {
@@ -29,7 +29,7 @@ func TestSessionService_ArchiveSession_PublishesSessionArchived(t *testing.T) {
 	_, err := service.ArchiveSession(context.Background(), sess.ID)
 	require.NoError(t, err)
 
-	require.Equal(t, []eventbus.SessionLifecycleEvent{{SessionID: sess.ID}}, got())
+	require.Equal(t, []eventbus.SessionIDEvent{{SessionID: sess.ID}}, got())
 }
 
 func TestSessionService_ArchiveSession_RefusedPublishesNothing(t *testing.T) {
@@ -65,7 +65,7 @@ func TestSessionService_DeleteSession_PublishesSessionDeleted(t *testing.T) {
 
 	require.NoError(t, service.DeleteSession(context.Background(), sess.ID, false, false))
 
-	require.Equal(t, []eventbus.SessionLifecycleEvent{{SessionID: sess.ID}}, got())
+	require.Equal(t, []eventbus.SessionIDEvent{{SessionID: sess.ID}}, got())
 }
 
 func TestSessionService_DeleteSession_RefusedPublishesNothing(t *testing.T) {

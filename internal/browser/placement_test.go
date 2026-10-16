@@ -297,15 +297,18 @@ func TestAdopt_SignalsPlacementOnlyWhenRowAdded(t *testing.T) {
 	assert.Len(t, h.svc.swapCh, 1)
 }
 
-func TestTabsChanged_SignalsOnlyForOwnedUnlinkedWindows(t *testing.T) {
+func TestSnapshot_SignalsOnlyForOwnedUnlinkedWindows(t *testing.T) {
 	h := newPlaceHarness(t)
 	personal := h.driver.AddWindow("https://personal.example.com")
 	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: personal.ID})
+	h.clock.fire()
 	assert.Empty(t, h.svc.swapCh)
 
 	owned := h.driver.AddWindow("https://owned.example.com")
 	require.NoError(t, h.store.Add(&BrowserWindow{SessionID: 2, State: WindowOpen, DriverWindowID: owned.ID}))
 	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: owned.ID})
+	assert.Empty(t, h.svc.swapCh)
+	h.clock.fire()
 	assert.Len(t, h.svc.swapCh, 1)
 	drain(h.svc)
 
@@ -313,6 +316,7 @@ func TestTabsChanged_SignalsOnlyForOwnedUnlinkedWindows(t *testing.T) {
 	h.wm.Add("wm-owned", "owned - Fake", "2")
 	require.NoError(t, h.svc.place(context.Background()))
 	h.svc.handleEvent(context.Background(), Event{Type: EventTabsChanged, WindowID: owned.ID})
+	h.clock.fire()
 	assert.Empty(t, h.svc.swapCh)
 }
 

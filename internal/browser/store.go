@@ -25,7 +25,7 @@ func (s *Store) GetByDriverWindowID(id string) (*BrowserWindow, error) {
 		return nil, ErrWindowNotFound
 	}
 	var w BrowserWindow
-	if err := s.db.Where("driver_window_id = ? AND state = ?", id, WindowOpen).First(&w).Error; err != nil {
+	if err := s.openWindow(id).First(&w).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrWindowNotFound
 		}
@@ -64,49 +64,43 @@ func (s *Store) DeleteByDriverWindowID(id string) error {
 	if id == "" {
 		return nil
 	}
-	return s.db.Where("driver_window_id = ? AND state = ?", id, WindowOpen).Delete(&BrowserWindow{}).Error
+	return s.openWindow(id).Delete(&BrowserWindow{}).Error
 }
 
 func (s *Store) TouchFocused(id string, at time.Time) error {
 	if id == "" {
 		return nil
 	}
-	return s.db.Model(&BrowserWindow{}).
-		Where("driver_window_id = ? AND state = ?", id, WindowOpen).
-		Update("last_focused_at", at).Error
+	return s.openWindow(id).Model(&BrowserWindow{}).Update("last_focused_at", at).Error
 }
 
 func (s *Store) MarkMissingExcept(live map[string]bool) error {
-	var rows []BrowserWindow
-	if err := s.db.Where("state = ?", WindowOpen).Find(&rows).Error; err != nil {
-		return err
-	}
-	for _, r := range rows {
-		if live[r.DriverWindowID] {
-			continue
+	q := s.db.Model(&BrowserWindow{}).Where("state = ?", WindowOpen)
+	if len(live) > 0 {
+		ids := make([]string, 0, len(live))
+		for id := range live {
+			ids = append(ids, id)
 		}
-		if err := s.db.Model(&BrowserWindow{}).Where("id = ?", r.ID).
-			Updates(map[string]any{"state": WindowMissing, "driver_window_id": ""}).Error; err != nil {
-			return err
-		}
+		q = q.Where("driver_window_id NOT IN ?", ids)
 	}
-	return nil
+	return q.Updates(missingUpdate()).Error
+}
+
+func missingUpdate() map[string]any {
+	return map[string]any{"state": WindowMissing, "driver_window_id": ""}
+}
+
+func (s *Store) openWindow(id string) *gorm.DB {
+	return s.db.Where("driver_window_id = ? AND state = ?", id, WindowOpen)
 }
 
 func (s *Store) SaveTabs(driverWindowID string, tabs []SavedTab, at time.Time) error {
 	if driverWindowID == "" {
 		return nil
 	}
-	return s.db.Model(&BrowserWindow{}).
-		Where("driver_window_id = ? AND state = ?", driverWindowID, WindowOpen).
+	return s.openWindow(driverWindowID).Model(&BrowserWindow{}).
 		Select("Tabs", "SnapshotAt").
 		Updates(&BrowserWindow{Tabs: tabs, SnapshotAt: at}).Error
-}
-
-func (s *Store) ListBySession(sessionID uint) ([]BrowserWindow, error) {
-	var rows []BrowserWindow
-	err := s.db.Where("session_id = ?", sessionID).Order("id").Find(&rows).Error
-	return rows, err
 }
 
 func (s *Store) ListRestorable(sessionID uint) ([]BrowserWindow, error) {
@@ -137,9 +131,7 @@ func (s *Store) MarkMissingByDriverWindowID(id string) error {
 	if id == "" {
 		return nil
 	}
-	return s.db.Model(&BrowserWindow{}).
-		Where("driver_window_id = ? AND state = ?", id, WindowOpen).
-		Updates(map[string]any{"state": WindowMissing, "driver_window_id": ""}).Error
+	return s.openWindow(id).Model(&BrowserWindow{}).Updates(missingUpdate()).Error
 }
 
 func (s *Store) DeleteBySession(sessionID uint) error {

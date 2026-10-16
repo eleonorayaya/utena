@@ -1391,8 +1391,8 @@ func TestModule_LifecycleEventsDoNotBlockPublisher(t *testing.T) {
 	m.Service.mu.Lock()
 	done := make(chan struct{})
 	go func() {
-		_ = bus.Publish(context.Background(), eventbus.Event{Type: eventbus.SessionArchived, Data: eventbus.SessionLifecycleEvent{SessionID: 1}})
-		_ = bus.Publish(context.Background(), eventbus.Event{Type: eventbus.SessionDeleted, Data: eventbus.SessionLifecycleEvent{SessionID: 2}})
+		_ = bus.Publish(context.Background(), eventbus.Event{Type: eventbus.SessionArchived, Data: eventbus.SessionIDEvent{SessionID: 1}})
+		_ = bus.Publish(context.Background(), eventbus.Event{Type: eventbus.SessionDeleted, Data: eventbus.SessionIDEvent{SessionID: 2}})
 		close(done)
 	}()
 	select {

@@ -14,21 +14,13 @@ type restoreCandidate struct {
 	score    float64
 }
 
-func isBlankPage(u string) bool {
-	lower := strings.ToLower(u)
-	return strings.HasPrefix(lower, "chrome://newtab") || strings.HasPrefix(lower, "about:")
-}
-
 func normalizeURL(raw string) string {
-	if raw == "" || isBlankPage(raw) {
+	if !isWebURL(raw) {
 		return ""
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return ""
-	}
-	if u.Opaque != "" {
-		return strings.ToLower(u.Scheme) + ":" + u.Opaque
 	}
 	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host) + strings.TrimSuffix(u.Path, "/")
 }
@@ -46,6 +38,14 @@ func urlSet(urls []string) map[string]bool {
 func windowURLs(w Window) []string {
 	urls := make([]string, 0, len(w.Tabs))
 	for _, t := range w.Tabs {
+		urls = append(urls, t.URL)
+	}
+	return urls
+}
+
+func savedURLs(tabs []SavedTab) []string {
+	urls := make([]string, 0, len(tabs))
+	for _, t := range tabs {
 		urls = append(urls, t.URL)
 	}
 	return urls
@@ -80,13 +80,9 @@ func matchRestored(rows []BrowserWindow, windows []Window, owned map[string]bool
 		if len(r.Tabs) == 0 {
 			continue
 		}
-		urls := make([]string, 0, len(r.Tabs))
-		for _, t := range r.Tabs {
-			urls = append(urls, t.URL)
-		}
-		rowSet := urlSet(urls)
+		rowSet := urlSet(savedURLs(r.Tabs))
 		for id, set := range windowSets {
-			if score := jaccard(rowSet, set); score > 0 && score >= threshold {
+			if score := jaccard(rowSet, set); score >= threshold {
 				candidates = append(candidates, restoreCandidate{windowID: id, rowID: r.ID, score: score})
 			}
 		}

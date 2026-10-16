@@ -349,3 +349,9 @@ func TestStore_MarkMissingExceptKeepsTabs(t *testing.T) {
 	assert.Equal(t, WindowMissing, got.State)
 	assert.Equal(t, sampleTabs(), got.Tabs)
 }
+
+func (s *Store) ListBySession(sessionID uint) ([]BrowserWindow, error) {
+	var rows []BrowserWindow
+	err := s.db.Where("session_id = ?", sessionID).Order("id").Find(&rows).Error
+	return rows, err
+}
