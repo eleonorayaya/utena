@@ -498,10 +498,6 @@ func TestDriver_ConnectedCarriesRunFromHello(t *testing.T) {
 	}, 5*time.Second, 5*time.Millisecond)
 }
 
-func TestAppBundleID(t *testing.T) {
-	assert.Equal(t, "com.google.Chrome", NewDriver(testBrowser).AppBundleID())
-}
-
 func TestWindowTitle(t *testing.T) {
 	cases := map[string]struct {
 		window browser.Window

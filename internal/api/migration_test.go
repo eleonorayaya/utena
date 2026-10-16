@@ -163,7 +163,7 @@ func openFileSQLite(t *testing.T) *gorm.DB {
 
 func newMigrationApp(t *testing.T, gormDB *gorm.DB) *App {
 	t.Helper()
-	return newApp(gormDB, afero.NewMemMapFs(), Config{ConfigDir: "/config", SessionsRoot: t.TempDir()})
+	return newApp(gormDB, afero.NewMemMapFs(), Config{ConfigDir: "/config", SessionsRoot: t.TempDir(), Browser: "chrome"})
 }
 
 func migrateLegacy(t *testing.T, gormDB *gorm.DB) *App {

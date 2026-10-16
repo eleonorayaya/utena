@@ -6,7 +6,7 @@ type linker struct {
 	links map[string]string
 }
 
-func (l *linker) resolve(chrome []Window, title func(Window) string, wmWindows []wm.Window, want []string) map[string]string {
+func (l *linker) resolve(windows []Window, title func(Window) string, wmWindows []wm.Window, want []string) map[string]string {
 	if l.links == nil {
 		l.links = map[string]string{}
 	}
@@ -15,13 +15,13 @@ func (l *linker) resolve(chrome []Window, title func(Window) string, wmWindows [
 	for _, w := range wmWindows {
 		wmIDs[w.ID] = true
 	}
-	chromeByID := make(map[string]Window, len(chrome))
-	for _, w := range chrome {
-		chromeByID[w.ID] = w
+	byID := make(map[string]Window, len(windows))
+	for _, w := range windows {
+		byID[w.ID] = w
 	}
-	for chromeID, wmID := range l.links {
-		if _, ok := chromeByID[chromeID]; !ok || !wmIDs[wmID] {
-			delete(l.links, chromeID)
+	for windowID, wmID := range l.links {
+		if _, ok := byID[windowID]; !ok || !wmIDs[wmID] {
+			delete(l.links, windowID)
 		}
 	}
 
@@ -37,7 +37,7 @@ func (l *linker) resolve(chrome []Window, title func(Window) string, wmWindows [
 			result[id] = wmID
 			continue
 		}
-		if _, ok := chromeByID[id]; ok {
+		if _, ok := byID[id]; ok {
 			remaining = append(remaining, id)
 		}
 	}
@@ -53,19 +53,19 @@ func (l *linker) resolve(chrome []Window, title func(Window) string, wmWindows [
 		}
 	}
 
-	link := func(chromeID, wmID string) {
-		l.links[chromeID] = wmID
-		result[chromeID] = wmID
+	link := func(windowID, wmID string) {
+		l.links[windowID] = wmID
+		result[windowID] = wmID
 	}
 
 	titleCounts := map[string]int{}
-	for _, w := range chrome {
+	for _, w := range windows {
 		if _, ok := l.links[w.ID]; !ok {
 			titleCounts[title(w)]++
 		}
 	}
 	for _, id := range remaining {
-		t := title(chromeByID[id])
+		t := title(byID[id])
 		if t == "" || titleCounts[t] != 1 {
 			continue
 		}
@@ -85,7 +85,7 @@ func (l *linker) resolve(chrome []Window, title func(Window) string, wmWindows [
 	return result
 }
 
-func (l *linker) linkCreated(chromeID string, before, after []wm.Window) bool {
+func (l *linker) linkCreated(windowID string, before, after []wm.Window) bool {
 	existing := make(map[string]bool, len(before)+len(l.links))
 	for _, w := range before {
 		existing[w.ID] = true
@@ -105,6 +105,6 @@ func (l *linker) linkCreated(chromeID string, before, after []wm.Window) bool {
 	if l.links == nil {
 		l.links = map[string]string{}
 	}
-	l.links[chromeID] = created[0]
+	l.links[windowID] = created[0]
 	return true
 }

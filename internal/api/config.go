@@ -46,8 +46,8 @@ func LoadConfig(args []string) (Config, error) {
 		return Config{}, err
 	}
 
-	set := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	browserFlag := false
+	fs.Visit(func(f *flag.Flag) { browserFlag = browserFlag || f.Name == "browser" })
 
 	if v := os.Getenv("UTENA_PORT"); v != "" {
 		if _, err := fmt.Sscanf(v, "%d", &cfg.Port); err != nil {
@@ -57,7 +57,7 @@ func LoadConfig(args []string) (Config, error) {
 	if v := os.Getenv("UTENA_DATA_DIR"); v != "" {
 		cfg.ConfigDir = v
 	}
-	if !set["browser"] {
+	if !browserFlag && os.Getenv("UTENA_BROWSER") == "" {
 		file, err := loadDaemonFile(cfg.ConfigDir)
 		if err != nil {
 			return Config{}, err
@@ -88,7 +88,7 @@ func LoadConfig(args []string) (Config, error) {
 		cfg.ParkWorkspace = v
 	}
 
-	if cfg.Browser != "chrome" && cfg.Browser != "firefox" {
+	if _, ok := browserDrivers[cfg.Browser]; !ok {
 		return Config{}, fmt.Errorf("invalid browser %q: must be chrome or firefox", cfg.Browser)
 	}
 	if cfg.WM != "aerospace" && cfg.WM != "none" {

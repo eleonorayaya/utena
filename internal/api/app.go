@@ -20,6 +20,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tuios"
+	"github.com/eleonorayaya/utena/internal/webext"
 	"github.com/eleonorayaya/utena/internal/wm"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
@@ -93,11 +94,13 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 	return app
 }
 
+var browserDrivers = map[string]func() *webext.Driver{
+	chrome.Browser.Name:  chrome.NewDriver,
+	firefox.Browser.Name: firefox.NewDriver,
+}
+
 func newBrowserDriver(name string) browser.Driver {
-	if name == "firefox" {
-		return firefox.NewDriver()
-	}
-	return chrome.NewDriver()
+	return browserDrivers[name]()
 }
 
 func newWMDriver(name string) wm.Driver {
