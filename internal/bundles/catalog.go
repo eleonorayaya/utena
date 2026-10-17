@@ -21,46 +21,37 @@ type Entry struct {
 	McpServers []string `json:"mcp_servers"`
 }
 
-func (c Catalog) ManagedPlugins() []string {
-	return c.managed(func(b Bundle) []string { return b.Plugins })
-}
-
-func (c Catalog) ManagedServers() []string {
-	return c.managed(func(b Bundle) []string { return b.McpServers })
-}
-
-func (c Catalog) Resolve(names []string) ([]string, []string) {
-	return c.resolve(names, func(b Bundle) []string { return b.Plugins })
-}
-
-func (c Catalog) ResolveServers(names []string) ([]string, []string) {
-	return c.resolve(names, func(b Bundle) []string { return b.McpServers })
-}
-
-func (c Catalog) managed(field func(Bundle) []string) []string {
-	set := make(map[string]struct{})
-	for _, b := range c {
-		for _, v := range field(b) {
-			set[v] = struct{}{}
-		}
-	}
-	return slices.Sorted(maps.Keys(set))
-}
-
-func (c Catalog) resolve(names []string, field func(Bundle) []string) ([]string, []string) {
-	set := make(map[string]struct{})
-	var unknown []string
+func (c Catalog) Resolve(names []string) (plugins, servers, unknown []string) {
+	pluginSet := make(map[string]struct{})
+	serverSet := make(map[string]struct{})
 	for _, name := range names {
 		b, ok := c[name]
 		if !ok {
 			unknown = append(unknown, name)
 			continue
 		}
-		for _, v := range field(b) {
-			set[v] = struct{}{}
+		for _, p := range b.Plugins {
+			pluginSet[p] = struct{}{}
+		}
+		for _, sv := range b.McpServers {
+			serverSet[sv] = struct{}{}
 		}
 	}
-	return slices.Sorted(maps.Keys(set)), unknown
+	return slices.Sorted(maps.Keys(pluginSet)), slices.Sorted(maps.Keys(serverSet)), unknown
+}
+
+func (c Catalog) Managed() (plugins, servers []string) {
+	pluginSet := make(map[string]struct{})
+	serverSet := make(map[string]struct{})
+	for _, b := range c {
+		for _, p := range b.Plugins {
+			pluginSet[p] = struct{}{}
+		}
+		for _, sv := range b.McpServers {
+			serverSet[sv] = struct{}{}
+		}
+	}
+	return slices.Sorted(maps.Keys(pluginSet)), slices.Sorted(maps.Keys(serverSet))
 }
 
 func (c Catalog) Entries() []Entry {

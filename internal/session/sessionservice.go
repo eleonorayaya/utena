@@ -828,11 +828,10 @@ func (s *SessionService) writeBundles(ctx context.Context, root string, names []
 	if root == "" {
 		return nil
 	}
-	enabled, unknown := s.bundleCatalog.Resolve(names)
+	enabled, servers, unknown := s.bundleCatalog.Resolve(names)
 	if len(unknown) > 0 {
 		slog.WarnContext(ctx, "session references unknown bundles", "session_root", root, "bundles", unknown)
 	}
-	servers, _ := s.bundleCatalog.ResolveServers(names)
 	selected := make(map[string]json.RawMessage, len(servers))
 	var missing []string
 	for _, name := range servers {
@@ -846,10 +845,11 @@ func (s *SessionService) writeBundles(ctx context.Context, root string, names []
 	if len(missing) > 0 {
 		slog.WarnContext(ctx, "bundle references unknown MCP servers", "session_root", root, "servers", missing)
 	}
+	managedPlugins, managedServers := s.bundleCatalog.Managed()
 	return claudesettings.ApplyBundles(root, claudesettings.BundleSettings{
-		ManagedPlugins: s.bundleCatalog.ManagedPlugins(),
+		ManagedPlugins: managedPlugins,
 		Plugins:        enabled,
-		ManagedServers: s.bundleCatalog.ManagedServers(),
+		ManagedServers: managedServers,
 		Servers:        selected,
 	})
 }

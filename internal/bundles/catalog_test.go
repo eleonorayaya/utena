@@ -17,21 +17,6 @@ func testCatalog() Catalog {
 	}
 }
 
-func TestCatalog_ManagedPlugins(t *testing.T) {
-	assert.Equal(t, []string{"go@m", "lsp@m", "pdf@m"}, testCatalog().ManagedPlugins())
-	assert.Empty(t, Catalog(nil).ManagedPlugins())
-}
-
-func TestCatalog_Resolve(t *testing.T) {
-	plugins, unknown := testCatalog().Resolve([]string{"docs", "nope", "go"})
-	assert.Equal(t, []string{"go@m", "lsp@m", "pdf@m"}, plugins)
-	assert.Equal(t, []string{"nope"}, unknown)
-
-	plugins, unknown = Catalog(nil).Resolve([]string{"go"})
-	assert.Empty(t, plugins)
-	assert.Equal(t, []string{"go"}, unknown)
-}
-
 func serverCatalog() Catalog {
 	return Catalog{
 		"go":     {Plugins: []string{"go@m"}, McpServers: []string{"gopls", "github"}},
@@ -40,33 +25,41 @@ func serverCatalog() Catalog {
 	}
 }
 
-func TestCatalog_ManagedServers(t *testing.T) {
-	assert.Equal(t, []string{"github", "gopls", "notion"}, serverCatalog().ManagedServers())
-	assert.Empty(t, testCatalog().ManagedServers())
-	assert.Empty(t, Catalog(nil).ManagedServers())
+func TestCatalog_Managed(t *testing.T) {
+	plugins, servers := testCatalog().Managed()
+	assert.Equal(t, []string{"go@m", "lsp@m", "pdf@m"}, plugins)
+	assert.Empty(t, servers)
+
+	plugins, servers = serverCatalog().Managed()
+	assert.Equal(t, []string{"go@m", "pdf@m"}, plugins)
+	assert.Equal(t, []string{"github", "gopls", "notion"}, servers)
+
+	plugins, servers = Catalog(nil).Managed()
+	assert.Empty(t, plugins)
+	assert.Empty(t, servers)
 }
 
-func TestCatalog_ResolveServers(t *testing.T) {
-	servers, unknown := serverCatalog().ResolveServers([]string{"docs", "nope", "go", "notion"})
-	assert.Equal(t, []string{"github", "gopls", "notion"}, servers)
+func TestCatalog_Resolve(t *testing.T) {
+	plugins, servers, unknown := testCatalog().Resolve([]string{"docs", "nope", "go"})
+	assert.Equal(t, []string{"go@m", "lsp@m", "pdf@m"}, plugins)
+	assert.Empty(t, servers)
 	assert.Equal(t, []string{"nope"}, unknown)
 
-	servers, unknown = serverCatalog().ResolveServers([]string{"notion"})
-	assert.Equal(t, []string{"notion"}, servers)
-	assert.Empty(t, unknown)
-
-	servers, unknown = testCatalog().ResolveServers([]string{"go"})
-	assert.Empty(t, servers)
-	assert.Empty(t, unknown)
-
-	servers, unknown = Catalog(nil).ResolveServers([]string{"go"})
+	plugins, servers, unknown = Catalog(nil).Resolve([]string{"go"})
+	assert.Empty(t, plugins)
 	assert.Empty(t, servers)
 	assert.Equal(t, []string{"go"}, unknown)
 }
 
-func TestCatalog_ResolveOnlyServersBundleHasNoPlugins(t *testing.T) {
-	plugins, unknown := serverCatalog().Resolve([]string{"notion"})
+func TestCatalog_ResolveWithServers(t *testing.T) {
+	plugins, servers, unknown := serverCatalog().Resolve([]string{"docs", "nope", "go", "notion"})
+	assert.Equal(t, []string{"go@m", "pdf@m"}, plugins)
+	assert.Equal(t, []string{"github", "gopls", "notion"}, servers)
+	assert.Equal(t, []string{"nope"}, unknown)
+
+	plugins, servers, unknown = serverCatalog().Resolve([]string{"notion"})
 	assert.Empty(t, plugins)
+	assert.Equal(t, []string{"notion"}, servers)
 	assert.Empty(t, unknown)
 }
 
