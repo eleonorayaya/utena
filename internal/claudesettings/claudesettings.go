@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
 const (
 	settingsFileName         = "settings.local.json"
+	mcpFileName              = ".mcp.json"
 	multiSessionGuideName    = "CLAUDE.md"
 	multiSessionGuideMarker  = "<!-- utena:multi-session-guide -->"
 	multiSessionGuideContent = multiSessionGuideMarker + `
@@ -170,24 +173,51 @@ func ensureSettingsFile(rootPath string, allowWrite []string) error {
 	return nil
 }
 
+func readRawMap(path, label string) (map[string]any, []byte, bool, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]any{}, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("read %s: %w", filepath.Base(path), err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, nil, false, fmt.Errorf("parse %s: %w", label, err)
+	}
+	if raw == nil {
+		raw = map[string]any{}
+	}
+	return raw, data, true, nil
+}
+
+func writeRawMapIfChanged(path, label string, raw map[string]any, prev []byte) error {
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal %s: %w", label, err)
+	}
+	out = append(out, '\n')
+	if bytes.Equal(out, prev) {
+		return nil
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create %s dir: %w", filepath.Base(dir), err)
+	}
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	return nil
+}
+
 func ApplyPlugins(rootPath string, managed, enabled []string) error {
 	settingsPath := filepath.Join(rootPath, ".claude", settingsFileName)
-	raw := map[string]any{}
-	data, err := os.ReadFile(settingsPath)
-	switch {
-	case err == nil:
-		if err := json.Unmarshal(data, &raw); err != nil {
-			return fmt.Errorf("parse settings: %w", err)
-		}
-		if raw == nil {
-			raw = map[string]any{}
-		}
-	case errors.Is(err, os.ErrNotExist):
-		if len(enabled) == 0 {
-			return nil
-		}
-	default:
-		return fmt.Errorf("read %s: %w", settingsFileName, err)
+	raw, data, exists, err := readRawMap(settingsPath, "settings")
+	if err != nil {
+		return err
+	}
+	if !exists && len(enabled) == 0 {
+		return nil
 	}
 
 	plugins, _ := raw["enabledPlugins"].(map[string]any)
@@ -205,22 +235,85 @@ func ApplyPlugins(rootPath string, managed, enabled []string) error {
 	} else {
 		raw["enabledPlugins"] = plugins
 	}
+	return writeRawMapIfChanged(settingsPath, "settings", raw, data)
+}
 
-	out, err := json.MarshalIndent(raw, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal settings: %w", err)
+func ApplyMcpServers(rootPath string, managed []string, selected map[string]json.RawMessage) error {
+	names := slices.Sorted(maps.Keys(selected))
+	if err := applyMcpJSON(rootPath, managed, names, selected); err != nil {
+		return err
 	}
-	out = append(out, '\n')
-	if bytes.Equal(out, data) {
+	return applyMcpApprovals(rootPath, managed, names)
+}
+
+func applyMcpJSON(rootPath string, managed, names []string, selected map[string]json.RawMessage) error {
+	mcpPath := filepath.Join(rootPath, mcpFileName)
+	raw, data, exists, err := readRawMap(mcpPath, mcpFileName)
+	if err != nil {
+		return err
+	}
+	if !exists && len(names) == 0 {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
-		return fmt.Errorf("create .claude dir: %w", err)
+
+	servers, _ := raw["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = make(map[string]any)
 	}
-	if err := os.WriteFile(settingsPath, out, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", settingsFileName, err)
+	for _, name := range managed {
+		delete(servers, name)
 	}
-	return nil
+	for _, name := range names {
+		var def any
+		if err := json.Unmarshal(selected[name], &def); err != nil {
+			return fmt.Errorf("parse mcp server %s: %w", name, err)
+		}
+		servers[name] = def
+	}
+	if len(servers) == 0 {
+		delete(raw, "mcpServers")
+	} else {
+		raw["mcpServers"] = servers
+	}
+	return writeRawMapIfChanged(mcpPath, mcpFileName, raw, data)
+}
+
+func applyMcpApprovals(rootPath string, managed, names []string) error {
+	settingsPath := filepath.Join(rootPath, ".claude", settingsFileName)
+	raw, data, exists, err := readRawMap(settingsPath, "settings")
+	if err != nil {
+		return err
+	}
+	if !exists && len(names) == 0 {
+		return nil
+	}
+
+	drop := make(map[string]struct{}, len(managed)+len(names))
+	for _, name := range managed {
+		drop[name] = struct{}{}
+	}
+	for _, name := range names {
+		drop[name] = struct{}{}
+	}
+	existing, _ := raw["enabledMcpjsonServers"].([]any)
+	approved := make([]any, 0, len(existing)+len(names))
+	for _, entry := range existing {
+		if s, ok := entry.(string); ok {
+			if _, skip := drop[s]; skip {
+				continue
+			}
+		}
+		approved = append(approved, entry)
+	}
+	for _, name := range names {
+		approved = append(approved, name)
+	}
+	if len(approved) == 0 {
+		delete(raw, "enabledMcpjsonServers")
+	} else {
+		raw["enabledMcpjsonServers"] = approved
+	}
+	return writeRawMapIfChanged(settingsPath, "settings", raw, data)
 }
 
 func LinkWorktree(workspacePath, worktreePath string) error {

@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEnsureWorkspaceRoot_CreatesFileWhenMissing(t *testing.T) {
@@ -518,5 +520,246 @@ func TestApplyPlugins_NoFileAndNothingEnabledWritesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claude", "settings.local.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected no settings file, stat err = %v", err)
+	}
+}
+
+func writeMcpJSON(t *testing.T, root, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readMcpJSON(t *testing.T, root string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(root, ".mcp.json"))
+	if err != nil {
+		t.Fatalf("read .mcp.json: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse .mcp.json: %v", err)
+	}
+	return out
+}
+
+func TestApplyMcpServers(t *testing.T) {
+	zoo := json.RawMessage(`{"command":"zoo","args":["mcp"]}`)
+	ha := json.RawMessage(`{"type":"http","url":"https://ha"}`)
+	tests := []struct {
+		name         string
+		mcp          string
+		settings     string
+		managed      []string
+		selected     map[string]json.RawMessage
+		wantServers  []string
+		wantApproved []any
+		wantMcpKeys  []string
+		wantSetKeys  []string
+	}{
+		{
+			name:         "writes selected servers to both files",
+			managed:      []string{"zoo", "ha"},
+			selected:     map[string]json.RawMessage{"zoo": zoo, "ha": ha},
+			wantServers:  []string{"ha", "zoo"},
+			wantApproved: []any{"ha", "zoo"},
+			wantMcpKeys:  []string{"mcpServers"},
+			wantSetKeys:  []string{"enabledMcpjsonServers"},
+		},
+		{
+			name:         "removes managed servers that are not selected",
+			mcp:          `{"mcpServers":{"zoo":{"command":"zoo"},"ha":{"type":"http","url":"https://ha"}}}`,
+			settings:     `{"enabledMcpjsonServers":["zoo","ha"]}`,
+			managed:      []string{"zoo", "ha"},
+			selected:     map[string]json.RawMessage{"ha": ha},
+			wantServers:  []string{"ha"},
+			wantApproved: []any{"ha"},
+			wantMcpKeys:  []string{"mcpServers"},
+			wantSetKeys:  []string{"enabledMcpjsonServers"},
+		},
+		{
+			name:         "leaves unmanaged servers and approvals alone",
+			mcp:          `{"mcpServers":{"mine":{"command":"mine"},"zoo":{"command":"old"}}}`,
+			settings:     `{"enabledMcpjsonServers":["mine","zoo","other"]}`,
+			managed:      []string{"zoo", "ha"},
+			selected:     map[string]json.RawMessage{"zoo": zoo},
+			wantServers:  []string{"mine", "zoo"},
+			wantApproved: []any{"mine", "other", "zoo"},
+			wantMcpKeys:  []string{"mcpServers"},
+			wantSetKeys:  []string{"enabledMcpjsonServers"},
+		},
+		{
+			name:        "drops emptied keys and keeps the rest",
+			mcp:         `{"mcpServers":{"zoo":{"command":"zoo"}},"other":1}`,
+			settings:    `{"enabledMcpjsonServers":["zoo"],"enabledPlugins":{"go@m":true},"sandbox":{"filesystem":{"allowWrite":["/x"]}}}`,
+			managed:     []string{"zoo"},
+			wantMcpKeys: []string{"other"},
+			wantSetKeys: []string{"enabledPlugins", "sandbox"},
+		},
+		{
+			name:         "treats a null .mcp.json as empty",
+			mcp:          "null",
+			managed:      []string{"zoo"},
+			selected:     map[string]json.RawMessage{"zoo": zoo},
+			wantServers:  []string{"zoo"},
+			wantApproved: []any{"zoo"},
+			wantMcpKeys:  []string{"mcpServers"},
+			wantSetKeys:  []string{"enabledMcpjsonServers"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tt.mcp != "" {
+				writeMcpJSON(t, root, tt.mcp)
+			}
+			if tt.settings != "" {
+				writeSettings(t, root, tt.settings)
+			}
+			if err := ApplyMcpServers(root, tt.managed, tt.selected); err != nil {
+				t.Fatalf("ApplyMcpServers: %v", err)
+			}
+			mcp := readMcpJSON(t, root)
+			if got := sortedKeys(mcp); !slices.Equal(got, tt.wantMcpKeys) {
+				t.Fatalf(".mcp.json keys = %v, want %v", got, tt.wantMcpKeys)
+			}
+			servers, _ := mcp["mcpServers"].(map[string]any)
+			if got := sortedKeys(servers); !slices.Equal(got, tt.wantServers) {
+				t.Fatalf("mcpServers = %v, want %v", got, tt.wantServers)
+			}
+			for name, def := range tt.selected {
+				var want any
+				if err := json.Unmarshal(def, &want); err != nil {
+					t.Fatal(err)
+				}
+				gotDef, _ := json.Marshal(servers[name])
+				wantDef, _ := json.Marshal(want)
+				if string(gotDef) != string(wantDef) {
+					t.Fatalf("mcpServers[%s] = %s, want %s", name, gotDef, wantDef)
+				}
+			}
+			settings := readSettings(t, root)
+			if got := sortedKeys(settings); !slices.Equal(got, tt.wantSetKeys) {
+				t.Fatalf("settings keys = %v, want %v", got, tt.wantSetKeys)
+			}
+			approved, _ := settings["enabledMcpjsonServers"].([]any)
+			if len(approved) != len(tt.wantApproved) {
+				t.Fatalf("enabledMcpjsonServers = %v, want %v", approved, tt.wantApproved)
+			}
+			for i := range approved {
+				if approved[i] != tt.wantApproved[i] {
+					t.Fatalf("enabledMcpjsonServers = %v, want %v", approved, tt.wantApproved)
+				}
+			}
+		})
+	}
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func TestApplyMcpServers_NothingSelectedCreatesNothing(t *testing.T) {
+	root := t.TempDir()
+	if err := ApplyMcpServers(root, []string{"zoo"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{".mcp.json", ".claude"} {
+		if _, err := os.Stat(filepath.Join(root, p)); !os.IsNotExist(err) {
+			t.Fatalf("expected no %s, stat err = %v", p, err)
+		}
+	}
+}
+
+func TestApplyMcpServers_MalformedMcpJSONSkipsSettings(t *testing.T) {
+	root := t.TempDir()
+	writeMcpJSON(t, root, "{not json")
+	err := ApplyMcpServers(root, []string{"zoo"}, map[string]json.RawMessage{"zoo": json.RawMessage(`{"command":"zoo"}`)})
+	if err == nil || !strings.HasPrefix(err.Error(), "parse .mcp.json: ") {
+		t.Fatalf("err = %v, want parse .mcp.json error", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claude")); !os.IsNotExist(err) {
+		t.Fatalf("expected no .claude dir, stat err = %v", err)
+	}
+}
+
+func TestApplyMcpServers_MalformedSettingsErrors(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, "{not json")
+	err := ApplyMcpServers(root, []string{"zoo"}, map[string]json.RawMessage{"zoo": json.RawMessage(`{"command":"zoo"}`)})
+	if err == nil || !strings.HasPrefix(err.Error(), "parse settings: ") {
+		t.Fatalf("err = %v, want parse settings error", err)
+	}
+}
+
+func TestApplyMcpServers_UnchangedRunDoesNotRewrite(t *testing.T) {
+	root := t.TempDir()
+	selected := map[string]json.RawMessage{"zoo": json.RawMessage(`{"command":"zoo"}`)}
+	if err := ApplyMcpServers(root, []string{"zoo"}, selected); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{filepath.Join(root, ".mcp.json"), filepath.Join(root, ".claude", "settings.local.json")}
+	old := time.Now().Add(-time.Hour).Truncate(time.Second)
+	before := make([][]byte, len(paths))
+	for i, p := range paths {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[i] = data
+	}
+	if err := ApplyMcpServers(root, []string{"zoo"}, selected); err != nil {
+		t.Fatal(err)
+	}
+	for i, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != string(before[i]) {
+			t.Fatalf("%s changed:\n%s\nwant:\n%s", p, data, before[i])
+		}
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.ModTime().Equal(old) {
+			t.Fatalf("%s was rewritten: mtime %v, want %v", p, info.ModTime(), old)
+		}
+	}
+}
+
+func TestApplyMcpServers_DefinitionRoundTrips(t *testing.T) {
+	root := t.TempDir()
+	def := json.RawMessage(`{"type":"http","url":"https://x","headers":{"Authorization":"Bearer ${TOKEN}"}}`)
+	if err := ApplyMcpServers(root, []string{"x"}, map[string]json.RawMessage{"x": def}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{
+  "mcpServers": {
+    "x": {
+      "headers": {
+        "Authorization": "Bearer ${TOKEN}"
+      },
+      "type": "http",
+      "url": "https://x"
+    }
+  }
+}
+`
+	if string(raw) != want {
+		t.Fatalf(".mcp.json =\n%s\nwant:\n%s", raw, want)
 	}
 }
