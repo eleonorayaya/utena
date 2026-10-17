@@ -366,11 +366,17 @@ func (s *Service) activateHeld(ctx context.Context, windowID, rawURL string) (Op
 	if !ok {
 		return OpenResult{}, false, nil
 	}
-	tab, ok := MatchTab(w.Tabs, rawURL)
-	if !ok {
+	if tab, ok := MatchTab(w.Tabs, rawURL); ok {
+		if err := s.driver.ActivateTab(ctx, w.ID, tab.ID); err != nil {
+			return OpenResult{}, false, driverErr(err)
+		}
+		return OpenResult{WindowID: w.ID, TabID: tab.ID}, true, nil
+	}
+	if !w.Focused {
 		return OpenResult{}, false, nil
 	}
-	if err := s.driver.ActivateTab(ctx, w.ID, tab.ID); err != nil {
+	tab, err := s.driver.OpenTab(ctx, w.ID, rawURL)
+	if err != nil {
 		return OpenResult{}, false, driverErr(err)
 	}
 	return OpenResult{WindowID: w.ID, TabID: tab.ID}, true, nil
@@ -1004,9 +1010,11 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	switch ev.Type {
 	case EventConnected:
 		s.connected.Store(true)
-		s.ensuredFor = 0
 		flushErr := s.flushRemovals()
 		restarted, runErr := s.trackRun(ev.Run)
+		if restarted {
+			s.ensuredFor = 0
+		}
 		if restarted && s.restoreWindow > 0 {
 			s.restoreUntil = s.now().Add(s.restoreWindow)
 			if s.restoreTimer != nil {

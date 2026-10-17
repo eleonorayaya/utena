@@ -65,8 +65,9 @@ func TestPlace_WindowClosedByHandComesBackOnlyOnNextAttach(t *testing.T) {
 	assert.Len(t, liveWindows(t, h), 2)
 }
 
-func TestPlace_ConnectedProvidesWindowAgain(t *testing.T) {
+func TestPlace_BrowserRestartProvidesWindowAgainButReconnectDoesNot(t *testing.T) {
 	h := newHarness(t)
+	connectRun(h, "r1")
 	h.svc.SetAttached(1)
 	require.NoError(t, h.svc.place(context.Background()))
 	w := liveWindows(t, h)[0]
@@ -74,9 +75,12 @@ func TestPlace_ConnectedProvidesWindowAgain(t *testing.T) {
 	h.svc.handleEvent(context.Background(), Event{Type: EventWindowRemoved, WindowID: w.ID})
 	h.clock.fire()
 
-	h.svc.handleEvent(context.Background(), Event{Type: EventConnected})
+	connectRun(h, "r1")
 	require.NoError(t, h.svc.place(context.Background()))
+	assert.Empty(t, liveWindows(t, h))
 
+	connectRun(h, "r2")
+	require.NoError(t, h.svc.place(context.Background()))
 	assert.Len(t, liveWindows(t, h), 1)
 }
 

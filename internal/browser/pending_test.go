@@ -86,6 +86,22 @@ func TestOpen_BackgroundHoldActivatesAnOpenTabWithoutFocus(t *testing.T) {
 	assert.Empty(t, storedTabs(t, h, 2))
 }
 
+func TestOpen_BackgroundHoldIntoTheFocusedWindowLoadsNow(t *testing.T) {
+	h := newPendingHarness(t)
+	w := ownWindow(t, h, 2, "https://a.example.com")
+	h.driver.SetFocused(w.ID)
+
+	res, err := h.svc.Open(context.Background(), OpenRequest{SessionID: 2, URL: prURL})
+	require.NoError(t, err)
+
+	assert.False(t, res.Pending)
+	assert.Equal(t, w.ID, res.WindowID)
+	live, _ := h.driver.Window(w.ID)
+	assert.Equal(t, []string{"https://a.example.com", prURL}, tabURLs(live))
+	assert.Empty(t, storedTabs(t, h, 2))
+	assert.Empty(t, h.driver.Focused())
+}
+
 func TestOpen_BackgroundHoldWithoutWindowAddsSavedRow(t *testing.T) {
 	h := newPendingHarness(t)
 
