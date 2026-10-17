@@ -134,17 +134,24 @@ const pollScript = `on run
 	set RS to character id 30
 	set US to character id 31
 	tell application id "com.google.Chrome"
-		set out to "up" & US & (frontmost as text)
-		repeat with w in (every window whose mode is "normal")
-			set out to out & RS & "w" & US & (id of w) & US & (index of w) & US & (active tab index of w)
-			set tids to id of every tab of w
-			set turls to URL of every tab of w
-			set ttitles to title of every tab of w
-			repeat with i from 1 to count of tids
-				set out to out & RS & "t" & US & (item i of tids) & US & (item i of turls) & US & (item i of ttitles)
-			end repeat
-		end repeat
+		set fm to frontmost
+		set wids to id of every window whose mode is "normal"
+		set widx to index of every window whose mode is "normal"
+		set wact to active tab index of every window whose mode is "normal"
+		set tids to id of every tab of (every window whose mode is "normal")
+		set turls to URL of every tab of (every window whose mode is "normal")
+		set ttitles to title of every tab of (every window whose mode is "normal")
 	end tell
+	set out to "up" & US & (fm as text)
+	repeat with i from 1 to count of wids
+		set out to out & RS & "w" & US & (item i of wids) & US & (item i of widx) & US & (item i of wact)
+		set ti to item i of tids
+		set tu to item i of turls
+		set tt to item i of ttitles
+		repeat with j from 1 to count of ti
+			set out to out & RS & "t" & US & (item j of ti) & US & (item j of tu) & US & (item j of tt)
+		end repeat
+	end repeat
 	return out
 end run`
 
@@ -325,7 +332,9 @@ func (d *Driver) Subscribe(ctx context.Context, onEvent func(browser.Event)) err
 	if err != nil {
 		return err
 	}
-	onEvent(browser.Event{Type: browser.EventConnected, Run: d.runID(ctx)})
+	run := d.runID(ctx)
+	onEvent(browser.Event{Type: browser.EventConnected, Run: run})
+	var removed []browser.Event
 	failures := 0
 	for {
 		if !sleepCtx(ctx, d.interval) {
@@ -340,10 +349,18 @@ func (d *Driver) Subscribe(ctx context.Context, onEvent func(browser.Event)) err
 			continue
 		}
 		failures = 0
-		if !cur.running {
+		if !cur.running || (run != "" && d.runID(ctx) != run) {
 			return browser.ErrNotConnected
 		}
+		for _, ev := range removed {
+			onEvent(ev)
+		}
+		removed = nil
 		for _, ev := range diff(prev, cur) {
+			if ev.Type == browser.EventWindowRemoved {
+				removed = append(removed, ev)
+				continue
+			}
 			onEvent(ev)
 		}
 		prev = cur

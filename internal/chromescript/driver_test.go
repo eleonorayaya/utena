@@ -26,6 +26,8 @@ type fakeRunner struct {
 	pollErr error
 	reply   map[string]string
 	err     error
+	pids    []string
+	pidAt   int
 }
 
 func (r *fakeRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -33,7 +35,12 @@ func (r *fakeRunner) Run(ctx context.Context, name string, args ...string) ([]by
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, call{name: name, args: args})
 	if name == "pgrep" {
-		return []byte("4242\n"), nil
+		if len(r.pids) == 0 {
+			return []byte("4242\n"), nil
+		}
+		pid := r.pids[min(r.pidAt, len(r.pids)-1)]
+		r.pidAt++
+		return []byte(pid + "\n"), nil
 	}
 	script := args[1]
 	if script == pollScript {
@@ -278,6 +285,54 @@ func TestSubscribe_ReturnsWhenChromeQuits(t *testing.T) {
 	assert.Equal(t, []browser.Event{{Type: browser.EventConnected, Run: "4242"}}, rec.all())
 }
 
+func TestSubscribe_ReportsRemovedWindowAfterChromeStillRuns(t *testing.T) {
+	r := &fakeRunner{polls: []string{
+		up(false, win("1", "1", "1"), win("2", "2", "1")),
+		up(false, win("1", "1", "1")),
+		up(false, win("1", "1", "1")),
+	}}
+	d := newDriver(r, time.Millisecond)
+	rec := &recorder{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- d.Subscribe(ctx, rec.add) }()
+
+	require.Eventually(t, func() bool { return len(rec.all()) >= 2 }, time.Second, time.Millisecond)
+	cancel()
+	<-done
+	assert.Equal(t, []browser.Event{
+		{Type: browser.EventConnected, Run: "4242"},
+		{Type: browser.EventWindowRemoved, WindowID: "2"},
+	}, rec.all())
+}
+
+func TestSubscribe_WindowsClosingAsChromeQuitsAreNotReportedRemoved(t *testing.T) {
+	r := &fakeRunner{polls: []string{
+		up(false, win("1", "1", "1"), win("2", "2", "1")),
+		up(false, win("1", "1", "1")),
+		"down",
+	}}
+	d := newDriver(r, time.Millisecond)
+	rec := &recorder{}
+
+	err := d.Subscribe(context.Background(), rec.add)
+
+	assert.ErrorIs(t, err, browser.ErrNotConnected)
+	assert.Equal(t, []browser.Event{{Type: browser.EventConnected, Run: "4242"}}, rec.all())
+}
+
+func TestSubscribe_ReturnsWhenChromeRestartsBetweenPolls(t *testing.T) {
+	r := &fakeRunner{polls: []string{up(false)}, pids: []string{"4242", "4242", "5151"}}
+	d := newDriver(r, time.Millisecond)
+	rec := &recorder{}
+
+	err := d.Subscribe(context.Background(), rec.add)
+
+	assert.ErrorIs(t, err, browser.ErrNotConnected)
+	assert.Equal(t, []browser.Event{{Type: browser.EventConnected, Run: "4242"}}, rec.all())
+}
+
 func TestSubscribe_ToleratesTransientPollErrors(t *testing.T) {
 	r := &fakeRunner{pollErr: errors.New("boom")}
 	d := newDriver(r, time.Millisecond)
@@ -287,7 +342,13 @@ func TestSubscribe_ToleratesTransientPollErrors(t *testing.T) {
 	assert.ErrorContains(t, err, "boom")
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	assert.Len(t, r.calls, maxPollErrors)
+	polls := 0
+	for _, c := range r.calls {
+		if c.name == "osascript" {
+			polls++
+		}
+	}
+	assert.Equal(t, maxPollErrors, polls)
 }
 
 func TestCapabilities(t *testing.T) {

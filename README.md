@@ -47,17 +47,18 @@ This sets up environment variables needed for utena integrations (like Claude Co
 
 #### Browser windows
 
-Links opened from a utena session land in that session's own browser window. The daemon drives one browser, Chrome or Firefox:
+Links opened from a utena session land in that session's own browser window. The daemon drives one browser: Chrome or Firefox through the utena extension, or Chrome through AppleScript where extensions can't be installed:
 
 | Flag | Env | Default | |
 |---|---|---|---|
-| `--browser` | `UTENA_BROWSER` | `chrome` | `chrome` or `firefox` |
+| `--browser` | `UTENA_BROWSER` | `chrome` | `chrome`, `firefox` or `chrome-applescript` |
 
 Without the flag, the daemon reads the default from `~/.config/utena/daemon.json` (`{"browser": "firefox"}`); the env var overrides both. The dotfiles personal profile writes that file. Restart the daemon after changing it.
 
 1. Install the extension in one browser profile only.
    - **Chrome:** run `task extension:install`, then do the one-time Load unpacked step it prints (`chrome://extensions` → Developer mode → Load unpacked).
    - **Firefox:** release Firefox only keeps signed add-ons, so the extension is signed as an unlisted add-on on addons.mozilla.org. Create API credentials at https://addons.mozilla.org/developers/addon/api/key/, export them as `WEB_EXT_API_KEY` and `WEB_EXT_API_SECRET`, and run `task extension:firefox:sign`. It signs the extension (Mozilla's automated review takes a few minutes) and opens the `.xpi` in Firefox to install. Bump the version in `extension/firefox/manifest.json` before signing a changed extension; AMO won't sign a version twice. `task extension:firefox:lint` checks it without signing.
+   - **Chrome without the extension (`chrome-applescript`):** nothing to install. The daemon reads Chrome's windows and tabs through `osascript` about every 1.5s. The first time, macOS asks whether utena may control Google Chrome; if you missed it, allow it in System Settings → Privacy & Security → Automation (the TUI footer says so while it's blocked). Chrome brings itself to the front whenever a page loads, so links from sessions that aren't attached wait as pending tabs (see below), and a window created when you attach a session briefly takes focus before utena gives it back.
 2. `eval "$(utena shell-init)"` sets `BROWSER` to `utena-open` inside tuios, so tools that open links route them through the daemon.
 3. `utena open <url>...` opens links in the current session's window; when the browser extension is connected, the TUI's `o` switches to the selected session (if it isn't attached) and opens its PR in that session's window. Otherwise `o` just opens the PR.
 4. If the daemon or extension is unavailable, links fall back to `/usr/bin/open`.
