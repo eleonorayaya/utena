@@ -193,9 +193,7 @@ func TestSessionService_WriteBundles_UsesStoredBundles(t *testing.T) {
 	require.NoError(t, sessionStore.UpdateBundles(sess.ID, []string{"docs"}))
 	require.Equal(t, []string{"go"}, sess.Bundles)
 
-	pluginsErr, mcpErr := service.writeBundles(ctx, sess)
-	require.NoError(t, pluginsErr)
-	require.NoError(t, mcpErr)
+	require.NoError(t, service.writeBundles(ctx, sess))
 	require.Equal(t, map[string]any{"docs@m": true}, readEnabledPlugins(t, sess.SessionRoot))
 }
 
@@ -215,9 +213,7 @@ func TestSessionService_WriteBundles_SkipsEmptySessionRoot(t *testing.T) {
 	cwd := t.TempDir()
 	t.Chdir(cwd)
 
-	pluginsErr, mcpErr := service.writeBundles(context.Background(), sess)
-	require.NoError(t, pluginsErr)
-	require.NoError(t, mcpErr)
+	require.NoError(t, service.writeBundles(context.Background(), sess))
 	_, err := os.Stat(filepath.Join(cwd, ".claude"))
 	require.True(t, os.IsNotExist(err))
 }
@@ -273,42 +269,42 @@ func TestSessionService_SetBundles_MalformedMcpJSONStillWritesPlugins(t *testing
 
 	_, err := service.SetBundles(context.Background(), sess.ID, []string{"go", "homelab"})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "mcp: parse .mcp.json")
-	require.NotContains(t, err.Error(), "plugins:")
+	require.Contains(t, err.Error(), "parse .mcp.json")
+	require.NotContains(t, err.Error(), "settings.local.json")
 	require.Equal(t, map[string]any{"go@m": true}, readEnabledPlugins(t, sess.SessionRoot))
 }
 
-func TestSessionService_ApplyClaudeSettings_SeparatesPluginAndMcpWarnings(t *testing.T) {
+func TestSessionService_ApplyClaudeSettings_MalformedMcpJSONWarnsOnce(t *testing.T) {
 	service, sess := addMcpTestSession(t)
 	require.NoError(t, service.store.UpdateBundles(sess.ID, []string{"go", "homelab"}))
 	require.NoError(t, os.WriteFile(filepath.Join(sess.SessionRoot, ".mcp.json"), []byte("{not json"), 0o644))
 
 	warnings := service.applyClaudeSettings(context.Background(), sess)
 	require.Len(t, warnings, 1)
-	require.True(t, strings.HasPrefix(warnings[0], "claude-mcp: "), warnings[0])
+	require.True(t, strings.HasPrefix(warnings[0], "claude-bundles: "), warnings[0])
 	require.NotContains(t, warnings[0], "\n")
 	require.Equal(t, map[string]any{"go@m": true}, readEnabledPlugins(t, sess.SessionRoot))
 }
 
-func TestSessionService_ApplyClaudeSettings_MalformedSettingsWarnsPerKind(t *testing.T) {
+func TestSessionService_ApplyClaudeSettings_MalformedFilesWarnOnceOnOneLine(t *testing.T) {
 	service, sess := addMcpTestSession(t)
 	require.NoError(t, service.store.UpdateBundles(sess.ID, []string{"go", "homelab"}))
+	require.NoError(t, os.WriteFile(filepath.Join(sess.SessionRoot, ".mcp.json"), []byte("{not json"), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(sess.SessionRoot, ".claude"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(sess.SessionRoot, ".claude", "settings.local.json"), []byte("{not json"), 0o644))
 
 	warnings := service.applyClaudeSettings(context.Background(), sess)
-	var plugins, mcp int
+	var bundleWarnings []string
 	for _, w := range warnings {
 		require.NotContains(t, w, "\n")
-		if strings.HasPrefix(w, "claude-plugins: ") {
-			plugins++
-		}
-		if strings.HasPrefix(w, "claude-mcp: ") {
-			mcp++
+		require.False(t, strings.HasPrefix(w, "claude-plugins: ") || strings.HasPrefix(w, "claude-mcp: "), w)
+		if strings.HasPrefix(w, "claude-bundles: ") {
+			bundleWarnings = append(bundleWarnings, w)
 		}
 	}
-	require.Equal(t, 1, plugins, warnings)
-	require.Equal(t, 1, mcp, warnings)
+	require.Len(t, bundleWarnings, 1, warnings)
+	require.Contains(t, bundleWarnings[0], ".mcp.json")
+	require.Contains(t, bundleWarnings[0], "settings.local.json")
 }
 
 func TestSessionService_ActivateSession_WritesMcpServers(t *testing.T) {

@@ -200,7 +200,6 @@ func TestTrustProject_MalformedLeavesFileUntouched(t *testing.T) {
 		"syntax":   `{"projects": `,
 		"trailing": `{} junk`,
 		"empty":    ``,
-		"null":     `null`,
 		"array":    `[]`,
 	}
 	for name, content := range cases {
@@ -229,6 +228,48 @@ func TestTrustProject_MalformedLeavesFileUntouched(t *testing.T) {
 				t.Fatalf("stray files left: %v", entries)
 			}
 		})
+	}
+}
+
+func TestTrustProject_NullFileIsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".claude.json")
+	if err := os.WriteFile(path, []byte(`null`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := TrustProject(path, "/sessions/a"); err != nil {
+		t.Fatalf("TrustProject: %v", err)
+	}
+
+	if projectEntry(t, loadGlobalConfig(t, path), "/sessions/a")["hasTrustDialogAccepted"] != true {
+		t.Fatal("not trusted")
+	}
+}
+
+func TestTrustProject_WritesThroughSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.json")
+	if err := os.WriteFile(target, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".claude.json")
+	if err := os.Symlink("real.json", path); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := TrustProject(path, "/sessions/a"); err != nil {
+		t.Fatalf("TrustProject: %v", err)
+	}
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlink replaced by %v", info.Mode())
+	}
+	if projectEntry(t, loadGlobalConfig(t, target), "/sessions/a")["hasTrustDialogAccepted"] != true {
+		t.Fatal("target not updated")
 	}
 }
 

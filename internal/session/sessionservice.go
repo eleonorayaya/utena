@@ -754,14 +754,9 @@ func (s *SessionService) applyClaudeSettings(ctx context.Context, sess *Session)
 		slog.WarnContext(ctx, "ensure session-root claude settings failed", "error", err)
 		warnings = append(warnings, fmt.Sprintf("claude-settings: %s", err.Error()))
 	}
-	pluginsErr, mcpErr := s.writeBundles(ctx, sess)
-	if pluginsErr != nil {
-		slog.WarnContext(ctx, "apply claude plugins failed", "error", pluginsErr)
-		warnings = append(warnings, fmt.Sprintf("claude-plugins: %s", pluginsErr.Error()))
-	}
-	if mcpErr != nil {
-		slog.WarnContext(ctx, "apply claude mcp servers failed", "error", mcpErr)
-		warnings = append(warnings, fmt.Sprintf("claude-mcp: %s", mcpErr.Error()))
+	if err := s.writeBundles(ctx, sess); err != nil {
+		slog.WarnContext(ctx, "apply claude bundles failed", "error", err)
+		warnings = append(warnings, fmt.Sprintf("claude-bundles: %s", err.Error()))
 	}
 	if err := s.trustSessionRoot(sess); err != nil {
 		slog.WarnContext(ctx, "trust session root in claude config failed", "error", err)
@@ -786,14 +781,7 @@ func (s *SessionService) SetBundles(ctx context.Context, id uint, names []string
 	if err := s.store.UpdateBundles(sess.ID, sess.Bundles); err != nil {
 		return nil, fmt.Errorf("persist session bundles: %w", err)
 	}
-	pluginsErr, mcpErr := s.writeBundles(ctx, sess)
-	if pluginsErr != nil {
-		pluginsErr = fmt.Errorf("plugins: %w", pluginsErr)
-	}
-	if mcpErr != nil {
-		mcpErr = fmt.Errorf("mcp: %w", mcpErr)
-	}
-	if err := errors.Join(pluginsErr, mcpErr); err != nil {
+	if err := s.writeBundles(ctx, sess); err != nil {
 		return nil, fmt.Errorf("apply claude bundles: %w", err)
 	}
 	return sess, nil
@@ -811,9 +799,9 @@ func (s *SessionService) DefaultBundlesFor(ctx context.Context, workspaceIDs []u
 	return defaultBundles(paths), nil
 }
 
-func (s *SessionService) writeBundles(ctx context.Context, sess *Session) (pluginsErr, mcpErr error) {
+func (s *SessionService) writeBundles(ctx context.Context, sess *Session) error {
 	if sess.SessionRoot == "" {
-		return nil, nil
+		return nil
 	}
 	if current, err := s.store.GetBundles(sess.ID); err != nil {
 		slog.WarnContext(ctx, "failed to load session bundles", "session", sess.ID, "error", err)
@@ -824,7 +812,6 @@ func (s *SessionService) writeBundles(ctx context.Context, sess *Session) (plugi
 	if len(unknown) > 0 {
 		slog.WarnContext(ctx, "session references unknown bundles", "session", sess.ID, "bundles", unknown)
 	}
-	pluginsErr = claudesettings.ApplyPlugins(sess.SessionRoot, s.bundleCatalog.ManagedPlugins(), enabled)
 	names, _ := s.bundleCatalog.ResolveServers(sess.Bundles)
 	selected := make(map[string]json.RawMessage, len(names))
 	var missing []string
@@ -839,8 +826,12 @@ func (s *SessionService) writeBundles(ctx context.Context, sess *Session) (plugi
 	if len(missing) > 0 {
 		slog.WarnContext(ctx, "bundle references unknown MCP servers", "session", sess.ID, "servers", missing)
 	}
-	mcpErr = claudesettings.ApplyMcpServers(sess.SessionRoot, s.bundleCatalog.ManagedServers(), selected)
-	return pluginsErr, mcpErr
+	return claudesettings.ApplyBundles(sess.SessionRoot, claudesettings.BundleSettings{
+		ManagedPlugins: s.bundleCatalog.ManagedPlugins(),
+		Plugins:        enabled,
+		ManagedServers: s.bundleCatalog.ManagedServers(),
+		Servers:        selected,
+	})
 }
 
 func (s *SessionService) resolveWorktreeWorkspace(ctx context.Context, wt *git.Worktree, cache map[uint]*workspace.Workspace) (*workspace.Workspace, error) {
@@ -1258,8 +1249,8 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 
 	s.ensureSessionWorktrees(ctx, session)
 	s.SyncSessionBranches(ctx, session)
-	if pluginsErr, mcpErr := s.writeBundles(ctx, session); pluginsErr != nil || mcpErr != nil {
-		slog.WarnContext(ctx, "apply claude bundles failed", "session", session.ID, "plugins_error", pluginsErr, "mcp_error", mcpErr)
+	if err := s.writeBundles(ctx, session); err != nil {
+		slog.WarnContext(ctx, "apply claude bundles failed", "session", session.ID, "error", err)
 	}
 	if err := s.trustSessionRoot(session); err != nil {
 		slog.WarnContext(ctx, "trust session root in claude config failed", "session", session.ID, "error", err)

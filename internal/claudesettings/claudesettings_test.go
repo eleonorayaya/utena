@@ -426,7 +426,7 @@ func writeSettings(t *testing.T, root, body string) {
 	}
 }
 
-func TestApplyPlugins(t *testing.T) {
+func TestApplyBundles_Plugins(t *testing.T) {
 	tests := []struct {
 		name       string
 		existing   string
@@ -477,8 +477,8 @@ func TestApplyPlugins(t *testing.T) {
 			if tt.existing != "" {
 				writeSettings(t, root, tt.existing)
 			}
-			if err := ApplyPlugins(root, tt.managed, tt.enabled); err != nil {
-				t.Fatalf("ApplyPlugins: %v", err)
+			if err := ApplyBundles(root, BundleSettings{ManagedPlugins: tt.managed, Plugins: tt.enabled}); err != nil {
+				t.Fatalf("ApplyBundles: %v", err)
 			}
 			settings := readSettings(t, root)
 			if _, ok := settings["enabledPlugins"]; ok && tt.wantAbsent {
@@ -497,12 +497,12 @@ func TestApplyPlugins(t *testing.T) {
 	}
 }
 
-func TestApplyPlugins_PreservesSandbox(t *testing.T) {
+func TestApplyBundles_PluginsPreservesSandbox(t *testing.T) {
 	root := t.TempDir()
 	if err := EnsureSessionRoot(root, []string{"/ws"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyPlugins(root, []string{"go@m"}, []string{"go@m"}); err != nil {
+	if err := ApplyBundles(root, BundleSettings{ManagedPlugins: []string{"go@m"}, Plugins: []string{"go@m"}}); err != nil {
 		t.Fatal(err)
 	}
 	out := readSettings(t, root)
@@ -513,9 +513,9 @@ func TestApplyPlugins_PreservesSandbox(t *testing.T) {
 	}
 }
 
-func TestApplyPlugins_NoFileAndNothingEnabledWritesNothing(t *testing.T) {
+func TestApplyBundles_PluginsNoFileAndNothingEnabledWritesNothing(t *testing.T) {
 	root := t.TempDir()
-	if err := ApplyPlugins(root, []string{"go@m"}, nil); err != nil {
+	if err := ApplyBundles(root, BundleSettings{ManagedPlugins: []string{"go@m"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claude", "settings.local.json")); !os.IsNotExist(err) {
@@ -543,7 +543,7 @@ func readMcpJSON(t *testing.T, root string) map[string]any {
 	return out
 }
 
-func TestApplyMcpServers(t *testing.T) {
+func TestApplyBundles_McpServers(t *testing.T) {
 	zoo := json.RawMessage(`{"command":"zoo","args":["mcp"]}`)
 	ha := json.RawMessage(`{"type":"http","url":"https://ha"}`)
 	tests := []struct {
@@ -616,8 +616,8 @@ func TestApplyMcpServers(t *testing.T) {
 			if tt.settings != "" {
 				writeSettings(t, root, tt.settings)
 			}
-			if err := ApplyMcpServers(root, tt.managed, tt.selected); err != nil {
-				t.Fatalf("ApplyMcpServers: %v", err)
+			if err := ApplyBundles(root, BundleSettings{ManagedServers: tt.managed, Servers: tt.selected}); err != nil {
+				t.Fatalf("ApplyBundles: %v", err)
 			}
 			mcp := readMcpJSON(t, root)
 			if got := sortedKeys(mcp); !slices.Equal(got, tt.wantMcpKeys) {
@@ -664,9 +664,9 @@ func sortedKeys(m map[string]any) []string {
 	return keys
 }
 
-func TestApplyMcpServers_NothingSelectedCreatesNothing(t *testing.T) {
+func TestApplyBundles_NothingSelectedCreatesNothing(t *testing.T) {
 	root := t.TempDir()
-	if err := ApplyMcpServers(root, []string{"zoo"}, nil); err != nil {
+	if err := ApplyBundles(root, BundleSettings{ManagedServers: []string{"zoo"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []string{".mcp.json", ".claude"} {
@@ -676,10 +676,10 @@ func TestApplyMcpServers_NothingSelectedCreatesNothing(t *testing.T) {
 	}
 }
 
-func TestApplyMcpServers_MalformedMcpJSONSkipsSettings(t *testing.T) {
+func TestApplyBundles_MalformedMcpJSONSkipsSettings(t *testing.T) {
 	root := t.TempDir()
 	writeMcpJSON(t, root, "{not json")
-	err := ApplyMcpServers(root, []string{"zoo"}, map[string]json.RawMessage{"zoo": json.RawMessage(`{"command":"zoo"}`)})
+	err := ApplyBundles(root, BundleSettings{ManagedServers: []string{"zoo"}, Servers: map[string]json.RawMessage{"zoo": json.RawMessage(`{"command":"zoo"}`)}})
 	if err == nil || !strings.HasPrefix(err.Error(), "parse .mcp.json: ") {
 		t.Fatalf("err = %v, want parse .mcp.json error", err)
 	}
@@ -688,19 +688,19 @@ func TestApplyMcpServers_MalformedMcpJSONSkipsSettings(t *testing.T) {
 	}
 }
 
-func TestApplyMcpServers_MalformedSettingsErrors(t *testing.T) {
+func TestApplyBundles_MalformedSettingsErrors(t *testing.T) {
 	root := t.TempDir()
 	writeSettings(t, root, "{not json")
-	err := ApplyMcpServers(root, []string{"zoo"}, map[string]json.RawMessage{"zoo": json.RawMessage(`{"command":"zoo"}`)})
-	if err == nil || !strings.HasPrefix(err.Error(), "parse settings: ") {
+	err := ApplyBundles(root, BundleSettings{ManagedServers: []string{"zoo"}, Servers: map[string]json.RawMessage{"zoo": json.RawMessage(`{"command":"zoo"}`)}})
+	if err == nil || !strings.HasPrefix(err.Error(), "parse settings.local.json: ") {
 		t.Fatalf("err = %v, want parse settings error", err)
 	}
 }
 
-func TestApplyMcpServers_UnchangedRunDoesNotRewrite(t *testing.T) {
+func TestApplyBundles_UnchangedRunDoesNotRewrite(t *testing.T) {
 	root := t.TempDir()
 	selected := map[string]json.RawMessage{"zoo": json.RawMessage(`{"command":"zoo"}`)}
-	if err := ApplyMcpServers(root, []string{"zoo"}, selected); err != nil {
+	if err := ApplyBundles(root, BundleSettings{ManagedServers: []string{"zoo"}, Servers: selected}); err != nil {
 		t.Fatal(err)
 	}
 	paths := []string{filepath.Join(root, ".mcp.json"), filepath.Join(root, ".claude", "settings.local.json")}
@@ -716,7 +716,7 @@ func TestApplyMcpServers_UnchangedRunDoesNotRewrite(t *testing.T) {
 		}
 		before[i] = data
 	}
-	if err := ApplyMcpServers(root, []string{"zoo"}, selected); err != nil {
+	if err := ApplyBundles(root, BundleSettings{ManagedServers: []string{"zoo"}, Servers: selected}); err != nil {
 		t.Fatal(err)
 	}
 	for i, p := range paths {
@@ -737,10 +737,10 @@ func TestApplyMcpServers_UnchangedRunDoesNotRewrite(t *testing.T) {
 	}
 }
 
-func TestApplyMcpServers_DefinitionRoundTrips(t *testing.T) {
+func TestApplyBundles_DefinitionRoundTrips(t *testing.T) {
 	root := t.TempDir()
 	def := json.RawMessage(`{"type":"http","url":"https://x","headers":{"Authorization":"Bearer ${TOKEN}"}}`)
-	if err := ApplyMcpServers(root, []string{"x"}, map[string]json.RawMessage{"x": def}); err != nil {
+	if err := ApplyBundles(root, BundleSettings{ManagedServers: []string{"x"}, Servers: map[string]json.RawMessage{"x": def}}); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, ".mcp.json"))
@@ -764,10 +764,10 @@ func TestApplyMcpServers_DefinitionRoundTrips(t *testing.T) {
 	}
 }
 
-func TestApplyMcpServers_LargeIntegerSurvives(t *testing.T) {
+func TestApplyBundles_LargeIntegerSurvives(t *testing.T) {
 	root := t.TempDir()
 	def := json.RawMessage(`{"command":"x","timeout":12345678901234567890}`)
-	if err := ApplyMcpServers(root, []string{"x"}, map[string]json.RawMessage{"x": def}); err != nil {
+	if err := ApplyBundles(root, BundleSettings{ManagedServers: []string{"x"}, Servers: map[string]json.RawMessage{"x": def}}); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, ".mcp.json"))
@@ -779,7 +779,7 @@ func TestApplyMcpServers_LargeIntegerSurvives(t *testing.T) {
 	}
 }
 
-func TestApplyMcpServers_RejectsNonObjectDefinitions(t *testing.T) {
+func TestApplyBundles_RejectsNonObjectDefinitions(t *testing.T) {
 	for _, def := range []string{"", "null", " null ", "[]", `"x"`, "1", "{not json"} {
 		t.Run(def, func(t *testing.T) {
 			root := t.TempDir()
@@ -787,7 +787,7 @@ func TestApplyMcpServers_RejectsNonObjectDefinitions(t *testing.T) {
 				"good": json.RawMessage(`{"command":"good"}`),
 				"bad":  json.RawMessage(def),
 			}
-			err := ApplyMcpServers(root, []string{"good", "bad"}, selected)
+			err := ApplyBundles(root, BundleSettings{ManagedPlugins: []string{"go@m"}, Plugins: []string{"go@m"}, ManagedServers: []string{"good", "bad"}, Servers: selected})
 			if err == nil || !strings.Contains(err.Error(), "bad") {
 				t.Fatalf("err = %v, want error naming bad", err)
 			}
@@ -797,5 +797,95 @@ func TestApplyMcpServers_RejectsNonObjectDefinitions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestApplyBundles_MalformedMcpJSONStillWritesPlugins(t *testing.T) {
+	root := t.TempDir()
+	writeMcpJSON(t, root, "{not json")
+	err := ApplyBundles(root, BundleSettings{
+		ManagedPlugins: []string{"go@m"},
+		Plugins:        []string{"go@m"},
+		ManagedServers: []string{"zoo"},
+		Servers:        map[string]json.RawMessage{"zoo": json.RawMessage(`{"command":"zoo"}`)},
+	})
+	if err == nil || !strings.HasPrefix(err.Error(), "parse .mcp.json: ") {
+		t.Fatalf("err = %v, want parse .mcp.json error", err)
+	}
+	settings := readSettings(t, root)
+	if got := sortedKeys(settings); !slices.Equal(got, []string{"enabledPlugins"}) {
+		t.Fatalf("settings keys = %v, want [enabledPlugins]", got)
+	}
+}
+
+func TestApplyBundles_BothFilesFailingJoinsOnOneLine(t *testing.T) {
+	root := t.TempDir()
+	writeMcpJSON(t, root, "{not json")
+	writeSettings(t, root, "{not json")
+	err := ApplyBundles(root, BundleSettings{ManagedPlugins: []string{"go@m"}, Plugins: []string{"go@m"}})
+	if err == nil || !strings.Contains(err.Error(), ".mcp.json") || !strings.Contains(err.Error(), "settings.local.json") {
+		t.Fatalf("err = %v, want both files named", err)
+	}
+	if strings.Contains(err.Error(), "\n") {
+		t.Fatalf("err has a newline: %q", err)
+	}
+}
+
+func TestEnsureWorkspaceRoot_UnchangedFileIsNotReformatted(t *testing.T) {
+	root := t.TempDir()
+	body := `{"sandbox":{"filesystem":{"allowWrite":["` + filepath.Join(root, ".git") + `","` + filepath.Join(root, ".bare") + `"]}}}`
+	writeSettings(t, root, body)
+
+	if err := EnsureWorkspaceRoot(root); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != body {
+		t.Fatalf("file rewritten:\n%s", got)
+	}
+}
+
+func TestEnsureWorkspaceRoot_WritesThroughSymlinkAndKeepsMode(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "shared.json")
+	if err := os.WriteFile(target, []byte(`{"custom":true}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(target, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, ".claude", "settings.local.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EnsureWorkspaceRoot(root); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlink replaced by %v", info.Mode())
+	}
+	info, err = os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf("mode = %v, want 0640", info.Mode().Perm())
+	}
+	out := readSettings(t, root)
+	if out["custom"] != true || out["sandbox"] == nil {
+		t.Fatalf("settings = %v", out)
 	}
 }
