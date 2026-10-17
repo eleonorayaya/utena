@@ -7,9 +7,8 @@ import (
 )
 
 const (
-	checkColW = 4
-	KindColW  = 13
-	AgoColW   = 4
+	KindColW = 13
+	AgoColW  = 4
 )
 
 func KindSpan(ws workspace.Workspace) ui.Span {
@@ -47,11 +46,7 @@ func (i workspaceItem) FilterValue() string { return i.workspace.Name }
 func (i workspaceItem) Cells(selected bool) []ui.Cell {
 	var cells []ui.Cell
 	if i.multi {
-		box := ui.Span{Text: "[ ]", Style: ui.FG(theme.Current.TextMuted)}
-		if i.checked {
-			box = ui.Span{Text: "[x]", Style: ui.FG(theme.Current.Primary)}
-		}
-		cells = append(cells, ui.Cell{Spans: []ui.Span{box}, Width: checkColW})
+		cells = append(cells, ui.CheckCell(i.checked))
 	}
 	return append(cells,
 		ui.Cell{Spans: []ui.Span{{Text: i.workspace.Name, Style: ui.NameStyle(selected)}}},

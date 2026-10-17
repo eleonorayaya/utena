@@ -24,14 +24,17 @@ func New(title string) Model {
 	return Model{title: title, list: ui.NewList()}
 }
 
-func (m Model) Open(catalog []bundles.Entry, selected []string) Model {
-	m.catalog = catalog
+func (m Model) Open(selected []string) Model {
 	m.selected = slices.Clone(selected)
 	m.list.ResetFilter()
 	m.rebuildItems()
 	m.list.Select(0)
 	ui.SkipUnselectable(&m.list, 0)
 	return m
+}
+
+func (m Model) Catalog() []bundles.Entry {
+	return m.catalog
 }
 
 func (m Model) SetCatalog(catalog []bundles.Entry) Model {
@@ -105,11 +108,7 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		if !ok {
 			return m, nil, true
 		}
-		if i := slices.Index(m.selected, item.name); i >= 0 {
-			m.selected = slices.Delete(m.selected, i, i+1)
-		} else {
-			m.selected = append(m.selected, item.name)
-		}
+		m.selected = ui.ToggleSelected(m.selected, item.name)
 		m.rebuildItems()
 		return m, nil, true
 	case key.Matches(msg, Keys.Select):

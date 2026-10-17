@@ -29,8 +29,6 @@ type setSessionBundlesIntentMsg struct {
 	names     []string
 }
 
-type sessionBundlesSetMsg struct{ sessionID uint }
-
 func FetchBundles() tea.Cmd {
 	return func() tea.Msg { return fetchBundlesIntentMsg{} }
 }

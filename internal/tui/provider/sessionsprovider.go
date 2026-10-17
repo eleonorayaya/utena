@@ -286,12 +286,8 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 	case setSessionBundlesIntentMsg:
 		return p, p.client.setSessionBundles(msg.sessionID, msg.names)
 
-	case sessionBundlesSetMsg:
-		id := msg.sessionID
-		return p, tea.Batch(
-			p.client.fetchSessions(),
-			func() tea.Msg { return SessionBundlesSetMsg{SessionID: id} },
-		)
+	case SessionBundlesSetMsg:
+		return p, p.client.fetchSessions()
 	}
 
 	return p, nil

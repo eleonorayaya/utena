@@ -1,6 +1,7 @@
 package sessiondetail
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -289,6 +290,19 @@ func bundleDetail(s session.Session) Model {
 
 func TestSessionDetail_SelectFetchesBundles(t *testing.T) {
 	_, cmd := New().Update(SelectMsg{Session: makeActiveSession()})
+	assert.Contains(t, uitest.MsgTypes(cmd), "provider.fetchBundlesIntentMsg")
+}
+
+func TestSessionDetail_SelectSkipsFetchOnceCatalogLoaded(t *testing.T) {
+	m := bundleDetail(makeActiveSession())
+	_, cmd := m.Update(SelectMsg{Session: makeActiveSession()})
+	assert.NotContains(t, uitest.MsgTypes(cmd), "provider.fetchBundlesIntentMsg")
+}
+
+func TestSessionDetail_FailedCatalogLoadKeepsFetching(t *testing.T) {
+	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
+	m, _ = m.Update(provider.BundlesLoadedMsg{Err: errors.New("down")})
+	_, cmd := m.Update(SelectMsg{Session: makeActiveSession()})
 	assert.Contains(t, uitest.MsgTypes(cmd), "provider.fetchBundlesIntentMsg")
 }
 

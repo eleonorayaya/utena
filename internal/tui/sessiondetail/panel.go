@@ -117,7 +117,7 @@ func (m Model) View() string {
 
 	if len(s.Bundles) > 0 {
 		body = append(body, sectionRule(sectionTitleStyle().Render("Bundles"), mutedStyle().Render(fmt.Sprint(len(s.Bundles))), bw))
-		body = append(body, bundleLine(s.Bundles, m.catalog, bw))
+		body = append(body, bundleLine(s.Bundles, m.bundlePicker.Catalog(), bw))
 		body = append(body, "")
 	}
 

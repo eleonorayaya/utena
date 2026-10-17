@@ -265,7 +265,7 @@ func TestForm_LinesFitWidthWithManyLongWorkspaces(t *testing.T) {
 		}
 		longBundles := []string{long + "x", long + "y", long + "z"}
 		m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1, 2, 3, 4}, Bundles: longBundles})
-		require.Equal(t, longBundles, m.selectedBundles)
+		require.Equal(t, longBundles, m.defaultBundles)
 		m, _ = m.focus(fieldBundles)
 		out := m.View()
 		assert.Contains(t, out, "from workspace defaults")
@@ -324,14 +324,14 @@ func TestForm_BundlesShowWorkspaceDefaultsUntilLoaded(t *testing.T) {
 	assert.Contains(t, m.View(), "workspace defaults")
 	assert.True(t, m.Status().Empty())
 	assert.False(t, m.submitting)
-	assert.False(t, m.defaultsLoaded)
+	assert.Nil(t, m.defaultBundles)
 }
 
 func TestForm_DefaultBundlesPreCheck(t *testing.T) {
 	m, _ := picked(t, gitWS(1, "api"))
 	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
-	assert.Equal(t, []string{"go"}, m.selectedBundles)
-	assert.True(t, m.defaultsLoaded)
+	assert.Equal(t, []string{"go"}, m.defaultBundles)
+	assert.Nil(t, m.selectedBundles)
 	m, _ = m.focus(fieldBundles)
 	assert.Contains(t, m.View(), "from workspace defaults")
 }
@@ -354,7 +354,7 @@ func TestForm_StaleDefaultBundlesIgnored(t *testing.T) {
 	m, _ := picked(t, gitWS(1, "api"))
 	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1, 2}, Bundles: []string{"go"}})
 	assert.Nil(t, m.selectedBundles)
-	assert.False(t, m.defaultsLoaded)
+	assert.Nil(t, m.defaultBundles)
 }
 
 func TestForm_BundlesFieldOpensPicker(t *testing.T) {
@@ -380,7 +380,6 @@ func TestForm_EditedBundlesStopRecompute(t *testing.T) {
 	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{"docs"}})
 	assert.Equal(t, overlayNone, m.overlay)
 	assert.Equal(t, fieldBundles, m.form.Focused())
-	assert.True(t, m.bundlesEdited)
 	assert.Equal(t, []string{"docs"}, m.selectedBundles)
 	assert.NotContains(t, m.View(), "from workspace defaults")
 
@@ -397,13 +396,13 @@ func TestForm_SubmitOmitsBundlesUntilEdited(t *testing.T) {
 	m, _ := picked(t, gitWS(1, "api"))
 	m = loaded(m, 1, "main", "main")
 	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
-	assert.Nil(t, m.submitBundles())
+	assert.Nil(t, m.selectedBundles)
 	_, cmd := m.Update(press("enter"))
 	assert.Equal(t, []string{"provider.createSessionIntentMsg"}, uitest.MsgTypes(cmd))
 
 	m.overlay = overlayBundles
 	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{}})
-	got := m.submitBundles()
+	got := m.selectedBundles
 	assert.NotNil(t, got)
 	assert.Empty(t, got)
 }
@@ -435,11 +434,10 @@ func TestForm_ConfirmEmptyBeforeDefaultsLoadedIsNoChange(t *testing.T) {
 	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{}})
 	assert.Equal(t, overlayNone, m.overlay)
 	assert.Equal(t, fieldBundles, m.form.Focused())
-	assert.False(t, m.bundlesEdited)
-	assert.Nil(t, m.submitBundles())
+	assert.Nil(t, m.selectedBundles)
 
 	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
-	assert.Equal(t, []string{"go"}, m.selectedBundles)
+	assert.Equal(t, []string{"go"}, m.defaultBundles)
 }
 
 func TestForm_ConfirmUnchangedDefaultsIsNotEdited(t *testing.T) {
@@ -449,8 +447,7 @@ func TestForm_ConfirmUnchangedDefaultsIsNotEdited(t *testing.T) {
 	m = openBundlePicker(t, m)
 	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{"go"}})
 	assert.Equal(t, overlayNone, m.overlay)
-	assert.False(t, m.bundlesEdited)
-	assert.Nil(t, m.submitBundles())
+	assert.Nil(t, m.selectedBundles)
 	assert.Contains(t, m.View(), "from workspace defaults")
 }
 
@@ -469,8 +466,7 @@ func TestForm_ConfirmEmptyAfterDefaultsMarksEdited(t *testing.T) {
 	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
 	m = openBundlePicker(t, m)
 	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{}})
-	assert.True(t, m.bundlesEdited)
-	got := m.submitBundles()
+	got := m.selectedBundles
 	assert.NotNil(t, got)
 	assert.Empty(t, got)
 }
@@ -484,5 +480,5 @@ func TestForm_EscFromBundlePickerReturnsToField(t *testing.T) {
 	m, _ = closeOverlay(m)
 	assert.Equal(t, overlayNone, m.overlay)
 	assert.Equal(t, fieldBundles, m.form.Focused())
-	assert.False(t, m.bundlesEdited)
+	assert.Nil(t, m.selectedBundles)
 }

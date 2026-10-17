@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/browser"
-	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/addworkspaceform"
 	"github.com/eleonorayaya/utena/internal/tui/blockerform"
@@ -30,7 +29,6 @@ type Model struct {
 	picker                 ui.PRPicker
 	statusMsg              string
 	statusKind             ui.StatusKind
-	catalog                []bundles.Entry
 	bundlePicker           bundlepicker.Model
 	pickingBundles         bool
 }
@@ -202,13 +200,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.picker = m.picker.Close()
 		m.pickingBundles = false
 		m.setStatus("", ui.StatusInfo)
-		return m, tea.Batch(provider.RequestBrowserState(), provider.FetchBundles())
+		if m.bundlePicker.Catalog() == nil {
+			return m, tea.Batch(provider.RequestBrowserState(), provider.FetchBundles())
+		}
+		return m, provider.RequestBrowserState()
 	case provider.BundlesLoadedMsg:
 		if msg.Err == nil {
-			m.catalog = msg.Bundles
-			if m.pickingBundles {
-				m.bundlePicker = m.bundlePicker.SetCatalog(m.catalog)
-			}
+			m.bundlePicker = m.bundlePicker.SetCatalog(msg.Bundles)
 		}
 		return m, nil
 	case provider.SessionBundlesSetMsg:
@@ -267,12 +265,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.restoreSelection(sel)
 		return m, nil
 	case tea.KeyMsg:
-		if m.pickingBundles {
-			var cmd tea.Cmd
-			m.bundlePicker, cmd = m.bundlePicker.Update(msg)
-			return m, cmd
+		if !m.pickingBundles {
+			return m.onKeyMsg(msg)
 		}
-		return m.onKeyMsg(msg)
 	}
 	if m.pickingBundles {
 		var cmd tea.Cmd
@@ -416,7 +411,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if m.sess.Status == session.StatusDeleted {
 			return m, nil
 		}
-		m.bundlePicker = m.bundlePicker.Open(m.catalog, m.sess.Bundles)
+		m.bundlePicker = m.bundlePicker.Open(m.sess.Bundles)
 		m.pickingBundles = true
 		return m, nil
 	}

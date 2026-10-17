@@ -23,7 +23,7 @@ func catalog() []bundles.Entry {
 func opened(selected ...string) Model {
 	m := New("Bundles")
 	m.SetSize(60, 10)
-	return m.Open(catalog(), selected)
+	return m.SetCatalog(catalog()).Open(selected)
 }
 
 func space() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")} }
@@ -66,18 +66,18 @@ func TestPicker_ShowsBundlesWithPlugins(t *testing.T) {
 func TestPicker_LongPluginListFitsWidth(t *testing.T) {
 	m := New("Bundles")
 	m.SetSize(40, 10)
-	m = m.Open([]bundles.Entry{{Name: "everything", Plugins: []string{
+	m = m.SetCatalog([]bundles.Entry{{Name: "everything", Plugins: []string{
 		"superlongpluginname-one@marketplace",
 		"superlongpluginname-two@marketplace",
 		"superlongpluginname-three@marketplace",
-	}}}, nil)
+	}}}).Open(nil)
 	assertFits(t, m.View(), 40)
 }
 
 func TestPicker_ServersOnlyBundleShowsMcpServers(t *testing.T) {
 	m := New("Bundles")
 	m.SetSize(60, 10)
-	m = m.Open([]bundles.Entry{{Name: "cad", McpServers: []string{"zoo"}}}, nil)
+	m = m.SetCatalog([]bundles.Entry{{Name: "cad", McpServers: []string{"zoo"}}}).Open(nil)
 	v := m.View()
 	assert.Contains(t, v, "zoo (mcp)")
 	assertFits(t, v, 60)
@@ -86,7 +86,7 @@ func TestPicker_ServersOnlyBundleShowsMcpServers(t *testing.T) {
 func TestPicker_MixedBundleShowsPluginsThenServers(t *testing.T) {
 	m := New("Bundles")
 	m.SetSize(80, 10)
-	m = m.Open([]bundles.Entry{{Name: "homelab", Plugins: []string{"ha@m"}, McpServers: []string{"ha", "zoo"}}}, nil)
+	m = m.SetCatalog([]bundles.Entry{{Name: "homelab", Plugins: []string{"ha@m"}, McpServers: []string{"ha", "zoo"}}}).Open(nil)
 	v := m.View()
 	assert.Contains(t, v, "ha@m, ha (mcp), zoo (mcp)")
 	assertFits(t, v, 80)
@@ -95,10 +95,10 @@ func TestPicker_MixedBundleShowsPluginsThenServers(t *testing.T) {
 func TestPicker_LongServerListFitsWidth(t *testing.T) {
 	m := New("Bundles")
 	m.SetSize(40, 10)
-	m = m.Open([]bundles.Entry{{Name: "everything", Plugins: []string{"superlongpluginname@marketplace"}, McpServers: []string{
+	m = m.SetCatalog([]bundles.Entry{{Name: "everything", Plugins: []string{"superlongpluginname@marketplace"}, McpServers: []string{
 		"superlongservername-one",
 		"superlongservername-two",
-	}}}, nil)
+	}}}).Open(nil)
 	assertFits(t, m.View(), 40)
 }
 
@@ -140,7 +140,7 @@ func TestPicker_UnknownSelectedNameIsListed(t *testing.T) {
 func TestPicker_SetCatalogKeepsToggles(t *testing.T) {
 	m := New("Bundles")
 	m.SetSize(60, 10)
-	m = m.Open(nil, []string{"go"})
+	m = m.Open([]string{"go"})
 	assert.Contains(t, m.View(), "unknown bundle")
 	m = m.SetCatalog(catalog())
 	v := m.View()
@@ -148,6 +148,27 @@ func TestPicker_SetCatalogKeepsToggles(t *testing.T) {
 	assert.Contains(t, v, "docs")
 	assert.NotContains(t, v, "unknown bundle")
 	assert.Equal(t, SelectedMsg{Bundles: []string{"go"}}, confirm(t, m))
+}
+
+func TestPicker_SetCatalogKeepsCursorAndFilter(t *testing.T) {
+	m := opened()
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = m.SetCatalog(catalog())
+	m, _ = m.Update(space())
+	assert.Equal(t, SelectedMsg{Bundles: []string{"go"}}, confirm(t, m))
+
+	m = opened()
+	m = feed(m, uitest.Runes("/"))
+	m = feed(m, uitest.Runes("g"))
+	m = m.SetCatalog(catalog())
+	assert.True(t, m.CapturesText())
+}
+
+func TestPicker_CatalogGetter(t *testing.T) {
+	m := New("Bundles")
+	assert.Nil(t, m.Catalog())
+	assert.Equal(t, catalog(), m.SetCatalog(catalog()).Catalog())
+	assert.Equal(t, catalog(), m.SetCatalog(catalog()).Open([]string{"go"}).Catalog())
 }
 
 func TestPicker_EscCloses(t *testing.T) {
@@ -158,7 +179,7 @@ func TestPicker_EscCloses(t *testing.T) {
 func TestPicker_EmptyCatalog(t *testing.T) {
 	m := New("Bundles")
 	m.SetSize(60, 10)
-	m = m.Open(nil, nil)
+	m = m.Open(nil)
 	assert.Contains(t, m.View(), "No bundles configured")
 }
 

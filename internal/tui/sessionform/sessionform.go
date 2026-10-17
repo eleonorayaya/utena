@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/branchfield"
 	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
@@ -48,10 +47,8 @@ type Model struct {
 	filePicker      filepicker.Model
 	branchPicker    branchpicker.Model
 	bundlePicker    bundlepicker.Model
-	catalog         []bundles.Entry
+	defaultBundles  []string
 	selectedBundles []string
-	defaultsLoaded  bool
-	bundlesEdited   bool
 	rows            []branchfield.Row
 	rowCursor       int
 	pickingRow      int
@@ -89,9 +86,8 @@ func (m Model) Init() (Model, tea.Cmd) {
 	m.workspacesErr = ""
 	m.status = ui.Status{}
 	m.submitting = false
+	m.defaultBundles = nil
 	m.selectedBundles = nil
-	m.defaultsLoaded = false
-	m.bundlesEdited = false
 	m.overlay = overlayWorkspaces
 	m.workspacePicker = m.workspacePicker.Open(nil)
 	return m, tea.Batch(provider.FetchWorkspaces(), provider.RequestWorkspacesState(), provider.FetchBundles())
@@ -198,18 +194,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case provider.BundlesLoadedMsg:
 		if msg.Err == nil {
-			m.catalog = msg.Bundles
-			if m.overlay == overlayBundles {
-				m.bundlePicker = m.bundlePicker.SetCatalog(m.catalog)
-			}
+			m.bundlePicker = m.bundlePicker.SetCatalog(msg.Bundles)
 		}
 		return m, nil
 	case provider.DefaultBundlesLoadedMsg:
-		if msg.Err == nil && !m.bundlesEdited && slices.Equal(msg.WorkspaceIDs, m.rowIDs()) {
-			m.selectedBundles = msg.Bundles
-			m.defaultsLoaded = true
+		if msg.Err == nil && m.selectedBundles == nil && slices.Equal(msg.WorkspaceIDs, m.rowIDs()) {
+			m.defaultBundles = msg.Bundles
 			if m.overlay == overlayBundles {
-				m.bundlePicker = m.bundlePicker.Open(m.catalog, m.selectedBundles)
+				m.bundlePicker = m.bundlePicker.Open(m.bundles())
 			}
 		}
 		return m, nil
@@ -272,8 +264,8 @@ func (m Model) setRows(picked []workspace.Workspace) (Model, tea.Cmd) {
 	}
 	m.rows = rows
 	m.rowCursor = min(m.rowCursor, max(len(rows)-1, 0))
-	if !m.bundlesEdited && len(rows) > 0 {
-		m.defaultsLoaded = false
+	if m.selectedBundles == nil && len(rows) > 0 {
+		m.defaultBundles = nil
 		cmds = append(cmds, provider.FetchDefaultBundles(m.rowIDs()))
 	}
 	return m, tea.Batch(cmds...)
@@ -367,14 +359,9 @@ func (m Model) updateBundlePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case bundlepicker.SelectedMsg:
 		m.overlay = overlayNone
-		if !m.bundlesEdited && !m.defaultsLoaded && len(msg.Bundles) == 0 {
-			return m.focus(fieldBundles)
+		if m.selectedBundles != nil || !slices.Equal(msg.Bundles, m.defaultBundles) {
+			m.selectedBundles = msg.Bundles
 		}
-		if !m.bundlesEdited && m.defaultsLoaded && slices.Equal(msg.Bundles, m.selectedBundles) {
-			return m.focus(fieldBundles)
-		}
-		m.selectedBundles = msg.Bundles
-		m.bundlesEdited = true
 		return m.focus(fieldBundles)
 	case bundlepicker.ClosedMsg:
 		m.overlay = overlayNone
@@ -417,7 +404,7 @@ func (m Model) onPageKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case fieldWorkspaces:
 			return m.openWorkspacePicker(), nil
 		case fieldBundles:
-			m.bundlePicker = m.bundlePicker.Open(m.catalog, m.selectedBundles)
+			m.bundlePicker = m.bundlePicker.Open(m.bundles())
 			m.overlay = overlayBundles
 			m.status = ui.Status{}
 			return m, nil
@@ -475,14 +462,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.nameErr = ""
 	m.status = ui.Status{}
 	m.submitting = true
-	return m, provider.CreateSession(name, buildSpecs(m.rows, isNew), m.submitBundles())
-}
-
-func (m Model) submitBundles() []string {
-	if m.bundlesEdited {
-		return m.selectedBundles
-	}
-	return nil
+	return m, provider.CreateSession(name, buildSpecs(m.rows, isNew), m.selectedBundles)
 }
 
 func buildSpecs(rows []branchfield.Row, isNew bool) []provider.SessionWorkspaceSpec {
@@ -531,26 +511,33 @@ func (m Model) fields() []ui.Field {
 	}
 }
 
+func (m Model) bundles() []string {
+	if m.selectedBundles != nil {
+		return m.selectedBundles
+	}
+	return m.defaultBundles
+}
+
 func (m Model) bundlesValue() (string, string) {
 	muted := ui.Muted()
 	switch {
-	case m.bundlesEdited:
-		return m.joinedBundles(), ""
-	case m.defaultsLoaded && len(m.selectedBundles) > 0:
-		return m.joinedBundles(), "from workspace defaults"
-	case !m.defaultsLoaded:
+	case m.selectedBundles != nil:
+		return joinedBundles(m.selectedBundles), ""
+	case len(m.defaultBundles) > 0:
+		return joinedBundles(m.defaultBundles), "from workspace defaults"
+	case m.defaultBundles == nil:
 		return muted.Render("workspace defaults"), ""
-	case len(m.catalog) == 0:
+	case len(m.bundlePicker.Catalog()) == 0:
 		return muted.Render("no bundles configured"), ""
 	}
 	return muted.Render("none"), ""
 }
 
-func (m Model) joinedBundles() string {
-	if len(m.selectedBundles) == 0 {
+func joinedBundles(names []string) string {
+	if len(names) == 0 {
 		return ui.Muted().Render("none")
 	}
-	return strings.Join(m.selectedBundles, " · ")
+	return strings.Join(names, " · ")
 }
 
 func (m Model) View() string {

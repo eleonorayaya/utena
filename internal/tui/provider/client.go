@@ -247,7 +247,7 @@ func (c *client) fetchBundles() tea.Cmd {
 		defer res.Body.Close()
 
 		if res.StatusCode != http.StatusOK {
-			return fail(fmt.Errorf("unexpected status %d", res.StatusCode))
+			return BundlesLoadedMsg{Err: parseAPIError(res, "fetch bundles").Err}
 		}
 
 		var resp bundles.ListResponse
@@ -275,7 +275,7 @@ func (c *client) fetchDefaultBundles(ids []uint) tea.Cmd {
 		defer res.Body.Close()
 
 		if res.StatusCode != http.StatusOK {
-			return fail(fmt.Errorf("unexpected status %d", res.StatusCode))
+			return DefaultBundlesLoadedMsg{WorkspaceIDs: ids, Err: parseAPIError(res, "fetch default bundles").Err}
 		}
 
 		var resp session.DefaultBundlesResponse
@@ -312,7 +312,7 @@ func (c *client) setSessionBundles(id uint, names []string) tea.Cmd {
 			return parseAPIError(res, "set session bundles")
 		}
 
-		return sessionBundlesSetMsg{sessionID: id}
+		return SessionBundlesSetMsg{SessionID: id}
 	}
 }
 

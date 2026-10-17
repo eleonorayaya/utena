@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/tui/uitest"
@@ -71,7 +70,15 @@ func TestFetchBundles_FailureIsQuiet(t *testing.T) {
 	msg := newClient(srv.URL).fetchBundles()()
 	loaded, ok := msg.(BundlesLoadedMsg)
 	require.True(t, ok, "got %T", msg)
-	assert.Error(t, loaded.Err)
+	assert.EqualError(t, loaded.Err, "fetch bundles: unexpected status 404")
+}
+
+func TestFetchBundles_ServerErrorIsQuiet(t *testing.T) {
+	srv, _ := recordingServer(t, http.StatusInternalServerError, `{"error":"broken catalog"}`)
+	msg := newClient(srv.URL).fetchBundles()()
+	loaded, ok := msg.(BundlesLoadedMsg)
+	require.True(t, ok, "got %T", msg)
+	assert.EqualError(t, loaded.Err, "broken catalog")
 }
 
 func TestFetchDefaultBundles_SendsWorkspaceIDs(t *testing.T) {
@@ -88,13 +95,13 @@ func TestFetchDefaultBundles_FailureIsQuiet(t *testing.T) {
 	loaded, ok := msg.(DefaultBundlesLoadedMsg)
 	require.True(t, ok, "got %T", msg)
 	assert.Equal(t, []uint{4}, loaded.WorkspaceIDs)
-	assert.Error(t, loaded.Err)
+	assert.EqualError(t, loaded.Err, "fetch default bundles: unexpected status 404")
 }
 
 func TestSetSessionBundles_PutsBundles(t *testing.T) {
 	srv, rec := recordingServer(t, http.StatusOK, `{}`)
 	msg := newClient(srv.URL).setSessionBundles(7, []string{"go"})()
-	assert.Equal(t, sessionBundlesSetMsg{sessionID: 7}, msg)
+	assert.Equal(t, SessionBundlesSetMsg{SessionID: 7}, msg)
 	assert.Equal(t, http.MethodPut, rec.method)
 	assert.Equal(t, "/sessions/7/bundles", rec.path)
 	assert.JSONEq(t, `{"bundles":["go"]}`, string(rec.body))
@@ -139,9 +146,11 @@ func TestCreateSession_SendsBundles(t *testing.T) {
 	assert.Equal(t, []any{"go"}, body["bundles"])
 }
 
-func TestSessionsProvider_SessionBundlesSetEmitsPublicMsg(t *testing.T) {
-	srv, _ := recordingServer(t, http.StatusOK, `{"sessions":[]}`)
+func TestSessionsProvider_SessionBundlesSetRefetchesSessions(t *testing.T) {
+	srv, rec := recordingServer(t, http.StatusOK, `{"sessions":[]}`)
 	p := newSessionsProvider(newClient(srv.URL))
-	_, cmd := p.Update(sessionBundlesSetMsg{sessionID: 7})
-	assert.Contains(t, uitest.Drain(cmd), tea.Msg(SessionBundlesSetMsg{SessionID: 7}))
+	_, cmd := p.Update(SessionBundlesSetMsg{SessionID: 7})
+	require.NotNil(t, cmd)
+	uitest.Drain(cmd)
+	assert.Equal(t, "/sessions", rec.path)
 }
