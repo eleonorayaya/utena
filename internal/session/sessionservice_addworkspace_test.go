@@ -175,7 +175,22 @@ func TestSessionService_AddWorkspace_FullIntegration(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, info.IsDir())
 
+	waitForUpdatedAfter(t, sessionStore, sess.ID, updated.UpdatedAt, 10*time.Second)
+
 	final, err := sessionStore.GetByID(sess.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusActive, final.Status)
+}
+
+func waitForUpdatedAfter(t *testing.T, store *SessionStore, id uint, since time.Time, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		sess, err := store.GetByID(id)
+		if err == nil && sess.UpdatedAt.After(since) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("session %d was not updated after %v within %v", id, since, timeout)
 }
