@@ -501,6 +501,15 @@ func TestSessionRouter_ListResources_DeletedSessionIsUnmanaged(t *testing.T) {
 	require.Equal(t, "utena-gone", resp.Sessions[0].Name)
 }
 
+func putBundles(t *testing.T, router *SessionRouter, id uint, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/bundles", id), bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	return w
+}
+
 func TestSessionRouter_SetBundles(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 	router.controller.service.SetBundleCatalog(bundles.Catalog{
@@ -518,10 +527,7 @@ func TestSessionRouter_SetBundles(t *testing.T) {
 	}
 	addTestSession(t, sessionStore, swStore, session, ws1ID)
 
-	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/bundles", session.ID), bytes.NewReader([]byte(`{"bundles":["docs","docs"]}`)))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.Routes().ServeHTTP(w, req)
+	w := putBundles(t, router, session.ID, `{"bundles":["docs","docs"]}`)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	retrieved, err := sessionStore.GetByID(session.ID)
@@ -547,11 +553,7 @@ func TestSessionRouter_SetBundles_EmptyClearsPlugins(t *testing.T) {
 	addTestSession(t, sessionStore, swStore, session, ws1ID)
 
 	put := func(body string) {
-		req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/bundles", session.ID), bytes.NewReader([]byte(body)))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		router.Routes().ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, http.StatusOK, putBundles(t, router, session.ID, body).Code)
 	}
 
 	put(`{"bundles":["go"]}`)
@@ -576,10 +578,7 @@ func TestSessionRouter_SetBundles_DeletedSession(t *testing.T) {
 	}
 	addTestSession(t, sessionStore, swStore, session, ws1ID)
 
-	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/bundles", session.ID), bytes.NewReader([]byte(`{"bundles":["go"]}`)))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.Routes().ServeHTTP(w, req)
+	w := putBundles(t, router, session.ID, `{"bundles":["go"]}`)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
@@ -587,10 +586,7 @@ func TestSessionRouter_SetBundles_RejectsBlankNames(t *testing.T) {
 	router, _, _, _, _, _ := setupSessionRouter(t)
 
 	for _, body := range []string{`{"bundles":[""]}`, `{"bundles":["go","  "]}`} {
-		req := httptest.NewRequest("PUT", "/1/bundles", bytes.NewReader([]byte(body)))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		router.Routes().ServeHTTP(w, req)
+		w := putBundles(t, router, 1, body)
 		require.Equal(t, http.StatusBadRequest, w.Code, body)
 	}
 }
@@ -598,20 +594,14 @@ func TestSessionRouter_SetBundles_RejectsBlankNames(t *testing.T) {
 func TestSessionRouter_SetBundles_RequiresBundles(t *testing.T) {
 	router, _, _, _, _, _ := setupSessionRouter(t)
 
-	req := httptest.NewRequest("PUT", "/1/bundles", bytes.NewReader([]byte(`{}`)))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.Routes().ServeHTTP(w, req)
+	w := putBundles(t, router, 1, `{}`)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestSessionRouter_SetBundles_NotFound(t *testing.T) {
 	router, _, _, _, _, _ := setupSessionRouter(t)
 
-	req := httptest.NewRequest("PUT", "/9999/bundles", bytes.NewReader([]byte(`{"bundles":[]}`)))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.Routes().ServeHTTP(w, req)
+	w := putBundles(t, router, 9999, `{"bundles":[]}`)
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
 

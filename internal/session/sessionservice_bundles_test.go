@@ -177,7 +177,7 @@ func TestSessionService_CreateSession_ExplicitBundlesOverrideDefaults(t *testing
 	require.Empty(t, readEnabledPlugins(t, none.SessionRoot))
 }
 
-func TestSessionService_WriteBundles_UsesStoredBundles(t *testing.T) {
+func TestSessionService_ApplyClaudeSettings_UsesStoredBundles(t *testing.T) {
 	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
 	service.SetBundleCatalog(testBundleCatalog(), nil)
 
@@ -193,7 +193,8 @@ func TestSessionService_WriteBundles_UsesStoredBundles(t *testing.T) {
 	require.NoError(t, sessionStore.UpdateBundles(sess.ID, []string{"docs"}))
 	require.Equal(t, []string{"go"}, sess.Bundles)
 
-	require.NoError(t, service.writeBundles(ctx, sess))
+	require.Empty(t, service.applyClaudeSettings(ctx, sess))
+	require.Equal(t, []string{"docs"}, sess.Bundles)
 	require.Equal(t, map[string]any{"docs@m": true}, readEnabledPlugins(t, sess.SessionRoot))
 }
 
@@ -213,7 +214,7 @@ func TestSessionService_WriteBundles_SkipsEmptySessionRoot(t *testing.T) {
 	cwd := t.TempDir()
 	t.Chdir(cwd)
 
-	require.NoError(t, service.writeBundles(context.Background(), sess))
+	require.NoError(t, service.writeBundles(context.Background(), sess.SessionRoot, sess.Bundles))
 	_, err := os.Stat(filepath.Join(cwd, ".claude"))
 	require.True(t, os.IsNotExist(err))
 }

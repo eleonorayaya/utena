@@ -59,6 +59,16 @@ func defaultBundles(wsPaths []string) []string {
 	return bundles.Union(lists...)
 }
 
+func defaultBundlesFrom(wss []stepWorkspace, configs map[uint]*WorkspaceConfig) []string {
+	lists := make([][]string, 0, len(wss))
+	for _, ws := range wss {
+		if cfg := configs[ws.ID]; cfg != nil {
+			lists = append(lists, cfg.DefaultBundles)
+		}
+	}
+	return bundles.Union(lists...)
+}
+
 func loadWorkspaceConfig(wsPath string) (*WorkspaceConfig, error) {
 	path := filepath.Join(wsPath, ".utena", "config.json")
 	data, err := os.ReadFile(path)

@@ -41,10 +41,8 @@ func TestSessionService_CreateSession_TrustsSessionRoot(t *testing.T) {
 	require.Equal(t, true, readTrust(t, configPath, sess.SessionRoot))
 }
 
-func TestSessionService_ActivateSession_RetrustsSessionRoot(t *testing.T) {
+func TestSessionService_ActivateSession_TrustsOncePerDaemon(t *testing.T) {
 	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
-	configPath := filepath.Join(t.TempDir(), ".claude.json")
-	service.SetClaudeGlobalConfigPath(configPath)
 
 	ctx := context.Background()
 	sess, err := service.CreateSession(ctx, CreateSessionInput{
@@ -53,15 +51,20 @@ func TestSessionService_ActivateSession_RetrustsSessionRoot(t *testing.T) {
 	})
 	require.NoError(t, err)
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
-	require.Equal(t, true, readTrust(t, configPath, sess.SessionRoot))
 
-	_, err = service.ArchiveSession(ctx, sess.ID)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(configPath, []byte(`{"projects":{}}`), 0o600))
+	configPath := filepath.Join(t.TempDir(), ".claude.json")
+	service.SetClaudeGlobalConfigPath(configPath)
 
 	_, err = service.ActivateSession(ctx, sess.ID)
 	require.NoError(t, err)
 	require.Equal(t, true, readTrust(t, configPath, sess.SessionRoot))
+
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"projects":{}}`), 0o600))
+	_, err = service.ArchiveSession(ctx, sess.ID)
+	require.NoError(t, err)
+	_, err = service.ActivateSession(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Nil(t, readTrust(t, configPath, sess.SessionRoot))
 }
 
 func TestSessionService_TrustDisabledWithoutConfigPath(t *testing.T) {
