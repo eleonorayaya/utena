@@ -85,6 +85,7 @@ type SessionService struct {
 	setupTimeout         time.Duration
 	bundleCatalog        bundles.Catalog
 	mcpServers           bundles.Servers
+	claudeGlobalConfig   string
 }
 
 func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, setupStepStore *SessionSetupStepStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, muxService *mux.Service, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
@@ -110,6 +111,17 @@ func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktre
 func (s *SessionService) SetBundleCatalog(catalog bundles.Catalog, servers bundles.Servers) {
 	s.bundleCatalog = catalog
 	s.mcpServers = servers
+}
+
+func (s *SessionService) SetClaudeGlobalConfigPath(path string) {
+	s.claudeGlobalConfig = path
+}
+
+func (s *SessionService) trustSessionRoot(sess *Session) error {
+	if sess.SessionRoot == "" || s.claudeGlobalConfig == "" {
+		return nil
+	}
+	return claudesettings.TrustProject(s.claudeGlobalConfig, sess.SessionRoot)
 }
 
 func (s *SessionService) OnAppStart(ctx context.Context) error {
@@ -751,6 +763,10 @@ func (s *SessionService) applyClaudeSettings(ctx context.Context, sess *Session)
 		slog.WarnContext(ctx, "apply claude mcp servers failed", "error", mcpErr)
 		warnings = append(warnings, fmt.Sprintf("claude-mcp: %s", mcpErr.Error()))
 	}
+	if err := s.trustSessionRoot(sess); err != nil {
+		slog.WarnContext(ctx, "trust session root in claude config failed", "error", err)
+		warnings = append(warnings, fmt.Sprintf("claude-trust: %s", err.Error()))
+	}
 	if err := claudesettings.EnsureMultiSessionGuide(sess.SessionRoot, checkouts); err != nil {
 		slog.WarnContext(ctx, "ensure session CLAUDE.md failed", "error", err)
 		warnings = append(warnings, fmt.Sprintf("claude-guide: %s", err.Error()))
@@ -1244,6 +1260,9 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 	s.SyncSessionBranches(ctx, session)
 	if pluginsErr, mcpErr := s.writeBundles(ctx, session); pluginsErr != nil || mcpErr != nil {
 		slog.WarnContext(ctx, "apply claude bundles failed", "session", session.ID, "plugins_error", pluginsErr, "mcp_error", mcpErr)
+	}
+	if err := s.trustSessionRoot(session); err != nil {
+		slog.WarnContext(ctx, "trust session root in claude config failed", "session", session.ID, "error", err)
 	}
 
 	muxName := SanitizeMuxName(session.Name)

@@ -137,7 +137,7 @@ Bundles can also turn MCP servers on. Define the servers once under `mcp_servers
 }
 ```
 
-utena copies each selected definition as-is into `mcpServers` in the session root's `.mcp.json` and adds its name to `enabledMcpjsonServers` in `.claude/settings.local.json`, so Claude doesn't ask to approve it. Catalog servers that aren't selected are removed from both; other servers are left alone. Keep secrets out of the file with `${VAR}` placeholders, which Claude Code expands from its environment. Remove catalog servers from user scope (`~/.claude.json`) so they only exist in sessions that select them; shizuku does this. Run `/mcp` (or restart Claude) to pick up a change.
+utena copies each selected definition as-is into `mcpServers` in the session root's `.mcp.json` and adds its name to `enabledMcpjsonServers` in `.claude/settings.local.json`, so Claude doesn't ask to approve it. Claude only honors those local approvals in a trusted folder, so utena also marks each session root as trusted in `~/.claude.json` (`projects[<root>].hasTrustDialogAccepted`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set) when the session is set up or activated. This trusts the whole session folder, including the hooks and settings of the repos checked out in it. Catalog servers that aren't selected are removed from both; other servers are left alone. Keep secrets out of the file with `${VAR}` placeholders, which Claude Code expands from its environment. Remove catalog servers from user scope (`~/.claude.json`) so they only exist in sessions that select them; shizuku does this. Run `/mcp` (or restart Claude) to pick up a change.
 
 #### Claude Code integration
 

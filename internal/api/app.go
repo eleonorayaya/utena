@@ -12,6 +12,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/chrome"
 	"github.com/eleonorayaya/utena/internal/chromescript"
 	"github.com/eleonorayaya/utena/internal/claude"
+	"github.com/eleonorayaya/utena/internal/claudesettings"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
@@ -47,7 +48,13 @@ func NewApp(cfg Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newApp(gormDB, afero.NewOsFs(), cfg), nil
+	app := newApp(gormDB, afero.NewOsFs(), cfg)
+	if path, err := claudesettings.ClaudeGlobalConfigPath(); err != nil {
+		slog.Warn("resolve claude global config path failed; session roots won't be trusted", "error", err)
+	} else {
+		app.Session.Service.SetClaudeGlobalConfigPath(path)
+	}
+	return app, nil
 }
 
 func newApp(gormDB *gorm.DB, fs afero.Fs, cfg Config) *App {
