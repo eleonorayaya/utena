@@ -34,10 +34,11 @@ type WindowView struct {
 }
 
 type TabView struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	URL    string `json:"url"`
-	Active bool   `json:"active"`
+	ID     string   `json:"id"`
+	Title  string   `json:"title"`
+	URL    string   `json:"url"`
+	Active bool     `json:"active"`
+	State  TabState `json:"state"`
 }
 
 type FocusRequest struct {
@@ -142,12 +143,15 @@ func windowView(r BrowserWindow, live map[string]Window) WindowView {
 	if w, ok := live[r.DriverWindowID]; ok && r.State == WindowOpen && r.DriverWindowID != "" {
 		wv.Focused = w.Focused
 		for _, t := range w.Tabs {
-			wv.Tabs = append(wv.Tabs, TabView{ID: t.ID, Title: t.Title, URL: t.URL, Active: t.Active})
+			wv.Tabs = append(wv.Tabs, TabView{ID: t.ID, Title: t.Title, URL: t.URL, Active: t.Active, State: TabOpen})
+		}
+		for _, t := range pendingTabs(r.Tabs) {
+			wv.Tabs = append(wv.Tabs, TabView{Title: t.Title, URL: t.URL, State: TabPending})
 		}
 		return wv
 	}
 	for _, t := range r.Tabs {
-		wv.Tabs = append(wv.Tabs, TabView{Title: t.Title, URL: t.URL, Active: t.Active})
+		wv.Tabs = append(wv.Tabs, TabView{Title: t.Title, URL: t.URL, Active: t.Active, State: t.StateIn(r.State)})
 	}
 	return wv
 }

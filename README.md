@@ -70,11 +70,12 @@ Session windows outlive the session's time in the foreground:
 - **Closing a window by hand** forgets it; it won't come back.
 - **Quitting the browser** keeps the windows. When it restarts and restores its windows, utena reattaches them to their sessions by matching their tabs. Windows it can't match are restored from their saved tabs the next time the session is attached or a link is opened for it.
 - **Deleting** a session closes its windows.
+- **Attaching** a session that has no browser window gives it one: its saved windows come back, or a new empty window opens, so there's always a window to add tabs to. A window you close by hand comes back the next time you attach the session.
 
 The TUI shows each session's browser windows:
 
 - **Session list:** a `◫` next to the attached marker means the session has browser windows. It is blue when a window is open, and muted when the windows are only saved (the browser quit, or the session was archived).
-- **Session detail:** a **Browser** section, after Workspaces, shows the tab count and the best window state, then one line per tab (`●` marks a window's active tab), grouped under `window N` when there is more than one window. Saved tabs are muted.
+- **Session detail:** a **Browser** section, after Workspaces, shows the tab count and the best window state, then one line per tab (`●` marks a window's active tab), grouped under `window N` when there is more than one window. Saved tabs are muted. Pending tabs (`◌`) are links waiting to load: with a browser driver that can't load a page without taking focus, links for sessions that aren't attached wait in the session's window and load when the window gets focus. `utena open` says when a link is waiting.
 - **Opening a tab:** `↓`/`j` moves from blockers into the open windows' tabs. `enter` on a tab activates it and focuses its window, switching to the session first if it isn't attached (the TUI then closes, as with `o`). With nothing selected, `enter` still switches to the session. Saved tabs can't be selected.
 - **Outdated extension:** when an extension with an older protocol tries to connect and none is connected, the session list footer shows "browser extension outdated", followed by the driver's fix (Chrome: "reload it in chrome://extensions"), until a current extension connects.
 

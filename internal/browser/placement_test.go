@@ -255,6 +255,7 @@ func TestPlaceLoop_PlacesAfterSignalAndExitsOnCancel(t *testing.T) {
 		close(done)
 	}()
 
+	h.driver.OnCreate = func(w Window) { h.wm.Add("wm-"+w.ID, "", "2") }
 	h.svc.SetAttached(1)
 	assert.Eventually(t, func() bool { return h.wm.Workspace(b) == "P" }, time.Second, 10*time.Millisecond)
 
@@ -652,5 +653,7 @@ func TestPlace_UnownedCreatedLinkIsNotTakenByOwnedTitleMatch(t *testing.T) {
 	require.NoError(t, h.svc.place(context.Background()))
 
 	assert.NotContains(t, h.svc.links.links, owned.ID)
-	assert.Empty(t, h.wm.Moves())
+	for _, m := range h.wm.Moves() {
+		assert.NotEqual(t, "wm-"+res.WindowID, m.WindowID)
+	}
 }

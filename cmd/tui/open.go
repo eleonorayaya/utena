@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -28,7 +30,7 @@ func openCmd() *cobra.Command {
 			base := daemonURL(port)
 			sessionID := sessionIDFromEnv()
 			for _, u := range args {
-				if err := openURL(cmd.Context(), base, sessionID, u, systemOpen); err != nil {
+				if err := openURL(cmd.Context(), cmd.ErrOrStderr(), base, sessionID, u, systemOpen); err != nil {
 					return err
 				}
 			}
@@ -37,12 +39,15 @@ func openCmd() *cobra.Command {
 	}
 }
 
-func openURL(ctx context.Context, baseURL string, sessionID uint, url string, fallback func(string) error) error {
+func openURL(ctx context.Context, out io.Writer, baseURL string, sessionID uint, url string, fallback func(string) error) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	_, err := browser.RequestOpen(ctx, http.DefaultClient, baseURL+"/browser", browser.OpenRequest{SessionID: sessionID, URL: url})
+	res, err := browser.RequestOpen(ctx, http.DefaultClient, baseURL+"/browser", browser.OpenRequest{SessionID: sessionID, URL: url})
 	if err != nil {
 		return fallback(url)
+	}
+	if res.Pending {
+		_, _ = fmt.Fprintf(out, "utena: %s is waiting in session %d's browser window\n", url, sessionID)
 	}
 	return nil
 }

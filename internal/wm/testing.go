@@ -16,6 +16,7 @@ type FakeDriver struct {
 	windows  []Window
 	moves    []Move
 	focused  []string
+	current  string
 	MoveErr  error
 	ListErr  error
 	FocusErr error
@@ -100,6 +101,7 @@ func (f *FakeDriver) FocusWindow(ctx context.Context, windowID string) error {
 	err := f.FocusErr
 	if err == nil {
 		f.focused = append(f.focused, windowID)
+		f.current = windowID
 	}
 	onFocus := f.OnFocus
 	f.mu.Unlock()
@@ -107,6 +109,24 @@ func (f *FakeDriver) FocusWindow(ctx context.Context, windowID string) error {
 		onFocus(windowID)
 	}
 	return err
+}
+
+func (f *FakeDriver) SetCurrent(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.current = id
+}
+
+func (f *FakeDriver) FocusedWindow(ctx context.Context) (Window, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.current == "" {
+		return Window{}, false, nil
+	}
+	if i := f.indexLocked(f.current); i >= 0 {
+		return f.windows[i], true, nil
+	}
+	return Window{ID: f.current}, true, nil
 }
 
 func (f *FakeDriver) indexLocked(id string) int {

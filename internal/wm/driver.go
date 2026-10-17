@@ -6,6 +6,7 @@ type Driver interface {
 	ListWindows(ctx context.Context, bundleID string) ([]Window, error)
 	MoveToWorkspace(ctx context.Context, windowID, workspace string) error
 	FocusWindow(ctx context.Context, windowID string) error
+	FocusedWindow(ctx context.Context) (Window, bool, error)
 }
 
 type Window struct {
@@ -28,4 +29,8 @@ func (None) MoveToWorkspace(ctx context.Context, windowID, workspace string) err
 
 func (None) FocusWindow(ctx context.Context, windowID string) error {
 	return nil
+}
+
+func (None) FocusedWindow(ctx context.Context) (Window, bool, error) {
+	return Window{}, false, nil
 }

@@ -22,12 +22,18 @@ type FakeDriver struct {
 	OnFocus   func(windowID string)
 	OnClose   func(windowID string)
 	outdated  atomic.Bool
+	Caps      Capabilities
 }
 
 var (
-	_ Driver         = (*FakeDriver)(nil)
-	_ StatusReporter = (*FakeDriver)(nil)
+	_ Driver             = (*FakeDriver)(nil)
+	_ StatusReporter     = (*FakeDriver)(nil)
+	_ CapabilityReporter = (*FakeDriver)(nil)
 )
+
+func (f *FakeDriver) Capabilities() Capabilities {
+	return f.Caps
+}
 
 func (f *FakeDriver) SetOutdated(outdated bool) {
 	f.outdated.Store(outdated)

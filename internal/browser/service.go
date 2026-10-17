@@ -31,6 +31,9 @@ const (
 	createdLinkWait = 1500 * time.Millisecond
 	snapshotDelay   = 2 * time.Second
 	removeGrace     = 2 * time.Second
+	focusWait       = 1500 * time.Millisecond
+	focusSettle     = 400 * time.Millisecond
+	focusPoll       = 50 * time.Millisecond
 )
 
 type pendingTimer struct {
@@ -72,6 +75,7 @@ type OpenResult struct {
 	Created   bool   `json:"created"`
 	Focused   bool   `json:"focused"`
 	Activated bool   `json:"activated"`
+	Pending   bool   `json:"pending"`
 }
 
 type Service struct {
@@ -93,6 +97,9 @@ type Service struct {
 	snapshotDelay time.Duration
 	removeGrace   time.Duration
 	restoreWindow time.Duration
+	focusWait     time.Duration
+	focusSettle   time.Duration
+	focusPoll     time.Duration
 
 	mu                  sync.Mutex
 	connected           atomic.Bool
@@ -104,6 +111,7 @@ type Service struct {
 	links               linker
 	placedFor           uint
 	placeStale          bool
+	ensuredFor          uint
 	snapshots           map[string]*pendingTimer
 	removals            map[string]*pendingTimer
 	restoreUntil        time.Time
@@ -141,6 +149,9 @@ func NewService(driver Driver, store *Store, sessions Sessions, wmDriver wm.Driv
 		},
 		snapshotDelay: snapshotDelay,
 		removeGrace:   removeGrace,
+		focusWait:     focusWait,
+		focusSettle:   focusSettle,
+		focusPoll:     focusPoll,
 		snapshots:     map[string]*pendingTimer{},
 		removals:      map[string]*pendingTimer{},
 	}
@@ -178,10 +189,6 @@ func (s *Service) Connected() bool {
 }
 
 func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error) {
-	if !s.Connected() {
-		return OpenResult{}, ErrUnavailable
-	}
-
 	focus := true
 	activated := false
 	if req.SessionID != 0 {
@@ -192,12 +199,20 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 		case err != nil:
 			return OpenResult{}, err
 		case req.Activate && !attached:
-			if err := s.activate(ctx, req.SessionID); err != nil {
-				return OpenResult{}, err
-			}
 			activated = true
 		default:
 			focus = attached
+		}
+	}
+	if !focus && s.caps().LoadTakesFocus {
+		return s.hold(ctx, req)
+	}
+	if !s.Connected() {
+		return OpenResult{}, ErrUnavailable
+	}
+	if activated {
+		if err := s.activate(ctx, req.SessionID); err != nil {
+			return OpenResult{}, err
 		}
 	}
 	if focus && req.SessionID != 0 {
@@ -294,6 +309,70 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error)
 		res.Focused = s.focusLocked(ctx, res.WindowID, wmTarget, wmFound)
 	}
 	return res, nil
+}
+
+func (s *Service) caps() Capabilities {
+	return capabilitiesOf(s.driver)
+}
+
+func (s *Service) hold(ctx context.Context, req OpenRequest) (OpenResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row, err := s.holdTarget(req.SessionID)
+	if err != nil {
+		return OpenResult{}, err
+	}
+	if row == nil {
+		row = &BrowserWindow{SessionID: req.SessionID, State: WindowSnapshotted, LastFocusedAt: s.now()}
+	}
+	if row.State == WindowOpen && s.connected.Load() {
+		if res, ok, err := s.activateHeld(ctx, row.DriverWindowID, req.URL); ok || err != nil {
+			return res, err
+		}
+	}
+	res := OpenResult{WindowID: row.DriverWindowID, Pending: true}
+	if hasSavedURL(row.Tabs, req.URL) {
+		return res, nil
+	}
+	row.Tabs = append(row.Tabs, SavedTab{URL: req.URL, State: TabPending})
+	if row.ID == 0 {
+		return res, s.store.Add(row)
+	}
+	return res, s.store.SetTabs(row.ID, row.Tabs)
+}
+
+func (s *Service) holdTarget(sessionID uint) (*BrowserWindow, error) {
+	open, err := s.store.ListOpenBySession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(open) > 0 {
+		return &open[0], nil
+	}
+	restorable, err := s.store.ListRestorable(sessionID)
+	if err != nil || len(restorable) == 0 {
+		return nil, err
+	}
+	return &restorable[0], nil
+}
+
+func (s *Service) activateHeld(ctx context.Context, windowID, rawURL string) (OpenResult, bool, error) {
+	live, err := s.driver.ListWindows(ctx)
+	if err != nil {
+		return OpenResult{}, false, driverErr(err)
+	}
+	w, ok := findWindow(live, windowID)
+	if !ok {
+		return OpenResult{}, false, nil
+	}
+	tab, ok := MatchTab(w.Tabs, rawURL)
+	if !ok {
+		return OpenResult{}, false, nil
+	}
+	if err := s.driver.ActivateTab(ctx, w.ID, tab.ID); err != nil {
+		return OpenResult{}, false, driverErr(err)
+	}
+	return OpenResult{WindowID: w.ID, TabID: tab.ID}, true, nil
 }
 
 func (s *Service) activate(ctx context.Context, sessionID uint) error {
@@ -547,9 +626,10 @@ func (s *Service) Archive(ctx context.Context, sessionID uint) error {
 			errs = append(errs, s.store.MarkSnapshotted(r.ID, r.Tabs, r.SnapshotAt))
 			continue
 		}
-		tabs, at := savedTabs(w), now
-		if len(tabs) == 0 {
-			tabs, at = r.Tabs, r.SnapshotAt
+		tabs, fresh := mergeTabs(w, r.Tabs)
+		at := now
+		if !fresh {
+			at = r.SnapshotAt
 		}
 		if err := s.store.MarkSnapshotted(r.ID, tabs, at); err != nil {
 			errs = append(errs, err)
@@ -693,7 +773,9 @@ func (s *Service) activateSaved(ctx context.Context, r BrowserWindow, w Window) 
 	return nil
 }
 
-func (s *Service) restoreAttached(ctx context.Context, attached uint, live []Window) (bool, error) {
+func (s *Service) provideAttached(ctx context.Context, attached uint, live []Window) (bool, error) {
+	ensure := s.ensuredFor != attached
+	s.ensuredFor = attached
 	rows, err := s.store.ListOpenBySession(attached)
 	if err != nil {
 		return false, err
@@ -703,8 +785,80 @@ func (s *Service) restoreAttached(ctx context.Context, attached uint, live []Win
 			return false, nil
 		}
 	}
-	restored, err := s.restoreLocked(ctx, attached)
-	return len(restored) > 0, err
+	return s.keepFocus(ctx, func() (bool, error) {
+		restored, err := s.restoreLocked(ctx, attached)
+		if len(restored) > 0 || !ensure {
+			return len(restored) > 0, err
+		}
+		created, createErr := s.createSessionWindow(ctx, attached, live)
+		return created, errors.Join(err, createErr)
+	})
+}
+
+func (s *Service) createSessionWindow(ctx context.Context, sessionID uint, live []Window) (bool, error) {
+	before, track := s.wmSnapshot(ctx)
+	w, err := s.driver.CreateWindow(ctx, nil, false)
+	if err != nil {
+		return false, driverErr(err)
+	}
+	now := s.now()
+	if err := s.store.Add(&BrowserWindow{SessionID: sessionID, State: WindowOpen, DriverWindowID: w.ID, LastFocusedAt: now, SnapshotAt: now}); err != nil {
+		if closeErr := s.closeWindow(ctx, w.ID); closeErr != nil {
+			slog.WarnContext(ctx, "browser: close unrecorded session window failed", "window", w.ID, "error", closeErr)
+		}
+		return false, err
+	}
+	if track {
+		s.linkCreated(ctx, w.ID, before, live, time.Now().Add(createdLinkWait))
+	}
+	return true, nil
+}
+
+func (s *Service) keepFocus(ctx context.Context, act func() (bool, error)) (bool, error) {
+	if !s.caps().CreateTakesFocus || s.wmInert {
+		return act()
+	}
+	prev, ok, err := s.wm.FocusedWindow(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "browser: read focused wm window failed", "error", err)
+	}
+	acted, err := act()
+	if acted && ok {
+		s.refocus(ctx, prev.ID)
+	}
+	return acted, err
+}
+
+func (s *Service) refocus(ctx context.Context, wmID string) {
+	deadline := time.Now().Add(s.focusWait)
+	for {
+		cur, ok, err := s.wm.FocusedWindow(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "browser: read focused wm window failed", "error", err)
+			return
+		}
+		if ok && cur.ID != wmID {
+			break
+		}
+		if !time.Now().Before(deadline) || !sleepCtx(ctx, s.focusPoll) {
+			return
+		}
+	}
+	if !sleepCtx(ctx, s.focusSettle) {
+		return
+	}
+	if err := s.wm.FocusWindow(ctx, wmID); err != nil {
+		slog.WarnContext(ctx, "browser: refocus wm window failed", "wm_window", wmID, "error", err)
+	}
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
+	}
 }
 
 func (s *Service) placeLoop(ctx context.Context) {
@@ -736,11 +890,11 @@ func (s *Service) placeLocked(ctx context.Context) error {
 		return err
 	}
 	if attached != 0 {
-		restored, err := s.restoreAttached(ctx, attached, live)
+		provided, err := s.provideAttached(ctx, attached, live)
 		if err != nil {
-			slog.WarnContext(ctx, "browser: restore attached session failed", "session", attached, "error", err)
+			slog.WarnContext(ctx, "browser: provide attached session window failed", "session", attached, "error", err)
 		}
-		if restored {
+		if provided {
 			if live, err = s.driver.ListWindows(ctx); err != nil {
 				return err
 			}
@@ -841,6 +995,7 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 	switch ev.Type {
 	case EventConnected:
 		s.connected.Store(true)
+		s.ensuredFor = 0
 		flushErr := s.flushRemovals()
 		restarted, runErr := s.trackRun(ev.Run)
 		if restarted && s.restoreWindow > 0 {
@@ -871,7 +1026,7 @@ func (s *Service) handleEvent(ctx context.Context, ev Event) {
 			s.prevFocusedWindowID = s.lastFocusedWindowID
 			s.lastFocusedWindowID = ev.WindowID
 		}
-		err = s.store.TouchFocused(ev.WindowID, s.now())
+		err = errors.Join(s.store.TouchFocused(ev.WindowID, s.now()), s.loadPending(ctx, ev.WindowID))
 	}
 	if err != nil {
 		slog.WarnContext(ctx, "browser event handler failed", "type", ev.Type, "window", ev.WindowID, "error", err)
@@ -904,6 +1059,35 @@ func (s *Service) tabsChanged(ctx context.Context, windowID string) error {
 	}
 	s.scheduleSnapshot(windowID)
 	return nil
+}
+
+func (s *Service) loadPending(ctx context.Context, windowID string) error {
+	row, err := s.store.GetByDriverWindowID(windowID)
+	if errors.Is(err, ErrWindowNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(pendingTabs(row.Tabs)) == 0 {
+		return nil
+	}
+	tabs := make([]SavedTab, 0, len(row.Tabs))
+	var errs []error
+	for _, t := range row.Tabs {
+		if t.State == TabPending {
+			if _, err := s.driver.OpenTab(ctx, windowID, t.URL); err != nil {
+				errs = append(errs, driverErr(err))
+			} else {
+				t.State = ""
+			}
+		}
+		tabs = append(tabs, t)
+	}
+	if err := s.store.SetTabs(row.ID, tabs); err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	return errors.Join(append(errs, s.snapshot(ctx, windowID))...)
 }
 
 func (s *Service) windowRemoved(windowID string) error {
@@ -1001,8 +1185,15 @@ func (s *Service) snapshot(ctx context.Context, windowID string) error {
 }
 
 func (s *Service) saveTabs(w Window, at time.Time) error {
-	tabs := savedTabs(w)
-	if len(tabs) == 0 {
+	row, err := s.store.GetByDriverWindowID(w.ID)
+	if errors.Is(err, ErrWindowNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	tabs, fresh := mergeTabs(w, row.Tabs)
+	if !fresh {
 		return nil
 	}
 	return s.store.SaveTabs(w.ID, tabs, at)
@@ -1086,13 +1277,27 @@ func (s *Service) closePending(ctx context.Context, windows []Window) error {
 		if !ok {
 			continue
 		}
-		if tabs := savedTabs(w); !op.deleted && len(tabs) > 0 {
-			errs = append(errs, s.store.MarkSnapshotted(op.rowID, tabs, now))
+		if !op.deleted {
+			errs = append(errs, s.snapshotClosing(op.rowID, w, now))
 		}
 		errs = append(errs, s.closeWindow(ctx, id))
 	}
 	clear(s.pendingClose)
 	return errors.Join(errs...)
+}
+
+func (s *Service) snapshotClosing(rowID uint, w Window, at time.Time) error {
+	row, err := s.store.Get(rowID)
+	if errors.Is(err, ErrWindowNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if tabs, fresh := mergeTabs(w, row.Tabs); fresh {
+		return s.store.MarkSnapshotted(rowID, tabs, at)
+	}
+	return nil
 }
 
 func (s *Service) resolveDeferred(ctx context.Context, windows []Window) error {

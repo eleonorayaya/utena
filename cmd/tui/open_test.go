@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -22,10 +24,22 @@ func TestOpenURL_SendsSessionAndSkipsFallback(t *testing.T) {
 	defer srv.Close()
 
 	var fellBack []string
-	err := openURL(context.Background(), srv.URL, 7, "https://x.example.com", func(u string) error { fellBack = append(fellBack, u); return nil })
+	err := openURL(context.Background(), io.Discard, srv.URL, 7, "https://x.example.com", func(u string) error { fellBack = append(fellBack, u); return nil })
 	require.NoError(t, err)
 	assert.Equal(t, browser.OpenRequest{SessionID: 7, URL: "https://x.example.com"}, got)
 	assert.Empty(t, fellBack)
+}
+
+func TestOpenURL_PendingPrintsNotice(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(browser.OpenResult{Pending: true})
+	}))
+	defer srv.Close()
+
+	var out bytes.Buffer
+	err := openURL(context.Background(), &out, srv.URL, 7, "https://x.example.com", func(string) error { t.Fatal("fell back"); return nil })
+	require.NoError(t, err)
+	assert.Equal(t, "utena: https://x.example.com is waiting in session 7's browser window\n", out.String())
 }
 
 func TestOpenURL_FallsBackOn503(t *testing.T) {
@@ -35,14 +49,14 @@ func TestOpenURL_FallsBackOn503(t *testing.T) {
 	defer srv.Close()
 
 	var fellBack []string
-	err := openURL(context.Background(), srv.URL, 7, "https://x.example.com", func(u string) error { fellBack = append(fellBack, u); return nil })
+	err := openURL(context.Background(), io.Discard, srv.URL, 7, "https://x.example.com", func(u string) error { fellBack = append(fellBack, u); return nil })
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://x.example.com"}, fellBack)
 }
 
 func TestOpenURL_FallsBackWhenDaemonDown(t *testing.T) {
 	var fellBack []string
-	err := openURL(context.Background(), "http://127.0.0.1:1", 0, "https://x.example.com", func(u string) error { fellBack = append(fellBack, u); return nil })
+	err := openURL(context.Background(), io.Discard, "http://127.0.0.1:1", 0, "https://x.example.com", func(u string) error { fellBack = append(fellBack, u); return nil })
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://x.example.com"}, fellBack)
 }

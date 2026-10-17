@@ -124,3 +124,34 @@ func TestFocusWindow_RunnerError(t *testing.T) {
 
 	assert.ErrorIs(t, d.FocusWindow(context.Background(), "70770"), boom)
 }
+
+func TestFocusedWindow_ArgvAndDecode(t *testing.T) {
+	r := &fakeRunner{out: []byte(`[{"window-id":65841,"window-title":"utena attach","workspace":"T"}]`)}
+	d := newDriver(r)
+
+	w, ok, err := d.FocusedWindow(context.Background())
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, wm.Window{ID: "65841", Title: "utena attach", Workspace: "T"}, w)
+	assert.Equal(t, [][]string{{
+		"aerospace", "list-windows", "--focused",
+		"--json", "--format", "%{window-id} %{window-title} %{workspace}",
+	}}, r.calls)
+}
+
+func TestFocusedWindow_NoneFocused(t *testing.T) {
+	d := newDriver(&fakeRunner{out: []byte("[]")})
+
+	_, ok, err := d.FocusedWindow(context.Background())
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestFocusedWindow_RunnerError(t *testing.T) {
+	boom := errors.New("boom")
+	d := newDriver(&fakeRunner{err: boom})
+
+	_, ok, err := d.FocusedWindow(context.Background())
+	assert.ErrorIs(t, err, boom)
+	assert.False(t, ok)
+}

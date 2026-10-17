@@ -569,3 +569,24 @@ func TestDriver_CoalescesQueuedTabsChanged(t *testing.T) {
 	ext.send(t, map[string]any{"type": "event", "event": "tabs.changed", "data": map[string]any{"windowId": 7}})
 	assert.Eventually(t, func() bool { return rec.count(seven) == 2 }, 5*time.Second, 5*time.Millisecond)
 }
+
+func TestDriver_CreateWindowOmitsEmptyURLs(t *testing.T) {
+	d, srv, rec := newDriver(t)
+	var got []map[string]any
+	startExt(t, srv, ProtocolVersion, func(method string, params json.RawMessage) (any, string) {
+		var p map[string]any
+		_ = json.Unmarshal(params, &p)
+		got = append(got, p)
+		return wireWindow{ID: 5}, ""
+	})
+	waitConnected(t, rec)
+
+	_, err := d.CreateWindow(context.Background(), nil, false)
+	require.NoError(t, err)
+	_, err = d.CreateWindow(context.Background(), []string{"https://x"}, true)
+	require.NoError(t, err)
+
+	require.Len(t, got, 2)
+	assert.Equal(t, map[string]any{"focused": false}, got[0])
+	assert.Equal(t, map[string]any{"focused": true, "urls": []any{"https://x"}}, got[1])
+}

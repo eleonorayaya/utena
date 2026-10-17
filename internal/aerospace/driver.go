@@ -51,12 +51,21 @@ func (d *Driver) ListWindows(ctx context.Context, bundleID string) ([]wm.Window,
 	if bundleID == "" {
 		return nil, errors.New("aerospace: empty app bundle id")
 	}
-	out, err := d.runner.Run(ctx, "aerospace", "list-windows",
-		"--monitor", "all",
-		"--app-bundle-id", bundleID,
-		"--json",
-		"--format", "%{window-id} %{window-title} %{workspace}",
-	)
+	return d.listWindows(ctx, "--monitor", "all", "--app-bundle-id", bundleID)
+}
+
+func (d *Driver) FocusedWindow(ctx context.Context) (wm.Window, bool, error) {
+	windows, err := d.listWindows(ctx, "--focused")
+	if err != nil || len(windows) == 0 {
+		return wm.Window{}, false, err
+	}
+	return windows[0], true, nil
+}
+
+func (d *Driver) listWindows(ctx context.Context, filter ...string) ([]wm.Window, error) {
+	args := append([]string{"list-windows"}, filter...)
+	args = append(args, "--json", "--format", "%{window-id} %{window-title} %{workspace}")
+	out, err := d.runner.Run(ctx, "aerospace", args...)
 	if err != nil {
 		return nil, fmt.Errorf("aerospace list-windows: %w", err)
 	}

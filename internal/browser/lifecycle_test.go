@@ -918,9 +918,11 @@ func TestRestore_ReopenFailureClosesOrphanedWindow(t *testing.T) {
 
 	live, err := h.driver.ListWindows(context.Background())
 	require.NoError(t, err)
-	assert.Empty(t, live)
+	require.Len(t, live, 1)
+	assert.Empty(t, live[0].Tabs)
 	closed := h.driver.Closed()
 	require.Len(t, closed, 1)
+	assert.NotEqual(t, live[0].ID, closed[0])
 	assert.Contains(t, h.svc.closing, closed[0])
 	fail = false
 	restorable, err := h.store.ListRestorable(1)
@@ -1205,8 +1207,13 @@ func TestRestore_EmptySavedRowsAreDroppedNotRestored(t *testing.T) {
 
 	live, err := h.driver.ListWindows(context.Background())
 	require.NoError(t, err)
-	assert.Empty(t, live)
-	assert.Empty(t, rowsOf(t, h, 1))
+	require.Len(t, live, 1)
+	assert.Empty(t, live[0].Tabs)
+	rows := rowsOf(t, h, 1)
+	require.Len(t, rows, 1)
+	assert.Equal(t, WindowOpen, rows[0].State)
+	assert.Equal(t, live[0].ID, rows[0].DriverWindowID)
+	assert.Empty(t, rows[0].Tabs)
 }
 
 func TestRestore_MixedEmptyAndSavedRowsRestoreOnlySaved(t *testing.T) {

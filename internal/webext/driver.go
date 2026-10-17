@@ -348,7 +348,11 @@ func (d *Driver) ListWindows(ctx context.Context) ([]browser.Window, error) {
 
 func (d *Driver) CreateWindow(ctx context.Context, urls []string, focused bool) (browser.Window, error) {
 	var out wireWindow
-	if err := d.call(ctx, "windows.create", map[string]any{"urls": urls, "focused": focused}, &out); err != nil {
+	params := map[string]any{"focused": focused}
+	if len(urls) > 0 {
+		params["urls"] = urls
+	}
+	if err := d.call(ctx, "windows.create", params, &out); err != nil {
 		return browser.Window{}, err
 	}
 	return out.toWindow(), nil

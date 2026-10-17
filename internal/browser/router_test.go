@@ -152,8 +152,8 @@ func TestRouter_SessionsJSONShape(t *testing.T) {
 				"state": "open",
 				"tab_count": 2,
 				"windows": [
-					{"id": "`+w.ID+`", "state": "open", "focused": true, "tabs": [{"id": "`+w.Tabs[0].ID+`", "title": "A", "url": "https://a.example.com", "active": true}]},
-					{"id": "", "state": "snapshotted", "focused": false, "tabs": [{"id": "", "title": "S", "url": "https://s.example.com", "active": false}]}
+					{"id": "`+w.ID+`", "state": "open", "focused": true, "tabs": [{"id": "`+w.Tabs[0].ID+`", "title": "A", "url": "https://a.example.com", "active": true, "state": "open"}]},
+					{"id": "", "state": "snapshotted", "focused": false, "tabs": [{"id": "", "title": "S", "url": "https://s.example.com", "active": false, "state": "saved"}]}
 				]
 			}
 		}

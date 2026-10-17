@@ -26,8 +26,8 @@ func TestBrowserSessions_OpenRowUsesLiveTabs(t *testing.T) {
 		1: {State: "open", TabCount: 2, Windows: []WindowView{{
 			ID: w.ID, State: "open", Focused: true,
 			Tabs: []TabView{
-				{ID: w.Tabs[0].ID, URL: "https://a.example.com"},
-				{ID: w.Tabs[1].ID, URL: "chrome://newtab/", Title: "New Tab", Active: true},
+				{ID: w.Tabs[0].ID, URL: "https://a.example.com", State: TabOpen},
+				{ID: w.Tabs[1].ID, URL: "chrome://newtab/", Title: "New Tab", Active: true, State: TabOpen},
 			},
 		}}},
 	}, view.Sessions)
@@ -48,12 +48,12 @@ func TestBrowserSessions_MissingAndSnapshottedRowsUseSavedTabs(t *testing.T) {
 
 	assert.Equal(t, map[uint]SessionBrowser{
 		1: {State: "open", TabCount: 2, Windows: []WindowView{
-			{ID: "", State: "snapshotted", Tabs: []TabView{{URL: "https://s1.example.com", Title: "S1", Active: true}}},
-			{ID: live.ID, State: "open", Tabs: []TabView{{ID: live.Tabs[0].ID, URL: "https://live.example.com", Active: true}}},
+			{ID: "", State: "snapshotted", Tabs: []TabView{{URL: "https://s1.example.com", Title: "S1", Active: true, State: TabSaved}}},
+			{ID: live.ID, State: "open", Tabs: []TabView{{ID: live.Tabs[0].ID, URL: "https://live.example.com", Active: true, State: TabOpen}}},
 		}},
 		2: {State: "missing", TabCount: 3, Windows: []WindowView{
-			{ID: "", State: "snapshotted", Tabs: []TabView{{URL: "https://s2.example.com"}}},
-			{ID: "", State: "missing", Tabs: []TabView{{URL: "https://m2.example.com", Title: "M2"}, {URL: "https://m2b.example.com", Active: true}}},
+			{ID: "", State: "snapshotted", Tabs: []TabView{{URL: "https://s2.example.com", State: TabSaved}}},
+			{ID: "", State: "missing", Tabs: []TabView{{URL: "https://m2.example.com", Title: "M2", State: TabSaved}, {URL: "https://m2b.example.com", Active: true, State: TabSaved}}},
 		}},
 		3: {State: "snapshotted", TabCount: 0, Windows: []WindowView{{ID: "", State: "snapshotted", Tabs: []TabView{}}}},
 	}, view.Sessions)
@@ -65,7 +65,7 @@ func TestBrowserSessions_OpenRowFallsBackToSavedTabsWhenNotLive(t *testing.T) {
 
 	view := h.svc.BrowserSessions(context.Background())
 
-	assert.Equal(t, []WindowView{{ID: "w99", State: "open", Tabs: []TabView{{URL: "https://saved.example.com", Active: true}}}}, view.Sessions[1].Windows)
+	assert.Equal(t, []WindowView{{ID: "w99", State: "open", Tabs: []TabView{{URL: "https://saved.example.com", Active: true, State: TabOpen}}}}, view.Sessions[1].Windows)
 }
 
 func TestBrowserSessions_DisconnectedUsesSavedTabs(t *testing.T) {
@@ -77,7 +77,7 @@ func TestBrowserSessions_DisconnectedUsesSavedTabs(t *testing.T) {
 	view := h.svc.BrowserSessions(context.Background())
 
 	assert.False(t, view.Connected)
-	assert.Equal(t, SessionBrowser{State: "open", TabCount: 1, Windows: []WindowView{{ID: w.ID, State: "open", Tabs: []TabView{{URL: "https://saved.example.com"}}}}}, view.Sessions[1])
+	assert.Equal(t, SessionBrowser{State: "open", TabCount: 1, Windows: []WindowView{{ID: w.ID, State: "open", Tabs: []TabView{{URL: "https://saved.example.com", State: TabOpen}}}}}, view.Sessions[1])
 }
 
 func TestBrowserSessions_ListErrorFallsBackToSavedTabs(t *testing.T) {
@@ -89,7 +89,7 @@ func TestBrowserSessions_ListErrorFallsBackToSavedTabs(t *testing.T) {
 	view := h.svc.BrowserSessions(context.Background())
 
 	assert.True(t, view.Connected)
-	assert.Equal(t, []TabView{{URL: "https://saved.example.com"}}, view.Sessions[1].Windows[0].Tabs)
+	assert.Equal(t, []TabView{{URL: "https://saved.example.com", State: TabOpen}}, view.Sessions[1].Windows[0].Tabs)
 }
 
 func TestBrowserSessions_EmptyWhenNoRows(t *testing.T) {

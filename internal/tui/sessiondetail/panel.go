@@ -390,7 +390,10 @@ func tabLine(w browser.WindowView, t browser.TabView, selected bool, width int) 
 		markerStyle = mutedStyle()
 	}
 	marker := " "
-	if t.Active {
+	switch {
+	case t.State == browser.TabPending:
+		marker = mutedStyle().Render("◌")
+	case t.Active:
 		marker = markerStyle.Render("●")
 	}
 	title := ui.SingleLine(t.Title)

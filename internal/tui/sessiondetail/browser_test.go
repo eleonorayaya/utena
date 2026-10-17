@@ -108,6 +108,22 @@ func TestBrowserSection_SnapshottedOnlyIsMutedAndNotSelectable(t *testing.T) {
 	assert.Equal(t, "switch", m.Keys().ShortHelp()[0].Help().Desc)
 }
 
+func TestBrowserSection_PendingTabsAreMarkedAndNotSelectable(t *testing.T) {
+	sb := browser.SessionBrowser{State: "open", TabCount: 2, Windows: []browser.WindowView{
+		{ID: "w1", State: "open", Tabs: []browser.TabView{
+			{ID: "t1", Title: "Docs", URL: "https://docs.example.com", Active: true, State: browser.TabOpen},
+			{URL: "https://github.com/o/r/pull/7", State: browser.TabPending},
+		}},
+	}}
+	m := detailWith(makeActiveSession(), sb)
+	assert.Equal(t, []string{
+		"  Browser " + strings.Repeat("─", 34) + " 2 tabs · open",
+		"    ● Docs  docs.example.com",
+		"    ◌ https://github.com/o/r/pull/7",
+	}, browserLines(m.View()))
+	assert.Len(t, m.selectableTabs(), 1)
+}
+
 func TestBrowserSection_OmittedWithoutRows(t *testing.T) {
 	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
 	assert.NotContains(t, m.View(), "Browser")

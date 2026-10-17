@@ -25,6 +25,22 @@ type StatusReporter interface {
 	UpdateHint() string
 }
 
+type Capabilities struct {
+	CreateTakesFocus bool
+	LoadTakesFocus   bool
+}
+
+type CapabilityReporter interface {
+	Capabilities() Capabilities
+}
+
+func capabilitiesOf(d Driver) Capabilities {
+	if r, ok := d.(CapabilityReporter); ok {
+		return r.Capabilities()
+	}
+	return Capabilities{}
+}
+
 type HTTPDriver interface {
 	Name() string
 	Handler() http.Handler

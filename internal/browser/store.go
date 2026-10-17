@@ -20,6 +20,17 @@ func (s *Store) Add(w *BrowserWindow) error {
 	return s.db.Create(w).Error
 }
 
+func (s *Store) Get(id uint) (*BrowserWindow, error) {
+	var w BrowserWindow
+	if err := s.db.First(&w, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrWindowNotFound
+		}
+		return nil, err
+	}
+	return &w, nil
+}
+
 func (s *Store) GetByDriverWindowID(id string) (*BrowserWindow, error) {
 	if id == "" {
 		return nil, ErrWindowNotFound
@@ -101,6 +112,12 @@ func (s *Store) SaveTabs(driverWindowID string, tabs []SavedTab, at time.Time) e
 	return s.openWindow(driverWindowID).Model(&BrowserWindow{}).
 		Select("Tabs", "SnapshotAt").
 		Updates(&BrowserWindow{Tabs: tabs, SnapshotAt: at}).Error
+}
+
+func (s *Store) SetTabs(id uint, tabs []SavedTab) error {
+	return s.db.Model(&BrowserWindow{}).Where("id = ?", id).
+		Select("Tabs").
+		Updates(&BrowserWindow{Tabs: tabs}).Error
 }
 
 func (s *Store) ListAll() ([]BrowserWindow, error) {

@@ -18,11 +18,30 @@ const (
 	WindowSnapshotted WindowState = "snapshotted"
 )
 
+type TabState string
+
+const (
+	TabPending TabState = "pending"
+	TabOpen    TabState = "open"
+	TabSaved   TabState = "saved"
+)
+
 type SavedTab struct {
-	URL    string `json:"url"`
-	Title  string `json:"title"`
-	Active bool   `json:"active"`
-	Pinned bool   `json:"pinned"`
+	URL    string   `json:"url"`
+	Title  string   `json:"title"`
+	Active bool     `json:"active"`
+	Pinned bool     `json:"pinned"`
+	State  TabState `json:"state,omitempty"`
+}
+
+func (t SavedTab) StateIn(window WindowState) TabState {
+	switch {
+	case t.State == TabPending:
+		return TabPending
+	case window == WindowOpen:
+		return TabOpen
+	}
+	return TabSaved
 }
 
 type BrowserWindow struct {
@@ -49,6 +68,41 @@ func savedTabs(w Window) []SavedTab {
 		out = append(out, SavedTab{URL: t.URL, Title: t.Title, Active: t.Active, Pinned: t.Pinned})
 	}
 	return out
+}
+
+func mergeTabs(w Window, saved []SavedTab) ([]SavedTab, bool) {
+	live := savedTabs(w)
+	if len(live) == 0 {
+		return saved, false
+	}
+	for _, t := range saved {
+		if t.State != TabPending {
+			continue
+		}
+		if _, ok := MatchTab(w.Tabs, t.URL); !ok {
+			live = append(live, t)
+		}
+	}
+	return live, true
+}
+
+func pendingTabs(tabs []SavedTab) []SavedTab {
+	var out []SavedTab
+	for _, t := range tabs {
+		if t.State == TabPending {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func hasSavedURL(tabs []SavedTab, rawURL string) bool {
+	saved := make([]Tab, len(tabs))
+	for i, t := range tabs {
+		saved[i] = Tab{URL: t.URL}
+	}
+	_, ok := MatchTab(saved, rawURL)
+	return ok
 }
 
 func isWebURL(u string) bool {

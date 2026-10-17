@@ -105,3 +105,31 @@ func TestFakeDriver_ListErr(t *testing.T) {
 	_, err := f.ListWindows(context.Background(), "")
 	assert.ErrorIs(t, err, f.ListErr)
 }
+
+func TestNone_FocusedWindowIsEmpty(t *testing.T) {
+	_, ok, err := None{}.FocusedWindow(context.Background())
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestFakeDriver_FocusedWindowTracksFocus(t *testing.T) {
+	ctx := context.Background()
+	f := NewFakeDriver()
+	f.Add("1", "a", "2")
+
+	_, ok, err := f.FocusedWindow(ctx)
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	f.SetCurrent("term")
+	w, ok, err := f.FocusedWindow(ctx)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, Window{ID: "term"}, w)
+
+	require.NoError(t, f.FocusWindow(ctx, "1"))
+	w, ok, err = f.FocusedWindow(ctx)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, Window{ID: "1", Title: "a", Workspace: "2"}, w)
+}

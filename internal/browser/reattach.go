@@ -51,6 +51,16 @@ func savedURLs(tabs []SavedTab) []string {
 	return urls
 }
 
+func loadedURLs(tabs []SavedTab) []string {
+	urls := make([]string, 0, len(tabs))
+	for _, t := range tabs {
+		if t.State != TabPending {
+			urls = append(urls, t.URL)
+		}
+	}
+	return urls
+}
+
 func jaccard(a, b map[string]bool) float64 {
 	if len(a) == 0 || len(b) == 0 {
 		return 0
@@ -77,10 +87,10 @@ func matchRestored(rows []BrowserWindow, windows []Window, owned map[string]bool
 
 	var candidates []restoreCandidate
 	for _, r := range rows {
-		if len(r.Tabs) == 0 {
+		rowSet := urlSet(loadedURLs(r.Tabs))
+		if len(rowSet) == 0 {
 			continue
 		}
-		rowSet := urlSet(savedURLs(r.Tabs))
 		for id, set := range windowSets {
 			if score := jaccard(rowSet, set); score >= threshold {
 				candidates = append(candidates, restoreCandidate{windowID: id, rowID: r.ID, score: score})
