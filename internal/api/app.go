@@ -8,6 +8,7 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/aerospace"
 	"github.com/eleonorayaya/utena/internal/browser"
+	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/chrome"
 	"github.com/eleonorayaya/utena/internal/chromescript"
 	"github.com/eleonorayaya/utena/internal/claude"
@@ -33,6 +34,7 @@ type App struct {
 	Git       *git.GitModule
 	Workspace *workspace.WorkspaceModule
 	Session   *session.SessionModule
+	Bundles   *bundles.Module
 	Browser   *browser.Module
 	Mux       *mux.Module
 	Claude    *claude.ClaudeModule
@@ -69,6 +71,8 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 		muxModule = mux.NewModule(tuios.NewDriver(), bus, database)
 	}
 	sessionModule := session.NewSessionModule(muxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir, cfg.SessionsRoot)
+	sessionModule.Service.SetBundleCatalog(cfg.Bundles)
+	bundlesModule := bundles.NewModule(cfg.Bundles)
 	browserModule := browser.NewModule(newBrowserDriver(cfg.Browser), browserSessions{sessions: sessionModule.Service}, newWMDriver(cfg.WM), browser.Layout{BrowserWorkspace: cfg.BrowserWorkspace, ParkWorkspace: cfg.ParkWorkspace}, bus, database)
 
 	jobsModule := jobs.NewJobsModule()
@@ -81,6 +85,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 		Git:       gitModule,
 		Workspace: workspaceModule,
 		Session:   sessionModule,
+		Bundles:   bundlesModule,
 		Browser:   browserModule,
 		Mux:       muxModule,
 		Claude:    claude.NewClaudeModule(database),
@@ -194,6 +199,7 @@ func (a *App) modules() []moduleEntry {
 		{"workspace", "/workspaces", a.Workspace},
 		{"claude", "/claude", a.Claude},
 		{"session", "/sessions", a.Session},
+		{"bundles", "/bundles", a.Bundles},
 		{"browser", "/browser", a.Browser},
 		{"jobs", "/jobs", a.Jobs},
 		{"monitor", "/monitor", a.Monitor},

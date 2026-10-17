@@ -45,7 +45,7 @@ func (c Catalog) Resolve(names []string) ([]string, []string) {
 func (c Catalog) Entries() []Entry {
 	entries := make([]Entry, 0, len(c))
 	for _, name := range slices.Sorted(maps.Keys(c)) {
-		entries = append(entries, Entry{Name: name, Plugins: c[name].Plugins})
+		entries = append(entries, Entry{Name: name, Plugins: append([]string{}, c[name].Plugins...)})
 	}
 	return entries
 }
