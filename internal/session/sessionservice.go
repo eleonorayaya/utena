@@ -83,6 +83,7 @@ type SessionService struct {
 	sessionsRoot         string
 	setupTimeout         time.Duration
 	bundleCatalog        bundles.Catalog
+	mcpServers           bundles.Servers
 }
 
 func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, setupStepStore *SessionSetupStepStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, muxService *mux.Service, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
@@ -105,8 +106,9 @@ func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktre
 	}
 }
 
-func (s *SessionService) SetBundleCatalog(c bundles.Catalog) {
-	s.bundleCatalog = c
+func (s *SessionService) SetBundleCatalog(catalog bundles.Catalog, servers bundles.Servers) {
+	s.bundleCatalog = catalog
+	s.mcpServers = servers
 }
 
 func (s *SessionService) OnAppStart(ctx context.Context) error {

@@ -143,10 +143,32 @@ func TestLoadConfig_BundlesFromDaemonFile(t *testing.T) {
 	assert.Equal(t, bundles.Catalog{"go": {Plugins: []string{"go@m"}}}, cfg.Bundles)
 }
 
+func TestLoadConfig_McpServersFromDaemonFile(t *testing.T) {
+	clearWMEnv(t)
+	dir := t.TempDir()
+	t.Setenv("UTENA_DATA_DIR", dir)
+	contents := `{
+  "bundles": {"notion": {"mcp_servers": ["notion"]}},
+  "mcp_servers": {
+    "notion": {"type": "http", "url": "https://mcp.notion.com/mcp"},
+    "gopls": {"command": "gopls", "args": ["mcp"]}
+  }
+}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(contents), 0o644))
+
+	cfg, err := LoadConfig([]string{"--browser", "chrome"})
+	require.NoError(t, err)
+	assert.Equal(t, bundles.Catalog{"notion": {McpServers: []string{"notion"}}}, cfg.Bundles)
+	require.Len(t, cfg.McpServers, 2)
+	assert.Equal(t, `{"type": "http", "url": "https://mcp.notion.com/mcp"}`, string(cfg.McpServers["notion"]))
+	assert.Equal(t, `{"command": "gopls", "args": ["mcp"]}`, string(cfg.McpServers["gopls"]))
+}
+
 func TestLoadConfig_NoDaemonFileMeansNoBundles(t *testing.T) {
 	clearWMEnv(t)
 
 	cfg, err := LoadConfig(nil)
 	require.NoError(t, err)
 	assert.Empty(t, cfg.Bundles)
+	assert.Empty(t, cfg.McpServers)
 }

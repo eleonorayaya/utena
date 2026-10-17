@@ -506,7 +506,7 @@ func TestSessionRouter_SetBundles(t *testing.T) {
 	router.controller.service.SetBundleCatalog(bundles.Catalog{
 		"go":   {Plugins: []string{"go@m"}},
 		"docs": {Plugins: []string{"docs@m"}},
-	})
+	}, nil)
 	swStore := NewSessionWorktreeStore(sessionStore.db)
 
 	session := &Session{
@@ -534,7 +534,7 @@ func TestSessionRouter_SetBundles_EmptyClearsPlugins(t *testing.T) {
 	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
 	router.controller.service.SetBundleCatalog(bundles.Catalog{
 		"go": {Plugins: []string{"go@m"}},
-	})
+	}, nil)
 	swStore := NewSessionWorktreeStore(sessionStore.db)
 
 	session := &Session{
@@ -626,7 +626,7 @@ func postCreateSession(t *testing.T, router *SessionRouter, body string) *httpte
 
 func TestSessionRouter_CreateSession_EmptyBundlesOverridesDefaults(t *testing.T) {
 	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
-	service.SetBundleCatalog(testBundleCatalog())
+	service.SetBundleCatalog(testBundleCatalog(), nil)
 	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go"]}`)
 	router := NewSessionRouter(NewSessionController(service))
 
@@ -647,7 +647,7 @@ func TestSessionRouter_CreateSession_EmptyBundlesOverridesDefaults(t *testing.T)
 
 func TestSessionRouter_CreateSession_OmittedBundlesUsesDefaults(t *testing.T) {
 	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
-	service.SetBundleCatalog(testBundleCatalog())
+	service.SetBundleCatalog(testBundleCatalog(), nil)
 	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go"]}`)
 	router := NewSessionRouter(NewSessionController(service))
 
@@ -668,7 +668,7 @@ func TestSessionRouter_CreateSession_OmittedBundlesUsesDefaults(t *testing.T) {
 
 func TestSessionRouter_CreateSession_RejectsBlankBundleNames(t *testing.T) {
 	service, _, _, ws1ID, _ := setupTwoRepoSessionService(t)
-	service.SetBundleCatalog(testBundleCatalog())
+	service.SetBundleCatalog(testBundleCatalog(), nil)
 	router := NewSessionRouter(NewSessionController(service))
 
 	body := fmt.Sprintf(`{"name":"blank","workspaces":[{"workspace_id":%d,"base_branch":"main"}],"bundles":[" "]}`, ws1ID)

@@ -71,7 +71,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 		muxModule = mux.NewModule(tuios.NewDriver(), bus, database)
 	}
 	sessionModule := session.NewSessionModule(muxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir, cfg.SessionsRoot)
-	sessionModule.Service.SetBundleCatalog(cfg.Bundles)
+	sessionModule.Service.SetBundleCatalog(cfg.Bundles, cfg.McpServers)
 	bundlesModule := bundles.NewModule(cfg.Bundles)
 	browserModule := browser.NewModule(newBrowserDriver(cfg.Browser), browserSessions{sessions: sessionModule.Service}, newWMDriver(cfg.WM), browser.Layout{BrowserWorkspace: cfg.BrowserWorkspace, ParkWorkspace: cfg.ParkWorkspace}, bus, database)
 

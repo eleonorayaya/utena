@@ -38,7 +38,7 @@ func readEnabledPlugins(t *testing.T, root string) map[string]any {
 
 func TestSessionService_CreateSession_DefaultsBundlesFromWorkspaces(t *testing.T) {
 	service, sessionStore, _, ws1ID, ws2ID := setupTwoRepoSessionService(t)
-	service.SetBundleCatalog(testBundleCatalog())
+	service.SetBundleCatalog(testBundleCatalog(), nil)
 	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go"]}`)
 	writeWorkspaceConfig(t, workspacePath(t, service, ws2ID), `{"default_bundles":["go","docs"]}`)
 
@@ -62,7 +62,7 @@ func TestSessionService_CreateSession_DefaultsBundlesFromWorkspaces(t *testing.T
 
 func TestSessionService_CreateSession_ExplicitBundlesOverrideDefaults(t *testing.T) {
 	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
-	service.SetBundleCatalog(testBundleCatalog())
+	service.SetBundleCatalog(testBundleCatalog(), nil)
 	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go"]}`)
 
 	sess, err := service.CreateSession(context.Background(), CreateSessionInput{
@@ -89,7 +89,7 @@ func TestSessionService_CreateSession_ExplicitBundlesOverrideDefaults(t *testing
 
 func TestSessionService_WritePlugins_UsesStoredBundles(t *testing.T) {
 	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
-	service.SetBundleCatalog(testBundleCatalog())
+	service.SetBundleCatalog(testBundleCatalog(), nil)
 
 	ctx := context.Background()
 	sess, err := service.CreateSession(ctx, CreateSessionInput{
@@ -109,7 +109,7 @@ func TestSessionService_WritePlugins_UsesStoredBundles(t *testing.T) {
 
 func TestSessionService_WritePlugins_SkipsEmptySessionRoot(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
-	service.SetBundleCatalog(testBundleCatalog())
+	service.SetBundleCatalog(testBundleCatalog(), nil)
 	swStore := NewSessionWorktreeStore(sessionStore.db)
 
 	sess := &Session{
@@ -130,7 +130,7 @@ func TestSessionService_WritePlugins_SkipsEmptySessionRoot(t *testing.T) {
 
 func TestSessionService_AddWorkspace_UnionsDefaultBundles(t *testing.T) {
 	service, sessionStore, _, ws1ID, ws2ID := setupTwoRepoSessionService(t)
-	service.SetBundleCatalog(testBundleCatalog())
+	service.SetBundleCatalog(testBundleCatalog(), nil)
 	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go"]}`)
 	writeWorkspaceConfig(t, workspacePath(t, service, ws2ID), `{"default_bundles":["docs"]}`)
 
@@ -152,7 +152,7 @@ func TestSessionService_AddWorkspace_UnionsDefaultBundles(t *testing.T) {
 
 func TestSessionService_ActivateSession_ReappliesPlugins(t *testing.T) {
 	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
-	service.SetBundleCatalog(testBundleCatalog())
+	service.SetBundleCatalog(testBundleCatalog(), nil)
 
 	ctx := context.Background()
 	sess, err := service.CreateSession(ctx, CreateSessionInput{
@@ -166,7 +166,7 @@ func TestSessionService_ActivateSession_ReappliesPlugins(t *testing.T) {
 	_, err = service.ArchiveSession(ctx, sess.ID)
 	require.NoError(t, err)
 
-	service.SetBundleCatalog(bundles.Catalog{"go": {Plugins: []string{"go@m", "gopls@m"}}})
+	service.SetBundleCatalog(bundles.Catalog{"go": {Plugins: []string{"go@m", "gopls@m"}}}, nil)
 	_, err = service.ActivateSession(ctx, sess.ID)
 	require.NoError(t, err)
 

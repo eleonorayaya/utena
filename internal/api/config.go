@@ -22,6 +22,7 @@ type Config struct {
 	BrowserWorkspace string
 	ParkWorkspace    string
 	Bundles          bundles.Catalog
+	McpServers       bundles.Servers
 }
 
 func LoadConfig(args []string) (Config, error) {
@@ -65,6 +66,7 @@ func LoadConfig(args []string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.Bundles = file.Bundles
+	cfg.McpServers = file.McpServers
 	if !browserFlag && os.Getenv("UTENA_BROWSER") == "" && file.Browser != "" {
 		cfg.Browser = file.Browser
 	}
@@ -101,8 +103,9 @@ func LoadConfig(args []string) (Config, error) {
 }
 
 type daemonFile struct {
-	Browser string          `json:"browser"`
-	Bundles bundles.Catalog `json:"bundles"`
+	Browser    string          `json:"browser"`
+	Bundles    bundles.Catalog `json:"bundles"`
+	McpServers bundles.Servers `json:"mcp_servers"`
 }
 
 func loadDaemonFile(dir string) (daemonFile, error) {
