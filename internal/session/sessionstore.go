@@ -224,6 +224,10 @@ func sessionConflictMessage(session *Session) string {
 	return fmt.Sprintf("session %q already exists", session.Name)
 }
 
+func (s *SessionStore) UpdateBundles(id uint, names []string) error {
+	return s.db.Model(&Session{Model: gorm.Model{ID: id}}).Select("Bundles").Updates(&Session{Bundles: names}).Error
+}
+
 func (s *SessionStore) AttachedID() (uint, error) {
 	var ids []uint
 	if err := s.db.Model(&Session{}).Where("is_attached = ?", true).Order("last_used_at DESC").Limit(1).Pluck("id", &ids).Error; err != nil {

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/claudesettings"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/eventbus"
@@ -81,6 +82,7 @@ type SessionService struct {
 	configDir            string
 	sessionsRoot         string
 	setupTimeout         time.Duration
+	bundleCatalog        bundles.Catalog
 }
 
 func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, setupStepStore *SessionSetupStepStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, muxService *mux.Service, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
@@ -101,6 +103,10 @@ func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktre
 		sessionsRoot:         sessionsRoot,
 		setupTimeout:         defaultSetupTimeout,
 	}
+}
+
+func (s *SessionService) SetBundleCatalog(c bundles.Catalog) {
+	s.bundleCatalog = c
 }
 
 func (s *SessionService) OnAppStart(ctx context.Context) error {
@@ -305,6 +311,7 @@ type CreateSessionInput struct {
 	Name       string
 	Workspaces []WorkspaceBranchSpec
 	Actions    []*SessionAction
+	Bundles    []string
 }
 
 type assignedSlot struct {
@@ -423,6 +430,15 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		}
 	}
 
+	sessBundles := input.Bundles
+	if sessBundles == nil {
+		paths := make([]string, len(slots))
+		for i, sl := range slots {
+			paths[i] = sl.ws.Path
+		}
+		sessBundles = defaultBundles(paths)
+	}
+
 	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("create session root %q: %w", sessionRoot, err)
 	}
@@ -432,6 +448,7 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		Status:      StatusCreating,
 		LastUsedAt:  time.Now(),
 		SessionRoot: sessionRoot,
+		Bundles:     bundles.Union(sessBundles),
 	}
 	if err := s.store.Add(sess); err != nil {
 		slog.WarnContext(ctx, "session create failed; session root preserved", "path", sessionRoot, "error", err)
@@ -711,11 +728,23 @@ func (s *SessionService) applyClaudeSettings(ctx context.Context, sess *Session)
 		slog.WarnContext(ctx, "ensure session-root claude settings failed", "error", err)
 		warnings = append(warnings, fmt.Sprintf("claude-settings: %s", err.Error()))
 	}
+	if err := s.writePlugins(ctx, sess); err != nil {
+		slog.WarnContext(ctx, "apply claude plugins failed", "error", err)
+		warnings = append(warnings, fmt.Sprintf("claude-plugins: %s", err.Error()))
+	}
 	if err := claudesettings.EnsureMultiSessionGuide(sess.SessionRoot, checkouts); err != nil {
 		slog.WarnContext(ctx, "ensure session CLAUDE.md failed", "error", err)
 		warnings = append(warnings, fmt.Sprintf("claude-guide: %s", err.Error()))
 	}
 	return warnings
+}
+
+func (s *SessionService) writePlugins(ctx context.Context, sess *Session) error {
+	enabled, unknown := s.bundleCatalog.Resolve(sess.Bundles)
+	if len(unknown) > 0 {
+		slog.WarnContext(ctx, "session references unknown bundles", "session", sess.ID, "bundles", unknown)
+	}
+	return claudesettings.ApplyPlugins(sess.SessionRoot, s.bundleCatalog.ManagedPlugins(), enabled)
 }
 
 func (s *SessionService) resolveWorktreeWorkspace(ctx context.Context, wt *git.Worktree, cache map[uint]*workspace.Workspace) (*workspace.Workspace, error) {

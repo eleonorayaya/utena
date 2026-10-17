@@ -41,6 +41,7 @@ type Session struct {
 	IsAttached     bool                   `json:"is_attached"`
 	LastUsedAt     time.Time              `json:"last_used_at"`
 	SessionRoot    string                 `json:"session_root,omitempty" gorm:"index"`
+	Bundles        []string               `json:"bundles,omitempty" gorm:"serializer:json"`
 	ClaudeSessions []claude.ClaudeSession `json:"claude_sessions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	SessionActions []SessionAction        `json:"session_actions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
 	SetupSteps     []SessionSetupStep     `json:"setup_steps,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
