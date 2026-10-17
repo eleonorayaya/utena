@@ -601,7 +601,12 @@ func (s *SessionService) AddWorkspace(ctx context.Context, sessionID uint, spec 
 		slog.WarnContext(ctx, "failed to touch workspace last-used timestamp", "workspace", ws.ID, "error", err)
 	}
 
-	if merged := bundles.Union(sess.Bundles, defaultBundles([]string{ws.Path})); len(merged) != len(sess.Bundles) {
+	current, err := s.store.GetBundles(sess.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to reload session bundles", "session", sess.ID, "error", err)
+		current = sess.Bundles
+	}
+	if merged := bundles.Union(current, defaultBundles([]string{ws.Path})); len(merged) != len(current) {
 		if err := s.store.UpdateBundles(sess.ID, merged); err != nil {
 			slog.WarnContext(ctx, "failed to persist session bundles", "session", sess.ID, "error", err)
 		}

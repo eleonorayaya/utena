@@ -76,7 +76,16 @@ type WorkspaceBranchSpec struct {
 type CreateSessionRequest struct {
 	Name       string                `json:"name,omitempty"`
 	Workspaces []WorkspaceBranchSpec `json:"workspaces"`
-	Bundles    []string              `json:"bundles,omitempty"`
+	Bundles    []string              `json:"bundles"`
+}
+
+func validateBundleNames(names []string) error {
+	for _, name := range names {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("bundle names must not be blank")
+		}
+	}
+	return nil
 }
 
 func (c *CreateSessionRequest) Bind(r *http.Request) error {
@@ -104,6 +113,9 @@ func (c *CreateSessionRequest) Bind(r *http.Request) error {
 	}
 	if hasBase && c.Name == "" {
 		return errors.New("name is required when any workspace uses base_branch")
+	}
+	if err := validateBundleNames(c.Bundles); err != nil {
+		return err
 	}
 	if c.Name != "" {
 		return ValidateSessionName(c.Name)
@@ -133,12 +145,7 @@ func (r *SetBundlesRequest) Bind(_ *http.Request) error {
 	if r.Bundles == nil {
 		return errors.New("bundles is required")
 	}
-	for _, name := range r.Bundles {
-		if strings.TrimSpace(name) == "" {
-			return errors.New("bundle names must not be blank")
-		}
-	}
-	return nil
+	return validateBundleNames(r.Bundles)
 }
 
 type AddBlockerRequest struct {

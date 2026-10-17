@@ -614,3 +614,71 @@ func TestSessionRouter_SetBundles_NotFound(t *testing.T) {
 	router.Routes().ServeHTTP(w, req)
 	require.Equal(t, http.StatusNotFound, w.Code)
 }
+
+func postCreateSession(t *testing.T, router *SessionRouter, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	return w
+}
+
+func TestSessionRouter_CreateSession_EmptyBundlesOverridesDefaults(t *testing.T) {
+	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	service.SetBundleCatalog(testBundleCatalog())
+	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go"]}`)
+	router := NewSessionRouter(NewSessionController(service))
+
+	body := fmt.Sprintf(`{"name":"bare","workspaces":[{"workspace_id":%d,"base_branch":"main"}],"bundles":[]}`, ws1ID)
+	w := postCreateSession(t, router, body)
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+
+	var resp SessionResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Session)
+	require.Empty(t, resp.Bundles)
+
+	waitForStatus(t, sessionStore, resp.ID, StatusActive, 5*time.Second)
+	stored, err := sessionStore.GetBundles(resp.ID)
+	require.NoError(t, err)
+	require.Empty(t, stored)
+}
+
+func TestSessionRouter_CreateSession_OmittedBundlesUsesDefaults(t *testing.T) {
+	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	service.SetBundleCatalog(testBundleCatalog())
+	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go"]}`)
+	router := NewSessionRouter(NewSessionController(service))
+
+	body := fmt.Sprintf(`{"name":"defaulted","workspaces":[{"workspace_id":%d,"base_branch":"main"}]}`, ws1ID)
+	w := postCreateSession(t, router, body)
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+
+	var resp SessionResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Session)
+	require.Equal(t, []string{"go"}, resp.Bundles)
+
+	waitForStatus(t, sessionStore, resp.ID, StatusActive, 5*time.Second)
+	stored, err := sessionStore.GetBundles(resp.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"go"}, stored)
+}
+
+func TestSessionRouter_CreateSession_RejectsBlankBundleNames(t *testing.T) {
+	service, _, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	service.SetBundleCatalog(testBundleCatalog())
+	router := NewSessionRouter(NewSessionController(service))
+
+	body := fmt.Sprintf(`{"name":"blank","workspaces":[{"workspace_id":%d,"base_branch":"main"}],"bundles":[" "]}`, ws1ID)
+	w := postCreateSession(t, router, body)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "bundle names must not be blank")
+}
+
+func TestCreateSessionRequest_MarshalsEmptyBundles(t *testing.T) {
+	data, err := json.Marshal(CreateSessionRequest{Bundles: []string{}})
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"bundles":[]`)
+}
