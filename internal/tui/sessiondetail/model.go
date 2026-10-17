@@ -10,6 +10,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/addworkspaceform"
 	"github.com/eleonorayaya/utena/internal/tui/blockerform"
+	"github.com/eleonorayaya/utena/internal/tui/bundlepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
@@ -28,10 +29,16 @@ type Model struct {
 	picker                 ui.PRPicker
 	statusMsg              string
 	statusKind             ui.StatusKind
+	bundlePicker           bundlepicker.Model
+	pickingBundles         bool
 }
 
 func New() Model {
-	return Model{}
+	return Model{bundlePicker: bundlepicker.New("Plugin bundles")}
+}
+
+func (m Model) CapturesText() bool {
+	return m.pickingBundles && m.bundlePicker.CapturesText()
 }
 
 func (m *Model) setStatus(text string, kind ui.StatusKind) {
@@ -40,6 +47,9 @@ func (m *Model) setStatus(text string, kind ui.StatusKind) {
 }
 
 func (m Model) Status() ui.Status {
+	if m.pickingBundles {
+		return ui.Status{}
+	}
 	if m.picker.IsOpen() {
 		return ui.Status{Text: "↑/↓ choose · enter open · esc cancel", Kind: ui.StatusInfo}
 	}
@@ -162,6 +172,9 @@ func (m Model) selectedTab() *tabRef {
 }
 
 func (m Model) Keys() help.KeyMap {
+	if m.pickingBundles {
+		return m.bundlePicker.Keys()
+	}
 	k := keys
 	if m.selectedTab() != nil {
 		k.Activate = openTabKey
@@ -175,6 +188,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.bundlePicker.SetSize(msg.Width, msg.Height)
 		return m, nil
 	case SelectMsg:
 		s := msg.Session
@@ -184,8 +198,31 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.cursor = m.minCursor()
 		m.pendingBlockerDeleteID = 0
 		m.picker = m.picker.Close()
+		m.pickingBundles = false
 		m.setStatus("", ui.StatusInfo)
+		if m.bundlePicker.Catalog() == nil {
+			return m, tea.Batch(provider.RequestBrowserState(), provider.FetchBundles())
+		}
 		return m, provider.RequestBrowserState()
+	case provider.BundlesLoadedMsg:
+		if msg.Err == nil {
+			m.bundlePicker = m.bundlePicker.SetCatalog(msg.Bundles)
+		}
+		return m, nil
+	case provider.SessionBundlesSetMsg:
+		if m.sess != nil && msg.SessionID == m.sess.ID {
+			m.setStatus("bundles saved · run /reload-plugins and /mcp in open Claude panes", ui.StatusInfo)
+		}
+		return m, nil
+	case bundlepicker.SelectedMsg:
+		m.pickingBundles = false
+		if m.sess != nil {
+			return m, provider.SetSessionBundles(m.sess.ID, msg.Bundles)
+		}
+		return m, nil
+	case bundlepicker.ClosedMsg:
+		m.pickingBundles = false
+		return m, nil
 	case provider.BrowserStateUpdatedMsg:
 		if m.sess == nil {
 			m.browserState = msg.State
@@ -222,10 +259,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.picker = m.picker.Close()
 		}
+		if !found || m.sess.Status == session.StatusDeleted {
+			m.pickingBundles = false
+		}
 		m.restoreSelection(sel)
 		return m, nil
 	case tea.KeyMsg:
-		return m.onKeyMsg(msg)
+		if !m.pickingBundles {
+			return m.onKeyMsg(msg)
+		}
+	}
+	if m.pickingBundles {
+		var cmd tea.Cmd
+		m.bundlePicker, cmd = m.bundlePicker.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -359,6 +406,14 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			router.NavigateTo(router.AddWorkspaceFormView),
 			addworkspaceform.Start(id),
 		)
+
+	case key.Matches(msg, keys.Bundles):
+		if m.sess.Status == session.StatusDeleted {
+			return m, nil
+		}
+		m.bundlePicker = m.bundlePicker.Open(m.sess.Bundles)
+		m.pickingBundles = true
+		return m, nil
 	}
 
 	return m, nil

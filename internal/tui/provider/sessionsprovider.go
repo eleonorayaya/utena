@@ -36,11 +36,12 @@ type SessionWorkspaceSpec struct {
 	BaseBranch  string
 }
 
-func CreateSession(name string, specs []SessionWorkspaceSpec) tea.Cmd {
+func CreateSession(name string, specs []SessionWorkspaceSpec, selected []string) tea.Cmd {
 	return func() tea.Msg {
 		return createSessionIntentMsg{
-			name:  name,
-			specs: specs,
+			name:     name,
+			specs:    specs,
+			selected: selected,
 		}
 	}
 }
@@ -77,8 +78,9 @@ type activateSessionMsg struct {
 }
 
 type createSessionIntentMsg struct {
-	name  string
-	specs []SessionWorkspaceSpec
+	name     string
+	specs    []SessionWorkspaceSpec
+	selected []string
 }
 
 type repairSessionIntentMsg struct {
@@ -215,7 +217,7 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, p.client.fetchSessions()
 
 	case createSessionIntentMsg:
-		return p, p.client.createSession(msg.name, msg.specs)
+		return p, p.client.createSession(msg.name, msg.specs, msg.selected)
 
 	case SessionCreatedMsg:
 		return p, p.client.fetchSessions()
@@ -273,6 +275,18 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, p.client.deleteBlocker(msg.sessionID, msg.blockerID)
 
 	case blockerChangedMsg:
+		return p, p.client.fetchSessions()
+
+	case fetchBundlesIntentMsg:
+		return p, p.client.fetchBundles()
+
+	case fetchDefaultBundlesIntentMsg:
+		return p, p.client.fetchDefaultBundles(msg.workspaceIDs)
+
+	case setSessionBundlesIntentMsg:
+		return p, p.client.setSessionBundles(msg.sessionID, msg.names)
+
+	case SessionBundlesSetMsg:
 		return p, p.client.fetchSessions()
 	}
 

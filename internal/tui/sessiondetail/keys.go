@@ -12,6 +12,7 @@ type keyMap struct {
 	Archive       key.Binding
 	Delete        key.Binding
 	AddWorkspace  key.Binding
+	Bundles       key.Binding
 	Up            key.Binding
 	Down          key.Binding
 	Block         key.Binding
@@ -32,7 +33,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Activate, k.OpenPR, k.Back},
 		{k.Block, k.Up, k.Down, k.Resolve, k.RemoveBlocker},
-		{k.Archive, k.Delete, k.Repair, k.AddWorkspace},
+		{k.Archive, k.Delete, k.Repair, k.AddWorkspace, k.Bundles},
 	}
 }
 
@@ -43,6 +44,7 @@ var keys = keyMap{
 	Archive:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archive")),
 	Delete:        key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 	AddWorkspace:  key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "add workspace")),
+	Bundles:       key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "plugins")),
 	Up:            key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "prev item")),
 	Down:          key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "next item")),
 	Block:         key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "block")),

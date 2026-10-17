@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/eleonorayaya/utena/internal/bundles"
 )
 
 type Config struct {
@@ -19,6 +21,8 @@ type Config struct {
 	Browser          string
 	BrowserWorkspace string
 	ParkWorkspace    string
+	Bundles          bundles.Catalog
+	McpServers       bundles.Servers
 }
 
 func LoadConfig(args []string) (Config, error) {
@@ -57,14 +61,14 @@ func LoadConfig(args []string) (Config, error) {
 	if v := os.Getenv("UTENA_DATA_DIR"); v != "" {
 		cfg.ConfigDir = v
 	}
-	if !browserFlag && os.Getenv("UTENA_BROWSER") == "" {
-		file, err := loadDaemonFile(cfg.ConfigDir)
-		if err != nil {
-			return Config{}, err
-		}
-		if file.Browser != "" {
-			cfg.Browser = file.Browser
-		}
+	file, err := loadDaemonFile(cfg.ConfigDir)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Bundles = file.Bundles
+	cfg.McpServers = file.McpServers
+	if !browserFlag && os.Getenv("UTENA_BROWSER") == "" && file.Browser != "" {
+		cfg.Browser = file.Browser
 	}
 	if os.Getenv("UTENA_LOG_PRETTY") == "true" {
 		cfg.PrettyLogs = true
@@ -99,7 +103,9 @@ func LoadConfig(args []string) (Config, error) {
 }
 
 type daemonFile struct {
-	Browser string `json:"browser"`
+	Browser    string          `json:"browser"`
+	Bundles    bundles.Catalog `json:"bundles"`
+	McpServers bundles.Servers `json:"mcp_servers"`
 }
 
 func loadDaemonFile(dir string) (daemonFile, error) {

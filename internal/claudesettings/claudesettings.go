@@ -1,16 +1,20 @@
 package claudesettings
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
 const (
 	settingsFileName         = "settings.local.json"
+	mcpFileName              = ".mcp.json"
 	multiSessionGuideName    = "CLAUDE.md"
 	multiSessionGuideMarker  = "<!-- utena:multi-session-guide -->"
 	multiSessionGuideContent = multiSessionGuideMarker + `
@@ -50,19 +54,15 @@ func EnsureMultiSessionGuide(sessionRoot string, checkouts []SessionCheckout) er
 	return nil
 }
 
-type settingsLocal struct {
-	Sandbox struct {
-		Filesystem struct {
-			AllowWrite []string `json:"allowWrite"`
-		} `json:"filesystem"`
-	} `json:"sandbox"`
-}
-
 func WorkspaceAllowWritePaths(workspacePath string) []string {
 	return []string{
 		filepath.Join(workspacePath, ".git"),
 		filepath.Join(workspacePath, ".bare"),
 	}
+}
+
+func settingsPath(rootPath string) string {
+	return filepath.Join(rootPath, ".claude", settingsFileName)
 }
 
 func settingsFileExists(path string) (bool, error) {
@@ -76,21 +76,9 @@ func settingsFileExists(path string) (bool, error) {
 	return false, fmt.Errorf("stat %s: %w", filepath.Base(path), err)
 }
 
-func mergeAllowWrite(data []byte, paths []string) ([]byte, bool, error) {
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, false, fmt.Errorf("parse settings: %w", err)
-	}
+func mergeAllowWrite(raw map[string]any, paths []string) {
 	sandbox, _ := raw["sandbox"].(map[string]any)
-	if sandbox == nil {
-		sandbox = make(map[string]any)
-		raw["sandbox"] = sandbox
-	}
 	filesystem, _ := sandbox["filesystem"].(map[string]any)
-	if filesystem == nil {
-		filesystem = make(map[string]any)
-		sandbox["filesystem"] = filesystem
-	}
 	allowWrite, _ := filesystem["allowWrite"].([]any)
 
 	existing := make(map[string]struct{}, len(allowWrite))
@@ -99,7 +87,6 @@ func mergeAllowWrite(data []byte, paths []string) ([]byte, bool, error) {
 			existing[s] = struct{}{}
 		}
 	}
-
 	changed := false
 	for _, p := range paths {
 		if _, ok := existing[p]; ok {
@@ -110,14 +97,17 @@ func mergeAllowWrite(data []byte, paths []string) ([]byte, bool, error) {
 		changed = true
 	}
 	if !changed {
-		return nil, false, nil
+		return
+	}
+	if sandbox == nil {
+		sandbox = make(map[string]any)
+		raw["sandbox"] = sandbox
+	}
+	if filesystem == nil {
+		filesystem = make(map[string]any)
+		sandbox["filesystem"] = filesystem
 	}
 	filesystem["allowWrite"] = allowWrite
-	out, err := json.MarshalIndent(raw, "", "  ")
-	if err != nil {
-		return nil, false, fmt.Errorf("marshal settings: %w", err)
-	}
-	return append(out, '\n'), true, nil
 }
 
 func EnsureWorkspaceRoot(workspacePath string) error {
@@ -133,38 +123,100 @@ func EnsureSessionRoot(sessionRoot string, workspacePaths []string) error {
 }
 
 func ensureSettingsFile(rootPath string, allowWrite []string) error {
-	claudeDir := filepath.Join(rootPath, ".claude")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
-		return fmt.Errorf("create .claude dir: %w", err)
+	return editJSONObject(settingsPath(rootPath), projectFilePerm, true, func(raw map[string]any) error {
+		mergeAllowWrite(raw, allowWrite)
+		return nil
+	})
+}
+
+func replaceManaged(raw map[string]any, field string, managed []string, set map[string]any) {
+	current, _ := raw[field].(map[string]any)
+	if current == nil {
+		current = make(map[string]any)
 	}
-	settingsPath := filepath.Join(claudeDir, settingsFileName)
-	exists, err := settingsFileExists(settingsPath)
-	if err != nil {
-		return err
+	for _, k := range managed {
+		delete(current, k)
 	}
-	if !exists {
-		var s settingsLocal
-		s.Sandbox.Filesystem.AllowWrite = append([]string{}, allowWrite...)
-		data, err := json.MarshalIndent(s, "", "  ")
-		if err != nil {
-			return fmt.Errorf("marshal settings: %w", err)
+	maps.Copy(current, set)
+	if len(current) == 0 {
+		delete(raw, field)
+		return
+	}
+	raw[field] = current
+}
+
+func replaceApprovals(raw map[string]any, managed, names []string) {
+	drop := make(map[string]struct{}, len(managed)+len(names))
+	for _, name := range slices.Concat(managed, names) {
+		drop[name] = struct{}{}
+	}
+	existing, _ := raw["enabledMcpjsonServers"].([]any)
+	approved := make([]any, 0, len(existing)+len(names))
+	for _, entry := range existing {
+		if s, ok := entry.(string); ok {
+			if _, skip := drop[s]; skip {
+				continue
+			}
 		}
-		data = append(data, '\n')
-		if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", settingsFileName, err)
+		approved = append(approved, entry)
+	}
+	for _, name := range names {
+		approved = append(approved, name)
+	}
+	if len(approved) == 0 {
+		delete(raw, "enabledMcpjsonServers")
+		return
+	}
+	raw["enabledMcpjsonServers"] = approved
+}
+
+type BundleSettings struct {
+	ManagedPlugins []string
+	Plugins        []string
+	ManagedServers []string
+	Servers        map[string]json.RawMessage
+}
+
+func ApplyBundles(rootPath string, b BundleSettings) error {
+	names := slices.Sorted(maps.Keys(b.Servers))
+	servers := make(map[string]any, len(names))
+	for _, name := range names {
+		if err := validateMcpDefinition(b.Servers[name]); err != nil {
+			return fmt.Errorf("mcp server %s: %w", name, err)
+		}
+		servers[name] = b.Servers[name]
+	}
+	plugins := make(map[string]any, len(b.Plugins))
+	for _, id := range b.Plugins {
+		plugins[id] = true
+	}
+
+	mcpErr := editJSONObject(filepath.Join(rootPath, mcpFileName), projectFilePerm, false, func(raw map[string]any) error {
+		replaceManaged(raw, "mcpServers", b.ManagedServers, servers)
+		return nil
+	})
+	settingsErr := editJSONObject(settingsPath(rootPath), projectFilePerm, false, func(raw map[string]any) error {
+		replaceManaged(raw, "enabledPlugins", b.ManagedPlugins, plugins)
+		if mcpErr == nil {
+			replaceApprovals(raw, b.ManagedServers, names)
 		}
 		return nil
+	})
+	switch {
+	case mcpErr != nil && settingsErr != nil:
+		return fmt.Errorf("%w; %w", mcpErr, settingsErr)
+	case mcpErr != nil:
+		return mcpErr
 	}
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", settingsFileName, err)
+	return settingsErr
+}
+
+func validateMcpDefinition(def json.RawMessage) error {
+	if !json.Valid(def) {
+		return errors.New("invalid JSON definition")
 	}
-	merged, changed, err := mergeAllowWrite(data, allowWrite)
-	if err != nil || !changed {
-		return err
-	}
-	if err := os.WriteFile(settingsPath, merged, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", settingsFileName, err)
+	if trimmed := bytes.TrimSpace(def); len(trimmed) == 0 || trimmed[0] != '{' {
+		return errors.New("definition must be a JSON object")
 	}
 	return nil
 }

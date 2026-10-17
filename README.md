@@ -92,6 +92,53 @@ With [AeroSpace](https://github.com/nikitabobko/AeroSpace), the daemon also park
 
 The dotfiles AeroSpace config (`programs/aerospace/contents/aerospace.toml.tmpl`) binds `alt-b` to view workspace `P` and `alt-shift-b` to park the focused window on `P`. AeroSpace creates `P` on demand. A session-owned window you move by hand goes back to its workspace the next time placement runs.
 
+#### Plugin bundles
+
+Bundles turn groups of Claude Code plugins on per session. Define them in `~/.config/utena/daemon.json`:
+
+```json
+{
+  "bundles": {
+    "go": {"plugins": ["go@my-marketplace", "go-patterns@my-marketplace"]},
+    "docs": {"plugins": ["pdf@my-marketplace"]}
+  }
+}
+```
+
+The daemon reads this file at startup, so restart it after changing it. A malformed file stops the daemon from starting. `GET /bundles` lists the catalog.
+
+A workspace can pick default bundles in its `.utena/config.json`:
+
+```json
+{
+  "default_bundles": ["go"]
+}
+```
+
+A new session gets the default bundles of all its workspaces, unless the create request sets `bundles` itself (`"bundles": []` means none). Adding a workspace to a session adds that workspace's defaults. `PUT /sessions/{id}/bundles` with `{"bundles": [...]}` replaces a session's bundles. Unknown bundle names are kept and logged, not rejected.
+
+utena writes the selected plugins as `true` under `enabledPlugins` in the session root's `.claude/settings.local.json`, and removes catalog plugins that aren't selected. Plugins outside the catalog are never touched. The file is rewritten when the session is set up, a workspace is added, the session is activated, or its bundles change. Run `/reload-plugins` in open Claude panes to pick up a change.
+
+In the TUI, the new-session form has a Bundles field, pre-filled from the selected workspaces' defaults; press enter on it to pick bundles (space toggles). Until you change it, the daemon applies the workspace defaults. In session detail, the Bundles section lists the session's bundles and `p` edits them.
+
+For bundles to stay off elsewhere, set each bundled plugin to `false` in `~/.claude/settings.json`; the dotfiles (shizuku) do this, so the session's local `true` turns them on.
+
+Bundles can also turn MCP servers on. Define the servers once under `mcp_servers` and list them in bundles:
+
+```json
+{
+  "mcp_servers": {
+    "homeassistant": {"type": "http", "url": "https://ha.example/api/mcp",
+                      "headers": {"Authorization": "Bearer ${HOMEASSISTANT_TOKEN}"}}
+  },
+  "bundles": {
+    "homelab": {"mcp_servers": ["homeassistant"]}
+  }
+}
+```
+
+utena copies each selected definition as-is into `mcpServers` in the session root's `.mcp.json` and adds its name to `enabledMcpjsonServers` in `.claude/settings.local.json`, so Claude doesn't ask to approve it. Claude only honors those local approvals in a trusted folder, so utena also marks each session root as trusted in `~/.claude.json` (`projects[<root>].hasTrustDialogAccepted`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set) when the session is set up or activated. This trusts the whole session folder, including the hooks and settings of the repos checked out in it. Catalog servers that aren't selected are removed from both; other servers are left alone. Keep secrets out of the file with `${VAR}` placeholders, which Claude Code expands from its environment. Remove catalog servers from user scope (`~/.claude.json`) so they only exist in sessions that select them; shizuku does this. Run `/mcp` (or restart Claude) to pick up a change.
+
 #### Claude Code integration
 
 Utena can track Claude Code session status (working, needs attention, completed) and display it in the TUI.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eleonorayaya/utena/internal/browser"
+	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
@@ -73,6 +74,9 @@ func (m Model) View() string {
 	if m.sess == nil {
 		return ui.FitHeight(mutedStyle().Render("Select a session"), m.height)
 	}
+	if m.pickingBundles {
+		return ui.FitHeight(m.bundlePicker.View(), m.height)
+	}
 	s := *m.sess
 	bw := max(width-2*padW, 1)
 
@@ -108,6 +112,12 @@ func (m Model) View() string {
 	if rows := workspaceRows(s, bw); len(rows) > 0 {
 		body = append(body, sectionRule(sectionTitleStyle().Render("Workspaces"), mutedStyle().Render(fmt.Sprint(len(rows))), bw))
 		body = append(body, rows...)
+		body = append(body, "")
+	}
+
+	if len(s.Bundles) > 0 {
+		body = append(body, sectionRule(sectionTitleStyle().Render("Bundles"), mutedStyle().Render(fmt.Sprint(len(s.Bundles))), bw))
+		body = append(body, bundleLine(s.Bundles, m.bundlePicker.Catalog(), bw))
 		body = append(body, "")
 	}
 
@@ -282,6 +292,23 @@ func workspaceRows(s session.Session, width int) []string {
 		out[i] = line
 	}
 	return out
+}
+
+func bundleLine(names []string, catalog []bundles.Entry, width int) string {
+	known := make(map[string]struct{}, len(catalog))
+	for _, e := range catalog {
+		known[e.Name] = struct{}{}
+	}
+	parts := make([]string, len(names))
+	for i, name := range names {
+		label := ui.SingleLine(name)
+		if _, ok := known[name]; catalog != nil && !ok {
+			parts[i] = mutedStyle().Render(label + " (unknown)")
+			continue
+		}
+		parts[i] = valueStyle().Render(label)
+	}
+	return "  " + ui.Truncate(strings.Join(parts, mutedStyle().Render(" · ")), max(width-2, 1))
 }
 
 func prSummary(prs []git.PullRequest) string {

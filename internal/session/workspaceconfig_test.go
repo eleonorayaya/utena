@@ -62,3 +62,20 @@ func TestDetectPackageManager_Yarn(t *testing.T) {
 func TestDetectPackageManager_NPM(t *testing.T) {
 	require.Equal(t, packageManagerNpm, detectPackageManager(t.TempDir()))
 }
+
+func TestDefaultBundles_UnionsInWorkspaceOrder(t *testing.T) {
+	a, b, c := t.TempDir(), t.TempDir(), t.TempDir()
+	writeWorkspaceConfig(t, a, `{"default_bundles":["go"]}`)
+	writeWorkspaceConfig(t, b, `{"default_bundles":["docs","go"]}`)
+
+	require.Equal(t, []string{"go", "docs"}, defaultBundles([]string{a, b, c}))
+	require.Nil(t, defaultBundles([]string{c}))
+}
+
+func TestDefaultBundles_SkipsUnreadableConfig(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	writeWorkspaceConfig(t, a, `{`)
+	writeWorkspaceConfig(t, b, `{"default_bundles":["go"]}`)
+
+	require.Equal(t, []string{"go"}, defaultBundles([]string{a, b}))
+}

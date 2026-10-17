@@ -205,7 +205,7 @@ func (s *SessionStore) Update(session *Session) error {
 		return err
 	}
 
-	if err := s.db.Omit("ClaudeSessions", "MuxSession").Save(session).Error; err != nil {
+	if err := s.db.Omit("ClaudeSessions", "MuxSession", "Bundles").Save(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return common.WrapConflict(sessionConflictMessage(session), ErrSessionAlreadyExists)
 		}
@@ -222,6 +222,21 @@ func sessionConflictMessage(session *Session) string {
 		return fmt.Sprintf("session %q already claims this mux record — kill the existing session first", session.Name)
 	}
 	return fmt.Sprintf("session %q already exists", session.Name)
+}
+
+func (s *SessionStore) UpdateBundles(id uint, names []string) error {
+	return s.db.Model(&Session{Model: gorm.Model{ID: id}}).Select("Bundles").Updates(&Session{Bundles: names}).Error
+}
+
+func (s *SessionStore) GetBundles(id uint) ([]string, error) {
+	var session Session
+	if err := s.db.Model(&Session{}).Select("id", "bundles").First(&session, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return session.Bundles, nil
 }
 
 func (s *SessionStore) AttachedID() (uint, error) {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/mux"
@@ -498,4 +499,222 @@ func TestSessionRouter_ListResources_DeletedSessionIsUnmanaged(t *testing.T) {
 	require.Nil(t, resp.Sessions[0].SessionID)
 	require.Equal(t, ResourceStatusUnmanaged, resp.Sessions[0].Status)
 	require.Equal(t, "utena-gone", resp.Sessions[0].Name)
+}
+
+func putBundles(t *testing.T, router *SessionRouter, id uint, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/bundles", id), bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	return w
+}
+
+func TestSessionRouter_SetBundles(t *testing.T) {
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
+	router.controller.service.SetBundleCatalog(bundles.Catalog{
+		"go":   {Plugins: []string{"go@m"}},
+		"docs": {Plugins: []string{"docs@m"}},
+	}, nil)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	session := &Session{
+		Name:        "session-1",
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
+		SessionRoot: t.TempDir(),
+		Bundles:     []string{"go"},
+	}
+	addTestSession(t, sessionStore, swStore, session, ws1ID)
+
+	w := putBundles(t, router, session.ID, `{"bundles":["docs","docs"]}`)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"docs"}, retrieved.Bundles)
+	require.Equal(t, map[string]any{"docs@m": true}, readEnabledPlugins(t, session.SessionRoot))
+}
+
+func TestSessionRouter_SetBundles_EmptyClearsPlugins(t *testing.T) {
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
+	router.controller.service.SetBundleCatalog(bundles.Catalog{
+		"go": {Plugins: []string{"go@m"}},
+	}, nil)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	session := &Session{
+		Name:        "session-1",
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
+		SessionRoot: t.TempDir(),
+		Bundles:     []string{"go"},
+	}
+	addTestSession(t, sessionStore, swStore, session, ws1ID)
+
+	put := func(body string) {
+		require.Equal(t, http.StatusOK, putBundles(t, router, session.ID, body).Code)
+	}
+
+	put(`{"bundles":["go"]}`)
+	require.Equal(t, map[string]any{"go@m": true}, readEnabledPlugins(t, session.SessionRoot))
+
+	put(`{"bundles":[]}`)
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+	require.Empty(t, retrieved.Bundles)
+	require.Empty(t, readEnabledPlugins(t, session.SessionRoot))
+}
+
+func TestSessionRouter_SetBundles_DeletedSession(t *testing.T) {
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	session := &Session{
+		Name:        "session-1",
+		Status:      StatusDeleted,
+		LastUsedAt:  time.Now(),
+		SessionRoot: t.TempDir(),
+	}
+	addTestSession(t, sessionStore, swStore, session, ws1ID)
+
+	w := putBundles(t, router, session.ID, `{"bundles":["go"]}`)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSessionRouter_SetBundles_RejectsBlankNames(t *testing.T) {
+	router, _, _, _, _, _ := setupSessionRouter(t)
+
+	for _, body := range []string{`{"bundles":[""]}`, `{"bundles":["go","  "]}`} {
+		w := putBundles(t, router, 1, body)
+		require.Equal(t, http.StatusBadRequest, w.Code, body)
+	}
+}
+
+func TestSessionRouter_SetBundles_RequiresBundles(t *testing.T) {
+	router, _, _, _, _, _ := setupSessionRouter(t)
+
+	w := putBundles(t, router, 1, `{}`)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSessionRouter_SetBundles_NotFound(t *testing.T) {
+	router, _, _, _, _, _ := setupSessionRouter(t)
+
+	w := putBundles(t, router, 9999, `{"bundles":[]}`)
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func postCreateSession(t *testing.T, router *SessionRouter, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	return w
+}
+
+func TestSessionRouter_CreateSession_EmptyBundlesOverridesDefaults(t *testing.T) {
+	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	service.SetBundleCatalog(testBundleCatalog(), nil)
+	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go"]}`)
+	router := NewSessionRouter(NewSessionController(service))
+
+	body := fmt.Sprintf(`{"name":"bare","workspaces":[{"workspace_id":%d,"base_branch":"main"}],"bundles":[]}`, ws1ID)
+	w := postCreateSession(t, router, body)
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+
+	var resp SessionResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Session)
+	require.Empty(t, resp.Bundles)
+
+	waitForStatus(t, sessionStore, resp.ID, StatusActive, 5*time.Second)
+	stored, err := sessionStore.GetBundles(resp.ID)
+	require.NoError(t, err)
+	require.Empty(t, stored)
+}
+
+func TestSessionRouter_CreateSession_OmittedBundlesUsesDefaults(t *testing.T) {
+	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	service.SetBundleCatalog(testBundleCatalog(), nil)
+	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go"]}`)
+	router := NewSessionRouter(NewSessionController(service))
+
+	body := fmt.Sprintf(`{"name":"defaulted","workspaces":[{"workspace_id":%d,"base_branch":"main"}]}`, ws1ID)
+	w := postCreateSession(t, router, body)
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+
+	var resp SessionResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Session)
+	require.Equal(t, []string{"go"}, resp.Bundles)
+
+	waitForStatus(t, sessionStore, resp.ID, StatusActive, 5*time.Second)
+	stored, err := sessionStore.GetBundles(resp.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"go"}, stored)
+}
+
+func TestSessionRouter_CreateSession_RejectsBlankBundleNames(t *testing.T) {
+	service, _, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	service.SetBundleCatalog(testBundleCatalog(), nil)
+	router := NewSessionRouter(NewSessionController(service))
+
+	body := fmt.Sprintf(`{"name":"blank","workspaces":[{"workspace_id":%d,"base_branch":"main"}],"bundles":[" "]}`, ws1ID)
+	w := postCreateSession(t, router, body)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "bundle names must not be blank")
+}
+
+func TestCreateSessionRequest_MarshalsEmptyBundles(t *testing.T) {
+	data, err := json.Marshal(CreateSessionRequest{Bundles: []string{}})
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"bundles":[]`)
+}
+
+func getDefaultBundles(t *testing.T, router *SessionRouter, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/default-bundles"+query, nil)
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	return w
+}
+
+func TestSessionRouter_DefaultBundles_UnionsWorkspaces(t *testing.T) {
+	service, _, _, ws1ID, ws2ID := setupTwoRepoSessionService(t)
+	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go","docs"]}`)
+	writeWorkspaceConfig(t, workspacePath(t, service, ws2ID), `{"default_bundles":["docs","web"]}`)
+	router := NewSessionRouter(NewSessionController(service))
+
+	w := getDefaultBundles(t, router, fmt.Sprintf("?workspace_id=%d&workspace_id=%d", ws1ID, ws2ID))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp DefaultBundlesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, []string{"go", "docs", "web"}, resp.Bundles)
+}
+
+func TestSessionRouter_DefaultBundles_EmptyIsArray(t *testing.T) {
+	service, _, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	router := NewSessionRouter(NewSessionController(service))
+
+	w := getDefaultBundles(t, router, fmt.Sprintf("?workspace_id=%d", ws1ID))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.JSONEq(t, `{"bundles":[]}`, w.Body.String())
+}
+
+func TestSessionRouter_DefaultBundles_RejectsBadID(t *testing.T) {
+	service, _, _, _, _ := setupTwoRepoSessionService(t)
+	router := NewSessionRouter(NewSessionController(service))
+
+	w := getDefaultBundles(t, router, "?workspace_id=abc")
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
+
+func TestSessionRouter_DefaultBundles_UnknownWorkspace(t *testing.T) {
+	service, _, _, _, _ := setupTwoRepoSessionService(t)
+	router := NewSessionRouter(NewSessionController(service))
+
+	w := getDefaultBundles(t, router, "?workspace_id=99999")
+	require.NotEqual(t, http.StatusOK, w.Code)
 }

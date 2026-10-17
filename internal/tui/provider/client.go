@@ -10,10 +10,12 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/browser"
+	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
 	"github.com/eleonorayaya/utena/internal/workspace"
@@ -232,7 +234,89 @@ func (c *client) repairSession(id uint) tea.Cmd {
 	}
 }
 
-func (c *client) createSession(name string, specs []SessionWorkspaceSpec) tea.Cmd {
+func (c *client) fetchBundles() tea.Cmd {
+	return func() tea.Msg {
+		fail := func(err error) tea.Msg {
+			log.Printf("[ERROR] fetch bundles: %v", err)
+			return BundlesLoadedMsg{Err: err}
+		}
+		res, err := c.httpClient.Get(c.baseURL + "/bundles")
+		if err != nil {
+			return fail(err)
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			return BundlesLoadedMsg{Err: parseAPIError(res, "fetch bundles").Err}
+		}
+
+		var resp bundles.ListResponse
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			return fail(err)
+		}
+		return BundlesLoadedMsg{Bundles: resp.Bundles}
+	}
+}
+
+func (c *client) fetchDefaultBundles(ids []uint) tea.Cmd {
+	return func() tea.Msg {
+		fail := func(err error) tea.Msg {
+			log.Printf("[ERROR] fetch default bundles %v: %v", ids, err)
+			return DefaultBundlesLoadedMsg{WorkspaceIDs: ids, Err: err}
+		}
+		q := url.Values{}
+		for _, id := range ids {
+			q.Add("workspace_id", strconv.FormatUint(uint64(id), 10))
+		}
+		res, err := c.httpClient.Get(c.baseURL + "/sessions/default-bundles?" + q.Encode())
+		if err != nil {
+			return fail(err)
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			return DefaultBundlesLoadedMsg{WorkspaceIDs: ids, Err: parseAPIError(res, "fetch default bundles").Err}
+		}
+
+		var resp session.DefaultBundlesResponse
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			return fail(err)
+		}
+		return DefaultBundlesLoadedMsg{WorkspaceIDs: ids, Bundles: resp.Bundles}
+	}
+}
+
+func (c *client) setSessionBundles(id uint, names []string) tea.Cmd {
+	return func() tea.Msg {
+		if names == nil {
+			names = []string{}
+		}
+		body, err := json.Marshal(map[string][]string{"bundles": names})
+		if err != nil {
+			return ErrMsg{err}
+		}
+		req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/sessions/%d/bundles", c.baseURL, id), bytes.NewReader(body))
+		if err != nil {
+			return ErrMsg{err}
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] set session bundles %d: %v", id, err)
+			return ErrMsg{err}
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			return parseAPIError(res, "set session bundles")
+		}
+
+		return SessionBundlesSetMsg{SessionID: id}
+	}
+}
+
+func (c *client) createSession(name string, specs []SessionWorkspaceSpec, selected []string) tea.Cmd {
 	return func() tea.Msg {
 		wss := make([]map[string]any, 0, len(specs))
 		for _, s := range specs {
@@ -250,6 +334,9 @@ func (c *client) createSession(name string, specs []SessionWorkspaceSpec) tea.Cm
 		}
 		if name != "" {
 			body["name"] = name
+		}
+		if selected != nil {
+			body["bundles"] = selected
 		}
 		jsonBody, err := json.Marshal(body)
 		if err != nil {

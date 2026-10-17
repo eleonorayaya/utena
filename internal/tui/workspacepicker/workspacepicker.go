@@ -119,11 +119,7 @@ func (m Model) onKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		if !ok {
 			return m, nil, true
 		}
-		if i := slices.Index(m.selected, ws.ID); i >= 0 {
-			m.selected = slices.Delete(m.selected, i, i+1)
-		} else {
-			m.selected = append(m.selected, ws.ID)
-		}
+		m.selected = ui.ToggleSelected(m.selected, ws.ID)
 		m.rebuildItems()
 		return m, nil, true
 	case key.Matches(msg, Keys.Select):

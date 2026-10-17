@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
+
+	"github.com/eleonorayaya/utena/internal/bundles"
 )
 
 type WorkspaceSetupActionType string
@@ -37,7 +40,33 @@ type WorkspaceSetupAction struct {
 }
 
 type WorkspaceConfig struct {
-	SetupActions []WorkspaceSetupAction `json:"setup_actions"`
+	SetupActions   []WorkspaceSetupAction `json:"setup_actions"`
+	DefaultBundles []string               `json:"default_bundles,omitempty"`
+}
+
+func defaultBundles(wsPaths []string) []string {
+	lists := make([][]string, 0, len(wsPaths))
+	for _, p := range wsPaths {
+		cfg, err := loadWorkspaceConfig(p)
+		if err != nil {
+			slog.Warn("failed to load workspace config", "path", p, "error", err)
+			continue
+		}
+		if cfg != nil {
+			lists = append(lists, cfg.DefaultBundles)
+		}
+	}
+	return bundles.Union(lists...)
+}
+
+func defaultBundlesFrom(wss []stepWorkspace, configs map[uint]*WorkspaceConfig) []string {
+	lists := make([][]string, 0, len(wss))
+	for _, ws := range wss {
+		if cfg := configs[ws.ID]; cfg != nil {
+			lists = append(lists, cfg.DefaultBundles)
+		}
+	}
+	return bundles.Union(lists...)
 }
 
 func loadWorkspaceConfig(wsPath string) (*WorkspaceConfig, error) {

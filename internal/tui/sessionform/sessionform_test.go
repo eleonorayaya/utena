@@ -8,7 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
+	"github.com/eleonorayaya/utena/internal/tui/bundlepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/workspacepicker"
@@ -200,7 +202,15 @@ func TestForm_BranchRowsNavigateBeforeLeavingField(t *testing.T) {
 	assert.Equal(t, 0, m.rowCursor)
 	assert.Equal(t, fieldBranches, m.form.Focused())
 	m, _ = m.Update(press("up"))
+	assert.Equal(t, fieldBundles, m.form.Focused())
+	m, _ = m.Update(press("up"))
 	assert.Equal(t, fieldWorkspaces, m.form.Focused())
+	m, _ = m.Update(press("down"))
+	assert.Equal(t, fieldBundles, m.form.Focused())
+	m.rowCursor = 2
+	m, _ = m.Update(press("down"))
+	assert.Equal(t, fieldBranches, m.form.Focused())
+	assert.Equal(t, 0, m.rowCursor)
 }
 
 func TestForm_ManualBranchNotFoundShowsUnderRow(t *testing.T) {
@@ -253,7 +263,12 @@ func TestForm_LinesFitWidthWithManyLongWorkspaces(t *testing.T) {
 		for i, ws := range wss {
 			m = loaded(m, ws.ID, strings.Repeat("feature/branch-", i+3))
 		}
+		longBundles := []string{long + "x", long + "y", long + "z"}
+		m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1, 2, 3, 4}, Bundles: longBundles})
+		require.Equal(t, longBundles, m.defaultBundles)
+		m, _ = m.focus(fieldBundles)
 		out := m.View()
+		assert.Contains(t, out, "from workspace defaults")
 		assert.Equal(t, 24, len(strings.Split(out, "\n")))
 		for _, l := range strings.Split(out, "\n") {
 			assert.LessOrEqual(t, lipgloss.Width(l), w, "page %d: %q", w, l)
@@ -283,4 +298,187 @@ func TestForm_FetchedRemoteBranchesSurviveReopen(t *testing.T) {
 	assert.Equal(t, []string{"remote-only"}, m.rows[0].Remote)
 	m = m.openBranchPicker(0)
 	assert.Contains(t, m.View(), "remote-only")
+}
+
+func catalogLoaded(m Model) Model {
+	m, _ = m.Update(provider.BundlesLoadedMsg{Bundles: []bundles.Entry{{Name: "go", Plugins: []string{"gopls"}}, {Name: "docs", Plugins: []string{"writer"}}}})
+	return m
+}
+
+func TestForm_PickingWorkspacesRequestsDefaultBundles(t *testing.T) {
+	_, cmd := picked(t, gitWS(1, "api"), gitWS(2, "web"))
+	assert.Contains(t, uitest.MsgTypes(cmd), "provider.fetchDefaultBundlesIntentMsg")
+}
+
+func TestForm_InitFetchesBundleCatalog(t *testing.T) {
+	m := New()
+	_, cmd := m.Init()
+	assert.Contains(t, uitest.MsgTypes(cmd), "provider.fetchBundlesIntentMsg")
+}
+
+func TestForm_BundlesShowWorkspaceDefaultsUntilLoaded(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	assert.Contains(t, m.View(), "workspace defaults")
+	m, cmd := m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Err: errors.New("x")})
+	assert.Nil(t, cmd)
+	assert.Contains(t, m.View(), "workspace defaults")
+	assert.True(t, m.Status().Empty())
+	assert.False(t, m.submitting)
+	assert.Nil(t, m.defaultBundles)
+}
+
+func TestForm_DefaultBundlesPreCheck(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	assert.Equal(t, []string{"go"}, m.defaultBundles)
+	assert.Nil(t, m.selectedBundles)
+	m, _ = m.focus(fieldBundles)
+	assert.Contains(t, m.View(), "from workspace defaults")
+}
+
+func TestForm_LoadedEmptyDefaultsShowNone(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = catalogLoaded(m)
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{}})
+	assert.Contains(t, m.View(), "none")
+	assert.NotContains(t, m.View(), "workspace defaults")
+}
+
+func TestForm_LoadedEmptyDefaultsWithoutCatalog(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{}})
+	assert.Contains(t, m.View(), "no bundles configured")
+}
+
+func TestForm_StaleDefaultBundlesIgnored(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1, 2}, Bundles: []string{"go"}})
+	assert.Nil(t, m.selectedBundles)
+	assert.Nil(t, m.defaultBundles)
+}
+
+func TestForm_BundlesFieldOpensPicker(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = catalogLoaded(m)
+	m, _ = m.focus(fieldBundles)
+	assert.False(t, m.CapturesText())
+	m, _ = m.Update(press("enter"))
+	assert.Equal(t, overlayBundles, m.overlay)
+	v := m.View()
+	assert.Contains(t, v, "Bundles")
+	assert.Contains(t, v, "go")
+	assert.Contains(t, v, "docs")
+}
+
+func TestForm_EditedBundlesStopRecompute(t *testing.T) {
+	api, web := gitWS(1, "api"), gitWS(2, "web")
+	m, _ := picked(t, api, web)
+	m = catalogLoaded(m)
+	m, _ = m.focus(fieldBundles)
+	m, _ = m.Update(press("enter"))
+	require.Equal(t, overlayBundles, m.overlay)
+	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{"docs"}})
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.Equal(t, fieldBundles, m.form.Focused())
+	assert.Equal(t, []string{"docs"}, m.selectedBundles)
+	assert.NotContains(t, m.View(), "from workspace defaults")
+
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1, 2}, Bundles: []string{"go"}})
+	assert.Equal(t, []string{"docs"}, m.selectedBundles)
+
+	m = m.openWorkspacePicker()
+	m, cmd := m.Update(workspacepicker.SelectedMsg{Workspaces: []workspace.Workspace{api}})
+	assert.NotContains(t, uitest.MsgTypes(cmd), "provider.fetchDefaultBundlesIntentMsg")
+	assert.Equal(t, []string{"docs"}, m.selectedBundles)
+}
+
+func TestForm_SubmitOmitsBundlesUntilEdited(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = loaded(m, 1, "main", "main")
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	assert.Nil(t, m.selectedBundles)
+	_, cmd := m.Update(press("enter"))
+	assert.Equal(t, []string{"provider.createSessionIntentMsg"}, uitest.MsgTypes(cmd))
+
+	m.overlay = overlayBundles
+	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{}})
+	got := m.selectedBundles
+	assert.NotNil(t, got)
+	assert.Empty(t, got)
+}
+
+func openBundlePicker(t *testing.T, m Model) Model {
+	t.Helper()
+	m, _ = m.focus(fieldBundles)
+	m, _ = m.Update(press("enter"))
+	require.Equal(t, overlayBundles, m.overlay)
+	return m
+}
+
+func TestForm_LateCatalogRefreshesOpenPicker(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	m = openBundlePicker(t, m)
+	assert.Contains(t, m.View(), "unknown bundle")
+	m = catalogLoaded(m)
+	v := m.View()
+	assert.Contains(t, v, "[x] go")
+	assert.Contains(t, v, "docs")
+	assert.NotContains(t, v, "unknown bundle")
+}
+
+func TestForm_ConfirmEmptyBeforeDefaultsLoadedIsNoChange(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = catalogLoaded(m)
+	m = openBundlePicker(t, m)
+	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{}})
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.Equal(t, fieldBundles, m.form.Focused())
+	assert.Nil(t, m.selectedBundles)
+
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	assert.Equal(t, []string{"go"}, m.defaultBundles)
+}
+
+func TestForm_ConfirmUnchangedDefaultsIsNotEdited(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = catalogLoaded(m)
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	m = openBundlePicker(t, m)
+	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{"go"}})
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.Nil(t, m.selectedBundles)
+	assert.Contains(t, m.View(), "from workspace defaults")
+}
+
+func TestForm_DefaultsArrivingRefreshOpenPicker(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = catalogLoaded(m)
+	m = openBundlePicker(t, m)
+	assert.NotContains(t, m.View(), "[x] go")
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	assert.Contains(t, m.View(), "[x] go")
+}
+
+func TestForm_ConfirmEmptyAfterDefaultsMarksEdited(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = catalogLoaded(m)
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	m = openBundlePicker(t, m)
+	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{}})
+	got := m.selectedBundles
+	assert.NotNil(t, got)
+	assert.Empty(t, got)
+}
+
+func TestForm_EscFromBundlePickerReturnsToField(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = catalogLoaded(m)
+	m, _ = m.focus(fieldBundles)
+	m, _ = m.Update(press("enter"))
+	require.Equal(t, overlayBundles, m.overlay)
+	m, _ = closeOverlay(m)
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.Equal(t, fieldBundles, m.form.Focused())
+	assert.Nil(t, m.selectedBundles)
 }

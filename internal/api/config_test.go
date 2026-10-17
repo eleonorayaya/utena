@@ -7,6 +7,7 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/aerospace"
 	"github.com/eleonorayaya/utena/internal/browser"
+	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/wm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,6 +115,9 @@ func TestLoadConfig_RejectsBadDaemonFile(t *testing.T) {
 
 	_, err := LoadConfig(nil)
 	assert.ErrorContains(t, err, "daemon.json")
+
+	_, err = LoadConfig([]string{"--browser", "chrome"})
+	assert.ErrorContains(t, err, "daemon.json")
 }
 
 func TestLoadConfig_RejectsUnknownBrowser(t *testing.T) {
@@ -126,4 +130,45 @@ func TestLoadConfig_RejectsUnknownBrowser(t *testing.T) {
 func TestNewBrowserDriver(t *testing.T) {
 	assert.Equal(t, "chrome", newBrowserDriver("chrome").(browser.HTTPDriver).Name())
 	assert.Equal(t, "firefox", newBrowserDriver("firefox").(browser.HTTPDriver).Name())
+}
+
+func TestLoadConfig_BundlesFromDaemonFile(t *testing.T) {
+	clearWMEnv(t)
+	dir := t.TempDir()
+	t.Setenv("UTENA_DATA_DIR", dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(`{"bundles":{"go":{"plugins":["go@m"]}}}`), 0o644))
+
+	cfg, err := LoadConfig([]string{"--browser", "chrome"})
+	require.NoError(t, err)
+	assert.Equal(t, bundles.Catalog{"go": {Plugins: []string{"go@m"}}}, cfg.Bundles)
+}
+
+func TestLoadConfig_McpServersFromDaemonFile(t *testing.T) {
+	clearWMEnv(t)
+	dir := t.TempDir()
+	t.Setenv("UTENA_DATA_DIR", dir)
+	contents := `{
+  "bundles": {"notion": {"mcp_servers": ["notion"]}},
+  "mcp_servers": {
+    "notion": {"type": "http", "url": "https://mcp.notion.com/mcp"},
+    "gopls": {"command": "gopls", "args": ["mcp"]}
+  }
+}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(contents), 0o644))
+
+	cfg, err := LoadConfig([]string{"--browser", "chrome"})
+	require.NoError(t, err)
+	assert.Equal(t, bundles.Catalog{"notion": {McpServers: []string{"notion"}}}, cfg.Bundles)
+	require.Len(t, cfg.McpServers, 2)
+	assert.Equal(t, `{"type": "http", "url": "https://mcp.notion.com/mcp"}`, string(cfg.McpServers["notion"]))
+	assert.Equal(t, `{"command": "gopls", "args": ["mcp"]}`, string(cfg.McpServers["gopls"]))
+}
+
+func TestLoadConfig_NoDaemonFileMeansNoBundles(t *testing.T) {
+	clearWMEnv(t)
+
+	cfg, err := LoadConfig(nil)
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Bundles)
+	assert.Empty(t, cfg.McpServers)
 }
