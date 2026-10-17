@@ -69,7 +69,30 @@ func (m *SessionModule) Models() []any {
 }
 
 func (m *SessionModule) PreMigrations() []db.PreMigration {
-	return []db.PreMigration{renameTmuxSessionColumn, dropTmuxSessionNameColumn, renameSetupTmuxSteps}
+	return []db.PreMigration{renameTmuxSessionColumn, dropTmuxSessionNameColumn, renameSetupTmuxSteps, cascadeClaudeSessions}
+}
+
+func cascadeClaudeSessions(tx *gorm.DB) error {
+	mg := tx.Migrator()
+	if !mg.HasTable("claude_sessions") {
+		return nil
+	}
+	var onDelete []string
+	if err := tx.Raw(`SELECT on_delete FROM pragma_foreign_key_list('claude_sessions') WHERE "table" = 'sessions'`).Scan(&onDelete).Error; err != nil {
+		return err
+	}
+	if len(onDelete) == 1 && onDelete[0] == "CASCADE" {
+		return nil
+	}
+	if mg.HasConstraint(&Session{}, "ClaudeSessions") {
+		if err := mg.DropConstraint(&Session{}, "ClaudeSessions"); err != nil {
+			return fmt.Errorf("drop claude_sessions foreign key: %w", err)
+		}
+	}
+	if err := mg.CreateConstraint(&Session{}, "ClaudeSessions"); err != nil {
+		return fmt.Errorf("create claude_sessions foreign key: %w", err)
+	}
+	return nil
 }
 
 func dropTmuxSessionNameColumn(tx *gorm.DB) error {

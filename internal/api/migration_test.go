@@ -416,3 +416,37 @@ func TestMigration_DropsEmptyLeftoversFromOldBinary(t *testing.T) {
 	require.NoError(t, gormDB.Raw("PRAGMA foreign_key_check").Scan(&fkViolations).Error)
 	assert.Empty(t, fkViolations)
 }
+
+func TestMigration_ClaudeSessionsCascadeWithSession(t *testing.T) {
+	gormDB := openFileSQLite(t)
+	migrateLegacy(t, gormDB)
+	sess := &session.Session{Name: "s1", Status: session.StatusArchived}
+	require.NoError(t, gormDB.Create(sess).Error)
+	require.NoError(t, gormDB.Create(&claude.ClaudeSession{ClaudeSessionID: "claude-1", SessionID: sess.ID, Status: claude.StatusIdle}).Error)
+	require.NoError(t, gormDB.Exec("PRAGMA foreign_keys=OFF").Error)
+	require.NoError(t, gormDB.Exec("ALTER TABLE claude_sessions RENAME TO claude_sessions_old").Error)
+	require.NoError(t, gormDB.Exec("CREATE TABLE `claude_sessions` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`updated_at` datetime,`deleted_at` datetime,`claude_session_id` text,`session_id` integer,`status` text,`cwd` text,CONSTRAINT `fk_sessions_claude_sessions` FOREIGN KEY (`session_id`) REFERENCES `sessions`(`id`))").Error)
+	require.NoError(t, gormDB.Exec("INSERT INTO claude_sessions SELECT * FROM claude_sessions_old").Error)
+	require.NoError(t, gormDB.Exec("DROP TABLE claude_sessions_old").Error)
+	require.NoError(t, gormDB.Exec("PRAGMA foreign_keys=ON").Error)
+	require.Equal(t, []string{"NO ACTION"}, claudeSessionsOnDelete(t, gormDB))
+
+	app := migrateLegacy(t, gormDB)
+
+	assert.Equal(t, []string{"CASCADE"}, claudeSessionsOnDelete(t, gormDB))
+	assert.Equal(t, int64(1), rowCount(t, gormDB, "claude_sessions"))
+	assert.True(t, gormDB.Migrator().HasIndex("claude_sessions", "idx_claude_sessions_claude_session_id"))
+	schema := schemaSnapshot(t, gormDB)
+	require.NoError(t, app.DB.OnAppStart(context.Background()))
+	assert.Equal(t, schema, schemaSnapshot(t, gormDB))
+
+	require.NoError(t, app.Session.Store.HardDelete(sess.ID))
+	assert.Equal(t, int64(0), rowCount(t, gormDB, "claude_sessions"))
+}
+
+func claudeSessionsOnDelete(t *testing.T, gormDB *gorm.DB) []string {
+	t.Helper()
+	var onDelete []string
+	require.NoError(t, gormDB.Raw(`SELECT on_delete FROM pragma_foreign_key_list('claude_sessions') WHERE "table" = 'sessions'`).Scan(&onDelete).Error)
+	return onDelete
+}
