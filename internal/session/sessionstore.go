@@ -205,7 +205,7 @@ func (s *SessionStore) Update(session *Session) error {
 		return err
 	}
 
-	if err := s.db.Omit("ClaudeSessions", "MuxSession").Save(session).Error; err != nil {
+	if err := s.db.Omit("ClaudeSessions", "MuxSession", "Bundles").Save(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return common.WrapConflict(sessionConflictMessage(session), ErrSessionAlreadyExists)
 		}

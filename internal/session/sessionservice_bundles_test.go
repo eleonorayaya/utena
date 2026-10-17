@@ -61,7 +61,7 @@ func TestSessionService_CreateSession_DefaultsBundlesFromWorkspaces(t *testing.T
 }
 
 func TestSessionService_CreateSession_ExplicitBundlesOverrideDefaults(t *testing.T) {
-	service, _, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
 	service.SetBundleCatalog(testBundleCatalog())
 	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go"]}`)
 
@@ -80,6 +80,11 @@ func TestSessionService_CreateSession_ExplicitBundlesOverrideDefaults(t *testing
 	})
 	require.NoError(t, err)
 	require.Empty(t, none.Bundles)
+
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+	waitForStatus(t, sessionStore, none.ID, StatusActive, 5*time.Second)
+	require.Equal(t, map[string]any{"docs@m": true}, readEnabledPlugins(t, sess.SessionRoot))
+	require.Empty(t, readEnabledPlugins(t, none.SessionRoot))
 }
 
 func TestSessionService_AddWorkspace_UnionsDefaultBundles(t *testing.T) {
