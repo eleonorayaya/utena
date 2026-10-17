@@ -51,7 +51,7 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 - `internal/wm/` - window-manager seam: `wm.Driver` interface (list windows by app bundle ID, move a window to a workspace, focus a window), `wm.FakeDriver`, and the inert `wm.None`
 - `internal/aerospace/` - `wm.Driver` over the `aerospace` CLI
 - `internal/claude/` - Claude session management
-- `internal/bundles/` - plugin bundle catalog (`daemon.json` `"bundles"`) and `GET /bundles`
+- `internal/bundles/` - plugin bundle catalog (`daemon.json` `"bundles"`, with plugins and MCP server names, plus `"mcp_servers"` definitions) and `GET /bundles`; sessions get plugins in `.claude/settings.local.json` and servers in `.mcp.json`
 - `internal/tui/` - Bubbletea TUI application; `internal/tui/bundlepicker` is the plugin bundle multi-select used by the new-session form and session detail (`p`); `internal/tui/provider` holds the daemon client and providers (sessions, workspaces, and a browser provider that fetches `GET /browser/sessions` after every sessions load and focuses tabs through `POST /browser/focus`)
 - `internal/common/` - shared utilities
 

@@ -123,6 +123,22 @@ In the TUI, the new-session form has a Bundles field, pre-filled from the select
 
 For bundles to stay off elsewhere, set each bundled plugin to `false` in `~/.claude/settings.json`; the dotfiles (shizuku) do this, so the session's local `true` turns them on.
 
+Bundles can also turn MCP servers on. Define the servers once under `mcp_servers` and list them in bundles:
+
+```json
+{
+  "mcp_servers": {
+    "homeassistant": {"type": "http", "url": "https://ha.example/api/mcp",
+                      "headers": {"Authorization": "Bearer ${HOMEASSISTANT_TOKEN}"}}
+  },
+  "bundles": {
+    "homelab": {"mcp_servers": ["homeassistant"]}
+  }
+}
+```
+
+utena copies each selected definition as-is into `mcpServers` in the session root's `.mcp.json` and adds its name to `enabledMcpjsonServers` in `.claude/settings.local.json`, so Claude doesn't ask to approve it. Catalog servers that aren't selected are removed from both; other servers are left alone. Keep secrets out of the file with `${VAR}` placeholders, which Claude Code expands from its environment. Remove catalog servers from user scope (`~/.claude.json`) so they only exist in sessions that select them; shizuku does this. Run `/mcp` (or restart Claude) to pick up a change.
+
 #### Claude Code integration
 
 Utena can track Claude Code session status (working, needs attention, completed) and display it in the TUI.
