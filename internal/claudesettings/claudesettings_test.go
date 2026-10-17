@@ -426,11 +426,12 @@ func writeSettings(t *testing.T, root, body string) {
 
 func TestApplyPlugins(t *testing.T) {
 	tests := []struct {
-		name     string
-		existing string
-		managed  []string
-		enabled  []string
-		want     map[string]any
+		name       string
+		existing   string
+		managed    []string
+		enabled    []string
+		want       map[string]any
+		wantAbsent bool
 	}{
 		{
 			name:    "creates file with enabled plugins",
@@ -453,11 +454,19 @@ func TestApplyPlugins(t *testing.T) {
 			want:     map[string]any{"mine@m": false},
 		},
 		{
-			name:     "drops the key when nothing remains",
-			existing: `{"enabledPlugins":{"go@m":true}}`,
+			name:       "drops the key when nothing remains",
+			existing:   `{"enabledPlugins":{"go@m":true}}`,
+			managed:    []string{"go@m"},
+			enabled:    nil,
+			want:       nil,
+			wantAbsent: true,
+		},
+		{
+			name:     "treats a null file as empty",
+			existing: "null",
 			managed:  []string{"go@m"},
-			enabled:  nil,
-			want:     nil,
+			enabled:  []string{"go@m"},
+			want:     map[string]any{"go@m": true},
 		},
 	}
 	for _, tt := range tests {
@@ -469,7 +478,11 @@ func TestApplyPlugins(t *testing.T) {
 			if err := ApplyPlugins(root, tt.managed, tt.enabled); err != nil {
 				t.Fatalf("ApplyPlugins: %v", err)
 			}
-			got, _ := readSettings(t, root)["enabledPlugins"].(map[string]any)
+			settings := readSettings(t, root)
+			if _, ok := settings["enabledPlugins"]; ok && tt.wantAbsent {
+				t.Fatalf("enabledPlugins present, want absent: %v", settings)
+			}
+			got, _ := settings["enabledPlugins"].(map[string]any)
 			if len(got) != len(tt.want) {
 				t.Fatalf("enabledPlugins = %v, want %v", got, tt.want)
 			}

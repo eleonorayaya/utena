@@ -115,6 +115,9 @@ func TestLoadConfig_RejectsBadDaemonFile(t *testing.T) {
 
 	_, err := LoadConfig(nil)
 	assert.ErrorContains(t, err, "daemon.json")
+
+	_, err = LoadConfig([]string{"--browser", "chrome"})
+	assert.ErrorContains(t, err, "daemon.json")
 }
 
 func TestLoadConfig_RejectsUnknownBrowser(t *testing.T) {

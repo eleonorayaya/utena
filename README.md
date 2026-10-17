@@ -92,6 +92,35 @@ With [AeroSpace](https://github.com/nikitabobko/AeroSpace), the daemon also park
 
 The dotfiles AeroSpace config (`programs/aerospace/contents/aerospace.toml.tmpl`) binds `alt-b` to view workspace `P` and `alt-shift-b` to park the focused window on `P`. AeroSpace creates `P` on demand. A session-owned window you move by hand goes back to its workspace the next time placement runs.
 
+#### Plugin bundles
+
+Bundles turn groups of Claude Code plugins on per session. Define them in `~/.config/utena/daemon.json`:
+
+```json
+{
+  "bundles": {
+    "go": {"plugins": ["go@my-marketplace", "go-patterns@my-marketplace"]},
+    "docs": {"plugins": ["pdf@my-marketplace"]}
+  }
+}
+```
+
+The daemon reads this file at startup, so restart it after changing it. A malformed file stops the daemon from starting. `GET /bundles` lists the catalog.
+
+A workspace can pick default bundles in its `.utena/config.json`:
+
+```json
+{
+  "default_bundles": ["go"]
+}
+```
+
+A new session gets the default bundles of all its workspaces, unless the create request sets `bundles` itself (`"bundles": []` means none). Adding a workspace to a session adds that workspace's defaults. `PUT /sessions/{id}/bundles` with `{"bundles": [...]}` replaces a session's bundles. Unknown bundle names are kept and logged, not rejected.
+
+utena writes the selected plugins as `true` under `enabledPlugins` in the session root's `.claude/settings.local.json`, and removes catalog plugins that aren't selected. Plugins outside the catalog are never touched. The file is rewritten when the session is set up, a workspace is added, the session is activated, or its bundles change. Run `/reload-plugins` in open Claude panes to pick up a change.
+
+For bundles to stay off elsewhere, set each bundled plugin to `false` in `~/.claude/settings.json`; the dotfiles (shizuku) do this, so the session's local `true` turns them on.
+
 #### Claude Code integration
 
 Utena can track Claude Code session status (working, needs attention, completed) and display it in the TUI.

@@ -27,7 +27,8 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 2. **TUI → Daemon**: The TUI makes HTTP requests to `http://127.0.0.1:3333/sessions`. Activating a session publishes `SessionActivated`; `utena attach` long-polls `GET /mux/activations/next` and restarts its `tuios attach` child on the new session, reporting attach/detach via `PUT /mux/hooks/{event}`
 
 3. **Daemon API**: Uses chi router, serves on port 3333 and listens on 127.0.0.1 only (clients must use `127.0.0.1`, not `localhost`), mounts controllers:
-   - `/sessions` - session management endpoints (`GET /sessions/resources` backs `utena top`)
+   - `/sessions` - session management endpoints (`GET /sessions/resources` backs `utena top`, `PUT /sessions/{id}/bundles` sets a session's plugin bundles)
+   - `/bundles` - plugin bundle catalog from daemon.json
    - `/mux` - client attach hooks, activation long-poll, session env lookup
    - `/claude` - Claude session endpoints
    - `/workspaces` - workspace management endpoints
@@ -50,6 +51,7 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 - `internal/wm/` - window-manager seam: `wm.Driver` interface (list windows by app bundle ID, move a window to a workspace, focus a window), `wm.FakeDriver`, and the inert `wm.None`
 - `internal/aerospace/` - `wm.Driver` over the `aerospace` CLI
 - `internal/claude/` - Claude session management
+- `internal/bundles/` - plugin bundle catalog (`daemon.json` `"bundles"`) and `GET /bundles`
 - `internal/tui/` - Bubbletea TUI application; `internal/tui/provider` holds the daemon client and providers (sessions, workspaces, and a browser provider that fetches `GET /browser/sessions` after every sessions load and focuses tabs through `POST /browser/focus`)
 - `internal/common/` - shared utilities
 
