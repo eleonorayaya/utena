@@ -7,6 +7,7 @@ import (
 
 	"github.com/eleonorayaya/utena/internal/aerospace"
 	"github.com/eleonorayaya/utena/internal/browser"
+	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/wm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -126,4 +127,23 @@ func TestLoadConfig_RejectsUnknownBrowser(t *testing.T) {
 func TestNewBrowserDriver(t *testing.T) {
 	assert.Equal(t, "chrome", newBrowserDriver("chrome").(browser.HTTPDriver).Name())
 	assert.Equal(t, "firefox", newBrowserDriver("firefox").(browser.HTTPDriver).Name())
+}
+
+func TestLoadConfig_BundlesFromDaemonFile(t *testing.T) {
+	clearWMEnv(t)
+	dir := t.TempDir()
+	t.Setenv("UTENA_DATA_DIR", dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(`{"bundles":{"go":{"plugins":["go@m"]}}}`), 0o644))
+
+	cfg, err := LoadConfig([]string{"--browser", "chrome"})
+	require.NoError(t, err)
+	assert.Equal(t, bundles.Catalog{"go": {Plugins: []string{"go@m"}}}, cfg.Bundles)
+}
+
+func TestLoadConfig_NoDaemonFileMeansNoBundles(t *testing.T) {
+	clearWMEnv(t)
+
+	cfg, err := LoadConfig(nil)
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Bundles)
 }
