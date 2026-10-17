@@ -17,6 +17,7 @@ type SessionsView struct {
 	Connected  bool                    `json:"connected"`
 	Outdated   bool                    `json:"outdated"`
 	UpdateHint string                  `json:"update_hint,omitempty"`
+	Warning    string                  `json:"warning,omitempty"`
 	Sessions   map[uint]SessionBrowser `json:"sessions"`
 }
 
@@ -78,6 +79,13 @@ func (s *Service) updateHint() string {
 	return ""
 }
 
+func (s *Service) warning() string {
+	if r, ok := s.driver.(WarningReporter); ok {
+		return r.Warning()
+	}
+	return ""
+}
+
 func stateRank(state WindowState) int {
 	switch state {
 	case WindowOpen:
@@ -91,7 +99,7 @@ func stateRank(state WindowState) int {
 }
 
 func (s *Service) BrowserSessions(ctx context.Context) SessionsView {
-	view := SessionsView{Connected: s.Connected(), Outdated: s.Outdated(), UpdateHint: s.updateHint(), Sessions: map[uint]SessionBrowser{}}
+	view := SessionsView{Connected: s.Connected(), Outdated: s.Outdated(), UpdateHint: s.updateHint(), Warning: s.warning(), Sessions: map[uint]SessionBrowser{}}
 	rows, err := s.store.ListAll()
 	if err != nil {
 		slog.WarnContext(ctx, "browser: list windows for state failed", "error", err)

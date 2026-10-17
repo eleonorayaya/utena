@@ -25,6 +25,10 @@ type StatusReporter interface {
 	UpdateHint() string
 }
 
+type WarningReporter interface {
+	Warning() string
+}
+
 type Capabilities struct {
 	CreateTakesFocus bool
 	LoadTakesFocus   bool

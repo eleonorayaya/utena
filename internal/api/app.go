@@ -9,6 +9,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/aerospace"
 	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/chrome"
+	"github.com/eleonorayaya/utena/internal/chromescript"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
@@ -20,7 +21,6 @@ import (
 	"github.com/eleonorayaya/utena/internal/mux"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tuios"
-	"github.com/eleonorayaya/utena/internal/webext"
 	"github.com/eleonorayaya/utena/internal/wm"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/go-chi/chi/v5"
@@ -94,9 +94,10 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 	return app
 }
 
-var browserDrivers = map[string]func() *webext.Driver{
-	chrome.Browser.Name:  chrome.NewDriver,
-	firefox.Browser.Name: firefox.NewDriver,
+var browserDrivers = map[string]func() browser.Driver{
+	chrome.Browser.Name:  func() browser.Driver { return chrome.NewDriver() },
+	firefox.Browser.Name: func() browser.Driver { return firefox.NewDriver() },
+	"chrome-applescript": func() browser.Driver { return chromescript.NewDriver() },
 }
 
 func newBrowserDriver(name string) browser.Driver {

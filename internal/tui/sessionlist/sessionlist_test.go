@@ -327,6 +327,14 @@ func TestSessionList_OutdatedWarningDoesNotClobberActionStatus(t *testing.T) {
 	assert.Contains(t, m.Status().Text, "browser extension outdated")
 }
 
+func TestSessionList_DriverWarning(t *testing.T) {
+	m, _ := New().Update(provider.BrowserStateUpdatedMsg{State: browser.SessionsView{Warning: "allow utena to control Chrome", Sessions: map[uint]browser.SessionBrowser{}}})
+	assert.Equal(t, ui.Status{Text: "allow utena to control Chrome", Kind: ui.StatusWarning}, m.Status())
+
+	m, _ = m.Update(provider.BrowserStateUpdatedMsg{State: browser.SessionsView{Sessions: map[uint]browser.SessionBrowser{}}})
+	assert.True(t, m.Status().Empty())
+}
+
 func TestSessionList_SplitPreviewShowsBrowserSection(t *testing.T) {
 	m, _ := New().Update(tea.WindowSizeMsg{Width: 140, Height: 40})
 	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{withClaude(7, "web", claude.StatusIdle)}})

@@ -106,6 +106,9 @@ func (m Model) Status() ui.Status {
 		}
 		return ui.Status{Text: text, Kind: ui.StatusWarning}
 	}
+	if m.statusMsg == "" && m.browserState.Warning != "" {
+		return ui.Status{Text: m.browserState.Warning, Kind: ui.StatusWarning}
+	}
 	return ui.Status{Text: m.statusMsg, Kind: m.statusKind}
 }
 

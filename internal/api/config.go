@@ -38,7 +38,7 @@ func LoadConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.BranchPrefix, "branch-prefix", "eqt/", "prefix for git branches created with worktrees")
 	fs.StringVar(&cfg.SessionsRoot, "sessions-root", defaultSessionsRoot, "directory that holds multi-workspace session roots")
 	fs.StringVar(&cfg.WM, "wm", "aerospace", "window manager driver: aerospace or none")
-	fs.StringVar(&cfg.Browser, "browser", "chrome", "browser driver: chrome or firefox")
+	fs.StringVar(&cfg.Browser, "browser", "chrome", "browser driver: chrome, firefox or chrome-applescript")
 	fs.StringVar(&cfg.BrowserWorkspace, "browser-workspace", "2", "workspace for the attached session's browser windows")
 	fs.StringVar(&cfg.ParkWorkspace, "park-workspace", "P", "workspace for other sessions' browser windows")
 
@@ -89,7 +89,7 @@ func LoadConfig(args []string) (Config, error) {
 	}
 
 	if _, ok := browserDrivers[cfg.Browser]; !ok {
-		return Config{}, fmt.Errorf("invalid browser %q: must be chrome or firefox", cfg.Browser)
+		return Config{}, fmt.Errorf("invalid browser %q: must be chrome, firefox or chrome-applescript", cfg.Browser)
 	}
 	if cfg.WM != "aerospace" && cfg.WM != "none" {
 		return Config{}, fmt.Errorf("invalid window manager %q: must be aerospace or none", cfg.WM)
