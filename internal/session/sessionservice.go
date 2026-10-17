@@ -1173,6 +1173,9 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 
 	s.ensureSessionWorktrees(ctx, session)
 	s.SyncSessionBranches(ctx, session)
+	if err := s.writePlugins(ctx, session); err != nil {
+		slog.WarnContext(ctx, "apply claude plugins failed", "session", session.ID, "error", err)
+	}
 
 	muxName := SanitizeMuxName(session.Name)
 	if session.MuxSessionID != nil && session.MuxSession != nil && session.MuxSession.Name != "" {

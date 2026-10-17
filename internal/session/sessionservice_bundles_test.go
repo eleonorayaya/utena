@@ -128,3 +128,26 @@ func TestSessionService_AddWorkspace_UnionsDefaultBundles(t *testing.T) {
 	waitForUpdatedAfter(t, sessionStore, sess.ID, updated.UpdatedAt, 10*time.Second)
 	require.Equal(t, true, readEnabledPlugins(t, sess.SessionRoot)["docs@m"])
 }
+
+func TestSessionService_ActivateSession_ReappliesPlugins(t *testing.T) {
+	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	service.SetBundleCatalog(testBundleCatalog())
+
+	ctx := context.Background()
+	sess, err := service.CreateSession(ctx, CreateSessionInput{
+		Name:       "revive",
+		Workspaces: []WorkspaceBranchSpec{{WorkspaceID: ws1ID, BaseBranch: "main"}},
+		Bundles:    []string{"go"},
+	})
+	require.NoError(t, err)
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+
+	_, err = service.ArchiveSession(ctx, sess.ID)
+	require.NoError(t, err)
+
+	service.SetBundleCatalog(bundles.Catalog{"go": {Plugins: []string{"go@m", "gopls@m"}}})
+	_, err = service.ActivateSession(ctx, sess.ID)
+	require.NoError(t, err)
+
+	require.Equal(t, map[string]any{"go@m": true, "gopls@m": true}, readEnabledPlugins(t, sess.SessionRoot))
+}
