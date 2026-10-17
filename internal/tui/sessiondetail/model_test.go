@@ -367,6 +367,41 @@ func TestSessionDetail_CapturesTextWhileFiltering(t *testing.T) {
 	assert.True(t, m.CapturesText())
 }
 
+func TestSessionDetail_LateCatalogRefreshesOpenPicker(t *testing.T) {
+	s := makeActiveSession()
+	s.Bundles = []string{"go"}
+	m, _ := New().Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m, _ = m.Update(SelectMsg{Session: s})
+	m, _ = m.Update(runeKey("p"))
+	require.True(t, m.pickingBundles)
+	assert.Contains(t, m.View(), "unknown bundle")
+	m, _ = m.Update(provider.BundlesLoadedMsg{Bundles: bundleCatalog()})
+	out := m.View()
+	assert.Contains(t, out, "[x] go")
+	assert.Contains(t, out, "docs")
+	assert.NotContains(t, out, "unknown bundle")
+}
+
+func TestSessionDetail_BundlePickerClosesWhenSessionGone(t *testing.T) {
+	open := func() Model {
+		m := bundleDetail(makeActiveSession())
+		m, _ = m.Update(runeKey("p"))
+		require.True(t, m.pickingBundles)
+		return m
+	}
+
+	m, _ := open().Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{makeArchivedSession()}})
+	assert.False(t, m.pickingBundles)
+
+	deleted := makeActiveSession()
+	deleted.Status = session.StatusDeleted
+	m, _ = open().Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{deleted}})
+	assert.False(t, m.pickingBundles)
+
+	m, _ = open().Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{makeActiveSession()}})
+	assert.True(t, m.pickingBundles)
+}
+
 func TestSessionDetail_UnknownBundleMarked(t *testing.T) {
 	s := makeActiveSession()
 	s.Bundles = []string{"go", "legacy"}

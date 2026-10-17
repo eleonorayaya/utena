@@ -199,12 +199,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case provider.BundlesLoadedMsg:
 		if msg.Err == nil {
 			m.catalog = msg.Bundles
+			if m.overlay == overlayBundles {
+				m.bundlePicker = m.bundlePicker.SetCatalog(m.catalog)
+			}
 		}
 		return m, nil
 	case provider.DefaultBundlesLoadedMsg:
 		if msg.Err == nil && !m.bundlesEdited && slices.Equal(msg.WorkspaceIDs, m.rowIDs()) {
 			m.selectedBundles = msg.Bundles
 			m.defaultsLoaded = true
+			if m.overlay == overlayBundles {
+				m.bundlePicker = m.bundlePicker.Open(m.catalog, m.selectedBundles)
+			}
 		}
 		return m, nil
 	case provider.ErrMsg:
@@ -360,9 +366,15 @@ func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) updateBundlePicker(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case bundlepicker.SelectedMsg:
+		m.overlay = overlayNone
+		if !m.bundlesEdited && !m.defaultsLoaded && len(msg.Bundles) == 0 {
+			return m.focus(fieldBundles)
+		}
+		if !m.bundlesEdited && m.defaultsLoaded && slices.Equal(msg.Bundles, m.selectedBundles) {
+			return m.focus(fieldBundles)
+		}
 		m.selectedBundles = msg.Bundles
 		m.bundlesEdited = true
-		m.overlay = overlayNone
 		return m.focus(fieldBundles)
 	case bundlepicker.ClosedMsg:
 		m.overlay = overlayNone

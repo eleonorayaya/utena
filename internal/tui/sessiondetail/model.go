@@ -206,6 +206,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case provider.BundlesLoadedMsg:
 		if msg.Err == nil {
 			m.catalog = msg.Bundles
+			if m.pickingBundles {
+				m.bundlePicker = m.bundlePicker.SetCatalog(m.catalog)
+			}
 		}
 		return m, nil
 	case provider.SessionBundlesSetMsg:
@@ -257,6 +260,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.picker = m.picker.Sync(m.sess.PullRequests)
 		} else {
 			m.picker = m.picker.Close()
+		}
+		if !found || m.sess.Status == session.StatusDeleted {
+			m.pickingBundles = false
 		}
 		m.restoreSelection(sel)
 		return m, nil

@@ -34,6 +34,13 @@ func (m Model) Open(catalog []bundles.Entry, selected []string) Model {
 	return m
 }
 
+func (m Model) SetCatalog(catalog []bundles.Entry) Model {
+	m.catalog = catalog
+	m.rebuildItems()
+	ui.SkipUnselectable(&m.list, m.list.Index())
+	return m
+}
+
 func (m *Model) SetSize(width, height int) {
 	m.width, m.height = width, height
 	m.list.SetSize(width, max(height-2, 1))

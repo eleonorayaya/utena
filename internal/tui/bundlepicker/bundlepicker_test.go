@@ -109,6 +109,19 @@ func TestPicker_UnknownSelectedNameIsListed(t *testing.T) {
 	assert.Empty(t, sel.Bundles)
 }
 
+func TestPicker_SetCatalogKeepsToggles(t *testing.T) {
+	m := New("Bundles")
+	m.SetSize(60, 10)
+	m = m.Open(nil, []string{"go"})
+	assert.Contains(t, m.View(), "unknown bundle")
+	m = m.SetCatalog(catalog())
+	v := m.View()
+	assert.Contains(t, v, "[x] go")
+	assert.Contains(t, v, "docs")
+	assert.NotContains(t, v, "unknown bundle")
+	assert.Equal(t, SelectedMsg{Bundles: []string{"go"}}, confirm(t, m))
+}
+
 func TestPicker_EscCloses(t *testing.T) {
 	_, cmd := opened().Update(tea.KeyMsg{Type: tea.KeyEsc})
 	assert.Equal(t, []tea.Msg{ClosedMsg{}}, uitest.Drain(cmd))

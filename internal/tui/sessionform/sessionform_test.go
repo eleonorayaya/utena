@@ -408,6 +408,73 @@ func TestForm_SubmitOmitsBundlesUntilEdited(t *testing.T) {
 	assert.Empty(t, got)
 }
 
+func openBundlePicker(t *testing.T, m Model) Model {
+	t.Helper()
+	m, _ = m.focus(fieldBundles)
+	m, _ = m.Update(press("enter"))
+	require.Equal(t, overlayBundles, m.overlay)
+	return m
+}
+
+func TestForm_LateCatalogRefreshesOpenPicker(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	m = openBundlePicker(t, m)
+	assert.Contains(t, m.View(), "unknown bundle")
+	m = catalogLoaded(m)
+	v := m.View()
+	assert.Contains(t, v, "[x] go")
+	assert.Contains(t, v, "docs")
+	assert.NotContains(t, v, "unknown bundle")
+}
+
+func TestForm_ConfirmEmptyBeforeDefaultsLoadedIsNoChange(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = catalogLoaded(m)
+	m = openBundlePicker(t, m)
+	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{}})
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.Equal(t, fieldBundles, m.form.Focused())
+	assert.False(t, m.bundlesEdited)
+	assert.Nil(t, m.submitBundles())
+
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	assert.Equal(t, []string{"go"}, m.selectedBundles)
+}
+
+func TestForm_ConfirmUnchangedDefaultsIsNotEdited(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = catalogLoaded(m)
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	m = openBundlePicker(t, m)
+	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{"go"}})
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.False(t, m.bundlesEdited)
+	assert.Nil(t, m.submitBundles())
+	assert.Contains(t, m.View(), "from workspace defaults")
+}
+
+func TestForm_DefaultsArrivingRefreshOpenPicker(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = catalogLoaded(m)
+	m = openBundlePicker(t, m)
+	assert.NotContains(t, m.View(), "[x] go")
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	assert.Contains(t, m.View(), "[x] go")
+}
+
+func TestForm_ConfirmEmptyAfterDefaultsMarksEdited(t *testing.T) {
+	m, _ := picked(t, gitWS(1, "api"))
+	m = catalogLoaded(m)
+	m, _ = m.Update(provider.DefaultBundlesLoadedMsg{WorkspaceIDs: []uint{1}, Bundles: []string{"go"}})
+	m = openBundlePicker(t, m)
+	m, _ = m.Update(bundlepicker.SelectedMsg{Bundles: []string{}})
+	assert.True(t, m.bundlesEdited)
+	got := m.submitBundles()
+	assert.NotNil(t, got)
+	assert.Empty(t, got)
+}
+
 func TestForm_EscFromBundlePickerReturnsToField(t *testing.T) {
 	m, _ := picked(t, gitWS(1, "api"))
 	m = catalogLoaded(m)
