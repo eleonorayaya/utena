@@ -399,3 +399,111 @@ func TestLinkWorktree_IdempotentOnExistingCorrectSymlink(t *testing.T) {
 		t.Fatalf("second call should be no-op: %v", err)
 	}
 }
+
+func readSettings(t *testing.T, root string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse settings: %v", err)
+	}
+	return out
+}
+
+func writeSettings(t *testing.T, root, body string) {
+	t.Helper()
+	dir := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.local.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyPlugins(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing string
+		managed  []string
+		enabled  []string
+		want     map[string]any
+	}{
+		{
+			name:    "creates file with enabled plugins",
+			managed: []string{"go@m", "pdf@m"},
+			enabled: []string{"go@m"},
+			want:    map[string]any{"go@m": true},
+		},
+		{
+			name:     "removes unselected managed plugins",
+			existing: `{"enabledPlugins":{"go@m":true,"pdf@m":true}}`,
+			managed:  []string{"go@m", "pdf@m"},
+			enabled:  []string{"pdf@m"},
+			want:     map[string]any{"pdf@m": true},
+		},
+		{
+			name:     "leaves unmanaged plugins alone",
+			existing: `{"enabledPlugins":{"mine@m":false,"go@m":true}}`,
+			managed:  []string{"go@m"},
+			enabled:  nil,
+			want:     map[string]any{"mine@m": false},
+		},
+		{
+			name:     "drops the key when nothing remains",
+			existing: `{"enabledPlugins":{"go@m":true}}`,
+			managed:  []string{"go@m"},
+			enabled:  nil,
+			want:     nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tt.existing != "" {
+				writeSettings(t, root, tt.existing)
+			}
+			if err := ApplyPlugins(root, tt.managed, tt.enabled); err != nil {
+				t.Fatalf("ApplyPlugins: %v", err)
+			}
+			got, _ := readSettings(t, root)["enabledPlugins"].(map[string]any)
+			if len(got) != len(tt.want) {
+				t.Fatalf("enabledPlugins = %v, want %v", got, tt.want)
+			}
+			for k, v := range tt.want {
+				if got[k] != v {
+					t.Fatalf("enabledPlugins = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyPlugins_PreservesSandbox(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureSessionRoot(root, []string{"/ws"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyPlugins(root, []string{"go@m"}, []string{"go@m"}); err != nil {
+		t.Fatal(err)
+	}
+	out := readSettings(t, root)
+	sandbox, _ := out["sandbox"].(map[string]any)
+	fs, _ := sandbox["filesystem"].(map[string]any)
+	if allow, _ := fs["allowWrite"].([]any); len(allow) != 2 {
+		t.Fatalf("allowWrite = %v, want 2 entries", allow)
+	}
+}
+
+func TestApplyPlugins_NoFileAndNothingEnabledWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	if err := ApplyPlugins(root, []string{"go@m"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claude", "settings.local.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected no settings file, stat err = %v", err)
+	}
+}

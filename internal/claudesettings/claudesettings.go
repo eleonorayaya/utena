@@ -1,6 +1,7 @@
 package claudesettings
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -164,6 +165,59 @@ func ensureSettingsFile(rootPath string, allowWrite []string) error {
 		return err
 	}
 	if err := os.WriteFile(settingsPath, merged, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", settingsFileName, err)
+	}
+	return nil
+}
+
+func ApplyPlugins(rootPath string, managed, enabled []string) error {
+	settingsPath := filepath.Join(rootPath, ".claude", settingsFileName)
+	raw := map[string]any{}
+	data, err := os.ReadFile(settingsPath)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return fmt.Errorf("parse settings: %w", err)
+		}
+		if raw == nil {
+			raw = map[string]any{}
+		}
+	case errors.Is(err, os.ErrNotExist):
+		if len(enabled) == 0 {
+			return nil
+		}
+	default:
+		return fmt.Errorf("read %s: %w", settingsFileName, err)
+	}
+
+	plugins, _ := raw["enabledPlugins"].(map[string]any)
+	if plugins == nil {
+		plugins = make(map[string]any)
+	}
+	for _, id := range managed {
+		delete(plugins, id)
+	}
+	for _, id := range enabled {
+		plugins[id] = true
+	}
+	if len(plugins) == 0 {
+		delete(raw, "enabledPlugins")
+	} else {
+		raw["enabledPlugins"] = plugins
+	}
+
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal settings: %w", err)
+	}
+	out = append(out, '\n')
+	if bytes.Equal(out, data) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		return fmt.Errorf("create .claude dir: %w", err)
+	}
+	if err := os.WriteFile(settingsPath, out, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", settingsFileName, err)
 	}
 	return nil
