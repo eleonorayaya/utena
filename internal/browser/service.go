@@ -112,6 +112,7 @@ type Service struct {
 	placedFor           uint
 	placeStale          bool
 	ensuredFor          uint
+	refocusTo           string
 	snapshots           map[string]*pendingTimer
 	removals            map[string]*pendingTimer
 	restoreUntil        time.Time
@@ -748,7 +749,7 @@ func (s *Service) restoreRow(ctx context.Context, r BrowserWindow, deadline time
 		return Window{}, err
 	}
 	before, track := s.wmSnapshot(ctx)
-	w, err := s.driver.CreateWindow(ctx, urls, false)
+	w, err := s.createQuietly(ctx, urls)
 	if err != nil {
 		return Window{}, err
 	}
@@ -797,7 +798,7 @@ func (s *Service) provideAttached(ctx context.Context, attached uint, live []Win
 
 func (s *Service) createSessionWindow(ctx context.Context, sessionID uint, live []Window) (bool, error) {
 	before, track := s.wmSnapshot(ctx)
-	w, err := s.driver.CreateWindow(ctx, nil, false)
+	w, err := s.createQuietly(ctx, nil)
 	if err != nil {
 		return false, driverErr(err)
 	}
@@ -822,11 +823,19 @@ func (s *Service) keepFocus(ctx context.Context, act func() (bool, error)) (bool
 	if err != nil {
 		slog.WarnContext(ctx, "browser: read focused wm window failed", "error", err)
 	}
-	acted, err := act()
-	if acted && ok {
-		s.refocus(ctx, prev.ID)
+	if ok {
+		s.refocusTo = prev.ID
+		defer func() { s.refocusTo = "" }()
 	}
-	return acted, err
+	return act()
+}
+
+func (s *Service) createQuietly(ctx context.Context, urls []string) (Window, error) {
+	w, err := s.driver.CreateWindow(ctx, urls, false)
+	if err == nil && s.refocusTo != "" {
+		s.refocus(ctx, s.refocusTo)
+	}
+	return w, err
 }
 
 func (s *Service) refocus(ctx context.Context, wmID string) {
