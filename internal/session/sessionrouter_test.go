@@ -682,3 +682,49 @@ func TestCreateSessionRequest_MarshalsEmptyBundles(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(data), `"bundles":[]`)
 }
+
+func getDefaultBundles(t *testing.T, router *SessionRouter, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/default-bundles"+query, nil)
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	return w
+}
+
+func TestSessionRouter_DefaultBundles_UnionsWorkspaces(t *testing.T) {
+	service, _, _, ws1ID, ws2ID := setupTwoRepoSessionService(t)
+	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["go","docs"]}`)
+	writeWorkspaceConfig(t, workspacePath(t, service, ws2ID), `{"default_bundles":["docs","web"]}`)
+	router := NewSessionRouter(NewSessionController(service))
+
+	w := getDefaultBundles(t, router, fmt.Sprintf("?workspace_id=%d&workspace_id=%d", ws1ID, ws2ID))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp DefaultBundlesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, []string{"go", "docs", "web"}, resp.Bundles)
+}
+
+func TestSessionRouter_DefaultBundles_EmptyIsArray(t *testing.T) {
+	service, _, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	router := NewSessionRouter(NewSessionController(service))
+
+	w := getDefaultBundles(t, router, fmt.Sprintf("?workspace_id=%d", ws1ID))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.JSONEq(t, `{"bundles":[]}`, w.Body.String())
+}
+
+func TestSessionRouter_DefaultBundles_RejectsBadID(t *testing.T) {
+	service, _, _, _, _ := setupTwoRepoSessionService(t)
+	router := NewSessionRouter(NewSessionController(service))
+
+	w := getDefaultBundles(t, router, "?workspace_id=abc")
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
+
+func TestSessionRouter_DefaultBundles_UnknownWorkspace(t *testing.T) {
+	service, _, _, _, _ := setupTwoRepoSessionService(t)
+	router := NewSessionRouter(NewSessionController(service))
+
+	w := getDefaultBundles(t, router, "?workspace_id=99999")
+	require.NotEqual(t, http.StatusOK, w.Code)
+}

@@ -148,6 +148,12 @@ func (r *SetBundlesRequest) Bind(_ *http.Request) error {
 	return validateBundleNames(r.Bundles)
 }
 
+type DefaultBundlesResponse struct {
+	Bundles []string `json:"bundles"`
+}
+
+func (*DefaultBundlesResponse) Render(http.ResponseWriter, *http.Request) error { return nil }
+
 type AddBlockerRequest struct {
 	Kind BlockerKind `json:"kind"`
 	Note string      `json:"note,omitempty"`

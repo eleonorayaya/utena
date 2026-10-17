@@ -768,6 +768,18 @@ func (s *SessionService) SetBundles(ctx context.Context, id uint, names []string
 	return sess, nil
 }
 
+func (s *SessionService) DefaultBundlesFor(ctx context.Context, workspaceIDs []uint) ([]string, error) {
+	paths := make([]string, 0, len(workspaceIDs))
+	for _, id := range workspaceIDs {
+		ws, err := s.workspaceService.GetWorkspace(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, ws.Path)
+	}
+	return defaultBundles(paths), nil
+}
+
 func (s *SessionService) writePlugins(ctx context.Context, sess *Session) error {
 	if sess.SessionRoot == "" {
 		return nil

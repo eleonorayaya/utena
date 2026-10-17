@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -142,6 +143,29 @@ func (c *SessionController) SetBundles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.RenderResponse(w, r, NewSessionResponse(session))
+}
+
+func (c *SessionController) DefaultBundles(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var ids []uint
+	for _, raw := range r.URL.Query()["workspace_id"] {
+		id, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			common.RenderError(w, r, common.NewInvalidRequest(fmt.Sprintf("invalid workspace_id %q", raw)))
+			return
+		}
+		ids = append(ids, uint(id))
+	}
+
+	names, err := c.service.DefaultBundlesFor(ctx, ids)
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+	if names == nil {
+		names = []string{}
+	}
+	common.RenderResponse(w, r, &DefaultBundlesResponse{Bundles: names})
 }
 
 func (c *SessionController) UpdateSession(w http.ResponseWriter, r *http.Request) {
