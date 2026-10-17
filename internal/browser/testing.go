@@ -111,6 +111,10 @@ func (f *FakeDriver) SetTitle(windowID, title string) {
 	}
 }
 
+func (f *FakeDriver) Name() string {
+	return "fake"
+}
+
 func (f *FakeDriver) AppBundleID() string {
 	return "fake.browser"
 }

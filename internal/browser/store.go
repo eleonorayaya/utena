@@ -9,14 +9,32 @@ import (
 )
 
 type Store struct {
-	db db.Database
+	db     db.Database
+	driver string
 }
 
-func NewStore(database db.Database) *Store {
-	return &Store{db: database}
+func NewStore(database db.Database, driver string) *Store {
+	return &Store{db: database, driver: driver}
+}
+
+func (s *Store) rows() *gorm.DB {
+	return s.db.Where("driver = ?", s.driver)
+}
+
+func (s *Store) ClaimUnrecorded() error {
+	unrecorded := "driver = '' OR driver IS NULL"
+	if err := s.db.Model(&BrowserWindow{}).Where(unrecorded).Update("driver", s.driver).Error; err != nil {
+		return err
+	}
+	var count int64
+	if err := s.db.Model(&BrowserState{}).Where("driver = ?", s.driver).Count(&count).Error; err != nil || count > 0 {
+		return err
+	}
+	return s.db.Model(&BrowserState{}).Where(unrecorded).Update("driver", s.driver).Error
 }
 
 func (s *Store) Add(w *BrowserWindow) error {
+	w.Driver = s.driver
 	return s.db.Create(w).Error
 }
 
@@ -47,7 +65,7 @@ func (s *Store) GetByDriverWindowID(id string) (*BrowserWindow, error) {
 
 func (s *Store) ListOpenBySession(sessionID uint) ([]BrowserWindow, error) {
 	var rows []BrowserWindow
-	err := s.db.Where("session_id = ? AND state = ?", sessionID, WindowOpen).
+	err := s.rows().Where("session_id = ? AND state = ?", sessionID, WindowOpen).
 		Order("last_focused_at DESC, id DESC").
 		Find(&rows).Error
 	return rows, err
@@ -55,13 +73,13 @@ func (s *Store) ListOpenBySession(sessionID uint) ([]BrowserWindow, error) {
 
 func (s *Store) ListOpen() ([]BrowserWindow, error) {
 	var rows []BrowserWindow
-	err := s.db.Where("state = ?", WindowOpen).Order("id").Find(&rows).Error
+	err := s.rows().Where("state = ?", WindowOpen).Order("id").Find(&rows).Error
 	return rows, err
 }
 
 func (s *Store) OwnedDriverWindowIDs() (map[string]bool, error) {
 	var rows []BrowserWindow
-	if err := s.db.Where("state = ?", WindowOpen).Find(&rows).Error; err != nil {
+	if err := s.rows().Where("state = ?", WindowOpen).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	owned := make(map[string]bool, len(rows))
@@ -86,7 +104,7 @@ func (s *Store) TouchFocused(id string, at time.Time) error {
 }
 
 func (s *Store) MarkMissingExcept(live map[string]bool) error {
-	q := s.db.Model(&BrowserWindow{}).Where("state = ?", WindowOpen)
+	q := s.rows().Model(&BrowserWindow{}).Where("state = ?", WindowOpen)
 	if len(live) > 0 {
 		ids := make([]string, 0, len(live))
 		for id := range live {
@@ -102,7 +120,7 @@ func missingUpdate() map[string]any {
 }
 
 func (s *Store) openWindow(id string) *gorm.DB {
-	return s.db.Where("driver_window_id = ? AND state = ?", id, WindowOpen)
+	return s.rows().Where("driver_window_id = ? AND state = ?", id, WindowOpen)
 }
 
 func (s *Store) SaveTabs(driverWindowID string, tabs []SavedTab, at time.Time) error {
@@ -122,13 +140,13 @@ func (s *Store) SetTabs(id uint, tabs []SavedTab) error {
 
 func (s *Store) ListAll() ([]BrowserWindow, error) {
 	var rows []BrowserWindow
-	err := s.db.Order("session_id, id").Find(&rows).Error
+	err := s.rows().Order("session_id, id").Find(&rows).Error
 	return rows, err
 }
 
 func (s *Store) ListRestorable(sessionID uint) ([]BrowserWindow, error) {
 	var rows []BrowserWindow
-	err := s.db.Where("session_id = ? AND state IN ?", sessionID, []WindowState{WindowMissing, WindowSnapshotted}).
+	err := s.rows().Where("session_id = ? AND state IN ?", sessionID, []WindowState{WindowMissing, WindowSnapshotted}).
 		Order("last_focused_at DESC, id DESC").
 		Find(&rows).Error
 	return rows, err
@@ -167,21 +185,34 @@ func (s *Store) DeleteBySession(sessionID uint) error {
 
 func (s *Store) ListMissing() ([]BrowserWindow, error) {
 	var rows []BrowserWindow
-	err := s.db.Where("state = ?", WindowMissing).Order("id").Find(&rows).Error
+	err := s.rows().Where("state = ?", WindowMissing).Order("id").Find(&rows).Error
 	return rows, err
 }
 
-const browserStateID = 1
+func (s *Store) state() (*BrowserState, error) {
+	var st BrowserState
+	err := s.db.Where("driver = ?", s.driver).First(&st).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &st, err
+}
 
 func (s *Store) RunID() (string, error) {
-	var st BrowserState
-	err := s.db.Where("id = ?", browserStateID).First(&st).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", nil
+	st, err := s.state()
+	if err != nil || st == nil {
+		return "", err
 	}
-	return st.RunID, err
+	return st.RunID, nil
 }
 
 func (s *Store) SetRunID(run string) error {
-	return s.db.Save(&BrowserState{ID: browserStateID, RunID: run}).Error
+	st, err := s.state()
+	if err != nil {
+		return err
+	}
+	if st == nil {
+		return s.db.Create(&BrowserState{Driver: s.driver, RunID: run}).Error
+	}
+	return s.db.Model(st).Update("run_id", run).Error
 }

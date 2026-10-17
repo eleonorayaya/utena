@@ -53,7 +53,7 @@ Links opened from a utena session land in that session's own browser window. The
 |---|---|---|---|
 | `--browser` | `UTENA_BROWSER` | `chrome` | `chrome`, `firefox` or `chrome-applescript` |
 
-Without the flag, the daemon reads the default from `~/.config/utena/daemon.json` (`{"browser": "firefox"}`); the env var overrides both. The dotfiles personal profile writes that file. Restart the daemon after changing it. Saved windows aren't tied to a browser: after switching, existing session windows count as missing, and attaching a session reopens its saved tabs in the new browser.
+Without the flag, the daemon reads the default from `~/.config/utena/daemon.json` (`{"browser": "firefox"}`); the env var overrides both. The dotfiles personal profile writes that file. Restart the daemon after changing it. Each driver keeps its own session windows: after switching, the other driver's windows are left alone (not moved, restored or reattached) and come back when you switch back. Deleting a session forgets its windows for every driver.
 
 1. Install the extension in one browser profile only.
    - **Chrome:** run `task extension:install`, then do the one-time Load unpacked step it prints (`chrome://extensions` → Developer mode → Load unpacked).

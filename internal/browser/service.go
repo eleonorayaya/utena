@@ -548,6 +548,9 @@ func (s *Service) targetWindow(sessionID uint, live []Window) (Window, bool, err
 }
 
 func (s *Service) OnAppStart(ctx context.Context) error {
+	if err := s.store.ClaimUnrecorded(); err != nil {
+		return err
+	}
 	go s.followEvents(ctx)
 	go s.placeLoop(ctx)
 	go s.lifecycleLoop(ctx)

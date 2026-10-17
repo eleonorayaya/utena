@@ -16,6 +16,7 @@ type Driver interface {
 	FocusWindow(ctx context.Context, windowID string) error
 	CloseWindow(ctx context.Context, windowID string) error
 	Subscribe(ctx context.Context, onEvent func(Event)) error
+	Name() string
 	AppBundleID() string
 	WindowTitle(w Window) string
 }

@@ -47,6 +47,7 @@ func (t SavedTab) StateIn(window WindowState) TabState {
 type BrowserWindow struct {
 	gorm.Model
 	SessionID      uint        `json:"session_id" gorm:"index"`
+	Driver         string      `json:"driver" gorm:"index"`
 	State          WindowState `json:"state"`
 	DriverWindowID string      `json:"driver_window_id" gorm:"index"`
 	LastFocusedAt  time.Time   `json:"last_focused_at"`
@@ -55,8 +56,9 @@ type BrowserWindow struct {
 }
 
 type BrowserState struct {
-	ID    uint `gorm:"primaryKey"`
-	RunID string
+	ID     uint   `gorm:"primaryKey"`
+	Driver string `gorm:"uniqueIndex"`
+	RunID  string
 }
 
 func savedTabs(w Window) []SavedTab {

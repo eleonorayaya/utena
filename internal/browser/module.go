@@ -16,7 +16,7 @@ type Module struct {
 }
 
 func NewModule(driver Driver, sessions Sessions, wmDriver wm.Driver, layout Layout, bus eventbus.EventBus, database db.Database) *Module {
-	service := NewService(driver, NewStore(database), sessions, wmDriver, layout)
+	service := NewService(driver, NewStore(database, driver.Name()), sessions, wmDriver, layout)
 	bus.Subscribe(eventbus.SessionAttached, func(ctx context.Context, e eventbus.Event) error {
 		if ev, ok := e.Data.(eventbus.SessionIDEvent); ok {
 			service.SetAttached(ev.SessionID)

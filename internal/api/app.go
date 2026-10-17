@@ -97,7 +97,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 var browserDrivers = map[string]func() browser.Driver{
 	chrome.Browser.Name:  func() browser.Driver { return chrome.NewDriver() },
 	firefox.Browser.Name: func() browser.Driver { return firefox.NewDriver() },
-	"chrome-applescript": func() browser.Driver { return chromescript.NewDriver() },
+	chromescript.Name:    func() browser.Driver { return chromescript.NewDriver() },
 }
 
 func newBrowserDriver(name string) browser.Driver {

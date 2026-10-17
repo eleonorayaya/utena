@@ -15,6 +15,8 @@ import (
 	"github.com/eleonorayaya/utena/internal/chrome"
 )
 
+const Name = "chrome-applescript"
+
 const (
 	pollInterval   = 1500 * time.Millisecond
 	callTimeout    = 3 * time.Second
@@ -65,6 +67,10 @@ func newDriver(r Runner, interval time.Duration) *Driver {
 
 func (d *Driver) Capabilities() browser.Capabilities {
 	return browser.Capabilities{CreateTakesFocus: true, LoadTakesFocus: true}
+}
+
+func (d *Driver) Name() string {
+	return Name
 }
 
 func (d *Driver) AppBundleID() string {

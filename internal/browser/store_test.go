@@ -11,7 +11,7 @@ import (
 )
 
 func newTestStore(t *testing.T) *Store {
-	return NewStore(testdb.New(t, &BrowserWindow{}, &BrowserState{}))
+	return NewStore(testdb.New(t, &BrowserWindow{}, &BrowserState{}), "fake")
 }
 
 func TestStore_ListOpenBySessionOrdersByFocus(t *testing.T) {
@@ -162,8 +162,9 @@ func TestStore_MigratedRowsDecodeWithoutTabs(t *testing.T) {
 	database := testdb.New(t, &legacyBrowserWindow{})
 	legacy := &legacyBrowserWindow{SessionID: 1, State: WindowMissing}
 	require.NoError(t, database.Create(legacy).Error)
-	require.NoError(t, database.Migrate(&BrowserWindow{}))
-	s := NewStore(database)
+	require.NoError(t, database.Migrate(&BrowserWindow{}, &BrowserState{}))
+	s := NewStore(database, "fake")
+	require.NoError(t, s.ClaimUnrecorded())
 
 	rows, err := s.ListRestorable(1)
 	require.NoError(t, err)
@@ -354,4 +355,84 @@ func (s *Store) ListBySession(sessionID uint) ([]BrowserWindow, error) {
 	var rows []BrowserWindow
 	err := s.db.Where("session_id = ?", sessionID).Order("id").Find(&rows).Error
 	return rows, err
+}
+
+func TestStore_RowsAreScopedByDriver(t *testing.T) {
+	database := testdb.New(t, &BrowserWindow{}, &BrowserState{})
+	chrome := NewStore(database, "chrome")
+	firefox := NewStore(database, "firefox")
+	require.NoError(t, chrome.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: "7"}))
+	require.NoError(t, chrome.Add(&BrowserWindow{SessionID: 1, State: WindowSnapshotted, Tabs: []SavedTab{{URL: "https://a.example.com"}}}))
+	require.NoError(t, firefox.Add(&BrowserWindow{SessionID: 1, State: WindowOpen, DriverWindowID: "7"}))
+
+	open, err := firefox.ListOpenBySession(1)
+	require.NoError(t, err)
+	require.Len(t, open, 1)
+	assert.Equal(t, "firefox", open[0].Driver)
+	restorable, err := firefox.ListRestorable(1)
+	require.NoError(t, err)
+	assert.Empty(t, restorable)
+
+	require.NoError(t, firefox.MarkMissingExcept(nil))
+	got, err := chrome.GetByDriverWindowID("7")
+	require.NoError(t, err)
+	assert.Equal(t, WindowOpen, got.State)
+
+	all, err := chrome.ListAll()
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+}
+
+func TestStore_DeleteBySessionDropsEveryDriversRows(t *testing.T) {
+	database := testdb.New(t, &BrowserWindow{}, &BrowserState{})
+	chrome := NewStore(database, "chrome")
+	firefox := NewStore(database, "firefox")
+	require.NoError(t, chrome.Add(&BrowserWindow{SessionID: 1, State: WindowSnapshotted}))
+	require.NoError(t, firefox.Add(&BrowserWindow{SessionID: 1, State: WindowSnapshotted}))
+
+	require.NoError(t, firefox.DeleteBySession(1))
+
+	for _, s := range []*Store{chrome, firefox} {
+		rows, err := s.ListAll()
+		require.NoError(t, err)
+		assert.Empty(t, rows)
+	}
+}
+
+func TestStore_RunIDIsPerDriver(t *testing.T) {
+	database := testdb.New(t, &BrowserWindow{}, &BrowserState{})
+	chrome := NewStore(database, "chrome")
+	firefox := NewStore(database, "firefox")
+
+	require.NoError(t, chrome.SetRunID("c1"))
+	require.NoError(t, firefox.SetRunID("f1"))
+	require.NoError(t, chrome.SetRunID("c2"))
+
+	run, err := chrome.RunID()
+	require.NoError(t, err)
+	assert.Equal(t, "c2", run)
+	run, err = firefox.RunID()
+	require.NoError(t, err)
+	assert.Equal(t, "f1", run)
+}
+
+func TestStore_ClaimUnrecordedAdoptsLegacyRowsAndRunID(t *testing.T) {
+	database := testdb.New(t, &BrowserWindow{}, &BrowserState{})
+	require.NoError(t, database.Create(&BrowserWindow{SessionID: 1, State: WindowMissing}).Error)
+	require.NoError(t, database.Create(&BrowserState{ID: 1, RunID: "old"}).Error)
+	s := NewStore(database, "firefox")
+
+	require.NoError(t, s.ClaimUnrecorded())
+	require.NoError(t, s.ClaimUnrecorded())
+
+	rows, err := s.ListMissing()
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "firefox", rows[0].Driver)
+	run, err := s.RunID()
+	require.NoError(t, err)
+	assert.Equal(t, "old", run)
+	other, err := NewStore(database, "chrome").ListAll()
+	require.NoError(t, err)
+	assert.Empty(t, other)
 }

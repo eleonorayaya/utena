@@ -20,7 +20,7 @@ type placeHarness struct {
 
 func newPlaceHarness(t *testing.T) placeHarness {
 	t.Helper()
-	store := NewStore(testdb.New(t, &BrowserWindow{}, &BrowserState{}))
+	store := NewStore(testdb.New(t, &BrowserWindow{}, &BrowserState{}), "fake")
 	driver := NewFakeDriver()
 	sessions := &FakeSessions{}
 	wmd := wm.NewFakeDriver()
@@ -403,7 +403,7 @@ func TestOpen_CreatedLinkGivesUpAfterTimeout(t *testing.T) {
 }
 
 func TestNewService_PointerToNoneIsInert(t *testing.T) {
-	store := NewStore(testdb.New(t, &BrowserWindow{}, &BrowserState{}))
+	store := NewStore(testdb.New(t, &BrowserWindow{}, &BrowserState{}), "fake")
 	svc := NewService(NewFakeDriver(), store, &FakeSessions{}, &wm.None{}, Layout{BrowserWorkspace: "2", ParkWorkspace: "P"})
 	assert.True(t, svc.wmInert)
 	assert.False(t, NewService(NewFakeDriver(), store, &FakeSessions{}, wm.NewFakeDriver(), Layout{}).wmInert)
