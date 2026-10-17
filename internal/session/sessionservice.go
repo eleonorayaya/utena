@@ -125,16 +125,14 @@ func (s *SessionService) SetClaudeGlobalConfigPath(path string) {
 
 func (s *SessionService) trustSessionRoot(sess *Session) error {
 	root := sess.SessionRoot
-	if root == "" || s.claudeGlobalConfig == "" {
-		return nil
-	}
 	s.trustedMu.Lock()
+	path := s.claudeGlobalConfig
 	_, trusted := s.trustedRoots[root]
 	s.trustedMu.Unlock()
-	if trusted {
+	if root == "" || path == "" || trusted {
 		return nil
 	}
-	if err := claudesettings.TrustProject(s.claudeGlobalConfig, root); err != nil {
+	if err := claudesettings.TrustProject(path, root); err != nil {
 		return err
 	}
 	s.trustedMu.Lock()
