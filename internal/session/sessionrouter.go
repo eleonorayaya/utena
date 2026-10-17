@@ -22,6 +22,7 @@ func (sr *SessionRouter) Routes() chi.Router {
 	r.Get("/resources", sr.controller.ListResources)
 	r.Get("/workspace/{workspaceId}", sr.controller.ListSessionsByWorkspace)
 	r.Post("/{id}/workspaces", sr.controller.AddWorkspace)
+	r.Put("/{id}/bundles", sr.controller.SetBundles)
 	r.Put("/{id}/activate", sr.controller.ActivateSession)
 	r.Put("/{id}/repair", sr.controller.RepairSession)
 	r.Put("/{id}/archive", sr.controller.ArchiveSession)

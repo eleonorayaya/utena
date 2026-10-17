@@ -745,6 +745,24 @@ func (s *SessionService) applyClaudeSettings(ctx context.Context, sess *Session)
 	return warnings
 }
 
+func (s *SessionService) SetBundles(ctx context.Context, id uint, names []string) (*Session, error) {
+	sess, err := s.store.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if sess.Status == StatusDeleted {
+		return nil, common.NewInvalidRequest("cannot set bundles on a deleted session")
+	}
+	sess.Bundles = bundles.Union(names)
+	if err := s.store.UpdateBundles(sess.ID, sess.Bundles); err != nil {
+		return nil, fmt.Errorf("persist session bundles: %w", err)
+	}
+	if err := s.writePlugins(ctx, sess); err != nil {
+		return nil, fmt.Errorf("apply claude plugins: %w", err)
+	}
+	return sess, nil
+}
+
 func (s *SessionService) writePlugins(ctx context.Context, sess *Session) error {
 	if current, err := s.store.GetBundles(sess.ID); err != nil {
 		slog.WarnContext(ctx, "failed to load session bundles", "session", sess.ID, "error", err)

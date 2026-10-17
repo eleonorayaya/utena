@@ -75,6 +75,7 @@ type WorkspaceBranchSpec struct {
 type CreateSessionRequest struct {
 	Name       string                `json:"name,omitempty"`
 	Workspaces []WorkspaceBranchSpec `json:"workspaces"`
+	Bundles    []string              `json:"bundles,omitempty"`
 }
 
 func (c *CreateSessionRequest) Bind(r *http.Request) error {
@@ -119,6 +120,17 @@ func (r *AddWorkspaceRequest) Bind(_ *http.Request) error {
 	}
 	if (r.Branch != "") == (r.BaseBranch != "") {
 		return errors.New("exactly one of branch or base_branch is required")
+	}
+	return nil
+}
+
+type SetBundlesRequest struct {
+	Bundles []string `json:"bundles"`
+}
+
+func (r *SetBundlesRequest) Bind(_ *http.Request) error {
+	if r.Bundles == nil {
+		return errors.New("bundles is required")
 	}
 	return nil
 }

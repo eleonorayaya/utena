@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/mux"
@@ -498,4 +499,53 @@ func TestSessionRouter_ListResources_DeletedSessionIsUnmanaged(t *testing.T) {
 	require.Nil(t, resp.Sessions[0].SessionID)
 	require.Equal(t, ResourceStatusUnmanaged, resp.Sessions[0].Status)
 	require.Equal(t, "utena-gone", resp.Sessions[0].Name)
+}
+
+func TestSessionRouter_SetBundles(t *testing.T) {
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
+	router.controller.service.SetBundleCatalog(bundles.Catalog{
+		"go":   {Plugins: []string{"go@m"}},
+		"docs": {Plugins: []string{"docs@m"}},
+	})
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	session := &Session{
+		Name:        "session-1",
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
+		SessionRoot: t.TempDir(),
+		Bundles:     []string{"go"},
+	}
+	addTestSession(t, sessionStore, swStore, session, ws1ID)
+
+	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/bundles", session.ID), bytes.NewReader([]byte(`{"bundles":["docs","docs"]}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"docs"}, retrieved.Bundles)
+	require.Equal(t, map[string]any{"docs@m": true}, readEnabledPlugins(t, session.SessionRoot))
+}
+
+func TestSessionRouter_SetBundles_RequiresBundles(t *testing.T) {
+	router, _, _, _, _, _ := setupSessionRouter(t)
+
+	req := httptest.NewRequest("PUT", "/1/bundles", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSessionRouter_SetBundles_NotFound(t *testing.T) {
+	router, _, _, _, _, _ := setupSessionRouter(t)
+
+	req := httptest.NewRequest("PUT", "/9999/bundles", bytes.NewReader([]byte(`{"bundles":[]}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	require.Equal(t, http.StatusNotFound, w.Code)
 }
