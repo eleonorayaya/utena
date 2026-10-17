@@ -213,7 +213,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case provider.SessionBundlesSetMsg:
 		if m.sess != nil && msg.SessionID == m.sess.ID {
-			m.setStatus("bundles saved · run /reload-plugins in open Claude panes", ui.StatusInfo)
+			m.setStatus("bundles saved · run /reload-plugins and /mcp in open Claude panes", ui.StatusInfo)
 		}
 		return m, nil
 	case bundlepicker.SelectedMsg:

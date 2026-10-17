@@ -74,6 +74,34 @@ func TestPicker_LongPluginListFitsWidth(t *testing.T) {
 	assertFits(t, m.View(), 40)
 }
 
+func TestPicker_ServersOnlyBundleShowsMcpServers(t *testing.T) {
+	m := New("Bundles")
+	m.SetSize(60, 10)
+	m = m.Open([]bundles.Entry{{Name: "cad", McpServers: []string{"zoo"}}}, nil)
+	v := m.View()
+	assert.Contains(t, v, "zoo (mcp)")
+	assertFits(t, v, 60)
+}
+
+func TestPicker_MixedBundleShowsPluginsThenServers(t *testing.T) {
+	m := New("Bundles")
+	m.SetSize(80, 10)
+	m = m.Open([]bundles.Entry{{Name: "homelab", Plugins: []string{"ha@m"}, McpServers: []string{"ha", "zoo"}}}, nil)
+	v := m.View()
+	assert.Contains(t, v, "ha@m, ha (mcp), zoo (mcp)")
+	assertFits(t, v, 80)
+}
+
+func TestPicker_LongServerListFitsWidth(t *testing.T) {
+	m := New("Bundles")
+	m.SetSize(40, 10)
+	m = m.Open([]bundles.Entry{{Name: "everything", Plugins: []string{"superlongpluginname@marketplace"}, McpServers: []string{
+		"superlongservername-one",
+		"superlongservername-two",
+	}}}, nil)
+	assertFits(t, m.View(), 40)
+}
+
 func TestPicker_PreChecksSelected(t *testing.T) {
 	v := opened("go").View()
 	assert.Contains(t, v, "[x] go")

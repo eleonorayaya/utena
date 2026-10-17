@@ -55,7 +55,7 @@ func (m Model) entries() []bundleItem {
 	known := make(map[string]struct{}, len(m.catalog))
 	for _, e := range m.catalog {
 		known[e.Name] = struct{}{}
-		out = append(out, bundleItem{name: e.Name, plugins: e.Plugins})
+		out = append(out, bundleItem{name: e.Name, plugins: e.Plugins, servers: e.McpServers})
 	}
 	for _, name := range m.selected {
 		if _, ok := known[name]; ok {

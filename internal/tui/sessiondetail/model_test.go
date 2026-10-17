@@ -356,6 +356,7 @@ func TestSessionDetail_BundlesSavedShowsReloadHint(t *testing.T) {
 	assert.True(t, m.Status().Empty())
 	m, _ = m.Update(provider.SessionBundlesSetMsg{SessionID: 1})
 	assert.Contains(t, m.Status().Text, "/reload-plugins")
+	assert.Contains(t, m.Status().Text, "/mcp")
 }
 
 func TestSessionDetail_CapturesTextWhileFiltering(t *testing.T) {
