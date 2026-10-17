@@ -188,3 +188,18 @@ func TestPanel_ProblemCallout(t *testing.T) {
 	assert.True(t, strings.HasPrefix(lineWith(lines, "Problem"), "  ╭─ Problem"), lineWith(lines, "Problem"))
 	assert.True(t, strings.HasPrefix(lineWith(lines, "dirty tree"), "  │ ⚠ action pull failed: dirty tree"))
 }
+
+func TestRenderPanel_ShowsBundles(t *testing.T) {
+	s := richSession()
+	s.Bundles = []string{"go", "docs"}
+	out := strings.Join(plainLines(RenderPanel(&s, 80, 0)), "\n")
+	assert.Contains(t, out, "Bundles")
+	assert.Contains(t, out, "go · docs")
+	assert.NotContains(t, out, "unknown")
+}
+
+func TestRenderPanel_NoBundlesSection(t *testing.T) {
+	s := richSession()
+	out := strings.Join(plainLines(RenderPanel(&s, 80, 0)), "\n")
+	assert.NotContains(t, out, "Bundles")
+}

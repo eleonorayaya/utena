@@ -14,6 +14,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
+	"github.com/eleonorayaya/utena/internal/tui/uitest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -229,7 +230,7 @@ func TestBrowserCursor_ClampsWhenBlockersResolve(t *testing.T) {
 func TestDetail_SelectRequestsBrowserState(t *testing.T) {
 	_, cmd := New().Update(SelectMsg{Session: makeActiveSession()})
 	require.NotNil(t, cmd)
-	assert.Equal(t, "provider.requestBrowserStateMsg", msgType(cmd()))
+	assert.Contains(t, uitest.MsgTypes(cmd), "provider.requestBrowserStateMsg")
 }
 
 func TestDetail_ErrorShowsInFooter(t *testing.T) {
