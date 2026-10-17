@@ -530,6 +530,71 @@ func TestSessionRouter_SetBundles(t *testing.T) {
 	require.Equal(t, map[string]any{"docs@m": true}, readEnabledPlugins(t, session.SessionRoot))
 }
 
+func TestSessionRouter_SetBundles_EmptyClearsPlugins(t *testing.T) {
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
+	router.controller.service.SetBundleCatalog(bundles.Catalog{
+		"go": {Plugins: []string{"go@m"}},
+	})
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	session := &Session{
+		Name:        "session-1",
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
+		SessionRoot: t.TempDir(),
+		Bundles:     []string{"go"},
+	}
+	addTestSession(t, sessionStore, swStore, session, ws1ID)
+
+	put := func(body string) {
+		req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/bundles", session.ID), bytes.NewReader([]byte(body)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.Routes().ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+
+	put(`{"bundles":["go"]}`)
+	require.Equal(t, map[string]any{"go@m": true}, readEnabledPlugins(t, session.SessionRoot))
+
+	put(`{"bundles":[]}`)
+	retrieved, err := sessionStore.GetByID(session.ID)
+	require.NoError(t, err)
+	require.Empty(t, retrieved.Bundles)
+	require.Empty(t, readEnabledPlugins(t, session.SessionRoot))
+}
+
+func TestSessionRouter_SetBundles_DeletedSession(t *testing.T) {
+	router, sessionStore, _, _, ws1ID, _ := setupSessionRouter(t)
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	session := &Session{
+		Name:        "session-1",
+		Status:      StatusDeleted,
+		LastUsedAt:  time.Now(),
+		SessionRoot: t.TempDir(),
+	}
+	addTestSession(t, sessionStore, swStore, session, ws1ID)
+
+	req := httptest.NewRequest("PUT", fmt.Sprintf("/%d/bundles", session.ID), bytes.NewReader([]byte(`{"bundles":["go"]}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.Routes().ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSessionRouter_SetBundles_RejectsBlankNames(t *testing.T) {
+	router, _, _, _, _, _ := setupSessionRouter(t)
+
+	for _, body := range []string{`{"bundles":[""]}`, `{"bundles":["go","  "]}`} {
+		req := httptest.NewRequest("PUT", "/1/bundles", bytes.NewReader([]byte(body)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.Routes().ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code, body)
+	}
+}
+
 func TestSessionRouter_SetBundles_RequiresBundles(t *testing.T) {
 	router, _, _, _, _, _ := setupSessionRouter(t)
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/claude"
@@ -131,6 +132,11 @@ type SetBundlesRequest struct {
 func (r *SetBundlesRequest) Bind(_ *http.Request) error {
 	if r.Bundles == nil {
 		return errors.New("bundles is required")
+	}
+	for _, name := range r.Bundles {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("bundle names must not be blank")
+		}
 	}
 	return nil
 }

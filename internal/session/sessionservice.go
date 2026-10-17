@@ -764,6 +764,9 @@ func (s *SessionService) SetBundles(ctx context.Context, id uint, names []string
 }
 
 func (s *SessionService) writePlugins(ctx context.Context, sess *Session) error {
+	if sess.SessionRoot == "" {
+		return nil
+	}
 	if current, err := s.store.GetBundles(sess.ID); err != nil {
 		slog.WarnContext(ctx, "failed to load session bundles", "session", sess.ID, "error", err)
 	} else {

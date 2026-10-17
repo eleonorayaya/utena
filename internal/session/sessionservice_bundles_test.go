@@ -107,6 +107,27 @@ func TestSessionService_WritePlugins_UsesStoredBundles(t *testing.T) {
 	require.Equal(t, map[string]any{"docs@m": true}, readEnabledPlugins(t, sess.SessionRoot))
 }
 
+func TestSessionService_WritePlugins_SkipsEmptySessionRoot(t *testing.T) {
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+	service.SetBundleCatalog(testBundleCatalog())
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+
+	sess := &Session{
+		Name:       "legacy",
+		Status:     StatusActive,
+		LastUsedAt: time.Now(),
+		Bundles:    []string{"go"},
+	}
+	addTestSession(t, sessionStore, swStore, sess, ws1ID)
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	require.NoError(t, service.writePlugins(context.Background(), sess))
+	_, err := os.Stat(filepath.Join(cwd, ".claude"))
+	require.True(t, os.IsNotExist(err))
+}
+
 func TestSessionService_AddWorkspace_UnionsDefaultBundles(t *testing.T) {
 	service, sessionStore, _, ws1ID, ws2ID := setupTwoRepoSessionService(t)
 	service.SetBundleCatalog(testBundleCatalog())
