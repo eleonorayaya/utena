@@ -106,9 +106,11 @@ Applied:
 
 - **New-session form:** a `Bundles` multi-select field after `Workspaces`
   (space toggles). Pre-checked from the selected workspaces' defaults and
-  recomputed when workspaces change, until the user edits it.
-- **Session detail:** a `Bundles` section after Workspaces (`go · docs`). `b`
-  opens the same multi-select. On save the footer hints "run /reload-plugins
+  recomputed when workspaces change, until the user edits it. The form sends
+  `bundles` only once edited; otherwise the daemon applies the same defaults.
+  Defaults come from `GET /sessions/default-bundles?workspace_id=…`.
+- **Session detail:** a `Bundles` section after Workspaces (`go · docs`). `p`
+  (plugins; `b` is already "block") opens the same multi-select. On save the footer hints "run /reload-plugins
   in open Claude panes". No automatic reload injection: it is fiddly and a
   forced reload can invalidate the prompt cache.
 - **Session list:** unchanged.

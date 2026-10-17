@@ -119,6 +119,8 @@ A new session gets the default bundles of all its workspaces, unless the create 
 
 utena writes the selected plugins as `true` under `enabledPlugins` in the session root's `.claude/settings.local.json`, and removes catalog plugins that aren't selected. Plugins outside the catalog are never touched. The file is rewritten when the session is set up, a workspace is added, the session is activated, or its bundles change. Run `/reload-plugins` in open Claude panes to pick up a change.
 
+In the TUI, the new-session form has a Bundles field, pre-filled from the selected workspaces' defaults; press enter on it to pick bundles (space toggles). Until you change it, the daemon applies the workspace defaults. In session detail, the Bundles section lists the session's bundles and `p` edits them.
+
 For bundles to stay off elsewhere, set each bundled plugin to `false` in `~/.claude/settings.json`; the dotfiles (shizuku) do this, so the session's local `true` turns them on.
 
 #### Claude Code integration
