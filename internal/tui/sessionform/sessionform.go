@@ -403,7 +403,7 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.nameErr = ""
 	m.status = ui.Status{}
 	m.submitting = true
-	return m, provider.CreateSession(name, buildSpecs(m.rows, isNew))
+	return m, provider.CreateSession(name, buildSpecs(m.rows, isNew), nil)
 }
 
 func buildSpecs(rows []branchfield.Row, isNew bool) []provider.SessionWorkspaceSpec {
