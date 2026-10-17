@@ -8,9 +8,11 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/branchfield"
 	"github.com/eleonorayaya/utena/internal/tui/branchpicker"
+	"github.com/eleonorayaya/utena/internal/tui/bundlepicker"
 	"github.com/eleonorayaya/utena/internal/tui/filepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
@@ -22,6 +24,7 @@ import (
 
 const (
 	fieldWorkspaces = iota
+	fieldBundles
 	fieldBranches
 	fieldMode
 	fieldName
@@ -35,6 +38,7 @@ const (
 	overlayWorkspaces
 	overlayFiles
 	overlayBranch
+	overlayBundles
 )
 
 type Model struct {
@@ -43,6 +47,11 @@ type Model struct {
 	workspacePicker workspacepicker.Model
 	filePicker      filepicker.Model
 	branchPicker    branchpicker.Model
+	bundlePicker    bundlepicker.Model
+	catalog         []bundles.Entry
+	selectedBundles []string
+	defaultsLoaded  bool
+	bundlesEdited   bool
 	rows            []branchfield.Row
 	rowCursor       int
 	pickingRow      int
@@ -55,13 +64,14 @@ type Model struct {
 	width, height   int
 }
 
-var labels = [fieldCount]string{"Workspaces", "Branches", "Mode", "Name"}
+var labels = [fieldCount]string{"Workspaces", "Bundles", "Branches", "Mode", "Name"}
 
 func New() Model {
 	return Model{
 		form:            ui.NewForm("New session", fieldCount),
 		workspacePicker: workspacepicker.New("Workspaces", true),
 		branchPicker:    branchpicker.New(),
+		bundlePicker:    bundlepicker.New("Bundles"),
 		filePicker:      filepicker.New(),
 		mode:            branchfield.NewModeChoice(),
 		name:            ui.NewInput(""),
@@ -79,9 +89,12 @@ func (m Model) Init() (Model, tea.Cmd) {
 	m.workspacesErr = ""
 	m.status = ui.Status{}
 	m.submitting = false
+	m.selectedBundles = nil
+	m.defaultsLoaded = false
+	m.bundlesEdited = false
 	m.overlay = overlayWorkspaces
 	m.workspacePicker = m.workspacePicker.Open(nil)
-	return m, tea.Batch(provider.FetchWorkspaces(), provider.RequestWorkspacesState())
+	return m, tea.Batch(provider.FetchWorkspaces(), provider.RequestWorkspacesState(), provider.FetchBundles())
 }
 
 func (m *Model) SetSize(width, height int) {
@@ -90,6 +103,7 @@ func (m *Model) SetSize(width, height int) {
 	m.workspacePicker.SetSize(width, height)
 	m.filePicker.SetSize(width, height)
 	m.branchPicker.SetSize(width, height)
+	m.bundlePicker.SetSize(width, height)
 }
 
 func (m Model) Keys() help.KeyMap {
@@ -100,6 +114,8 @@ func (m Model) Keys() help.KeyMap {
 		return m.filePicker.Keys()
 	case overlayBranch:
 		return m.branchPicker.Keys()
+	case overlayBundles:
+		return m.bundlePicker.Keys()
 	}
 	k := formKeys
 	onName := m.form.Focused() == fieldName
@@ -130,12 +146,22 @@ func (m Model) CapturesText() bool {
 		return m.filePicker.CapturesText()
 	case overlayBranch:
 		return m.branchPicker.CapturesText()
+	case overlayBundles:
+		return m.bundlePicker.CapturesText()
 	}
 	return m.form.Focused() == fieldName || m.editingRow() >= 0
 }
 
 func (m Model) editingRow() int {
 	return slices.IndexFunc(m.rows, func(r branchfield.Row) bool { return r.Editing })
+}
+
+func (m Model) rowIDs() []uint {
+	ids := make([]uint, len(m.rows))
+	for i, r := range m.rows {
+		ids[i] = r.Workspace.ID
+	}
+	return ids
 }
 
 func (m Model) rowIndex(wsID uint) int {
@@ -170,6 +196,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.rows[i] = m.rows[i].Checked(msg)
 		}
 		return m, nil
+	case provider.BundlesLoadedMsg:
+		if msg.Err == nil {
+			m.catalog = msg.Bundles
+		}
+		return m, nil
+	case provider.DefaultBundlesLoadedMsg:
+		if msg.Err == nil && !m.bundlesEdited && slices.Equal(msg.WorkspaceIDs, m.rowIDs()) {
+			m.selectedBundles = msg.Bundles
+			m.defaultsLoaded = true
+		}
+		return m, nil
 	case provider.ErrMsg:
 		m.submitting = false
 		m.status = ui.Status{Text: msg.Err.Error(), Kind: ui.StatusError}
@@ -186,6 +223,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.updateFilePicker(msg)
 	case overlayBranch:
 		return m.updateBranchPicker(msg)
+	case overlayBundles:
+		return m.updateBundlePicker(msg)
 	}
 
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
@@ -200,11 +239,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) openWorkspacePicker() Model {
-	ids := make([]uint, len(m.rows))
-	for i, r := range m.rows {
-		ids[i] = r.Workspace.ID
-	}
-	m.workspacePicker = m.workspacePicker.Open(ids)
+	m.workspacePicker = m.workspacePicker.Open(m.rowIDs())
 	m.overlay = overlayWorkspaces
 	m.status = ui.Status{}
 	return m
@@ -231,6 +266,10 @@ func (m Model) setRows(picked []workspace.Workspace) (Model, tea.Cmd) {
 	}
 	m.rows = rows
 	m.rowCursor = min(m.rowCursor, max(len(rows)-1, 0))
+	if !m.bundlesEdited && len(rows) > 0 {
+		m.defaultsLoaded = false
+		cmds = append(cmds, provider.FetchDefaultBundles(m.rowIDs()))
+	}
 	return m, tea.Batch(cmds...)
 }
 
@@ -318,6 +357,22 @@ func (m Model) updateBranchPicker(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateBundlePicker(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case bundlepicker.SelectedMsg:
+		m.selectedBundles = msg.Bundles
+		m.bundlesEdited = true
+		m.overlay = overlayNone
+		return m.focus(fieldBundles)
+	case bundlepicker.ClosedMsg:
+		m.overlay = overlayNone
+		return m.focus(fieldBundles)
+	}
+	var cmd tea.Cmd
+	m.bundlePicker, cmd = m.bundlePicker.Update(msg)
+	return m, cmd
+}
+
 func (m Model) onPageKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if i := m.editingRow(); i >= 0 {
 		var cmd tea.Cmd
@@ -336,7 +391,7 @@ func (m Model) onPageKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.rowCursor--
 		return m, nil
 	case key.Matches(msg, formKeys.Next):
-		if field == fieldWorkspaces && msg.Type == tea.KeyDown {
+		if field == fieldBundles && msg.Type == tea.KeyDown {
 			m.rowCursor = 0
 		}
 		return m.focus(m.form.Next().Focused())
@@ -349,6 +404,11 @@ func (m Model) onPageKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		switch field {
 		case fieldWorkspaces:
 			return m.openWorkspacePicker(), nil
+		case fieldBundles:
+			m.bundlePicker = m.bundlePicker.Open(m.catalog, m.selectedBundles)
+			m.overlay = overlayBundles
+			m.status = ui.Status{}
+			return m, nil
 		case fieldBranches:
 			if len(m.rows) == 0 {
 				return m.openWorkspacePicker(), nil
@@ -403,7 +463,14 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.nameErr = ""
 	m.status = ui.Status{}
 	m.submitting = true
-	return m, provider.CreateSession(name, buildSpecs(m.rows, isNew), nil)
+	return m, provider.CreateSession(name, buildSpecs(m.rows, isNew), m.submitBundles())
+}
+
+func (m Model) submitBundles() []string {
+	if m.bundlesEdited {
+		return m.selectedBundles
+	}
+	return nil
 }
 
 func buildSpecs(rows []branchfield.Row, isNew bool) []provider.SessionWorkspaceSpec {
@@ -436,6 +503,8 @@ func (m Model) fields() []ui.Field {
 		branches = muted.Render("—")
 	}
 
+	bundlesValue, bundlesHint := m.bundlesValue()
+
 	nameHint := ""
 	if !branchfield.IsNewBranch(m.mode) {
 		nameHint = "optional — derived from the branch when empty"
@@ -443,10 +512,33 @@ func (m Model) fields() []ui.Field {
 
 	return []ui.Field{
 		{Label: labels[fieldWorkspaces], Value: wsValue, Error: m.workspacesErr},
+		{Label: labels[fieldBundles], Value: bundlesValue, Hint: bundlesHint},
 		{Label: labels[fieldBranches], Value: branches},
 		{Label: labels[fieldMode], Value: m.mode.View(focused == fieldMode)},
 		{Label: labels[fieldName], Value: m.name.View(), Error: m.nameErr, Hint: nameHint},
 	}
+}
+
+func (m Model) bundlesValue() (string, string) {
+	muted := ui.Muted()
+	switch {
+	case m.bundlesEdited:
+		return m.joinedBundles(), ""
+	case m.defaultsLoaded && len(m.selectedBundles) > 0:
+		return m.joinedBundles(), "from workspace defaults"
+	case !m.defaultsLoaded:
+		return muted.Render("workspace defaults"), ""
+	case len(m.catalog) == 0:
+		return muted.Render("no bundles configured"), ""
+	}
+	return muted.Render("none"), ""
+}
+
+func (m Model) joinedBundles() string {
+	if len(m.selectedBundles) == 0 {
+		return ui.Muted().Render("none")
+	}
+	return strings.Join(m.selectedBundles, " · ")
 }
 
 func (m Model) View() string {
@@ -457,6 +549,8 @@ func (m Model) View() string {
 		return ui.FitHeight(m.filePicker.View(), m.height)
 	case overlayBranch:
 		return ui.FitHeight(m.branchPicker.View(), m.height)
+	case overlayBundles:
+		return ui.FitHeight(m.bundlePicker.View(), m.height)
 	}
 	return ui.FitHeight(m.form.View(m.fields(), m.width), m.height)
 }
