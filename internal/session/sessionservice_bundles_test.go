@@ -19,6 +19,95 @@ func testBundleCatalog() bundles.Catalog {
 	}
 }
 
+func testMcpCatalog() (bundles.Catalog, bundles.Servers) {
+	catalog := testBundleCatalog()
+	catalog["homelab"] = bundles.Bundle{McpServers: []string{"ha"}}
+	catalog["broken"] = bundles.Bundle{McpServers: []string{"ghost"}}
+	return catalog, bundles.Servers{"ha": json.RawMessage(`{"type":"http","url":"https://x"}`)}
+}
+
+func readMcpServers(t *testing.T, root string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, ".mcp.json"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	require.NoError(t, err)
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(data, &raw))
+	servers, _ := raw["mcpServers"].(map[string]any)
+	return servers
+}
+
+func readEnabledMcpServers(t *testing.T, root string) []any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	require.NoError(t, err)
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(data, &raw))
+	approved, _ := raw["enabledMcpjsonServers"].([]any)
+	return approved
+}
+
+func addMcpTestSession(t *testing.T) (*SessionService, *Session) {
+	t.Helper()
+	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
+	service.SetBundleCatalog(testMcpCatalog())
+	swStore := NewSessionWorktreeStore(sessionStore.db)
+	sess := &Session{
+		Name:        "mcp",
+		Status:      StatusActive,
+		LastUsedAt:  time.Now(),
+		SessionRoot: t.TempDir(),
+	}
+	addTestSession(t, sessionStore, swStore, sess, ws1ID)
+	return service, sess
+}
+
+func TestSessionService_SetBundles_WritesMcpServers(t *testing.T) {
+	service, sess := addMcpTestSession(t)
+	ctx := context.Background()
+
+	_, err := service.SetBundles(ctx, sess.ID, []string{"homelab"})
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"ha": map[string]any{"type": "http", "url": "https://x"}}, readMcpServers(t, sess.SessionRoot))
+	require.Equal(t, []any{"ha"}, readEnabledMcpServers(t, sess.SessionRoot))
+
+	_, err = service.SetBundles(ctx, sess.ID, []string{})
+	require.NoError(t, err)
+	require.Empty(t, readMcpServers(t, sess.SessionRoot))
+	require.Empty(t, readEnabledMcpServers(t, sess.SessionRoot))
+}
+
+func TestSessionService_SetBundles_SkipsUndefinedMcpServers(t *testing.T) {
+	service, sess := addMcpTestSession(t)
+
+	_, err := service.SetBundles(context.Background(), sess.ID, []string{"broken"})
+	require.NoError(t, err)
+	require.NotContains(t, readMcpServers(t, sess.SessionRoot), "ghost")
+	require.NotContains(t, readEnabledMcpServers(t, sess.SessionRoot), "ghost")
+}
+
+func TestSessionService_CreateSession_DefaultBundlesWriteMcpServers(t *testing.T) {
+	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	service.SetBundleCatalog(testMcpCatalog())
+	writeWorkspaceConfig(t, workspacePath(t, service, ws1ID), `{"default_bundles":["homelab"]}`)
+
+	sess, err := service.CreateSession(context.Background(), CreateSessionInput{
+		Name:       "homelab",
+		Workspaces: []WorkspaceBranchSpec{{WorkspaceID: ws1ID, BaseBranch: "main"}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"homelab"}, sess.Bundles)
+
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+	require.Equal(t, map[string]any{"ha": map[string]any{"type": "http", "url": "https://x"}}, readMcpServers(t, sess.SessionRoot))
+	require.Equal(t, []any{"ha"}, readEnabledMcpServers(t, sess.SessionRoot))
+}
+
 func workspacePath(t *testing.T, service *SessionService, wsID uint) string {
 	t.Helper()
 	ws, err := service.workspaceService.GetWorkspace(context.Background(), wsID)
@@ -87,7 +176,7 @@ func TestSessionService_CreateSession_ExplicitBundlesOverrideDefaults(t *testing
 	require.Empty(t, readEnabledPlugins(t, none.SessionRoot))
 }
 
-func TestSessionService_WritePlugins_UsesStoredBundles(t *testing.T) {
+func TestSessionService_WriteBundles_UsesStoredBundles(t *testing.T) {
 	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
 	service.SetBundleCatalog(testBundleCatalog(), nil)
 
@@ -103,11 +192,11 @@ func TestSessionService_WritePlugins_UsesStoredBundles(t *testing.T) {
 	require.NoError(t, sessionStore.UpdateBundles(sess.ID, []string{"docs"}))
 	require.Equal(t, []string{"go"}, sess.Bundles)
 
-	require.NoError(t, service.writePlugins(ctx, sess))
+	require.NoError(t, service.writeBundles(ctx, sess))
 	require.Equal(t, map[string]any{"docs@m": true}, readEnabledPlugins(t, sess.SessionRoot))
 }
 
-func TestSessionService_WritePlugins_SkipsEmptySessionRoot(t *testing.T) {
+func TestSessionService_WriteBundles_SkipsEmptySessionRoot(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, _ := setupSessionService(t)
 	service.SetBundleCatalog(testBundleCatalog(), nil)
 	swStore := NewSessionWorktreeStore(sessionStore.db)
@@ -123,7 +212,7 @@ func TestSessionService_WritePlugins_SkipsEmptySessionRoot(t *testing.T) {
 	cwd := t.TempDir()
 	t.Chdir(cwd)
 
-	require.NoError(t, service.writePlugins(context.Background(), sess))
+	require.NoError(t, service.writeBundles(context.Background(), sess))
 	_, err := os.Stat(filepath.Join(cwd, ".claude"))
 	require.True(t, os.IsNotExist(err))
 }
