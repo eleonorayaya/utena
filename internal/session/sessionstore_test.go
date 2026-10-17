@@ -307,6 +307,35 @@ func TestSessionStore_Update_DoesNotOverwriteBundles(t *testing.T) {
 	require.Equal(t, "boom", retrieved.StatusError)
 }
 
+func TestSessionStore_GetBundles(t *testing.T) {
+	store, _, _ := setupSessionStore(t)
+
+	session := &Session{
+		Name:       "session-1",
+		Status:     StatusActive,
+		LastUsedAt: time.Now(),
+		Bundles:    []string{"go", "docs"},
+	}
+	require.NoError(t, store.Add(session))
+
+	got, err := store.GetBundles(session.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"go", "docs"}, got)
+
+	require.NoError(t, store.UpdateBundles(session.ID, []string{"docs"}))
+
+	got, err = store.GetBundles(session.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"docs"}, got)
+}
+
+func TestSessionStore_GetBundles_NotFound(t *testing.T) {
+	store, _, _ := setupSessionStore(t)
+
+	_, err := store.GetBundles(99999)
+	require.ErrorIs(t, err, ErrSessionNotFound)
+}
+
 func TestSessionStore_Update_NotFound(t *testing.T) {
 	store, _, _ := setupSessionStore(t)
 

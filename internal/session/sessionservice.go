@@ -603,7 +603,7 @@ func (s *SessionService) AddWorkspace(ctx context.Context, sessionID uint, spec 
 
 	if merged := bundles.Union(sess.Bundles, defaultBundles([]string{ws.Path})); len(merged) != len(sess.Bundles) {
 		if err := s.store.UpdateBundles(sess.ID, merged); err != nil {
-			return nil, fmt.Errorf("persist session bundles: %w", err)
+			slog.WarnContext(ctx, "failed to persist session bundles", "session", sess.ID, "error", err)
 		}
 	}
 
@@ -746,6 +746,11 @@ func (s *SessionService) applyClaudeSettings(ctx context.Context, sess *Session)
 }
 
 func (s *SessionService) writePlugins(ctx context.Context, sess *Session) error {
+	if current, err := s.store.GetBundles(sess.ID); err != nil {
+		slog.WarnContext(ctx, "failed to load session bundles", "session", sess.ID, "error", err)
+	} else {
+		sess.Bundles = current
+	}
 	enabled, unknown := s.bundleCatalog.Resolve(sess.Bundles)
 	if len(unknown) > 0 {
 		slog.WarnContext(ctx, "session references unknown bundles", "session", sess.ID, "bundles", unknown)

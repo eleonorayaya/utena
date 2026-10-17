@@ -228,6 +228,17 @@ func (s *SessionStore) UpdateBundles(id uint, names []string) error {
 	return s.db.Model(&Session{Model: gorm.Model{ID: id}}).Select("Bundles").Updates(&Session{Bundles: names}).Error
 }
 
+func (s *SessionStore) GetBundles(id uint) ([]string, error) {
+	var session Session
+	if err := s.db.Model(&Session{}).Select("id", "bundles").First(&session, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return session.Bundles, nil
+}
+
 func (s *SessionStore) AttachedID() (uint, error) {
 	var ids []uint
 	if err := s.db.Model(&Session{}).Where("is_attached = ?", true).Order("last_used_at DESC").Limit(1).Pluck("id", &ids).Error; err != nil {

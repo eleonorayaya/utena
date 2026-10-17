@@ -87,6 +87,26 @@ func TestSessionService_CreateSession_ExplicitBundlesOverrideDefaults(t *testing
 	require.Empty(t, readEnabledPlugins(t, none.SessionRoot))
 }
 
+func TestSessionService_WritePlugins_UsesStoredBundles(t *testing.T) {
+	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	service.SetBundleCatalog(testBundleCatalog())
+
+	ctx := context.Background()
+	sess, err := service.CreateSession(ctx, CreateSessionInput{
+		Name:       "stale",
+		Workspaces: []WorkspaceBranchSpec{{WorkspaceID: ws1ID, BaseBranch: "main"}},
+		Bundles:    []string{"go"},
+	})
+	require.NoError(t, err)
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+
+	require.NoError(t, sessionStore.UpdateBundles(sess.ID, []string{"docs"}))
+	require.Equal(t, []string{"go"}, sess.Bundles)
+
+	require.NoError(t, service.writePlugins(ctx, sess))
+	require.Equal(t, map[string]any{"docs@m": true}, readEnabledPlugins(t, sess.SessionRoot))
+}
+
 func TestSessionService_AddWorkspace_UnionsDefaultBundles(t *testing.T) {
 	service, sessionStore, _, ws1ID, ws2ID := setupTwoRepoSessionService(t)
 	service.SetBundleCatalog(testBundleCatalog())
