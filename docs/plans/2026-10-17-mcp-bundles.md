@@ -44,7 +44,7 @@ func ApplyMcpServers(rootPath string, managed []string, selected map[string]json
 **Files:** `internal/session/sessionservice.go`, `sessionservice_bundles_test.go`, `sessionrouter_test.go` if needed.
 
 - Rename `writePlugins` → `writeBundles`. After `ApplyPlugins`, resolve servers: `names, _ := s.bundleCatalog.ResolveServers(sess.Bundles)`; build `selected` from `s.mcpServers`; names missing a definition → `slog.WarnContext(..., "bundle references unknown MCP servers", ...)` and skip. Call `ApplyMcpServers(sess.SessionRoot, s.bundleCatalog.ManagedServers(), selected)`.
-- Return `errors.Join` of plugin and server errors, each wrapped: `fmt.Errorf("plugins: %w", err)` / `fmt.Errorf("mcp: %w", err)`. In `applyClaudeSettings` the warning prefix becomes `claude-bundles: `. `ActivateSession` / `AddWorkspace` keep warning-only behavior; `SetBundles` still returns the error.
+- Return the plugin and server errors separately: `writeBundles` returns `(pluginsErr, mcpErr error)`. `applyClaudeSettings` emits up to two warnings, `claude-plugins: <err>` and `claude-mcp: <err>`. `SetBundles` wraps them as `plugins: %w` / `mcp: %w` and returns their `errors.Join`. `ActivateSession` / `AddWorkspace` keep warning-only behavior; `SetBundles` still returns the error.
 - Tests (extend `sessionservice_bundles_test.go`; extend `testBundleCatalog` with a bundle `"homelab": {McpServers: ["ha"]}` and pass servers `{"ha": {"type":"http","url":"https://x"}}`): SetBundles(["homelab"]) writes `.mcp.json` with `ha` and `enabledMcpjsonServers: ["ha"]`; SetBundles([]) removes both; a bundle naming an undefined server writes nothing for it and doesn't error.
 - Commit `feat(session): write bundle MCP servers per session`.
 

@@ -750,16 +750,52 @@ func TestApplyMcpServers_DefinitionRoundTrips(t *testing.T) {
 	want := `{
   "mcpServers": {
     "x": {
+      "type": "http",
+      "url": "https://x",
       "headers": {
         "Authorization": "Bearer ${TOKEN}"
-      },
-      "type": "http",
-      "url": "https://x"
+      }
     }
   }
 }
 `
 	if string(raw) != want {
 		t.Fatalf(".mcp.json =\n%s\nwant:\n%s", raw, want)
+	}
+}
+
+func TestApplyMcpServers_LargeIntegerSurvives(t *testing.T) {
+	root := t.TempDir()
+	def := json.RawMessage(`{"command":"x","timeout":12345678901234567890}`)
+	if err := ApplyMcpServers(root, []string{"x"}, map[string]json.RawMessage{"x": def}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"timeout": 12345678901234567890`) {
+		t.Fatalf(".mcp.json lost precision:\n%s", raw)
+	}
+}
+
+func TestApplyMcpServers_RejectsNonObjectDefinitions(t *testing.T) {
+	for _, def := range []string{"", "null", " null ", "[]", `"x"`, "1", "{not json"} {
+		t.Run(def, func(t *testing.T) {
+			root := t.TempDir()
+			selected := map[string]json.RawMessage{
+				"good": json.RawMessage(`{"command":"good"}`),
+				"bad":  json.RawMessage(def),
+			}
+			err := ApplyMcpServers(root, []string{"good", "bad"}, selected)
+			if err == nil || !strings.Contains(err.Error(), "bad") {
+				t.Fatalf("err = %v, want error naming bad", err)
+			}
+			for _, p := range []string{".mcp.json", ".claude"} {
+				if _, err := os.Stat(filepath.Join(root, p)); !os.IsNotExist(err) {
+					t.Fatalf("expected no %s, stat err = %v", p, err)
+				}
+			}
+		})
 	}
 }

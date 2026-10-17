@@ -240,10 +240,25 @@ func ApplyPlugins(rootPath string, managed, enabled []string) error {
 
 func ApplyMcpServers(rootPath string, managed []string, selected map[string]json.RawMessage) error {
 	names := slices.Sorted(maps.Keys(selected))
+	for _, name := range names {
+		if err := validateMcpDefinition(selected[name]); err != nil {
+			return fmt.Errorf("mcp server %s: %w", name, err)
+		}
+	}
 	if err := applyMcpJSON(rootPath, managed, names, selected); err != nil {
 		return err
 	}
 	return applyMcpApprovals(rootPath, managed, names)
+}
+
+func validateMcpDefinition(def json.RawMessage) error {
+	if !json.Valid(def) {
+		return errors.New("invalid JSON definition")
+	}
+	if trimmed := bytes.TrimSpace(def); len(trimmed) == 0 || trimmed[0] != '{' {
+		return errors.New("definition must be a JSON object")
+	}
+	return nil
 }
 
 func applyMcpJSON(rootPath string, managed, names []string, selected map[string]json.RawMessage) error {
@@ -264,11 +279,7 @@ func applyMcpJSON(rootPath string, managed, names []string, selected map[string]
 		delete(servers, name)
 	}
 	for _, name := range names {
-		var def any
-		if err := json.Unmarshal(selected[name], &def); err != nil {
-			return fmt.Errorf("parse mcp server %s: %w", name, err)
-		}
-		servers[name] = def
+		servers[name] = selected[name]
 	}
 	if len(servers) == 0 {
 		delete(raw, "mcpServers")

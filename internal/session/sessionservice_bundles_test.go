@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,7 +193,9 @@ func TestSessionService_WriteBundles_UsesStoredBundles(t *testing.T) {
 	require.NoError(t, sessionStore.UpdateBundles(sess.ID, []string{"docs"}))
 	require.Equal(t, []string{"go"}, sess.Bundles)
 
-	require.NoError(t, service.writeBundles(ctx, sess))
+	pluginsErr, mcpErr := service.writeBundles(ctx, sess)
+	require.NoError(t, pluginsErr)
+	require.NoError(t, mcpErr)
 	require.Equal(t, map[string]any{"docs@m": true}, readEnabledPlugins(t, sess.SessionRoot))
 }
 
@@ -212,7 +215,9 @@ func TestSessionService_WriteBundles_SkipsEmptySessionRoot(t *testing.T) {
 	cwd := t.TempDir()
 	t.Chdir(cwd)
 
-	require.NoError(t, service.writeBundles(context.Background(), sess))
+	pluginsErr, mcpErr := service.writeBundles(context.Background(), sess)
+	require.NoError(t, pluginsErr)
+	require.NoError(t, mcpErr)
 	_, err := os.Stat(filepath.Join(cwd, ".claude"))
 	require.True(t, os.IsNotExist(err))
 }
@@ -260,4 +265,73 @@ func TestSessionService_ActivateSession_ReappliesPlugins(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, map[string]any{"go@m": true, "gopls@m": true}, readEnabledPlugins(t, sess.SessionRoot))
+}
+
+func TestSessionService_SetBundles_MalformedMcpJSONStillWritesPlugins(t *testing.T) {
+	service, sess := addMcpTestSession(t)
+	require.NoError(t, os.WriteFile(filepath.Join(sess.SessionRoot, ".mcp.json"), []byte("{not json"), 0o644))
+
+	_, err := service.SetBundles(context.Background(), sess.ID, []string{"go", "homelab"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mcp: parse .mcp.json")
+	require.NotContains(t, err.Error(), "plugins:")
+	require.Equal(t, map[string]any{"go@m": true}, readEnabledPlugins(t, sess.SessionRoot))
+}
+
+func TestSessionService_ApplyClaudeSettings_SeparatesPluginAndMcpWarnings(t *testing.T) {
+	service, sess := addMcpTestSession(t)
+	require.NoError(t, service.store.UpdateBundles(sess.ID, []string{"go", "homelab"}))
+	require.NoError(t, os.WriteFile(filepath.Join(sess.SessionRoot, ".mcp.json"), []byte("{not json"), 0o644))
+
+	warnings := service.applyClaudeSettings(context.Background(), sess)
+	require.Len(t, warnings, 1)
+	require.True(t, strings.HasPrefix(warnings[0], "claude-mcp: "), warnings[0])
+	require.NotContains(t, warnings[0], "\n")
+	require.Equal(t, map[string]any{"go@m": true}, readEnabledPlugins(t, sess.SessionRoot))
+}
+
+func TestSessionService_ApplyClaudeSettings_MalformedSettingsWarnsPerKind(t *testing.T) {
+	service, sess := addMcpTestSession(t)
+	require.NoError(t, service.store.UpdateBundles(sess.ID, []string{"go", "homelab"}))
+	require.NoError(t, os.MkdirAll(filepath.Join(sess.SessionRoot, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sess.SessionRoot, ".claude", "settings.local.json"), []byte("{not json"), 0o644))
+
+	warnings := service.applyClaudeSettings(context.Background(), sess)
+	var plugins, mcp int
+	for _, w := range warnings {
+		require.NotContains(t, w, "\n")
+		if strings.HasPrefix(w, "claude-plugins: ") {
+			plugins++
+		}
+		if strings.HasPrefix(w, "claude-mcp: ") {
+			mcp++
+		}
+	}
+	require.Equal(t, 1, plugins, warnings)
+	require.Equal(t, 1, mcp, warnings)
+}
+
+func TestSessionService_ActivateSession_WritesMcpServers(t *testing.T) {
+	service, sessionStore, _, ws1ID, _ := setupTwoRepoSessionService(t)
+	catalog, servers := testMcpCatalog()
+	service.SetBundleCatalog(catalog, servers)
+
+	ctx := context.Background()
+	sess, err := service.CreateSession(ctx, CreateSessionInput{
+		Name:       "revive-mcp",
+		Workspaces: []WorkspaceBranchSpec{{WorkspaceID: ws1ID, BaseBranch: "main"}},
+		Bundles:    []string{"homelab"},
+	})
+	require.NoError(t, err)
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+
+	_, err = service.ArchiveSession(ctx, sess.ID)
+	require.NoError(t, err)
+
+	service.SetBundleCatalog(catalog, bundles.Servers{"ha": json.RawMessage(`{"type":"http","url":"https://y"}`)})
+	_, err = service.ActivateSession(ctx, sess.ID)
+	require.NoError(t, err)
+
+	require.Equal(t, map[string]any{"ha": map[string]any{"type": "http", "url": "https://y"}}, readMcpServers(t, sess.SessionRoot))
+	require.Equal(t, []any{"ha"}, readEnabledMcpServers(t, sess.SessionRoot))
 }
