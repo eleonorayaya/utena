@@ -24,6 +24,7 @@ func BuildServer(app *App, cfg Config) *http.Server {
 
 	r.Use(httplog.RequestLogger(slog.Default(), httplogOpts))
 	r.Use(middleware.Recoverer)
+	r.Use(middleware.Compress(5, "application/json"))
 	r.Use(middleware.URLFormat)
 	r.Use(render.SetContentType(render.ContentTypeJSON))
 

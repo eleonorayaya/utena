@@ -34,6 +34,16 @@ const (
 	StatusCompleted SessionStatus = "completed"
 )
 
+var ListableStatuses = []SessionStatus{
+	StatusCreating,
+	StatusActive,
+	StatusBroken,
+	StatusPending,
+	StatusInactive,
+	StatusArchived,
+	StatusCompleted,
+}
+
 type Session struct {
 	gorm.Model
 	Name           string                 `json:"name,omitempty"`

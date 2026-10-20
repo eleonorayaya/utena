@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -248,6 +249,29 @@ func TestDaemon_ListSessions(t *testing.T) {
 	}
 	require.True(t, names["session-1"])
 	require.True(t, names["session-2"])
+}
+
+func TestDaemon_ListSessions_GzipWhenAccepted(t *testing.T) {
+	_, router, _, ws1ID, _ := setupTestRouter(t)
+
+	body := fmt.Sprintf(`{"name":"gzipped","workspaces":[{"workspace_id":%d,"base_branch":"main"}]}`, ws1ID)
+	resp := createSessionViaAPI(t, router, body)
+	waitForSessionStatus(t, router, resp.ID, session.StatusActive, 5*time.Second)
+
+	req := httptest.NewRequest("GET", "/sessions", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "gzip", w.Header().Get("Content-Encoding"))
+
+	zr, err := gzip.NewReader(w.Body)
+	require.NoError(t, err)
+	var response session.SessionListResponse
+	require.NoError(t, json.NewDecoder(zr).Decode(&response))
+	require.Len(t, response.Sessions, 1)
+	require.Equal(t, "gzipped", response.Sessions[0].Name)
 }
 
 func TestDaemon_TuiosSessionCreated(t *testing.T) {

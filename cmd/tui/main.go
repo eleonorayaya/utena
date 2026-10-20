@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -22,6 +23,7 @@ var (
 )
 
 func main() {
+	disableResponseCompression()
 	os.Args = rewriteArgs(os.Args)
 	rootCmd := &cobra.Command{
 		Use:          "utena",
@@ -45,6 +47,10 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func disableResponseCompression() {
+	http.DefaultTransport.(*http.Transport).DisableCompression = true
 }
 
 func setupLogging() {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -48,7 +49,12 @@ func parseAPIError(res *http.Response, fallback string) ErrMsg {
 
 func (c *client) fetchSessions() tea.Cmd {
 	return func() tea.Msg {
-		res, err := c.httpClient.Get(c.baseURL + "/sessions")
+		statuses := make([]string, len(session.ListableStatuses))
+		for i, s := range session.ListableStatuses {
+			statuses[i] = string(s)
+		}
+		q := url.Values{"status": {strings.Join(statuses, ",")}}
+		res, err := c.httpClient.Get(c.baseURL + "/sessions?" + q.Encode())
 		if err != nil {
 			log.Printf("[ERROR] fetch sessions: %v", err)
 			return ErrMsg{err}

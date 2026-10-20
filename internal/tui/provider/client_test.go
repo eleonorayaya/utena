@@ -58,6 +58,13 @@ func recordingServer(t *testing.T, status int, response string) (*httptest.Serve
 	return srv, rec
 }
 
+func TestFetchSessions_SkipsDeleted(t *testing.T) {
+	srv, rec := recordingServer(t, http.StatusOK, `{"sessions":[]}`)
+	newClient(srv.URL).fetchSessions()()
+	assert.Equal(t, "/sessions", rec.path)
+	assert.Equal(t, []string{"creating,active,broken,pending,inactive,archived,completed"}, rec.query["status"])
+}
+
 func TestFetchBundles_DecodesCatalog(t *testing.T) {
 	srv, rec := recordingServer(t, http.StatusOK, `{"bundles":[{"name":"go","plugins":["go@m"]}]}`)
 	msg := newClient(srv.URL).fetchBundles()()
