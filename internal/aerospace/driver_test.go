@@ -155,3 +155,21 @@ func TestFocusedWindow_RunnerError(t *testing.T) {
 	assert.ErrorIs(t, err, boom)
 	assert.False(t, ok)
 }
+
+func TestFocusedWorkspace_ArgvAndDecode(t *testing.T) {
+	r := &fakeRunner{out: []byte(`[{"workspace":"T"}]`)}
+
+	ws, err := newDriver(r).FocusedWorkspace(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "T", ws)
+	assert.Equal(t, [][]string{{"aerospace", "list-workspaces", "--focused", "--json"}}, r.calls)
+}
+
+func TestFocusedWorkspace_RunnerError(t *testing.T) {
+	boom := errors.New("boom")
+
+	_, err := newDriver(&fakeRunner{err: boom}).FocusedWorkspace(context.Background())
+
+	assert.ErrorIs(t, err, boom)
+}

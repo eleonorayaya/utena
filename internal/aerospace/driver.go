@@ -62,6 +62,23 @@ func (d *Driver) FocusedWindow(ctx context.Context) (wm.Window, bool, error) {
 	return windows[0], true, nil
 }
 
+func (d *Driver) FocusedWorkspace(ctx context.Context) (string, error) {
+	out, err := d.runner.Run(ctx, "aerospace", "list-workspaces", "--focused", "--json")
+	if err != nil {
+		return "", fmt.Errorf("aerospace list-workspaces: %w", err)
+	}
+	var wire []struct {
+		Workspace string `json:"workspace"`
+	}
+	if err := json.Unmarshal(out, &wire); err != nil {
+		return "", fmt.Errorf("aerospace list-workspaces: %w", err)
+	}
+	if len(wire) == 0 {
+		return "", nil
+	}
+	return wire[0].Workspace, nil
+}
+
 func (d *Driver) listWindows(ctx context.Context, filter ...string) ([]wm.Window, error) {
 	args := append([]string{"list-windows"}, filter...)
 	args = append(args, "--json", "--format", "%{window-id} %{window-title} %{workspace}")

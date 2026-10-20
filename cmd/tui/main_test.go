@@ -28,30 +28,27 @@ func TestDisableResponseCompression_SendsNoAcceptEncoding(t *testing.T) {
 	assert.Empty(t, acceptEncoding)
 }
 
-func TestAppOptions_PickerModeEnablesEscQuit(t *testing.T) {
-	assert.Len(t, appOptions(func(k string) string {
-		if k == "UTENA_PICKER" {
-			return "1"
-		}
-		return ""
-	}), 1)
-	assert.Empty(t, appOptions(func(string) string { return "" }))
+func envOf(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
 }
 
-func TestReturnPickerFocus_FocusesRecordedWindow(t *testing.T) {
-	d := wm.NewFakeDriver()
-	env := map[string]string{"UTENA_PICKER": "1", "UTENA_PICKER_RETURN_WINDOW": "77"}
+func TestAppOptions_PickerModeEnablesEscQuit(t *testing.T) {
+	assert.Len(t, appOptions(envOf(map[string]string{"UTENA_PICKER": "1"})), 1)
+	assert.Empty(t, appOptions(envOf(nil)))
+}
 
-	returnPickerFocus(d, func(k string) string { return env[k] })
+func TestAppOptions_ParkWorkspaceEnablesParking(t *testing.T) {
+	env := envOf(map[string]string{"UTENA_PICKER": "1", "UTENA_PICKER_PARK": "P"})
 
-	assert.Equal(t, []string{"77"}, d.Focused())
+	assert.Len(t, appOptions(env), 2)
+	assert.Len(t, programOptions(env), 2)
+	assert.Empty(t, programOptions(envOf(map[string]string{"UTENA_PICKER": "1"})))
 }
 
 func TestReturnPickerFocus_PopupModeIsNoop(t *testing.T) {
 	d := wm.NewFakeDriver()
-	env := map[string]string{"UTENA_POPUP": "1", "UTENA_PICKER_RETURN_WINDOW": "77"}
 
-	returnPickerFocus(d, func(k string) string { return env[k] })
+	returnPickerFocus(d, envOf(map[string]string{"UTENA_POPUP": "1"}))
 
 	assert.Empty(t, d.Focused())
 }

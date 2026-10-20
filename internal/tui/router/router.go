@@ -44,6 +44,12 @@ func (r Router) navigateTo(target View) (Router, tea.Cmd) {
 	return r.Init()
 }
 
+func (r Router) Reset(view View) (Router, tea.Cmd) {
+	r.viewStack = nil
+	r.activeView = view
+	return r.Init()
+}
+
 func (r Router) navigateBack() (Router, tea.Cmd) {
 	if len(r.viewStack) == 0 {
 		return r, nil

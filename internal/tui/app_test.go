@@ -78,3 +78,53 @@ func TestApp_OtherViewsFitWindowWithFooter(t *testing.T) {
 		assert.LessOrEqual(t, strings.Count(out, "\n")+1, 30, "view %v", v)
 	}
 }
+
+func runCmd(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var msgs []tea.Msg
+		for _, c := range batch {
+			msgs = append(msgs, runCmd(c)...)
+		}
+		return msgs
+	}
+	return []tea.Msg{msg}
+}
+
+func TestParkFilter_TurnsQuitIntoPark(t *testing.T) {
+	assert.Equal(t, ParkMsg{}, ParkFilter(nil, tea.QuitMsg{}))
+	key := tea.KeyMsg{Type: tea.KeyEsc}
+	assert.Equal(t, key, ParkFilter(nil, key))
+}
+
+func TestApp_CtrlCInterruptsWhenParking(t *testing.T) {
+	_, cmd := NewApp("0", router.SessionListView, WithPark(func() error { return nil })).Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	assert.Equal(t, tea.InterruptMsg{}, cmd())
+
+	_, cmd = NewApp("0", router.SessionListView).Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	assert.Equal(t, tea.QuitMsg{}, cmd())
+}
+
+func TestApp_ParkReturnsToSessionListAndParks(t *testing.T) {
+	parked := 0
+	var m tea.Model = NewApp("0", router.SessionListView, WithPark(func() error {
+		parked++
+		return nil
+	}))
+	m, _ = m.Update(router.NavigateToMsg{Target: router.SessionFormView})
+	assert.Equal(t, router.SessionFormView, m.(App).router.ActiveView())
+
+	m, cmd := m.Update(ParkMsg{})
+	runCmd(cmd)
+
+	assert.Equal(t, router.SessionListView, m.(App).router.ActiveView())
+	assert.Equal(t, 1, parked)
+}
+
+func TestApp_FocusRefetchesOnlyWhenParking(t *testing.T) {
+	_, cmd := NewApp("0", router.SessionListView, WithPark(func() error { return nil })).Update(tea.FocusMsg{})
+	assert.NotEmpty(t, runCmd(cmd))
+}

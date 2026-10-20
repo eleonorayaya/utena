@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -85,8 +87,11 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	setupLogging()
 	loadTheme()
 
-	p := tea.NewProgram(tui.NewApp(port, router.SessionListView, appOptions(os.Getenv)...))
+	p := tea.NewProgram(tui.NewApp(port, router.SessionListView, appOptions(os.Getenv)...), programOptions(os.Getenv)...)
 	_, err := p.Run()
+	if errors.Is(err, tea.ErrInterrupted) {
+		err = nil
+	}
 	closeOwnPopup()
 	returnPickerFocus(aerospace.NewDriver(), os.Getenv)
 	return err
@@ -96,7 +101,23 @@ func appOptions(getenv func(string) string) []tui.Option {
 	if getenv(picker.EnvPicker) == "" {
 		return nil
 	}
-	return []tui.Option{tui.WithEscQuits()}
+	opts := []tui.Option{tui.WithEscQuits()}
+	if workspace := getenv(picker.EnvPark); workspace != "" {
+		title := getenv(picker.EnvTitle)
+		opts = append(opts, tui.WithPark(func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), wmTimeout)
+			defer cancel()
+			return picker.Park(ctx, aerospace.NewDriver(), title, workspace, picker.DefaultReturnPath())
+		}))
+	}
+	return opts
+}
+
+func programOptions(getenv func(string) string) []tea.ProgramOption {
+	if getenv(picker.EnvPicker) == "" || getenv(picker.EnvPark) == "" {
+		return nil
+	}
+	return []tea.ProgramOption{tea.WithFilter(tui.ParkFilter), tea.WithReportFocus()}
 }
 
 func closeOwnPopup() {

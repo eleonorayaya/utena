@@ -12,15 +12,16 @@ type Move struct {
 }
 
 type FakeDriver struct {
-	mu       sync.Mutex
-	windows  []Window
-	moves    []Move
-	focused  []string
-	current  string
-	MoveErr  error
-	ListErr  error
-	FocusErr error
-	OnFocus  func(windowID string)
+	mu        sync.Mutex
+	windows   []Window
+	moves     []Move
+	focused   []string
+	current   string
+	workspace string
+	MoveErr   error
+	ListErr   error
+	FocusErr  error
+	OnFocus   func(windowID string)
 }
 
 var _ Driver = (*FakeDriver)(nil)
@@ -127,6 +128,18 @@ func (f *FakeDriver) FocusedWindow(ctx context.Context) (Window, bool, error) {
 		return f.windows[i], true, nil
 	}
 	return Window{ID: f.current}, true, nil
+}
+
+func (f *FakeDriver) SetFocusedWorkspace(workspace string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.workspace = workspace
+}
+
+func (f *FakeDriver) FocusedWorkspace(ctx context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.workspace, nil
 }
 
 func (f *FakeDriver) indexLocked(id string) int {
