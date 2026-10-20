@@ -727,6 +727,7 @@ func (s *SessionService) runAddWorkspace(sessionID uint, spec WorkspaceBranchSpe
 		}
 	}
 
+	setupWarnings = append(setupWarnings, s.runWorkspaceActions(ctx, sess, ws, &result)...)
 	setupWarnings = append(setupWarnings, s.applyClaudeSettings(ctx, sess)...)
 
 	sess.Status = StatusActive

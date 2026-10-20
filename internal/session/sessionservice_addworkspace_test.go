@@ -194,3 +194,43 @@ func waitForUpdatedAfter(t *testing.T, store *SessionStore, id uint, since time.
 	}
 	t.Fatalf("session %d was not updated after %v within %v", id, since, timeout)
 }
+
+func TestSessionService_AddWorkspace_RunsSetupActions(t *testing.T) {
+	service, sessionStore, _, ws1ID, ws2ID := setupTwoRepoSessionService(t)
+
+	ws2, err := service.workspaceService.GetWorkspace(context.Background(), ws2ID)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(ws2.Path, ".env.example"), []byte("A=1\n"), 0o644))
+	pmScript := filepath.Join(t.TempDir(), "fake-pm")
+	writeScript(t, pmScript, "#!/bin/sh\ntest -f .env && touch dep-installed\n")
+	writeWorkspaceConfig(t, ws2.Path, `{
+		"setup_actions": [
+			{"type": "install_deps", "package_manager": "`+pmScript+`"},
+			{"type": "copy_file", "src": ".env.example", "dest": ".env"}
+		]
+	}`)
+
+	ctx := context.Background()
+	sess, err := service.CreateSession(ctx, CreateSessionInput{
+		Name:       "add-actions",
+		Workspaces: []WorkspaceBranchSpec{{WorkspaceID: ws1ID, BaseBranch: "main"}},
+	})
+	require.NoError(t, err)
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+
+	updated, err := service.AddWorkspace(ctx, sess.ID, WorkspaceBranchSpec{WorkspaceID: ws2ID, BaseBranch: "main"})
+	require.NoError(t, err)
+	waitForUpdatedAfter(t, sessionStore, sess.ID, updated.UpdatedAt, 10*time.Second)
+
+	final, err := sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.NotContains(t, final.StatusError, "copy_file")
+	require.NotContains(t, final.StatusError, "install failed")
+
+	wtDir := filepath.Join(service.sessionsRoot, "add-actions", "repo2")
+	data, err := os.ReadFile(filepath.Join(wtDir, ".env"))
+	require.NoError(t, err)
+	require.Equal(t, "A=1\n", string(data))
+	_, err = os.Stat(filepath.Join(wtDir, "dep-installed"))
+	require.NoError(t, err, "install_deps should run after copy_file in the added worktree")
+}

@@ -391,8 +391,9 @@ func (e *setupExecution) execInstallDeps(ctx context.Context, def stepDef) error
 		pm = detectPackageManager(worktreePath)
 	}
 
+	name, args := installCommand(pm, exec.LookPath)
 	return traceOp(ctx, "install_deps", func() error {
-		cmd := exec.CommandContext(ctx, pm, "install")
+		cmd := exec.CommandContext(ctx, name, args...)
 		cmd.Dir = worktreePath
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -400,6 +401,43 @@ func (e *setupExecution) execInstallDeps(ctx context.Context, def stepDef) error
 		}
 		return nil
 	}, "pm", pm, "dir", worktreePath)
+}
+
+func installCommand(pm string, lookPath func(string) (string, error)) (string, []string) {
+	if !strings.ContainsRune(pm, filepath.Separator) {
+		if mise, err := lookPath("mise"); err == nil {
+			return mise, []string{"exec", "--", pm, "install"}
+		}
+	}
+	return pm, []string{"install"}
+}
+
+func (s *SessionService) runWorkspaceActions(ctx context.Context, sess *Session, ws *workspace.Workspace, result *worktreeSetupResult) []string {
+	cfg, err := loadWorkspaceConfig(ws.Path)
+	if err != nil {
+		return []string{fmt.Sprintf("%s: load workspace config: %s", ws.Name, err.Error())}
+	}
+	if cfg == nil {
+		return nil
+	}
+
+	e := &setupExecution{
+		svc:     s,
+		sess:    sess,
+		wsByID:  map[uint]*workspace.Workspace{ws.ID: ws},
+		results: map[uint]*worktreeSetupResult{ws.ID: result},
+	}
+	defs := buildSetupSteps([]stepWorkspace{{ID: ws.ID, Name: ws.Name, Path: ws.Path}}, map[uint]*WorkspaceConfig{ws.ID: cfg})
+	var warnings []string
+	for _, def := range defs {
+		if def.Kind != StepKindCopyFile && def.Kind != StepKindInstallDeps {
+			continue
+		}
+		if _, err := e.executeStep(ctx, def); err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s: %s", ws.Name, err.Error()))
+		}
+	}
+	return warnings
 }
 
 func (e *setupExecution) execApplyClaude(ctx context.Context) error {
