@@ -322,7 +322,28 @@ func (c *client) setSessionBundles(id uint, names []string) tea.Cmd {
 	}
 }
 
-func (c *client) createSession(name string, specs []SessionWorkspaceSpec, selected []string) tea.Cmd {
+func (c *client) fetchCoderStatus() tea.Cmd {
+	return func() tea.Msg {
+		res, err := c.httpClient.Get(c.baseURL + "/coder/status")
+		if err != nil {
+			log.Printf("[ERROR] fetch coder status: %v", err)
+			return CoderStatusLoadedMsg{Err: err}
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			return CoderStatusLoadedMsg{}
+		}
+		var resp struct {
+			Configured bool `json:"configured"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+			return CoderStatusLoadedMsg{Err: err}
+		}
+		return CoderStatusLoadedMsg{Configured: resp.Configured}
+	}
+}
+
+func (c *client) createSession(name string, specs []SessionWorkspaceSpec, selected []string, backend string) tea.Cmd {
 	return func() tea.Msg {
 		wss := make([]map[string]any, 0, len(specs))
 		for _, s := range specs {
@@ -343,6 +364,9 @@ func (c *client) createSession(name string, specs []SessionWorkspaceSpec, select
 		}
 		if selected != nil {
 			body["bundles"] = selected
+		}
+		if backend != "" {
+			body["backend"] = backend
 		}
 		jsonBody, err := json.Marshal(body)
 		if err != nil {

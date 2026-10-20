@@ -2,7 +2,9 @@ package sessionform
 
 import (
 	"errors"
+	"fmt"
 	"github.com/eleonorayaya/utena/internal/tui/uitest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -481,4 +483,70 @@ func TestForm_EscFromBundlePickerReturnsToField(t *testing.T) {
 	assert.Equal(t, overlayNone, m.overlay)
 	assert.Equal(t, fieldBundles, m.form.Focused())
 	assert.Nil(t, m.selectedBundles)
+}
+
+func submittedBackend(t *testing.T, cmd tea.Cmd) string {
+	t.Helper()
+	require.NotNil(t, cmd)
+	msg := cmd()
+	assert.Equal(t, "provider.createSessionIntentMsg", fmt.Sprintf("%T", msg))
+	return reflect.ValueOf(msg).FieldByName("backend").String()
+}
+
+func namedAndLoaded(t *testing.T, m Model) Model {
+	t.Helper()
+	m, _ = m.Update(workspacepicker.SelectedMsg{Workspaces: []workspace.Workspace{gitWS(1, "api")}})
+	m = loaded(m, 1, "main", "main")
+	for _, r := range "my-feature" {
+		m, _ = m.Update(press(string(r)))
+	}
+	return m
+}
+
+func TestForm_InitFetchesCoderStatus(t *testing.T) {
+	_, cmd := New().Init()
+	assert.Contains(t, uitest.MsgTypes(cmd), "provider.fetchCoderStatusIntentMsg")
+}
+
+func TestForm_BackendHiddenWithoutCoder(t *testing.T) {
+	m := namedAndLoaded(t, started(t, gitWS(1, "api")))
+	m, _ = m.Update(provider.CoderStatusLoadedMsg{Configured: false})
+	assert.NotContains(t, m.View(), "Backend")
+	m, _ = m.Update(press("tab"))
+	assert.Equal(t, fieldName, m.form.Focused(), "name stays the last field")
+	_, cmd := m.Update(press("enter"))
+	assert.Equal(t, "", submittedBackend(t, cmd))
+}
+
+func TestForm_BackendChoiceWhenCoderConfigured(t *testing.T) {
+	m := started(t, gitWS(1, "api"))
+	m, _ = m.Update(provider.CoderStatusLoadedMsg{Configured: true})
+	m = namedAndLoaded(t, m)
+	assert.Contains(t, m.View(), "Backend")
+	assert.Contains(t, m.View(), "● local")
+
+	m, _ = m.Update(press("tab"))
+	assert.Equal(t, fieldBackend, m.form.Focused())
+	assert.True(t, m.Keys().(keyMap).Create.Enabled())
+	m, _ = m.Update(press("right"))
+	assert.Equal(t, "coder", m.backend.Value())
+	assert.Contains(t, m.View(), "● coder")
+	_, cmd := m.Update(press("enter"))
+	assert.Equal(t, "coder", submittedBackend(t, cmd))
+}
+
+func TestForm_LocalBackendSendsNoBackend(t *testing.T) {
+	m := started(t, gitWS(1, "api"))
+	m, _ = m.Update(provider.CoderStatusLoadedMsg{Configured: true})
+	m = namedAndLoaded(t, m)
+	_, cmd := m.Update(press("enter"))
+	assert.Equal(t, "", submittedBackend(t, cmd))
+}
+
+func TestForm_CoderStatusErrorHidesBackend(t *testing.T) {
+	m := started(t, gitWS(1, "api"))
+	m, _ = m.Update(provider.CoderStatusLoadedMsg{Configured: true})
+	m, _ = m.Update(provider.CoderStatusLoadedMsg{Err: errors.New("down")})
+	assert.False(t, m.coderAvailable)
+	assert.NotContains(t, m.View(), "Backend")
 }

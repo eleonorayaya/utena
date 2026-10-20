@@ -1,6 +1,7 @@
 package sessionlist
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -10,9 +11,11 @@ import (
 	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/git"
+	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRenderRow_Columns(t *testing.T) {
@@ -81,4 +84,26 @@ func TestRenderRow_BrowserMarkerOnlyForOwnSession(t *testing.T) {
 	m := New()
 	m, _ = m.Update(provider.BrowserStateUpdatedMsg{State: browser.SessionsView{Sessions: map[uint]browser.SessionBrowser{8: {State: "open"}}}})
 	assert.NotContains(t, m.renderRow(withClaude(7, "web", claude.StatusIdle), false, 40), "◫")
+}
+
+func TestRenderRow_CoderSessionShowsMirroredState(t *testing.T) {
+	src := session.Session{
+		Name:            "remote-fix",
+		Status:          session.StatusActive,
+		Backend:         session.BackendCoder,
+		CoderWorkspace:  "remote-fix",
+		RemoteAttention: claude.StatusNeedsAttention,
+		PullRequests:    []git.PullRequest{{State: git.PRStateOpen}},
+		LastUsedAt:      time.Now().Add(-5 * time.Minute),
+	}
+	data, err := json.Marshal(session.NewSessionResponse(&src))
+	require.NoError(t, err)
+	var s session.Session
+	require.NoError(t, json.Unmarshal(data, &s))
+
+	out := New().renderRow(s, false, 50)
+	assert.True(t, strings.HasPrefix(out, "  ! remote-fix"), out)
+	assert.Contains(t, out, "●1")
+	assert.Equal(t, sectionOf(src), sectionOf(s))
+	assert.Equal(t, "coder · remote-fix", s.WorkspaceDisplay())
 }

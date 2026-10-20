@@ -91,6 +91,7 @@ type SessionService struct {
 	claudeGlobalConfig   string
 	trustedMu            sync.Mutex
 	trustedRoots         map[string]struct{}
+	remote               RemoteBackend
 }
 
 func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, setupStepStore *SessionSetupStepStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, muxService *mux.Service, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
@@ -166,6 +167,7 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.markOrphanedSessionsBroken(sessions)
 	s.markLegacyLayoutSessionsBroken(sessions)
 	s.recoverStuckCreatingSessions(sessions)
+	s.resumeCoderDeletes(sessions)
 	s.reconcileMuxState(ctx, sessions)
 	s.syncWatchedSessionBranches(ctx, sessions)
 	return nil
@@ -198,7 +200,7 @@ func (s *SessionService) markOrphanedSessionsBroken(sessions []Session) {
 		if sess.Status == StatusDeleted || sess.Status == StatusArchived || sess.Status == StatusBroken {
 			continue
 		}
-		if len(sess.Worktrees) > 0 {
+		if len(sess.Worktrees) > 0 || sess.IsCoder() {
 			continue
 		}
 		if err := s.markSessionBroken(sess, orphanedSessionError); err != nil {
@@ -289,6 +291,10 @@ func (s *SessionService) attachPullRequests(sessions []Session) {
 	}
 	byBranch := groupPRsByBranch(s.gitService.GetPRsForBranches(branchIDs))
 	for i := range sessions {
+		if sessions[i].IsCoder() {
+			sessions[i].PullRequests = sessions[i].RemotePRs
+			continue
+		}
 		var prs []git.PullRequest
 		for _, id := range sessions[i].BranchIDs() {
 			prs = append(prs, byBranch[id]...)
@@ -333,6 +339,10 @@ func (s *SessionService) GetSession(ctx context.Context, id uint) (*Session, err
 		return nil, err
 	}
 	s.populateMuxWindows(ctx, sess)
+	if sess.IsCoder() {
+		sess.PullRequests = sess.RemotePRs
+		return sess, nil
+	}
 	sess.PullRequests = s.gitService.GetPRsForBranches(sess.BranchIDs())
 	return sess, nil
 }
@@ -359,6 +369,7 @@ type CreateSessionInput struct {
 	Actions         []*SessionAction
 	Bundles         []string
 	LeaderSessionID *uint
+	Backend         Backend
 }
 
 type assignedSlot struct {
@@ -439,6 +450,17 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 	}
 	if err := ValidateSessionName(name); err != nil {
 		return nil, common.NewInvalidRequest(err.Error())
+	}
+
+	switch input.Backend {
+	case "", BackendLocal:
+	case BackendCoder:
+		if len(slots) != 1 {
+			return nil, common.NewInvalidRequest("coder sessions take exactly one workspace")
+		}
+		return s.createCoderSession(ctx, name, assignedSlot{spec: slots[0].spec, ws: slots[0].ws}, input)
+	default:
+		return nil, common.NewInvalidRequest(fmt.Sprintf("unknown backend %q: must be local or coder", input.Backend))
 	}
 
 	sessionRoot := filepath.Join(s.sessionsRoot, SanitizeSessionName(name))
@@ -602,6 +624,9 @@ func (s *SessionService) AddWorkspace(ctx context.Context, sessionID uint, spec 
 
 	if sess.Status == StatusDeleted || sess.Status == StatusArchived {
 		return nil, common.NewInvalidRequest("cannot add workspace to deleted or archived session")
+	}
+	if sess.IsCoder() {
+		return nil, ErrCoderUnsupported
 	}
 
 	ws, err := s.workspaceService.GetWorkspace(ctx, spec.WorkspaceID)
@@ -768,6 +793,9 @@ func (s *SessionService) SetBundles(ctx context.Context, id uint, names []string
 	}
 	if sess.Status == StatusDeleted {
 		return nil, common.NewInvalidRequest("cannot set bundles on a deleted session")
+	}
+	if sess.IsCoder() {
+		return nil, ErrCoderUnsupported
 	}
 	sess.Bundles = bundles.Union(names)
 	if err := s.store.UpdateBundles(sess.ID, sess.Bundles); err != nil {
@@ -1246,6 +1274,9 @@ func (s *SessionService) RepairSession(_ context.Context, id uint) (*Session, er
 	if sess.Status != StatusBroken && !isWarned {
 		return nil, ErrSessionNotBroken
 	}
+	if sess.IsCoder() {
+		return nil, ErrCoderUnsupported
+	}
 
 	if len(sess.Worktrees) == 0 {
 		return nil, common.NewInvalidRequest("session has no worktrees; cannot repair — please recreate")
@@ -1296,6 +1327,9 @@ func (s *SessionService) ActivateSession(ctx context.Context, id uint) (*Session
 
 	if session.Status == StatusCreating || session.Status == StatusBroken {
 		return nil, ErrCannotActivate
+	}
+	if session.IsCoder() {
+		return s.activateCoderSession(ctx, session)
 	}
 
 	s.ensureSessionWorktrees(ctx, session)
@@ -1394,6 +1428,10 @@ func (s *SessionService) DeleteSession(ctx context.Context, id uint, deleteBranc
 		if !session.CanDelete() {
 			return ErrSessionNotArchived
 		}
+	}
+
+	if session.IsCoder() {
+		return s.deleteCoderSession(ctx, session)
 	}
 
 	if deleteBranch {
@@ -1572,7 +1610,7 @@ func (s *SessionService) handleMuxSessionCreated(ctx context.Context, event even
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByMuxName(data.SessionName)
+	sess, err := s.findSessionForHook(data)
 	if err != nil {
 		slog.Debug("session not found for session-created hook", "mux_name", data.SessionName, "error", err)
 		return nil
@@ -1590,7 +1628,7 @@ func (s *SessionService) handleMuxSessionClosed(ctx context.Context, event event
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByMuxName(data.SessionName)
+	sess, err := s.findSessionForHook(data)
 	if err != nil {
 		slog.Debug("session not found for session-closed hook", "mux_name", data.SessionName, "error", err)
 		return nil
@@ -1620,7 +1658,7 @@ func (s *SessionService) handleMuxClientSessionChanged(ctx context.Context, even
 		}
 	}
 
-	sess, err := s.findSessionByMuxName(data.SessionName)
+	sess, err := s.findSessionForHook(data)
 	if err != nil {
 		slog.Debug("session not found for client-session-changed hook", "mux_name", data.SessionName, "error", err)
 		return nil
@@ -1641,7 +1679,7 @@ func (s *SessionService) handleMuxClientAttached(ctx context.Context, event even
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByMuxName(data.SessionName)
+	sess, err := s.findSessionForHook(data)
 	if err != nil {
 		slog.Debug("session not found for client-attached hook", "mux_name", data.SessionName, "error", err)
 		return nil
@@ -1671,7 +1709,7 @@ func (s *SessionService) handleMuxClientDetached(ctx context.Context, event even
 		return fmt.Errorf("unexpected event data type: %T", event.Data)
 	}
 
-	sess, err := s.findSessionByMuxName(data.SessionName)
+	sess, err := s.findSessionForHook(data)
 	if err != nil {
 		slog.Debug("session not found for client-detached hook", "mux_name", data.SessionName, "error", err)
 		return nil
@@ -1700,6 +1738,9 @@ func (s *SessionService) ArchiveSession(ctx context.Context, id uint) (*Session,
 	}
 	if !sess.CanArchive() {
 		return nil, fmt.Errorf("cannot archive session in status %s", sess.Status)
+	}
+	if sess.IsCoder() {
+		return s.archiveCoderSession(ctx, sess)
 	}
 
 	if sess.MuxSessionID != nil {
@@ -1750,6 +1791,9 @@ func (s *SessionService) ReconcileSession(ctx context.Context, id uint) (*Sessio
 }
 
 func (s *SessionService) reconcileLoadedSession(ctx context.Context, sess *Session) (*Session, error) {
+	if sess.IsCoder() {
+		return sess, nil
+	}
 	if sess.Status == StatusCreating || sess.Status == StatusDeleted || sess.Status == StatusArchived || sess.Status == StatusPending {
 		return sess, nil
 	}

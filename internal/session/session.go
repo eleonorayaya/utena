@@ -23,6 +23,13 @@ var ErrCannotActivate = common.NewInvalidRequest("cannot activate session in cur
 
 type SessionStatus string
 
+type Backend string
+
+const (
+	BackendLocal Backend = "local"
+	BackendCoder Backend = "coder"
+)
+
 const (
 	StatusCreating  SessionStatus = "creating"
 	StatusActive    SessionStatus = "active"
@@ -46,23 +53,33 @@ var ListableStatuses = []SessionStatus{
 
 type Session struct {
 	gorm.Model
-	Name            string                 `json:"name,omitempty"`
-	Status          SessionStatus          `json:"status"`
-	IsAttached      bool                   `json:"is_attached"`
-	LastUsedAt      time.Time              `json:"last_used_at"`
-	SessionRoot     string                 `json:"session_root,omitempty" gorm:"index"`
-	Bundles         []string               `json:"bundles,omitempty" gorm:"serializer:json"`
-	ClaudeSessions  []claude.ClaudeSession `json:"claude_sessions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	SessionActions  []SessionAction        `json:"session_actions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	SetupSteps      []SessionSetupStep     `json:"setup_steps,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	Worktrees       []SessionWorktree      `json:"worktrees,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	Blockers        []SessionBlocker       `json:"blockers,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	Branches        []SessionBranch        `json:"branches,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	PullRequests    []git.PullRequest      `json:"pull_requests,omitempty" gorm:"-"`
-	MuxSessionID    *uint                  `json:"mux_session_id,omitempty" gorm:"uniqueIndex"`
-	StatusError     string                 `json:"status_error,omitempty"`
-	LeaderSessionID *uint                  `json:"leader_session_id,omitempty"`
-	MuxSession      *mux.Session           `json:"mux_session,omitempty" gorm:"foreignKey:MuxSessionID"`
+	Name            string                     `json:"name,omitempty"`
+	Status          SessionStatus              `json:"status"`
+	IsAttached      bool                       `json:"is_attached"`
+	LastUsedAt      time.Time                  `json:"last_used_at"`
+	SessionRoot     string                     `json:"session_root,omitempty" gorm:"index"`
+	Bundles         []string                   `json:"bundles,omitempty" gorm:"serializer:json"`
+	ClaudeSessions  []claude.ClaudeSession     `json:"claude_sessions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	SessionActions  []SessionAction            `json:"session_actions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	SetupSteps      []SessionSetupStep         `json:"setup_steps,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Worktrees       []SessionWorktree          `json:"worktrees,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Blockers        []SessionBlocker           `json:"blockers,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Branches        []SessionBranch            `json:"branches,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	PullRequests    []git.PullRequest          `json:"pull_requests,omitempty" gorm:"-"`
+	MuxSessionID    *uint                      `json:"mux_session_id,omitempty" gorm:"uniqueIndex"`
+	StatusError     string                     `json:"status_error,omitempty"`
+	LeaderSessionID *uint                      `json:"leader_session_id,omitempty"`
+	MuxSession      *mux.Session               `json:"mux_session,omitempty" gorm:"foreignKey:MuxSessionID"`
+	Backend         Backend                    `json:"backend,omitempty" gorm:"default:local"`
+	CoderWorkspace  string                     `json:"coder_workspace,omitempty"`
+	RemoteSessionID *uint                      `json:"remote_session_id,omitempty"`
+	RemoteAttention claude.ClaudeSessionStatus `json:"remote_attention_status,omitempty"`
+	RemotePRs       []git.PullRequest          `json:"-" gorm:"serializer:json"`
+	RemoteSyncedAt  *time.Time                 `json:"remote_synced_at,omitempty"`
+}
+
+func (s *Session) IsCoder() bool {
+	return s.Backend == BackendCoder
 }
 
 var unwatchedStatuses = []SessionStatus{StatusDeleted, StatusArchived, StatusCompleted, StatusPending, StatusCreating}
@@ -86,6 +103,9 @@ func (s *Session) IsCreating() bool {
 
 // AttentionStatus rolls up the session's Claude statuses into a single value.
 func (s *Session) AttentionStatus() claude.ClaudeSessionStatus {
+	if s.IsCoder() {
+		return s.RemoteAttention
+	}
 	return claude.AggregateStatus(s.ClaudeSessions)
 }
 
@@ -157,6 +177,9 @@ func (s *Session) WorkspaceDisplay() string {
 	}
 	switch len(names) {
 	case 0:
+		if s.IsCoder() && s.CoderWorkspace != "" {
+			return "coder · " + s.CoderWorkspace
+		}
 		return "no workspace"
 	case 1:
 		return names[0]

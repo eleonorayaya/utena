@@ -20,7 +20,7 @@ type Service struct {
 	windowsMu         sync.RWMutex
 	nameLocks         sync.Map
 	activationsMu     sync.Mutex
-	activationWaiters []chan string
+	activationWaiters []chan Activation
 	resources         *resourceSampler
 }
 
@@ -138,26 +138,26 @@ func (t *Service) handleSessionActivated(ctx context.Context, event eventbus.Eve
 	t.activationsMu.Lock()
 	defer t.activationsMu.Unlock()
 	for _, ch := range t.activationWaiters {
-		ch <- data.SessionName
+		ch <- Activation{SessionName: data.SessionName, Host: data.Host}
 	}
 	t.activationWaiters = nil
 	return nil
 }
 
-func (t *Service) WaitForActivation(ctx context.Context) (string, error) {
-	ch := make(chan string, 1)
+func (t *Service) WaitForActivation(ctx context.Context) (Activation, error) {
+	ch := make(chan Activation, 1)
 	t.activationsMu.Lock()
 	t.activationWaiters = append(t.activationWaiters, ch)
 	t.activationsMu.Unlock()
 
 	select {
-	case name := <-ch:
-		return name, nil
+	case activation := <-ch:
+		return activation, nil
 	case <-ctx.Done():
 		t.activationsMu.Lock()
-		t.activationWaiters = slices.DeleteFunc(t.activationWaiters, func(c chan string) bool { return c == ch })
+		t.activationWaiters = slices.DeleteFunc(t.activationWaiters, func(c chan Activation) bool { return c == ch })
 		t.activationsMu.Unlock()
-		return "", ctx.Err()
+		return Activation{}, ctx.Err()
 	}
 }
 
@@ -343,24 +343,24 @@ func (t *Service) setStatus(name string, status SessionStatus) (SessionStatus, b
 	return prev, true
 }
 
-func (t *Service) HandleClientSessionChanged(ctx context.Context, name string) error {
+func (t *Service) HandleClientSessionChanged(ctx context.Context, name, host string) error {
 	return t.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.MuxClientSessionChanged,
-		Data: eventbus.MuxHookEvent{SessionName: name},
+		Data: eventbus.MuxHookEvent{SessionName: name, Host: host},
 	})
 }
 
-func (t *Service) HandleClientAttached(ctx context.Context, name string) error {
+func (t *Service) HandleClientAttached(ctx context.Context, name, host string) error {
 	return t.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.MuxClientAttached,
-		Data: eventbus.MuxHookEvent{SessionName: name},
+		Data: eventbus.MuxHookEvent{SessionName: name, Host: host},
 	})
 }
 
-func (t *Service) HandleClientDetached(ctx context.Context, name string) error {
+func (t *Service) HandleClientDetached(ctx context.Context, name, host string) error {
 	return t.eventBus.Publish(ctx, eventbus.Event{
 		Type: eventbus.MuxClientDetached,
-		Data: eventbus.MuxHookEvent{SessionName: name},
+		Data: eventbus.MuxHookEvent{SessionName: name, Host: host},
 	})
 }
 

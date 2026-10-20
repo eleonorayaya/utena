@@ -34,11 +34,11 @@ func (c *Controller) HandleHook(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch event {
 	case "client-session-changed":
-		err = c.service.HandleClientSessionChanged(ctx, req.SessionName)
+		err = c.service.HandleClientSessionChanged(ctx, req.SessionName, req.Host)
 	case "client-attached":
-		err = c.service.HandleClientAttached(ctx, req.SessionName)
+		err = c.service.HandleClientAttached(ctx, req.SessionName, req.Host)
 	case "client-detached":
-		err = c.service.HandleClientDetached(ctx, req.SessionName)
+		err = c.service.HandleClientDetached(ctx, req.SessionName, req.Host)
 	default:
 		common.RenderError(w, r, common.NewInvalidRequest("unknown event: "+event))
 		return
@@ -73,7 +73,7 @@ func (c *Controller) HandleNextActivation(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithTimeout(r.Context(), 50*time.Second)
 	defer cancel()
 
-	name, err := c.service.WaitForActivation(ctx)
+	activation, err := c.service.WaitForActivation(ctx)
 	if errors.Is(err, context.DeadlineExceeded) {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -81,5 +81,5 @@ func (c *Controller) HandleNextActivation(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return
 	}
-	render.JSON(w, r, HookEvent{SessionName: name})
+	render.JSON(w, r, HookEvent(activation))
 }

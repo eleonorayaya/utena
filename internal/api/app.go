@@ -13,6 +13,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/chromescript"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/claudesettings"
+	"github.com/eleonorayaya/utena/internal/coder"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
 	"github.com/eleonorayaya/utena/internal/eventbus"
@@ -41,6 +42,7 @@ type App struct {
 	Claude    *claude.ClaudeModule
 	Jobs      *jobs.JobsModule
 	Monitor   *monitor.MonitorModule
+	Coder     *coder.Module
 }
 
 func NewApp(cfg Config) (*App, error) {
@@ -89,6 +91,13 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 		browserModule = browser.NewModule(newBrowserDriver(cfg.Browser), sessions, newWMDriver(cfg.WM), browser.Layout{BrowserWorkspace: cfg.BrowserWorkspace, ParkWorkspace: cfg.ParkWorkspace}, bus, database)
 	}
 
+	coderCfg := cfg.Coder
+	if cfg.Follower {
+		coderCfg = coder.Config{}
+	}
+	coderModule := coder.NewModule(coderCfg, nil, sessionModule.Service)
+	sessionModule.Service.SetRemoteBackend(coderModule.Service)
+
 	jobsModule := jobs.NewJobsModule()
 	gitModule.RegisterJobs(jobsModule.Service)
 	sessionModule.RegisterJobs(jobsModule.Service)
@@ -105,6 +114,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 		Claude:    claude.NewClaudeModule(database),
 		Jobs:      jobsModule,
 		Monitor:   monitor.NewMonitorModule(bus, sessionModule.Service),
+		Coder:     coderModule,
 	}
 
 	database.RegisterModels(app.collectModels()...)
@@ -213,6 +223,7 @@ func (a *App) modules() []moduleEntry {
 		{"workspace", "/workspaces", a.Workspace},
 		{"claude", "/claude", a.Claude},
 		{"session", "/sessions", a.Session},
+		{"coder", "/coder", a.Coder},
 		{"bundles", "/bundles", a.Bundles},
 		{"browser", "/browser", a.Browser},
 		{"jobs", "/jobs", a.Jobs},

@@ -17,10 +17,12 @@ const (
 
 type MuxHookEvent struct {
 	SessionName string
+	Host        string
 }
 
 type SessionActivatedEvent struct {
 	SessionName string
+	Host        string
 }
 
 type SessionIDEvent struct {

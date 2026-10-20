@@ -285,6 +285,14 @@ func runLegacyMigration(t *testing.T, gormDB *gorm.DB) {
 
 	assertNoTmuxSchema(t, gormDB)
 
+	var backends []string
+	require.NoError(t, gormDB.Table("sessions").Pluck("backend", &backends).Error)
+	require.NotEmpty(t, backends)
+	for _, b := range backends {
+		assert.Equal(t, string(session.BackendLocal), b)
+	}
+	assert.False(t, sess.IsCoder())
+
 	assert.Equal(t, []fkInfo{{From: "mux_session_id", Table: "mux_sessions", To: "id"}}, foreignKeysOf(t, gormDB, "sessions"))
 	for _, child := range sessionChildTables {
 		assert.Contains(t, foreignKeysOf(t, gormDB, child), fkInfo{From: "session_id", Table: "sessions", To: "id"}, child)

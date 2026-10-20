@@ -78,6 +78,7 @@ type CreateSessionRequest struct {
 	Workspaces      []WorkspaceBranchSpec `json:"workspaces"`
 	Bundles         []string              `json:"bundles"`
 	LeaderSessionID *uint                 `json:"leader_session_id,omitempty"`
+	Backend         Backend               `json:"backend,omitempty"`
 }
 
 func validateBundleNames(names []string) error {
@@ -117,6 +118,11 @@ func (c *CreateSessionRequest) Bind(r *http.Request) error {
 	}
 	if err := validateBundleNames(c.Bundles); err != nil {
 		return err
+	}
+	switch c.Backend {
+	case "", BackendLocal, BackendCoder:
+	default:
+		return fmt.Errorf("backend must be local or coder (got %q)", c.Backend)
 	}
 	if c.Name != "" {
 		return ValidateSessionName(c.Name)

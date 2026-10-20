@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/eleonorayaya/utena/internal/aerospace"
 	"github.com/eleonorayaya/utena/internal/browser"
@@ -236,4 +237,55 @@ func TestLoadConfig_LeaderURLWithoutFollowerIsAllowed(t *testing.T) {
 	cfg, err := LoadConfig([]string{"--leader-url", "http://127.0.0.1:3334"})
 	require.NoError(t, err)
 	assert.False(t, cfg.Follower)
+}
+
+func TestLoadConfig_CoderDefaultsWithoutBlock(t *testing.T) {
+	clearWMEnv(t)
+	t.Setenv("UTENA_PORT", "")
+	t.Setenv("UTENA_DATA_DIR", t.TempDir())
+	cfg, err := LoadConfig([]string{"--port", "4000"})
+	require.NoError(t, err)
+	assert.False(t, cfg.Coder.Enabled())
+	assert.Equal(t, ".coder", cfg.Coder.SSHSuffix)
+	assert.Equal(t, 3333, cfg.Coder.FollowerPort)
+	assert.Equal(t, 3334, cfg.Coder.LeaderPort)
+	assert.Equal(t, 10*time.Minute, cfg.Coder.IdleDisconnect)
+	assert.Equal(t, 4000, cfg.Coder.LocalAPIPort)
+}
+
+func TestLoadConfig_CoderFromDaemonFile(t *testing.T) {
+	clearWMEnv(t)
+	t.Setenv("UTENA_PORT", "")
+	dir := t.TempDir()
+	t.Setenv("UTENA_DATA_DIR", dir)
+	body := `{"coder":{"template":"my-template","parameters":{"size":"large"},"ssh_suffix":".example","follower_port":4444,"leader_port":5555,"idle_disconnect":"90s"}}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(body), 0o644))
+
+	cfg, err := LoadConfig(nil)
+	require.NoError(t, err)
+	assert.True(t, cfg.Coder.Enabled())
+	assert.Equal(t, "my-template", cfg.Coder.Template)
+	assert.Equal(t, map[string]string{"size": "large"}, cfg.Coder.Parameters)
+	assert.Equal(t, "ws-1.example", cfg.Coder.SSHHost("ws-1"))
+	assert.Equal(t, 4444, cfg.Coder.FollowerPort)
+	assert.Equal(t, 5555, cfg.Coder.LeaderPort)
+	assert.Equal(t, 90*time.Second, cfg.Coder.IdleDisconnect)
+	assert.Equal(t, 3333, cfg.Coder.LocalAPIPort)
+}
+
+func TestLoadConfig_RejectsBadCoderBlock(t *testing.T) {
+	clearWMEnv(t)
+	t.Setenv("UTENA_PORT", "")
+	for _, body := range []string{
+		`{"coder":{"template":"my-template","idle_disconnect":"soon"}}`,
+		`{"coder":{"template":"my-template","idle_disconnect":"-1m"}}`,
+		`{"coder":{"template":"my-template","follower_port":70000}}`,
+		`{"coder":{"template":"my-template","parameters":{"repo":"x/y"}}}`,
+	} {
+		dir := t.TempDir()
+		t.Setenv("UTENA_DATA_DIR", dir)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(body), 0o644))
+		_, err := LoadConfig(nil)
+		assert.ErrorContains(t, err, "coder.", body)
+	}
 }

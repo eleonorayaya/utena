@@ -32,12 +32,13 @@ type SessionWorkspaceSpec struct {
 	BaseBranch  string
 }
 
-func CreateSession(name string, specs []SessionWorkspaceSpec, selected []string) tea.Cmd {
+func CreateSession(name string, specs []SessionWorkspaceSpec, selected []string, backend string) tea.Cmd {
 	return func() tea.Msg {
 		return createSessionIntentMsg{
 			name:     name,
 			specs:    specs,
 			selected: selected,
+			backend:  backend,
 		}
 	}
 }
@@ -76,6 +77,7 @@ type createSessionIntentMsg struct {
 	name     string
 	specs    []SessionWorkspaceSpec
 	selected []string
+	backend  string
 }
 
 type repairSessionIntentMsg struct {
@@ -209,7 +211,7 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 		return p, p.client.fetchSessions()
 
 	case createSessionIntentMsg:
-		return p, p.client.createSession(msg.name, msg.specs, msg.selected)
+		return p, p.client.createSession(msg.name, msg.specs, msg.selected, msg.backend)
 
 	case SessionCreatedMsg:
 		return p, p.client.fetchSessions()
@@ -271,6 +273,9 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 
 	case fetchBundlesIntentMsg:
 		return p, p.client.fetchBundles()
+
+	case fetchCoderStatusIntentMsg:
+		return p, p.client.fetchCoderStatus()
 
 	case fetchDefaultBundlesIntentMsg:
 		return p, p.client.fetchDefaultBundles(msg.workspaceIDs)

@@ -22,13 +22,13 @@ func attachCmd() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
-			target := ""
+			target := attachTarget{}
 			if len(args) == 1 {
-				target = args[0]
+				target.SessionName = args[0]
 			}
 			for {
 				next, err := attachUntilSwitch(cmd.Context(), port, target)
-				if err != nil || next == "" {
+				if err != nil || next.SessionName == "" {
 					return err
 				}
 				target = next
@@ -37,26 +37,38 @@ func attachCmd() *cobra.Command {
 	}
 }
 
-func attachUntilSwitch(ctx context.Context, port, target string) (string, error) {
-	tuiosArgs := []string{"attach"}
-	if target != "" {
-		tuiosArgs = append(tuiosArgs, target)
+type attachTarget struct {
+	SessionName string `json:"session_name"`
+	Host        string `json:"host,omitempty"`
+}
+
+func tuiosAttachArgs(target attachTarget) []string {
+	args := []string{"attach"}
+	if target.SessionName == "" {
+		return args
 	}
-	child := exec.Command("tuios", tuiosArgs...)
+	if target.Host != "" {
+		args = append(args, "--host", target.Host)
+	}
+	return append(args, target.SessionName)
+}
+
+func attachUntilSwitch(ctx context.Context, port string, target attachTarget) (attachTarget, error) {
+	child := exec.Command("tuios", tuiosAttachArgs(target)...)
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := child.Start(); err != nil {
-		return "", err
+		return attachTarget{}, err
 	}
-	if target != "" {
+	if target.SessionName != "" {
 		postClientHook(port, "client-session-changed", target)
 	}
 
 	pollCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	switched := make(chan string, 1)
+	switched := make(chan attachTarget, 1)
 	go func() {
 		for pollCtx.Err() == nil {
-			name, err := nextActivation(pollCtx, port)
+			next, err := nextActivation(pollCtx, port)
 			if err != nil {
 				select {
 				case <-pollCtx.Done():
@@ -64,8 +76,8 @@ func attachUntilSwitch(ctx context.Context, port, target string) (string, error)
 				}
 				continue
 			}
-			if name != "" {
-				switched <- name
+			if next.SessionName != "" {
+				switched <- next
 				_ = child.Process.Signal(syscall.SIGTERM)
 				return
 			}
@@ -74,7 +86,7 @@ func attachUntilSwitch(ctx context.Context, port, target string) (string, error)
 
 	waitErr := child.Wait()
 	cancel()
-	if target != "" {
+	if target.SessionName != "" {
 		postClientHook(port, "client-detached", target)
 	}
 
@@ -82,40 +94,38 @@ func attachUntilSwitch(ctx context.Context, port, target string) (string, error)
 	case next := <-switched:
 		return next, nil
 	default:
-		return "", waitErr
+		return attachTarget{}, waitErr
 	}
 }
 
-func nextActivation(ctx context.Context, port string) (string, error) {
+func nextActivation(ctx context.Context, port string) (attachTarget, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/mux/activations/next", daemonURL(port)), nil)
 	if err != nil {
-		return "", err
+		return attachTarget{}, err
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return attachTarget{}, err
 	}
 	defer res.Body.Close()
 	switch res.StatusCode {
 	case http.StatusNoContent:
-		return "", nil
+		return attachTarget{}, nil
 	case http.StatusOK:
-		var body struct {
-			SessionName string `json:"session_name"`
-		}
+		var body attachTarget
 		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
-			return "", err
+			return attachTarget{}, err
 		}
-		return body.SessionName, nil
+		return body, nil
 	default:
-		return "", fmt.Errorf("activations: unexpected status %d", res.StatusCode)
+		return attachTarget{}, fmt.Errorf("activations: unexpected status %d", res.StatusCode)
 	}
 }
 
-func postClientHook(port, event, sessionName string) {
+func postClientHook(port, event string, target attachTarget) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	putJSON(ctx, fmt.Sprintf("%s/mux/hooks/%s", daemonURL(port), event), map[string]string{"session_name": sessionName})
+	putJSON(ctx, fmt.Sprintf("%s/mux/hooks/%s", daemonURL(port), event), target)
 }
 
 func putJSON(ctx context.Context, url string, payload any) {

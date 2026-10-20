@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"time"
 
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/db"
@@ -216,7 +218,7 @@ func (s *SessionStore) Update(session *Session) error {
 		return err
 	}
 
-	if err := s.db.Omit("ClaudeSessions", "MuxSession", "Bundles").Save(session).Error; err != nil {
+	if err := s.db.Omit("ClaudeSessions", "MuxSession", "Bundles", "RemoteSessionID", "RemoteAttention", "RemotePRs", "RemoteSyncedAt").Save(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return common.WrapConflict(sessionConflictMessage(session), ErrSessionAlreadyExists)
 		}
@@ -357,6 +359,63 @@ func (s *SessionStore) OnAppStart(ctx context.Context) error {
 
 func (s *SessionStore) OnAppEnd(ctx context.Context) error {
 	return nil
+}
+
+func (s *SessionStore) CoderWorkspaceNames() ([]string, error) {
+	var names []string
+	err := s.db.Model(&Session{}).Unscoped().Where("backend = ? AND coder_workspace <> ''", BackendCoder).Pluck("coder_workspace", &names).Error
+	return names, err
+}
+
+func (s *SessionStore) ListCoder() ([]Session, error) {
+	var sessions []Session
+	if err := s.db.Where("backend = ?", BackendCoder).Order("id ASC").Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	return sessions, nil
+}
+
+func (s *SessionStore) GetByCoderWorkspace(name string) (*Session, error) {
+	var session Session
+	if err := s.loaded().Where("sessions.backend = ? AND sessions.coder_workspace = ?", BackendCoder, name).Order("sessions.id DESC").First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return &session, nil
+}
+
+func (s *SessionStore) SetRemoteSessionID(id, remoteID uint) error {
+	return s.db.Model(&Session{}).Where("id = ?", id).Update("remote_session_id", remoteID).Error
+}
+
+func (s *SessionStore) UpdateStatusWhere(id uint, status SessionStatus, statusError string, from ...SessionStatus) (bool, error) {
+	res := s.db.Model(&Session{}).Where("id = ? AND status IN ?", id, from).Updates(map[string]any{"status": status, "status_error": statusError})
+	return res.RowsAffected > 0, res.Error
+}
+
+func (s *SessionStore) SetStatusError(id uint, statusError string, statuses ...SessionStatus) error {
+	return s.db.Model(&Session{}).Where("id = ? AND status IN ?", id, statuses).Update("status_error", statusError).Error
+}
+
+func (s *SessionStore) MarkAttached(id uint, at time.Time) error {
+	return s.db.Model(&Session{}).Where("id = ?", id).Updates(map[string]any{"is_attached": true, "last_used_at": at}).Error
+}
+
+func (s *SessionStore) ApplyRemoteState(id uint, st RemoteState, mirrored []SessionStatus) error {
+	synced := st.SyncedAt
+	if err := s.db.Model(&Session{}).Where("id = ?", id).Select("RemoteAttention", "RemotePRs", "RemoteSyncedAt").Updates(&Session{
+		RemoteAttention: st.Attention,
+		RemotePRs:       st.PullRequests,
+		RemoteSyncedAt:  &synced,
+	}).Error; err != nil {
+		return err
+	}
+	if !slices.Contains(mirrored, st.Status) {
+		return nil
+	}
+	return s.db.Model(&Session{}).Where("id = ? AND status IN ?", id, mirrored).Updates(map[string]any{"status": st.Status, "status_error": st.StatusError}).Error
 }
 
 func (s *SessionStore) GetStatus(id uint) (SessionStatus, error) {

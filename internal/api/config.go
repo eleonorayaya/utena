@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/eleonorayaya/utena/internal/bundles"
+	"github.com/eleonorayaya/utena/internal/coder"
 )
 
 type Config struct {
@@ -28,6 +29,7 @@ type Config struct {
 	LeaderURL        string
 	Bundles          bundles.Catalog
 	McpServers       bundles.Servers
+	Coder            coder.Config
 }
 
 func LoadConfig(args []string) (Config, error) {
@@ -120,6 +122,10 @@ func LoadConfig(args []string) (Config, error) {
 			return Config{}, fmt.Errorf("invalid leader URL %q: must be absolute, e.g. http://127.0.0.1:3334", cfg.LeaderURL)
 		}
 	}
+	cfg.Coder, err = coder.ParseConfig(file.Coder, cfg.Port)
+	if err != nil {
+		return Config{}, err
+	}
 	if _, ok := browserDrivers[cfg.Browser]; !ok {
 		return Config{}, fmt.Errorf("invalid browser %q: must be chrome, firefox or chrome-applescript", cfg.Browser)
 	}
@@ -131,9 +137,10 @@ func LoadConfig(args []string) (Config, error) {
 }
 
 type daemonFile struct {
-	Browser    string          `json:"browser"`
-	Bundles    bundles.Catalog `json:"bundles"`
-	McpServers bundles.Servers `json:"mcp_servers"`
+	Browser    string           `json:"browser"`
+	Bundles    bundles.Catalog  `json:"bundles"`
+	McpServers bundles.Servers  `json:"mcp_servers"`
+	Coder      coder.FileConfig `json:"coder"`
 }
 
 func loadDaemonFile(dir string) (daemonFile, error) {

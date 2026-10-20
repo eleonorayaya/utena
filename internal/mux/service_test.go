@@ -224,10 +224,10 @@ func TestService_WaitForActivationReceivesActivatedSession(t *testing.T) {
 	svc, _ := newTestService(t)
 	bus := svc.eventBus
 
-	got := make(chan string, 1)
+	got := make(chan Activation, 1)
 	go func() {
-		name, _ := svc.WaitForActivation(context.Background())
-		got <- name
+		activation, _ := svc.WaitForActivation(context.Background())
+		got <- activation
 	}()
 	require.Eventually(t, func() bool {
 		svc.activationsMu.Lock()
@@ -237,9 +237,9 @@ func TestService_WaitForActivationReceivesActivatedSession(t *testing.T) {
 
 	require.NoError(t, bus.Publish(context.Background(), eventbus.Event{
 		Type: eventbus.SessionActivated,
-		Data: eventbus.SessionActivatedEvent{SessionName: "work"},
+		Data: eventbus.SessionActivatedEvent{SessionName: "work", Host: "ws-1"},
 	}))
-	assert.Equal(t, "work", <-got)
+	assert.Equal(t, Activation{SessionName: "work", Host: "ws-1"}, <-got)
 }
 
 func TestService_WaitForActivationTimesOut(t *testing.T) {
