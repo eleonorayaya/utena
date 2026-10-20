@@ -2,6 +2,8 @@ package db
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"gorm.io/driver/sqlite"
@@ -10,6 +12,9 @@ import (
 )
 
 func OpenSQLite(dbPath string) (*gorm.DB, error) {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return nil, fmt.Errorf("create database directory: %w", err)
+	}
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
 		SkipDefaultTransaction: true,
 		Logger:                 logger.Default.LogMode(logger.Silent),

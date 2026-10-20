@@ -53,6 +53,29 @@ tasks:
       - task: tui:install
       - task: extension:install
 
+  release:linux:
+    desc: Build the Linux release tarball in Docker (ARCH=amd64|arm64)
+    vars:
+      ARCH: '{{.ARCH | default "amd64"}}'
+      GNU_ARCH: '{{if eq .ARCH "arm64"}}aarch64{{else}}x86-64{{end}}'
+      CC: '{{if eq .ARCH "arm64"}}aarch64{{else}}x86_64{{end}}-linux-gnu-gcc'
+      GO_IMAGE:
+        sh: echo "golang:$(awk '/^go /{print $2}' go.mod)"
+      HOST_ARCH:
+        sh: docker version --format '{{"{{"}}.Server.Arch{{"}}"}}'
+    cmds:
+      - mkdir -p out/linux-{{.ARCH}}
+      - >-
+        docker run --rm --platform linux/{{.HOST_ARCH}}
+        -v "$(pwd)":/src -w /src
+        -v utena-gomod:/go/pkg/mod -v utena-gocache:/root/.cache/go-build
+        -e GOOS=linux -e GOARCH={{.ARCH}}
+        {{.GO_IMAGE}}
+        sh -c 'apt-get update -qq && apt-get install -y -qq gcc-{{.GNU_ARCH}}-linux-gnu >/dev/null
+        && CGO_ENABLED=1 CC={{.CC}} go build -o out/linux-{{.ARCH}}/utena-daemon ./cmd/daemon
+        && CGO_ENABLED=0 go build -ldflags "-X main.defaultPort=3333" -o out/linux-{{.ARCH}}/utena ./cmd/tui'
+      - tar -czf out/utena_linux_{{.ARCH}}.tar.gz -C out/linux-{{.ARCH}} utena-daemon utena
+
   dev:
     cmds:
       - mkdir -p "{{.DEV_DATA_DIR}}"

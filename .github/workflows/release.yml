@@ -1,0 +1,37 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=1 go build -o dist/utena-daemon ./cmd/daemon
+          CGO_ENABLED=0 go build -ldflags "-X main.defaultPort=3333" -o dist/utena ./cmd/tui
+          tar -czf utena_linux_${{ matrix.arch }}.tar.gz -C dist utena-daemon utena
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" utena_linux_${{ matrix.arch }}.tar.gz --clobber
