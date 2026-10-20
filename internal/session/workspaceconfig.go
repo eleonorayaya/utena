@@ -37,6 +37,7 @@ type WorkspaceSetupAction struct {
 	Dest           string                   `json:"dest,omitempty"`
 	DestRelativeTo DestRelativeTo           `json:"dest_relative_to,omitempty"`
 	PackageManager string                   `json:"package_manager,omitempty"`
+	RunWith        []string                 `json:"run_with,omitempty"`
 }
 
 type WorkspaceConfig struct {

@@ -19,6 +19,7 @@ type stepDef struct {
 	CopyDestRelTo DestRelativeTo
 
 	PackageManager string
+	RunWith        []string
 }
 
 func intPtr(i int) *int    { return &i }
@@ -74,6 +75,7 @@ func buildSetupSteps(workspaces []stepWorkspace, configs map[uint]*WorkspaceConf
 				WorkspaceID:    uintPtr(ws.ID),
 				DependsOnPos:   intPtr(lastPos),
 				PackageManager: action.PackageManager,
+				RunWith:        action.RunWith,
 			})
 			lastPos = len(defs) - 1
 		}

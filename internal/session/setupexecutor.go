@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -391,7 +392,7 @@ func (e *setupExecution) execInstallDeps(ctx context.Context, def stepDef) error
 		pm = detectPackageManager(worktreePath)
 	}
 
-	name, args := installCommand(pm, exec.LookPath)
+	name, args := installCommand(pm, def.RunWith)
 	return traceOp(ctx, "install_deps", func() error {
 		cmd := exec.CommandContext(ctx, name, args...)
 		cmd.Dir = worktreePath
@@ -403,13 +404,12 @@ func (e *setupExecution) execInstallDeps(ctx context.Context, def stepDef) error
 	}, "pm", pm, "dir", worktreePath)
 }
 
-func installCommand(pm string, lookPath func(string) (string, error)) (string, []string) {
-	if !strings.ContainsRune(pm, filepath.Separator) {
-		if mise, err := lookPath("mise"); err == nil {
-			return mise, []string{"exec", "--", pm, "install"}
-		}
+func installCommand(pm string, runWith []string) (string, []string) {
+	if len(runWith) == 0 {
+		return pm, []string{"install"}
 	}
-	return pm, []string{"install"}
+	args := append(slices.Clone(runWith[1:]), pm, "install")
+	return runWith[0], args
 }
 
 func (s *SessionService) runWorkspaceActions(ctx context.Context, sess *Session, ws *workspace.Workspace, result *worktreeSetupResult) []string {

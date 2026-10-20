@@ -203,9 +203,11 @@ func TestSessionService_AddWorkspace_RunsSetupActions(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(ws2.Path, ".env.example"), []byte("A=1\n"), 0o644))
 	pmScript := filepath.Join(t.TempDir(), "fake-pm")
 	writeScript(t, pmScript, "#!/bin/sh\ntest -f .env && touch dep-installed\n")
+	wrapper := filepath.Join(t.TempDir(), "wrapper")
+	writeScript(t, wrapper, "#!/bin/sh\ntouch wrapped\nexec \"$@\"\n")
 	writeWorkspaceConfig(t, ws2.Path, `{
 		"setup_actions": [
-			{"type": "install_deps", "package_manager": "`+pmScript+`"},
+			{"type": "install_deps", "package_manager": "`+pmScript+`", "run_with": ["`+wrapper+`"]},
 			{"type": "copy_file", "src": ".env.example", "dest": ".env"}
 		]
 	}`)
@@ -233,4 +235,6 @@ func TestSessionService_AddWorkspace_RunsSetupActions(t *testing.T) {
 	require.Equal(t, "A=1\n", string(data))
 	_, err = os.Stat(filepath.Join(wtDir, "dep-installed"))
 	require.NoError(t, err, "install_deps should run after copy_file in the added worktree")
+	_, err = os.Stat(filepath.Join(wtDir, "wrapped"))
+	require.NoError(t, err, "install_deps should run through run_with")
 }
