@@ -40,45 +40,7 @@ func buildSetupSteps(workspaces []stepWorkspace, configs map[uint]*WorkspaceConf
 		})
 		lastPos := len(defs) - 1
 
-		cfg := configs[ws.ID]
-		if cfg == nil {
-			continue
-		}
-
-		for _, action := range cfg.SetupActions {
-			if action.Type != WorkspaceActionCopyFile {
-				continue
-			}
-			defs = append(defs, stepDef{
-				Kind:          StepKindCopyFile,
-				Label:         fmt.Sprintf("Copy %s → %s", action.Src, action.Dest),
-				WorkspaceID:   uintPtr(ws.ID),
-				DependsOnPos:  intPtr(lastPos),
-				CopySrc:       action.Src,
-				CopyDest:      action.Dest,
-				CopyDestRelTo: action.DestRelativeTo,
-			})
-			lastPos = len(defs) - 1
-		}
-
-		for _, action := range cfg.SetupActions {
-			if action.Type != WorkspaceActionInstallDeps {
-				continue
-			}
-			label := fmt.Sprintf("Install dependencies: %s", ws.Name)
-			if action.PackageManager != "" && action.PackageManager != packageManagerAuto {
-				label = fmt.Sprintf("Install dependencies: %s (%s)", ws.Name, action.PackageManager)
-			}
-			defs = append(defs, stepDef{
-				Kind:           StepKindInstallDeps,
-				Label:          label,
-				WorkspaceID:    uintPtr(ws.ID),
-				DependsOnPos:   intPtr(lastPos),
-				PackageManager: action.PackageManager,
-				RunWith:        action.RunWith,
-			})
-			lastPos = len(defs) - 1
-		}
+		defs = appendActionSteps(defs, ws, configs[ws.ID], lastPos)
 	}
 
 	defs = append(defs, stepDef{Kind: StepKindApplyClaude, Label: "Apply Claude settings"})
@@ -90,5 +52,47 @@ func buildSetupSteps(workspaces []stepWorkspace, configs map[uint]*WorkspaceConf
 		DependsOnPos: intPtr(applyClaudePos),
 	})
 
+	return defs
+}
+
+func appendActionSteps(defs []stepDef, ws stepWorkspace, cfg *WorkspaceConfig, lastPos int) []stepDef {
+	if cfg == nil {
+		return defs
+	}
+
+	for _, action := range cfg.SetupActions {
+		if action.Type != WorkspaceActionCopyFile {
+			continue
+		}
+		defs = append(defs, stepDef{
+			Kind:          StepKindCopyFile,
+			Label:         fmt.Sprintf("Copy %s → %s", action.Src, action.Dest),
+			WorkspaceID:   uintPtr(ws.ID),
+			DependsOnPos:  intPtr(lastPos),
+			CopySrc:       action.Src,
+			CopyDest:      action.Dest,
+			CopyDestRelTo: action.DestRelativeTo,
+		})
+		lastPos = len(defs) - 1
+	}
+
+	for _, action := range cfg.SetupActions {
+		if action.Type != WorkspaceActionInstallDeps {
+			continue
+		}
+		label := fmt.Sprintf("Install dependencies: %s", ws.Name)
+		if action.PackageManager != "" && action.PackageManager != packageManagerAuto {
+			label = fmt.Sprintf("Install dependencies: %s (%s)", ws.Name, action.PackageManager)
+		}
+		defs = append(defs, stepDef{
+			Kind:           StepKindInstallDeps,
+			Label:          label,
+			WorkspaceID:    uintPtr(ws.ID),
+			DependsOnPos:   intPtr(lastPos),
+			PackageManager: action.PackageManager,
+			RunWith:        action.RunWith,
+		})
+		lastPos = len(defs) - 1
+	}
 	return defs
 }

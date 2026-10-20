@@ -417,9 +417,6 @@ func (s *SessionService) runWorkspaceActions(ctx context.Context, sess *Session,
 	if err != nil {
 		return []string{fmt.Sprintf("%s: load workspace config: %s", ws.Name, err.Error())}
 	}
-	if cfg == nil {
-		return nil
-	}
 
 	e := &setupExecution{
 		svc:     s,
@@ -427,12 +424,9 @@ func (s *SessionService) runWorkspaceActions(ctx context.Context, sess *Session,
 		wsByID:  map[uint]*workspace.Workspace{ws.ID: ws},
 		results: map[uint]*worktreeSetupResult{ws.ID: result},
 	}
-	defs := buildSetupSteps([]stepWorkspace{{ID: ws.ID, Name: ws.Name, Path: ws.Path}}, map[uint]*WorkspaceConfig{ws.ID: cfg})
+	defs := appendActionSteps(nil, stepWorkspace{ID: ws.ID, Name: ws.Name, Path: ws.Path}, cfg, 0)
 	var warnings []string
 	for _, def := range defs {
-		if def.Kind != StepKindCopyFile && def.Kind != StepKindInstallDeps {
-			continue
-		}
 		if _, err := e.executeStep(ctx, def); err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s: %s", ws.Name, err.Error()))
 		}
