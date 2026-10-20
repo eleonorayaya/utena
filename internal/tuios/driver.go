@@ -10,9 +10,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/mux"
@@ -80,7 +83,31 @@ func socketPath() string {
 	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
 		return filepath.Join(d, "tuios", "tuios.sock")
 	}
+	if d := systemRuntimeDir(); d != "" && privateDir(d, os.Getuid()) {
+		return filepath.Join(d, "tuios", "tuios.sock")
+	}
 	return filepath.Join("/tmp", fmt.Sprintf("tuios-%d", os.Getuid()), "tuios.sock")
+}
+
+var runUserRoot = "/run/user"
+
+func systemRuntimeDir() string {
+	if runtime.GOOS == "darwin" {
+		return ""
+	}
+	return filepath.Join(runUserRoot, strconv.Itoa(os.Getuid()))
+}
+
+func privateDir(dir string, uid int) bool {
+	st, err := os.Lstat(dir)
+	if err != nil || !st.Mode().IsDir() {
+		return false
+	}
+	sys, ok := st.Sys().(*syscall.Stat_t)
+	if !ok || int(sys.Uid) != uid {
+		return false
+	}
+	return st.Mode().Perm() == 0o700
 }
 
 func (d *Driver) dial() (net.Conn, error) {
