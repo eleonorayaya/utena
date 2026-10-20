@@ -412,28 +412,6 @@ func installCommand(pm string, runWith []string) (string, []string) {
 	return runWith[0], args
 }
 
-func (s *SessionService) runWorkspaceActions(ctx context.Context, sess *Session, ws *workspace.Workspace, result *worktreeSetupResult) []string {
-	cfg, err := loadWorkspaceConfig(ws.Path)
-	if err != nil {
-		return []string{fmt.Sprintf("%s: load workspace config: %s", ws.Name, err.Error())}
-	}
-
-	e := &setupExecution{
-		svc:     s,
-		sess:    sess,
-		wsByID:  map[uint]*workspace.Workspace{ws.ID: ws},
-		results: map[uint]*worktreeSetupResult{ws.ID: result},
-	}
-	defs := appendActionSteps(nil, stepWorkspace{ID: ws.ID, Name: ws.Name, Path: ws.Path}, cfg, 0)
-	var warnings []string
-	for _, def := range defs {
-		if _, err := e.executeStep(ctx, def); err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s: %s", ws.Name, err.Error()))
-		}
-	}
-	return warnings
-}
-
 func (e *setupExecution) execApplyClaude(ctx context.Context) error {
 	if e.anyWorktreeCreated() {
 		globalBranch := ""

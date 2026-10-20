@@ -26,6 +26,15 @@ func intPtr(i int) *int    { return &i }
 func uintPtr(u uint) *uint { return &u }
 
 func buildSetupSteps(workspaces []stepWorkspace, configs map[uint]*WorkspaceConfig) []stepDef {
+	defs := buildWorkspaceSetupSteps(workspaces, configs)
+	return append(defs, stepDef{
+		Kind:         StepKindSetupMux,
+		Label:        setupMuxLabel,
+		DependsOnPos: intPtr(len(defs) - 1),
+	})
+}
+
+func buildWorkspaceSetupSteps(workspaces []stepWorkspace, configs map[uint]*WorkspaceConfig) []stepDef {
 	defs := make([]stepDef, 0, len(workspaces)*2+3)
 
 	defs = append(defs, stepDef{Kind: StepKindCreateSessionDir, Label: "Create session directory"})
@@ -43,16 +52,7 @@ func buildSetupSteps(workspaces []stepWorkspace, configs map[uint]*WorkspaceConf
 		defs = appendActionSteps(defs, ws, configs[ws.ID], lastPos)
 	}
 
-	defs = append(defs, stepDef{Kind: StepKindApplyClaude, Label: "Apply Claude settings"})
-	applyClaudePos := len(defs) - 1
-
-	defs = append(defs, stepDef{
-		Kind:         StepKindSetupMux,
-		Label:        setupMuxLabel,
-		DependsOnPos: intPtr(applyClaudePos),
-	})
-
-	return defs
+	return append(defs, stepDef{Kind: StepKindApplyClaude, Label: "Apply Claude settings"})
 }
 
 func appendActionSteps(defs []stepDef, ws stepWorkspace, cfg *WorkspaceConfig, lastPos int) []stepDef {

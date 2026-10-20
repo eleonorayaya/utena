@@ -237,4 +237,19 @@ func TestSessionService_AddWorkspace_RunsSetupActions(t *testing.T) {
 	require.NoError(t, err, "install_deps should run after copy_file in the added worktree")
 	_, err = os.Stat(filepath.Join(wtDir, "wrapped"))
 	require.NoError(t, err, "install_deps should run through run_with")
+
+	steps, err := service.setupStepStore.ListBySessionID(sess.ID)
+	require.NoError(t, err)
+	kinds := make([]SetupStepKind, len(steps))
+	for i, st := range steps {
+		kinds[i] = st.Kind
+		require.Equal(t, SetupStepDone, st.Status, "step %q should be done", st.Label)
+	}
+	require.Equal(t, []SetupStepKind{
+		StepKindCreateSessionDir,
+		StepKindSetupWorktree,
+		StepKindCopyFile,
+		StepKindInstallDeps,
+		StepKindApplyClaude,
+	}, kinds, "add-workspace steps are persisted for progress tracking")
 }

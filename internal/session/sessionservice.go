@@ -660,15 +660,7 @@ func (s *SessionService) runAddWorkspace(sessionID uint, spec WorkspaceBranchSpe
 		"workspace_count", len(sess.Worktrees),
 	)
 
-	markBroken := func(stage string, err error) {
-		msg := fmt.Sprintf("%s failed: %v", stage, err)
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			msg = fmt.Sprintf("%s timed out after %s", stage, s.setupTimeout)
-		}
-		if updateErr := s.markSessionBroken(sess, msg); updateErr != nil {
-			slog.ErrorContext(ctx, "failed to persist broken status", "stage", stage, "error", updateErr)
-		}
-	}
+	markBroken := func(stage string, err error) { s.markSetupBroken(ctx, sess, stage, err) }
 
 	if len(sess.Worktrees) == 0 {
 		markBroken("find new worktree", fmt.Errorf("session %d has no worktrees", sess.ID))
@@ -682,64 +674,14 @@ func (s *SessionService) runAddWorkspace(sessionID uint, spec WorkspaceBranchSpe
 		return
 	}
 
-	var setupWarnings []string
-	result, err := s.setupSingleWorktree(ctx, sess, newSwt, ws, spec)
-	if err != nil {
-		markBroken("worktree setup", err)
-		return
-	}
-	if result.warning != "" {
-		setupWarnings = append(setupWarnings, fmt.Sprintf("%s: %s", ws.Name, result.warning))
-	}
-
-	if result.created {
-		branchName := ""
-		if result.branch != nil {
-			branchName = result.branch.Name
-		}
-		env := []string{
-			envSessionRoot + "=" + sess.SessionRoot,
-			envSessionName + "=" + sess.Name,
-			envBranch + "=" + branchName,
-			envWorktreePath + "=" + result.worktreePath,
-			envWorkspaceName + "=" + ws.Name,
-			envWorkspacePath + "=" + ws.Path,
-		}
-		wsScript := filepath.Join(ws.Path, ".utena", worktreeSetupName)
-		if err := traceOp(ctx, "worktree-setup script", func() error {
-			return s.runScript(ctx, wsScript, result.worktreePath, env)
-		}, "script", wsScript, "ws", ws.Name); err != nil {
-			slog.WarnContext(ctx, "workspace worktree-setup script failed", "ws", ws.Name, "error", err)
-			setupWarnings = append(setupWarnings, fmt.Sprintf("%s: %s", ws.Name, err.Error()))
-		}
-
-		globalEnv := []string{
-			envSessionRoot + "=" + sess.SessionRoot,
-			envSessionName + "=" + sess.Name,
-			envBranch + "=" + branchName,
-		}
-		globalScript := filepath.Join(s.configDir, worktreeSetupName)
-		if err := traceOp(ctx, "global worktree-setup script", func() error {
-			return s.runScript(ctx, globalScript, sess.SessionRoot, globalEnv)
-		}, "script", globalScript); err != nil {
-			slog.WarnContext(ctx, "global worktree-setup script failed", "error", err)
-			setupWarnings = append(setupWarnings, fmt.Sprintf("global: %s", err.Error()))
-		}
-	}
-
-	setupWarnings = append(setupWarnings, s.runWorkspaceActions(ctx, sess, ws, &result)...)
-	setupWarnings = append(setupWarnings, s.applyClaudeSettings(ctx, sess)...)
-
-	sess.Status = StatusActive
-	if len(setupWarnings) == 0 {
-		sess.StatusError = ""
-	} else {
-		sess.StatusError = strings.Join(setupWarnings, "; ")
-	}
-	if err := s.store.Update(sess); err != nil {
-		markBroken("persist active status", err)
-		return
-	}
+	orderedWS := []stepWorkspace{{ID: ws.ID, Name: ws.Name, Path: ws.Path}}
+	defs := buildWorkspaceSetupSteps(orderedWS, s.loadWorkspaceConfigs(orderedWS))
+	executor := s.newSetupExecution(sess, "", defs, orderedWS,
+		map[uint]WorkspaceBranchSpec{ws.ID: spec},
+		map[uint]*workspace.Workspace{ws.ID: ws},
+		map[uint]*SessionWorktree{ws.ID: newSwt},
+	)
+	s.completeSetup(ctx, sess, executor)
 }
 
 func (s *SessionService) applyClaudeSettings(ctx context.Context, sess *Session) []string {
@@ -965,15 +907,7 @@ func (s *SessionService) runSetup(sessionID uint, muxName string, specs []Worksp
 		slog.InfoContext(ctx, "session setup: done", "status", sess.Status, "duration_ms", time.Since(setupStart).Milliseconds())
 	}()
 
-	markBroken := func(stage string, err error) {
-		msg := fmt.Sprintf("%s failed: %v", stage, err)
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			msg = fmt.Sprintf("%s timed out after %s", stage, s.setupTimeout)
-		}
-		if updateErr := s.markSessionBroken(sess, msg); updateErr != nil {
-			slog.ErrorContext(ctx, "failed to persist broken status", "stage", stage, "error", updateErr)
-		}
-	}
+	markBroken := func(stage string, err error) { s.markSetupBroken(ctx, sess, stage, err) }
 
 	if len(sess.Worktrees) == 0 {
 		markBroken("missing worktrees", fmt.Errorf("session %d has no SessionWorktree rows", sess.ID))
@@ -1001,16 +935,18 @@ func (s *SessionService) runSetup(sessionID uint, muxName string, specs []Worksp
 		swtByID[ws.ID] = swt
 	}
 
-	configs := s.loadWorkspaceConfigs(orderedWS)
-	defs := buildSetupSteps(orderedWS, configs)
-	steps := s.ensureSetupSteps(sess.ID, defs)
+	defs := buildSetupSteps(orderedWS, s.loadWorkspaceConfigs(orderedWS))
+	executor := s.newSetupExecution(sess, muxName, defs, orderedWS, specByWS, wsByID, swtByID)
+	s.completeSetup(ctx, sess, executor)
+}
 
+func (s *SessionService) newSetupExecution(sess *Session, muxName string, defs []stepDef, orderedWS []stepWorkspace, specByWS map[uint]WorkspaceBranchSpec, wsByID map[uint]*workspace.Workspace, swtByID map[uint]*SessionWorktree) *setupExecution {
+	steps := s.ensureSetupSteps(sess.ID, defs)
 	execSteps := make([]execStep, len(defs))
 	for i := range defs {
 		execSteps[i] = execStep{def: defs[i], db: steps[i]}
 	}
-
-	executor := &setupExecution{
+	return &setupExecution{
 		svc:       s,
 		sess:      sess,
 		muxName:   muxName,
@@ -1022,14 +958,17 @@ func (s *SessionService) runSetup(sessionID uint, muxName string, specs []Worksp
 		updater:   &stepUpdater{store: s.setupStepStore},
 		results:   make(map[uint]*worktreeSetupResult, len(orderedWS)),
 	}
+}
+
+func (s *SessionService) completeSetup(ctx context.Context, sess *Session, executor *setupExecution) {
 	executor.run(ctx)
 
 	if executor.broken {
-		markBroken(executor.brokenStage, executor.brokenErr)
+		s.markSetupBroken(ctx, sess, executor.brokenStage, executor.brokenErr)
 		return
 	}
 	if ctx.Err() != nil {
-		markBroken("setup", ctx.Err())
+		s.markSetupBroken(ctx, sess, "setup", ctx.Err())
 		return
 	}
 
@@ -1040,8 +979,17 @@ func (s *SessionService) runSetup(sessionID uint, muxName string, specs []Worksp
 		sess.StatusError = strings.Join(executor.warnings, "; ")
 	}
 	if err := s.store.Update(sess); err != nil {
-		markBroken("persist active status", err)
-		return
+		s.markSetupBroken(ctx, sess, "persist active status", err)
+	}
+}
+
+func (s *SessionService) markSetupBroken(ctx context.Context, sess *Session, stage string, err error) {
+	msg := fmt.Sprintf("%s failed: %v", stage, err)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		msg = fmt.Sprintf("%s timed out after %s", stage, s.setupTimeout)
+	}
+	if updateErr := s.markSessionBroken(sess, msg); updateErr != nil {
+		slog.ErrorContext(ctx, "failed to persist broken status", "stage", stage, "error", updateErr)
 	}
 }
 
