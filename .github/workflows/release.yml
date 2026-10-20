@@ -2,11 +2,16 @@ name: release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   linux:
@@ -29,9 +34,26 @@ jobs:
           CGO_ENABLED=1 go build -o dist/utena-daemon ./cmd/daemon
           CGO_ENABLED=0 go build -ldflags "-X main.defaultPort=3333" -o dist/utena ./cmd/tui
           tar -czf utena_linux_${{ matrix.arch }}.tar.gz -C dist utena-daemon utena
-      - name: Upload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: utena_linux_${{ matrix.arch }}
+          path: utena_linux_${{ matrix.arch }}.tar.gz
+
+  publish:
+    needs: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --generate-notes || true
-          gh release upload "$GITHUB_REF_NAME" utena_linux_${{ matrix.arch }}.tar.gz --clobber
+          tag="build-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+          gh release create "$tag" utena_linux_*.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --notes "Built from ${GITHUB_SHA}." \
+            --latest
