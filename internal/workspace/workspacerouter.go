@@ -21,6 +21,8 @@ func (wr *WorkspaceRouter) Routes() chi.Router {
 	r.Post("/", wr.controller.AddWorkspace)
 	r.Post("/clone", wr.controller.CloneWorkspace)
 	r.Get("/roots", wr.controller.ListRoots)
+	r.Get("/"+GlobalSetupScriptName, wr.controller.GetGlobalSetupScript)
+	r.Get("/{id}/files/*", wr.controller.GetSourceFile)
 	r.Get("/{id}/branches", wr.controller.ListBranches)
 	r.Post("/{id}/branches/fetch", wr.controller.FetchAndListBranches)
 	r.Get("/{id}/branches/exists", wr.controller.CheckBranchExists)

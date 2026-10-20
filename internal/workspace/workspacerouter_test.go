@@ -603,3 +603,86 @@ func TestWorkspaceRouter_CloneWorkspace_TargetExists(t *testing.T) {
 
 	require.Equal(t, http.StatusConflict, w.Code)
 }
+
+func setupAddWorkspaceRouter(t *testing.T) (http.Handler, *WorkspaceStore, string) {
+	t.Helper()
+	configDir := filepath.Join(t.TempDir(), "config")
+	fs := afero.NewOsFs()
+	require.NoError(t, fs.MkdirAll(configDir, 0755))
+	require.NoError(t, afero.WriteFile(fs, filepath.Join(configDir, "config.json"), []byte(`{}`), 0644))
+
+	database := testdb.New(t, &Workspace{}, &git.Repo{}, &git.Branch{}, &git.Worktree{}, &git.PullRequest{})
+	store := NewWorkspaceStore(database, fs, configDir)
+	gitService := git.NewGitService(database)
+	router := NewWorkspaceRouter(NewWorkspaceController(NewWorkspaceService(store, gitService), store, gitService))
+
+	wsDir := initTestRepo(t)
+	require.NoError(t, store.Add(&Workspace{Name: filepath.Base(wsDir), Path: wsDir, IsGitRepo: true}))
+	return router.Routes(), store, wsDir
+}
+
+func postAddWorkspace(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	return w
+}
+
+func TestWorkspaceRouter_AddWorkspace_ExistingPathWithLeaderIDLinks(t *testing.T) {
+	h, store, wsDir := setupAddWorkspaceRouter(t)
+
+	w := postAddWorkspace(t, h, fmt.Sprintf(`{"path": %q, "leader_workspace_id": 4}`, wsDir))
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var response WorkspaceListResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Workspaces, 1)
+	require.Equal(t, wsDir, response.Workspaces[0].Path)
+	require.NotNil(t, response.Workspaces[0].LeaderWorkspaceID)
+	require.Equal(t, uint(4), *response.Workspaces[0].LeaderWorkspaceID)
+
+	stored, err := store.GetByPath(wsDir)
+	require.NoError(t, err)
+	require.NotNil(t, stored.LeaderWorkspaceID)
+	require.Equal(t, uint(4), *stored.LeaderWorkspaceID)
+	require.Len(t, store.List(), 1)
+}
+
+func TestWorkspaceRouter_AddWorkspace_ExistingPathWithoutLeaderIDConflicts(t *testing.T) {
+	h, store, wsDir := setupAddWorkspaceRouter(t)
+
+	w := postAddWorkspace(t, h, fmt.Sprintf(`{"path": %q}`, wsDir))
+
+	require.Equal(t, http.StatusConflict, w.Code)
+	stored, err := store.GetByPath(wsDir)
+	require.NoError(t, err)
+	require.Nil(t, stored.LeaderWorkspaceID)
+}
+
+func TestWorkspaceRouter_AddWorkspace_ExistingPathUpdatesLeaderID(t *testing.T) {
+	h, store, wsDir := setupAddWorkspaceRouter(t)
+
+	require.Equal(t, http.StatusOK, postAddWorkspace(t, h, fmt.Sprintf(`{"path": %q, "leader_workspace_id": 4}`, wsDir)).Code)
+	w := postAddWorkspace(t, h, fmt.Sprintf(`{"path": %q, "leader_workspace_id": 11}`, wsDir))
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	stored, err := store.GetByPath(wsDir)
+	require.NoError(t, err)
+	require.NotNil(t, stored.LeaderWorkspaceID)
+	require.Equal(t, uint(11), *stored.LeaderWorkspaceID)
+}
+
+func TestWorkspaceRouter_AddWorkspace_NewPathWithLeaderIDCreates(t *testing.T) {
+	h, store, _ := setupAddWorkspaceRouter(t)
+	newDir := initTestRepo(t)
+
+	w := postAddWorkspace(t, h, fmt.Sprintf(`{"path": %q, "leader_workspace_id": 6}`, newDir))
+
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	stored, err := store.GetByPath(newDir)
+	require.NoError(t, err)
+	require.NotNil(t, stored.LeaderWorkspaceID)
+	require.Equal(t, uint(6), *stored.LeaderWorkspaceID)
+}

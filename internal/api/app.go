@@ -36,7 +36,7 @@ type App struct {
 	Workspace *workspace.WorkspaceModule
 	Session   *session.SessionModule
 	Bundles   *bundles.Module
-	Browser   *browser.Module
+	Browser   common.Module
 	Mux       *mux.Module
 	Claude    *claude.ClaudeModule
 	Jobs      *jobs.JobsModule
@@ -80,7 +80,14 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 	sessionModule := session.NewSessionModule(muxModule.Service, workspaceModule, bus, database, cfg.BranchPrefix, cfg.ConfigDir, cfg.SessionsRoot)
 	sessionModule.Service.SetBundleCatalog(cfg.Bundles, cfg.McpServers)
 	bundlesModule := bundles.NewModule(cfg.Bundles)
-	browserModule := browser.NewModule(newBrowserDriver(cfg.Browser), browserSessions{sessions: sessionModule.Service}, newWMDriver(cfg.WM), browser.Layout{BrowserWorkspace: cfg.BrowserWorkspace, ParkWorkspace: cfg.ParkWorkspace}, bus, database)
+	sessions := browserSessions{sessions: sessionModule.Service}
+	var browserModule common.Module
+	if cfg.Follower {
+		sessionModule.Service.SetSourceReader(workspace.NewLeaderSourceReader(cfg.LeaderURL, nil))
+		browserModule = browser.NewFollowerModule(cfg.LeaderURL, nil, sessions)
+	} else {
+		browserModule = browser.NewModule(newBrowserDriver(cfg.Browser), sessions, newWMDriver(cfg.WM), browser.Layout{BrowserWorkspace: cfg.BrowserWorkspace, ParkWorkspace: cfg.ParkWorkspace}, bus, database)
+	}
 
 	jobsModule := jobs.NewJobsModule()
 	gitModule.RegisterJobs(jobsModule.Service)

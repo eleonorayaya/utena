@@ -109,6 +109,17 @@ func (s *SessionStore) IsAttached(id uint) (bool, error) {
 	return session.IsAttached, nil
 }
 
+func (s *SessionStore) LeaderSessionID(id uint) (*uint, error) {
+	var session Session
+	if err := s.db.Model(&Session{}).Select("leader_session_id").First(&session, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return session.LeaderSessionID, nil
+}
+
 func (s *SessionStore) List(statuses ...SessionStatus) ([]Session, error) {
 	var sessions []Session
 	q := s.loaded()

@@ -46,22 +46,23 @@ var ListableStatuses = []SessionStatus{
 
 type Session struct {
 	gorm.Model
-	Name           string                 `json:"name,omitempty"`
-	Status         SessionStatus          `json:"status"`
-	IsAttached     bool                   `json:"is_attached"`
-	LastUsedAt     time.Time              `json:"last_used_at"`
-	SessionRoot    string                 `json:"session_root,omitempty" gorm:"index"`
-	Bundles        []string               `json:"bundles,omitempty" gorm:"serializer:json"`
-	ClaudeSessions []claude.ClaudeSession `json:"claude_sessions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	SessionActions []SessionAction        `json:"session_actions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	SetupSteps     []SessionSetupStep     `json:"setup_steps,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	Worktrees      []SessionWorktree      `json:"worktrees,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	Blockers       []SessionBlocker       `json:"blockers,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	Branches       []SessionBranch        `json:"branches,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-	PullRequests   []git.PullRequest      `json:"pull_requests,omitempty" gorm:"-"`
-	MuxSessionID   *uint                  `json:"mux_session_id,omitempty" gorm:"uniqueIndex"`
-	StatusError    string                 `json:"status_error,omitempty"`
-	MuxSession     *mux.Session           `json:"mux_session,omitempty" gorm:"foreignKey:MuxSessionID"`
+	Name            string                 `json:"name,omitempty"`
+	Status          SessionStatus          `json:"status"`
+	IsAttached      bool                   `json:"is_attached"`
+	LastUsedAt      time.Time              `json:"last_used_at"`
+	SessionRoot     string                 `json:"session_root,omitempty" gorm:"index"`
+	Bundles         []string               `json:"bundles,omitempty" gorm:"serializer:json"`
+	ClaudeSessions  []claude.ClaudeSession `json:"claude_sessions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	SessionActions  []SessionAction        `json:"session_actions,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	SetupSteps      []SessionSetupStep     `json:"setup_steps,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Worktrees       []SessionWorktree      `json:"worktrees,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Blockers        []SessionBlocker       `json:"blockers,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	Branches        []SessionBranch        `json:"branches,omitempty" gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
+	PullRequests    []git.PullRequest      `json:"pull_requests,omitempty" gorm:"-"`
+	MuxSessionID    *uint                  `json:"mux_session_id,omitempty" gorm:"uniqueIndex"`
+	StatusError     string                 `json:"status_error,omitempty"`
+	LeaderSessionID *uint                  `json:"leader_session_id,omitempty"`
+	MuxSession      *mux.Session           `json:"mux_session,omitempty" gorm:"foreignKey:MuxSessionID"`
 }
 
 var unwatchedStatuses = []SessionStatus{StatusDeleted, StatusArchived, StatusCompleted, StatusPending, StatusCreating}

@@ -23,6 +23,8 @@ func clearWMEnv(t *testing.T) {
 	t.Setenv("UTENA_BROWSER_WORKSPACE", "")
 	t.Setenv("UTENA_PARK_WORKSPACE", "")
 	t.Setenv("UTENA_BROWSER", "")
+	t.Setenv("UTENA_FOLLOWER", "")
+	t.Setenv("UTENA_LEADER_URL", "")
 	t.Setenv("UTENA_DATA_DIR", t.TempDir())
 }
 
@@ -171,4 +173,67 @@ func TestLoadConfig_NoDaemonFileMeansNoBundles(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, cfg.Bundles)
 	assert.Empty(t, cfg.McpServers)
+}
+
+func TestLoadConfig_FollowerDefaultsOff(t *testing.T) {
+	clearWMEnv(t)
+
+	cfg, err := LoadConfig(nil)
+	require.NoError(t, err)
+	assert.False(t, cfg.Follower)
+	assert.Empty(t, cfg.LeaderURL)
+}
+
+func TestLoadConfig_FollowerFlags(t *testing.T) {
+	clearWMEnv(t)
+
+	cfg, err := LoadConfig([]string{"--follower", "--leader-url", "http://127.0.0.1:3334/"})
+	require.NoError(t, err)
+	assert.True(t, cfg.Follower)
+	assert.Equal(t, "http://127.0.0.1:3334", cfg.LeaderURL)
+}
+
+func TestLoadConfig_FollowerFromEnv(t *testing.T) {
+	clearWMEnv(t)
+	t.Setenv("UTENA_FOLLOWER", "true")
+	t.Setenv("UTENA_LEADER_URL", "http://127.0.0.1:4000")
+
+	cfg, err := LoadConfig([]string{"--leader-url", "http://127.0.0.1:3334"})
+	require.NoError(t, err)
+	assert.True(t, cfg.Follower)
+	assert.Equal(t, "http://127.0.0.1:4000", cfg.LeaderURL)
+}
+
+func TestLoadConfig_FollowerRequiresLeaderURL(t *testing.T) {
+	clearWMEnv(t)
+
+	_, err := LoadConfig([]string{"--follower"})
+	assert.ErrorContains(t, err, "--leader-url")
+
+	t.Setenv("UTENA_FOLLOWER", "1")
+	_, err = LoadConfig(nil)
+	assert.ErrorContains(t, err, "--leader-url")
+}
+
+func TestLoadConfig_FollowerRejectsRelativeLeaderURL(t *testing.T) {
+	clearWMEnv(t)
+
+	_, err := LoadConfig([]string{"--follower", "--leader-url", "127.0.0.1:3334"})
+	assert.ErrorContains(t, err, "leader URL")
+}
+
+func TestLoadConfig_RejectsBadFollowerEnv(t *testing.T) {
+	clearWMEnv(t)
+	t.Setenv("UTENA_FOLLOWER", "maybe")
+
+	_, err := LoadConfig(nil)
+	assert.ErrorContains(t, err, "UTENA_FOLLOWER")
+}
+
+func TestLoadConfig_LeaderURLWithoutFollowerIsAllowed(t *testing.T) {
+	clearWMEnv(t)
+
+	cfg, err := LoadConfig([]string{"--leader-url", "http://127.0.0.1:3334"})
+	require.NoError(t, err)
+	assert.False(t, cfg.Follower)
 }

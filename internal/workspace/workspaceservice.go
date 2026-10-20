@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -17,9 +18,10 @@ import (
 const BareOpTimeout = 45 * time.Minute
 
 type CloneFromURLRequest struct {
-	CloneURL string
-	RootPath string
-	DirName  string
+	CloneURL          string
+	RootPath          string
+	DirName           string
+	LeaderWorkspaceID *uint
 }
 
 type WorkspaceService struct {
@@ -117,8 +119,28 @@ func (s *WorkspaceService) DeleteWorkspace(ctx context.Context, id uint) error {
 	return nil
 }
 
-func (s *WorkspaceService) AddWorkspace(ctx context.Context, path string, asRoot bool) (*Workspace, error) {
+func (s *WorkspaceService) LinkExistingToLeader(path string, leaderWorkspaceID uint) (*Workspace, bool, error) {
+	ws, err := s.store.GetByPath(path)
+	var appErr *common.AppError
+	if errors.As(err, &appErr) && appErr.Category == common.CategoryNotFound {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	id := leaderWorkspaceID
+	ws.LeaderWorkspaceID = &id
+	if err := s.store.Update(ws); err != nil {
+		return nil, false, fmt.Errorf("persist leader workspace id: %w", err)
+	}
+	return ws, true, nil
+}
+
+func (s *WorkspaceService) AddWorkspace(ctx context.Context, path string, asRoot bool, leaderWorkspaceID *uint) (*Workspace, error) {
 	if asRoot {
+		if leaderWorkspaceID != nil {
+			return nil, common.NewInvalidRequest("leader_workspace_id cannot be set when adding a root")
+		}
 		added, err := s.store.AddWorkspaceRoot(path)
 		if err != nil {
 			return nil, err
@@ -137,6 +159,14 @@ func (s *WorkspaceService) AddWorkspace(ctx context.Context, path string, asRoot
 		}
 		s.store.RemoveWorkspaceFromConfig(path)
 		return nil, common.NewInvalidRequest(fmt.Sprintf("path %q is not a git repository — add the parent directory as root to scan for git repos within", path))
+	}
+
+	if leaderWorkspaceID != nil {
+		id := *leaderWorkspaceID
+		ws.LeaderWorkspaceID = &id
+		if err := s.store.Update(ws); err != nil {
+			return nil, fmt.Errorf("persist leader workspace id: %w", err)
+		}
 	}
 
 	if s.gitService != nil && ws.RepoID == nil {
@@ -208,9 +238,10 @@ func (s *WorkspaceService) StartClone(ctx context.Context, req CloneFromURLReque
 	}
 
 	ws := &Workspace{
-		Name:   filepath.Base(targetPath),
-		Path:   targetPath,
-		Status: StatusCloning,
+		Name:              filepath.Base(targetPath),
+		Path:              targetPath,
+		Status:            StatusCloning,
+		LeaderWorkspaceID: copyUintPtr(req.LeaderWorkspaceID),
 	}
 	if err := s.store.Add(ws); err != nil {
 		return nil, err
@@ -343,4 +374,12 @@ func (s *WorkspaceService) resolveRepoIDs(ctx context.Context, workspaces []Work
 			slog.Warn("failed to persist repo id for workspace", "workspace", ws.Name, "error", err)
 		}
 	}
+}
+
+func copyUintPtr(v *uint) *uint {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
 }

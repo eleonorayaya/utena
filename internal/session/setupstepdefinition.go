@@ -1,11 +1,26 @@
 package session
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/eleonorayaya/utena/internal/workspace"
+)
 
 type stepWorkspace struct {
-	ID   uint
-	Name string
-	Path string
+	ID                uint
+	Name              string
+	Path              string
+	LeaderWorkspaceID *uint
+}
+
+func newStepWorkspace(ws *workspace.Workspace) stepWorkspace {
+	return stepWorkspace{ID: ws.ID, Name: ws.Name, Path: ws.Path, LeaderWorkspaceID: ws.LeaderWorkspaceID}
+}
+
+func (w stepWorkspace) workspace() workspace.Workspace {
+	ws := workspace.Workspace{Name: w.Name, Path: w.Path, LeaderWorkspaceID: w.LeaderWorkspaceID}
+	ws.ID = w.ID
+	return ws
 }
 
 type stepDef struct {

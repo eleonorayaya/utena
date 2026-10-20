@@ -1,12 +1,29 @@
 package session
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
+
+func loadLocalWorkspaceConfig(wsPath string) (*WorkspaceConfig, error) {
+	return loadWorkspaceConfig(context.Background(), workspace.NewLocalSourceReader(""), workspace.Workspace{Path: wsPath})
+}
+
+func localDefaultBundles(t *testing.T, paths ...string) []string {
+	t.Helper()
+	wss := make([]workspace.Workspace, len(paths))
+	for i, p := range paths {
+		wss[i] = workspace.Workspace{Path: p}
+	}
+	out, err := defaultBundles(context.Background(), workspace.NewLocalSourceReader(""), wss)
+	require.NoError(t, err)
+	return out
+}
 
 func writeWorkspaceConfig(t *testing.T, wsPath, contents string) {
 	t.Helper()
@@ -24,7 +41,7 @@ func TestLoadWorkspaceConfig_Valid(t *testing.T) {
 		]
 	}`)
 
-	cfg, err := loadWorkspaceConfig(wsPath)
+	cfg, err := loadLocalWorkspaceConfig(wsPath)
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	require.Len(t, cfg.SetupActions, 2)
@@ -39,7 +56,7 @@ func TestLoadWorkspaceConfig_Valid(t *testing.T) {
 }
 
 func TestLoadWorkspaceConfig_Missing(t *testing.T) {
-	cfg, err := loadWorkspaceConfig(t.TempDir())
+	cfg, err := loadLocalWorkspaceConfig(t.TempDir())
 	require.NoError(t, err)
 	require.Nil(t, cfg)
 }
@@ -48,7 +65,7 @@ func TestLoadWorkspaceConfig_Malformed(t *testing.T) {
 	wsPath := t.TempDir()
 	writeWorkspaceConfig(t, wsPath, `{not valid json`)
 
-	cfg, err := loadWorkspaceConfig(wsPath)
+	cfg, err := loadLocalWorkspaceConfig(wsPath)
 	require.Error(t, err)
 	require.Nil(t, cfg)
 }
@@ -68,8 +85,8 @@ func TestDefaultBundles_UnionsInWorkspaceOrder(t *testing.T) {
 	writeWorkspaceConfig(t, a, `{"default_bundles":["go"]}`)
 	writeWorkspaceConfig(t, b, `{"default_bundles":["docs","go"]}`)
 
-	require.Equal(t, []string{"go", "docs"}, defaultBundles([]string{a, b, c}))
-	require.Nil(t, defaultBundles([]string{c}))
+	require.Equal(t, []string{"go", "docs"}, localDefaultBundles(t, a, b, c))
+	require.Nil(t, localDefaultBundles(t, c))
 }
 
 func TestDefaultBundles_SkipsUnreadableConfig(t *testing.T) {
@@ -77,5 +94,5 @@ func TestDefaultBundles_SkipsUnreadableConfig(t *testing.T) {
 	writeWorkspaceConfig(t, a, `{`)
 	writeWorkspaceConfig(t, b, `{"default_bundles":["go"]}`)
 
-	require.Equal(t, []string{"go"}, defaultBundles([]string{a, b}))
+	require.Equal(t, []string{"go"}, localDefaultBundles(t, a, b))
 }

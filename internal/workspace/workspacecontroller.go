@@ -3,8 +3,10 @@ package workspace
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/git"
@@ -16,13 +18,19 @@ type WorkspaceController struct {
 	service    *WorkspaceService
 	store      *WorkspaceStore
 	gitService *git.GitService
+	files      *LocalSourceReader
 }
 
 func NewWorkspaceController(service *WorkspaceService, store *WorkspaceStore, gitService *git.GitService) *WorkspaceController {
+	configDir := ""
+	if store != nil {
+		configDir = store.configDir
+	}
 	return &WorkspaceController{
 		service:    service,
 		store:      store,
 		gitService: gitService,
+		files:      NewLocalSourceReader(configDir),
 	}
 }
 
@@ -76,7 +84,19 @@ func (c *WorkspaceController) AddWorkspace(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	ws, err := c.service.AddWorkspace(ctx, req.Path, req.AsRoot)
+	if req.LeaderWorkspaceID != nil {
+		linked, found, err := c.service.LinkExistingToLeader(req.Path, *req.LeaderWorkspaceID)
+		if err != nil {
+			renderServiceError(w, r, "add workspace failed", err)
+			return
+		}
+		if found {
+			common.RenderResponse(w, r, NewWorkspaceListResponse([]Workspace{*linked}))
+			return
+		}
+	}
+
+	ws, err := c.service.AddWorkspace(ctx, req.Path, req.AsRoot, req.LeaderWorkspaceID)
 	if err != nil {
 		renderServiceError(w, r, "add workspace failed", err)
 		return
@@ -303,4 +323,60 @@ func (c *WorkspaceController) ListPRs(w http.ResponseWriter, r *http.Request) {
 	state := git.PRState(r.URL.Query().Get("state"))
 	prs := c.gitService.SearchPRs(*ws.RepoID, state)
 	render.JSON(w, r, PRListResponse{PullRequests: prs})
+}
+
+func (c *WorkspaceController) GetSourceFile(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	raw := chi.URLParam(r, "id")
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	relPath := sourceFileRelPath(r.URL.Path, raw)
+	if err := ValidateRelPath(relPath); err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(fmt.Sprintf("file path %q: %s", relPath, err.Error())))
+		return
+	}
+
+	ws, err := c.service.GetWorkspace(ctx, uint(id))
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+
+	data, mode, err := c.files.ReadSourceFile(ctx, *ws, relPath)
+	writeSourceFile(w, r, data, mode, err)
+}
+
+func (c *WorkspaceController) GetGlobalSetupScript(w http.ResponseWriter, r *http.Request) {
+	data, mode, err := c.files.ReadGlobalSetupScript(r.Context())
+	writeSourceFile(w, r, data, mode, err)
+}
+
+func sourceFileRelPath(urlPath, rawID string) string {
+	marker := "/" + rawID + "/files/"
+	idx := strings.Index(urlPath, marker)
+	if idx < 0 {
+		return ""
+	}
+	return urlPath[idx+len(marker):]
+}
+
+func writeSourceFile(w http.ResponseWriter, r *http.Request, data []byte, mode fs.FileMode, err error) {
+	if errors.Is(err, fs.ErrNotExist) {
+		w.Header().Set(FileMissingHeader, "1")
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set(FileModeHeader, FormatFileMode(mode))
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }

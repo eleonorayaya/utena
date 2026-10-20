@@ -1,15 +1,33 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/eleonorayaya/utena/internal/bundles"
+	"github.com/eleonorayaya/utena/internal/workspace"
 )
+
+const workspaceConfigRelPath = ".utena/config.json"
+
+type sourceReadError struct {
+	err error
+}
+
+func (e *sourceReadError) Error() string { return e.err.Error() }
+
+func (e *sourceReadError) Unwrap() error { return e.err }
+
+func isSourceReadError(err error) bool {
+	var e *sourceReadError
+	return errors.As(err, &e)
+}
 
 type WorkspaceSetupActionType string
 
@@ -45,19 +63,22 @@ type WorkspaceConfig struct {
 	DefaultBundles []string               `json:"default_bundles,omitempty"`
 }
 
-func defaultBundles(wsPaths []string) []string {
-	lists := make([][]string, 0, len(wsPaths))
-	for _, p := range wsPaths {
-		cfg, err := loadWorkspaceConfig(p)
+func defaultBundles(ctx context.Context, reader workspace.SourceReader, wss []workspace.Workspace) ([]string, error) {
+	lists := make([][]string, 0, len(wss))
+	for _, ws := range wss {
+		cfg, err := loadWorkspaceConfig(ctx, reader, ws)
+		if isSourceReadError(err) {
+			return nil, err
+		}
 		if err != nil {
-			slog.Warn("failed to load workspace config", "path", p, "error", err)
+			slog.Warn("failed to load workspace config", "path", ws.Path, "error", err)
 			continue
 		}
 		if cfg != nil {
 			lists = append(lists, cfg.DefaultBundles)
 		}
 	}
-	return bundles.Union(lists...)
+	return bundles.Union(lists...), nil
 }
 
 func defaultBundlesFrom(wss []stepWorkspace, configs map[uint]*WorkspaceConfig) []string {
@@ -70,14 +91,13 @@ func defaultBundlesFrom(wss []stepWorkspace, configs map[uint]*WorkspaceConfig) 
 	return bundles.Union(lists...)
 }
 
-func loadWorkspaceConfig(wsPath string) (*WorkspaceConfig, error) {
-	path := filepath.Join(wsPath, ".utena", "config.json")
-	data, err := os.ReadFile(path)
+func loadWorkspaceConfig(ctx context.Context, reader workspace.SourceReader, ws workspace.Workspace) (*WorkspaceConfig, error) {
+	data, _, err := reader.ReadSourceFile(ctx, ws, workspaceConfigRelPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, &sourceReadError{err: fmt.Errorf("read %s for workspace %q: %w", workspaceConfigRelPath, ws.Name, err)}
 	}
 
 	var cfg WorkspaceConfig

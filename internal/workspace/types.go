@@ -44,21 +44,26 @@ func RenderWorkspaceList(workspaces []Workspace) []render.Renderer {
 }
 
 type AddWorkspaceRequest struct {
-	Path   string `json:"path"`
-	AsRoot bool   `json:"as_root"`
+	Path              string `json:"path"`
+	AsRoot            bool   `json:"as_root"`
+	LeaderWorkspaceID *uint  `json:"leader_workspace_id,omitempty"`
 }
 
 func (a *AddWorkspaceRequest) Bind(r *http.Request) error {
 	if a.Path == "" {
 		return fmt.Errorf("path is required")
 	}
+	if a.AsRoot && a.LeaderWorkspaceID != nil {
+		return fmt.Errorf("leader_workspace_id cannot be set when adding a root")
+	}
 	return nil
 }
 
 type CloneWorkspaceRequest struct {
-	CloneURL string `json:"clone_url"`
-	RootPath string `json:"root_path,omitempty"`
-	DirName  string `json:"dir_name,omitempty"`
+	CloneURL          string `json:"clone_url"`
+	RootPath          string `json:"root_path,omitempty"`
+	DirName           string `json:"dir_name,omitempty"`
+	LeaderWorkspaceID *uint  `json:"leader_workspace_id,omitempty"`
 }
 
 func (a *CloneWorkspaceRequest) Bind(r *http.Request) error {

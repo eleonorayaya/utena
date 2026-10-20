@@ -12,7 +12,18 @@ type browserSessions struct {
 	sessions *session.SessionService
 }
 
-var _ browser.Sessions = browserSessions{}
+var (
+	_ browser.Sessions       = browserSessions{}
+	_ browser.LeaderSessions = browserSessions{}
+)
+
+func (b browserSessions) LeaderSessionID(ctx context.Context, sessionID uint) (*uint, error) {
+	id, err := b.sessions.LeaderSessionID(sessionID)
+	if errors.Is(err, session.ErrSessionNotFound) {
+		return nil, browser.ErrSessionNotFound
+	}
+	return id, err
+}
 
 func (b browserSessions) IsAttached(ctx context.Context, sessionID uint) (bool, error) {
 	attached, err := b.sessions.IsAttached(sessionID)

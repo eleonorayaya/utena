@@ -2,7 +2,9 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -17,21 +19,24 @@ import (
 func assignedToStepWorkspaces(assigned []assignedSlot) []stepWorkspace {
 	out := make([]stepWorkspace, len(assigned))
 	for i, a := range assigned {
-		out[i] = stepWorkspace{ID: a.ws.ID, Name: a.ws.Name, Path: a.ws.Path}
+		out[i] = newStepWorkspace(a.ws)
 	}
 	return out
 }
 
-func (s *SessionService) loadWorkspaceConfigs(wss []stepWorkspace) map[uint]*WorkspaceConfig {
+func (s *SessionService) loadWorkspaceConfigs(ctx context.Context, wss []stepWorkspace) (map[uint]*WorkspaceConfig, error) {
 	configs := make(map[uint]*WorkspaceConfig, len(wss))
 	for _, ws := range wss {
-		cfg, err := loadWorkspaceConfig(ws.Path)
+		cfg, err := loadWorkspaceConfig(ctx, s.sources, ws.workspace())
+		if isSourceReadError(err) {
+			return nil, err
+		}
 		if err != nil {
 			slog.Warn("failed to load workspace config", "ws", ws.Name, "path", ws.Path, "error", err)
 		}
 		configs[ws.ID] = cfg
 	}
-	return configs
+	return configs, nil
 }
 
 func newSetupStep(sessionID uint, pos int, d stepDef) *SessionSetupStep {
@@ -284,11 +289,11 @@ func (e *setupExecution) executeStep(ctx context.Context, def stepDef) (bool, er
 	case StepKindSetupWorktree:
 		return e.execSetupWorktree(ctx, def)
 	case StepKindCopyFile:
-		return false, e.execCopyFile(def)
+		return e.execCopyFile(ctx, def)
 	case StepKindInstallDeps:
 		return false, e.execInstallDeps(ctx, def)
 	case StepKindApplyClaude:
-		return false, e.execApplyClaude(ctx)
+		return e.execApplyClaude(ctx)
 	case StepKindSetupMux:
 		if err := e.svc.setupMux(ctx, e.sess, e.muxName, e.sess.SessionRoot); err != nil {
 			return true, fmt.Errorf("mux setup: %w", err)
@@ -325,10 +330,12 @@ func (e *setupExecution) execSetupWorktree(ctx context.Context, def stepDef) (bo
 			envWorkspaceName + "=" + ws.Name,
 			envWorkspacePath + "=" + ws.Path,
 		}
-		wsScript := filepath.Join(ws.Path, ".utena", worktreeSetupName)
 		if scriptErr := traceOp(ctx, "worktree-setup script", func() error {
-			return e.svc.runScript(ctx, wsScript, result.worktreePath, env)
-		}, "script", wsScript, "ws", ws.Name); scriptErr != nil {
+			return e.svc.runWorkspaceScript(ctx, *ws, result.worktreePath, env)
+		}, "ws", ws.Name); scriptErr != nil {
+			if isSourceReadError(scriptErr) {
+				return true, fmt.Errorf("worktree-setup script: %w", scriptErr)
+			}
 			slog.WarnContext(ctx, "workspace worktree-setup script failed", "ws", ws.Name, "error", scriptErr)
 			e.addWarning(fmt.Sprintf("%s: %s", ws.Name, scriptErr.Error()))
 		}
@@ -336,7 +343,7 @@ func (e *setupExecution) execSetupWorktree(ctx context.Context, def stepDef) (bo
 	return false, nil
 }
 
-func (e *setupExecution) execCopyFile(def stepDef) error {
+func (e *setupExecution) execCopyFile(ctx context.Context, def stepDef) (bool, error) {
 	wsID := *def.WorkspaceID
 	ws := e.wsByID[wsID]
 	result := e.getResult(wsID)
@@ -345,11 +352,11 @@ func (e *setupExecution) execCopyFile(def stepDef) error {
 		worktreePath = result.worktreePath
 	}
 
-	if err := validateRelPath(def.CopySrc); err != nil {
-		return fmt.Errorf("copy_file src %q: %w", def.CopySrc, err)
+	if err := workspace.ValidateRelPath(def.CopySrc); err != nil {
+		return false, fmt.Errorf("copy_file src %q: %w", def.CopySrc, err)
 	}
-	if err := validateRelPath(def.CopyDest); err != nil {
-		return fmt.Errorf("copy_file dest %q: %w", def.CopyDest, err)
+	if err := workspace.ValidateRelPath(def.CopyDest); err != nil {
+		return false, fmt.Errorf("copy_file dest %q: %w", def.CopyDest, err)
 	}
 
 	base := worktreePath
@@ -357,26 +364,26 @@ func (e *setupExecution) execCopyFile(def stepDef) error {
 		base = e.sess.SessionRoot
 	}
 	if base == "" {
-		return fmt.Errorf("copy_file %q: destination base path unavailable", def.CopyDest)
+		return false, fmt.Errorf("copy_file %q: destination base path unavailable", def.CopyDest)
 	}
 
 	srcPath := filepath.Join(ws.Path, def.CopySrc)
-	data, err := os.ReadFile(srcPath)
+	data, _, err := e.svc.sources.ReadSourceFile(ctx, *ws, def.CopySrc)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("copy_file source not found: %s", srcPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, fmt.Errorf("copy_file source not found: %s", srcPath)
 		}
-		return fmt.Errorf("copy_file read %s: %w", srcPath, err)
+		return true, fmt.Errorf("copy_file read %s: %w", srcPath, err)
 	}
 
 	destPath := filepath.Join(base, def.CopyDest)
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		return fmt.Errorf("copy_file mkdir %s: %w", filepath.Dir(destPath), err)
+		return false, fmt.Errorf("copy_file mkdir %s: %w", filepath.Dir(destPath), err)
 	}
 	if err := os.WriteFile(destPath, data, 0o644); err != nil {
-		return fmt.Errorf("copy_file write %s: %w", destPath, err)
+		return false, fmt.Errorf("copy_file write %s: %w", destPath, err)
 	}
-	return nil
+	return false, nil
 }
 
 func (e *setupExecution) execInstallDeps(ctx context.Context, def stepDef) error {
@@ -412,7 +419,7 @@ func installCommand(pm string, runWith []string) (string, []string) {
 	return runWith[0], args
 }
 
-func (e *setupExecution) execApplyClaude(ctx context.Context) error {
+func (e *setupExecution) execApplyClaude(ctx context.Context) (bool, error) {
 	if e.anyWorktreeCreated() {
 		globalBranch := ""
 		if len(e.orderedWS) > 0 {
@@ -425,10 +432,12 @@ func (e *setupExecution) execApplyClaude(ctx context.Context) error {
 			envSessionName + "=" + e.sess.Name,
 			envBranch + "=" + globalBranch,
 		}
-		globalScript := filepath.Join(e.svc.configDir, worktreeSetupName)
 		if err := traceOp(ctx, "global worktree-setup script", func() error {
-			return e.svc.runScript(ctx, globalScript, e.sess.SessionRoot, globalEnv)
-		}, "script", globalScript); err != nil {
+			return e.svc.runGlobalScript(ctx, e.sess.SessionRoot, globalEnv)
+		}); err != nil {
+			if isSourceReadError(err) {
+				return true, fmt.Errorf("global worktree-setup script: %w", err)
+			}
 			slog.WarnContext(ctx, "global worktree-setup script failed", "error", err)
 			e.addWarning(fmt.Sprintf("global: %s", err.Error()))
 		}
@@ -437,18 +446,5 @@ func (e *setupExecution) execApplyClaude(ctx context.Context) error {
 	for _, w := range e.svc.applyClaudeSettings(ctx, e.sess) {
 		e.addWarning(w)
 	}
-	return nil
-}
-
-func validateRelPath(p string) error {
-	if p == "" {
-		return fmt.Errorf("path is empty")
-	}
-	if filepath.IsAbs(p) {
-		return fmt.Errorf("path must be relative")
-	}
-	if strings.Contains(p, "..") {
-		return fmt.Errorf("path must not contain '..'")
-	}
-	return nil
+	return false, nil
 }

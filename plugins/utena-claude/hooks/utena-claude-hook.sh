@@ -1,7 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+DAEMON_URL="http://127.0.0.1:${UTENA_PORT:-3333}"
+
 UTENA_SESSION_ID="${UTENA_SESSION_ID:-}"
+if [ -z "$UTENA_SESSION_ID" ] && [ -n "${TUIOS_SESSION:-}" ]; then
+    UTENA_SESSION_ID=$(curl -sf --max-time 2 "${DAEMON_URL}/mux/sessions/${TUIOS_SESSION}/env/UTENA_SESSION_ID" 2>/dev/null || true)
+fi
 if [ -z "$UTENA_SESSION_ID" ]; then
     exit 0
 fi
@@ -21,6 +26,6 @@ curl -s -X PUT \
         --arg cwd "$CWD" \
         --arg notification_type "$NOTIFICATION_TYPE" \
         '{event:$event, claude_session_id:$claude_session_id, session_id:$session_id, cwd:$cwd, notification_type:$notification_type}')" \
-    "http://127.0.0.1:3333/claude/hook" > /dev/null 2>&1 || true
+    "${DAEMON_URL}/claude/hook" > /dev/null 2>&1 || true
 
 exit 0

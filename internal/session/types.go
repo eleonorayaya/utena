@@ -74,9 +74,10 @@ type WorkspaceBranchSpec struct {
 }
 
 type CreateSessionRequest struct {
-	Name       string                `json:"name,omitempty"`
-	Workspaces []WorkspaceBranchSpec `json:"workspaces"`
-	Bundles    []string              `json:"bundles"`
+	Name            string                `json:"name,omitempty"`
+	Workspaces      []WorkspaceBranchSpec `json:"workspaces"`
+	Bundles         []string              `json:"bundles"`
+	LeaderSessionID *uint                 `json:"leader_session_id,omitempty"`
 }
 
 func validateBundleNames(names []string) error {

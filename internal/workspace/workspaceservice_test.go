@@ -161,7 +161,7 @@ func TestWorkspaceService_AddWorkspace_GitRepo(t *testing.T) {
 	wsDir := initTestRepo(t)
 
 	ctx := context.Background()
-	ws, err := service.AddWorkspace(ctx, wsDir, false)
+	ws, err := service.AddWorkspace(ctx, wsDir, false, nil)
 	require.NoError(t, err)
 	require.NotNil(t, ws)
 	require.Equal(t, filepath.Base(wsDir), ws.Name)
@@ -174,7 +174,7 @@ func TestWorkspaceService_AddWorkspace_RejectsNonGit(t *testing.T) {
 	wsDir := t.TempDir()
 
 	ctx := context.Background()
-	ws, err := service.AddWorkspace(ctx, wsDir, false)
+	ws, err := service.AddWorkspace(ctx, wsDir, false, nil)
 	require.Error(t, err)
 	require.Nil(t, ws)
 	require.Contains(t, err.Error(), "not a git repository")
@@ -189,12 +189,36 @@ func TestWorkspaceService_AddWorkspaceAsRoot(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, "project-a"), 0755))
 
 	ctx := context.Background()
-	ws, err := service.AddWorkspace(ctx, rootDir, true)
+	ws, err := service.AddWorkspace(ctx, rootDir, true, nil)
 	require.NoError(t, err)
 	require.Nil(t, ws)
 
 	workspaces, _ := service.ListWorkspaces(ctx)
 	require.Len(t, workspaces, 1)
+}
+
+func TestWorkspaceService_AddWorkspace_StoresLeaderWorkspaceID(t *testing.T) {
+	service, store := setupWorkspaceServiceWithConfig(t)
+	wsDir := initTestRepo(t)
+	leaderID := uint(42)
+
+	ws, err := service.AddWorkspace(context.Background(), wsDir, false, &leaderID)
+	require.NoError(t, err)
+	require.NotNil(t, ws.LeaderWorkspaceID)
+	require.Equal(t, uint(42), *ws.LeaderWorkspaceID)
+
+	stored, err := store.GetByID(ws.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.LeaderWorkspaceID)
+	require.Equal(t, uint(42), *stored.LeaderWorkspaceID)
+}
+
+func TestWorkspaceService_AddWorkspaceAsRoot_RejectsLeaderWorkspaceID(t *testing.T) {
+	service, _ := setupWorkspaceServiceWithConfig(t)
+	leaderID := uint(1)
+
+	_, err := service.AddWorkspace(context.Background(), t.TempDir(), true, &leaderID)
+	require.Error(t, err)
 }
 
 func TestWorkspaceService_SetWorkspaceHidden(t *testing.T) {
@@ -348,6 +372,24 @@ func TestWorkspaceService_StartClone_HappyPath(t *testing.T) {
 	bareInfo, err := os.Stat(filepath.Join(done.Path, ".bare"))
 	require.NoError(t, err)
 	require.True(t, bareInfo.IsDir())
+}
+
+func TestWorkspaceService_StartClone_StoresLeaderWorkspaceID(t *testing.T) {
+	service, _ := setupServiceWithGitAndRoot(t)
+	source := initTestRepo(t)
+	leaderID := uint(9)
+
+	ws, err := service.StartClone(context.Background(), CloneFromURLRequest{
+		CloneURL:          source,
+		DirName:           "from-leader",
+		LeaderWorkspaceID: &leaderID,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, ws.LeaderWorkspaceID)
+
+	done := waitWorkspaceStatus(t, service, ws.ID, StatusReady)
+	require.NotNil(t, done.LeaderWorkspaceID)
+	require.Equal(t, uint(9), *done.LeaderWorkspaceID)
 }
 
 func TestWorkspaceService_StartClone_FailureLeavesFailedWorkspace(t *testing.T) {
