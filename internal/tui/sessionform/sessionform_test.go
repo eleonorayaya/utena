@@ -550,3 +550,27 @@ func TestForm_CoderStatusErrorHidesBackend(t *testing.T) {
 	assert.False(t, m.coderAvailable)
 	assert.NotContains(t, m.View(), "Backend")
 }
+
+func TestForm_CoderCreateReturnsToList(t *testing.T) {
+	m := started(t, gitWS(1, "api"))
+	m, _ = m.Update(provider.CoderStatusLoadedMsg{Configured: true})
+	m = namedAndLoaded(t, m)
+	m, _ = m.Update(press("tab"))
+	m, _ = m.Update(press("right"))
+	m, _ = m.Update(press("enter"))
+
+	_, cmd := m.Update(provider.SessionCreatedMsg{ID: 7})
+
+	assert.Equal(t, []string{"router.BackMsg"}, uitest.MsgTypes(cmd))
+}
+
+func TestForm_LocalCreateShowsProgress(t *testing.T) {
+	m := started(t, gitWS(1, "api"))
+	m, _ = m.Update(provider.CoderStatusLoadedMsg{Configured: true})
+	m = namedAndLoaded(t, m)
+	m, _ = m.Update(press("enter"))
+
+	_, cmd := m.Update(provider.SessionCreatedMsg{ID: 7})
+
+	assert.Equal(t, []string{"tea.sequenceMsg"}, uitest.MsgTypes(cmd))
+}

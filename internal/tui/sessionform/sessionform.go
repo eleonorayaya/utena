@@ -67,6 +67,7 @@ type Model struct {
 	workspacesErr   string
 	status          ui.Status
 	submitting      bool
+	submitted       string
 	width, height   int
 }
 
@@ -243,6 +244,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case provider.SessionCreatedMsg:
 		m.submitting = false
+		if m.submitted == backendCoder {
+			return m, router.Back()
+		}
 		return m, tea.Sequence(router.NavigateTo(router.SessionProgressView), sessionprogress.Start(msg.ID))
 	}
 
@@ -497,7 +501,8 @@ func (m Model) submit() (Model, tea.Cmd) {
 	m.nameErr = ""
 	m.status = ui.Status{}
 	m.submitting = true
-	return m, provider.CreateSession(name, buildSpecs(m.rows, isNew), m.selectedBundles, m.selectedBackend())
+	m.submitted = m.selectedBackend()
+	return m, provider.CreateSession(name, buildSpecs(m.rows, isNew), m.selectedBundles, m.submitted)
 }
 
 func (m Model) selectedBackend() string {

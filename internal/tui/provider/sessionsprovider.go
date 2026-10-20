@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/session"
 )
@@ -152,6 +154,22 @@ type SessionSwitchedMsg struct{}
 type sessionsProvider struct {
 	client   *client
 	sessions []session.Session
+	polling  bool
+}
+
+type pollSessionsTickMsg struct{}
+
+func pollSessionsTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return pollSessionsTickMsg{} })
+}
+
+func anySessionCreating(sessions []session.Session) bool {
+	for i := range sessions {
+		if sessions[i].Status == session.StatusCreating {
+			return true
+		}
+	}
+	return false
 }
 
 func newSessionsProvider(c *client) sessionsProvider {
@@ -189,7 +207,22 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionsLoadedMsg:
 		p.sessions = msg.sessions
-		return p, tea.Batch(p.emitState(), p.deriveActiveWorkspace())
+		cmds := []tea.Cmd{p.emitState(), p.deriveActiveWorkspace()}
+		creating := anySessionCreating(p.sessions)
+		switch {
+		case creating && !p.polling:
+			p.polling = true
+			cmds = append(cmds, pollSessionsTick())
+		case !creating:
+			p.polling = false
+		}
+		return p, tea.Batch(cmds...)
+
+	case pollSessionsTickMsg:
+		if !p.polling {
+			return p, nil
+		}
+		return p, tea.Batch(p.client.fetchSessions(), pollSessionsTick())
 
 	case fetchSessionsIntentMsg:
 		return p, p.client.fetchSessions()
