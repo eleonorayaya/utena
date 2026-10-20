@@ -40,10 +40,21 @@ type Model struct {
 	detail           sessiondetail.Model
 	width            int
 	height           int
+	escQuits         bool
 }
 
-func New() Model {
-	return Model{detail: sessiondetail.New()}
+type Option func(*Model)
+
+func WithEscQuits() Option {
+	return func(m *Model) { m.escQuits = true }
+}
+
+func New(opts ...Option) Model {
+	m := Model{detail: sessiondetail.New()}
+	for _, opt := range opts {
+		opt(&m)
+	}
+	return m
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
@@ -53,6 +64,13 @@ func (m Model) Init() (Model, tea.Cmd) {
 func (m Model) Keys() help.KeyMap {
 	if m.detail.Focused() {
 		return m.detail.Keys()
+	}
+	return m.keys()
+}
+
+func (m Model) keys() keyMap {
+	if m.escQuits {
+		return pickerKeys
 	}
 	return keys
 }
@@ -266,7 +284,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 
 	switch {
-	case key.Matches(msg, keys.Quit):
+	case key.Matches(msg, m.keys().Quit):
 		return m, tea.Quit, true
 
 	case key.Matches(msg, keys.Up):

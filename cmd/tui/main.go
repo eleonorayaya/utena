@@ -10,6 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/eleonorayaya/utena/internal/aerospace"
+	"github.com/eleonorayaya/utena/internal/picker"
 	"github.com/eleonorayaya/utena/internal/shellinit"
 	"github.com/eleonorayaya/utena/internal/tui"
 	"github.com/eleonorayaya/utena/internal/tui/router"
@@ -43,6 +45,7 @@ func main() {
 	rootCmd.AddCommand(hookCmd())
 	rootCmd.AddCommand(topCmd())
 	rootCmd.AddCommand(openCmd())
+	rootCmd.AddCommand(pickerCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -82,10 +85,18 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	setupLogging()
 	loadTheme()
 
-	p := tea.NewProgram(tui.NewApp(port, router.SessionListView))
+	p := tea.NewProgram(tui.NewApp(port, router.SessionListView, appOptions(os.Getenv)...))
 	_, err := p.Run()
 	closeOwnPopup()
+	returnPickerFocus(aerospace.NewDriver(), os.Getenv)
 	return err
+}
+
+func appOptions(getenv func(string) string) []tui.Option {
+	if getenv(picker.EnvPicker) == "" {
+		return nil
+	}
+	return []tui.Option{tui.WithEscQuits()}
 }
 
 func closeOwnPopup() {

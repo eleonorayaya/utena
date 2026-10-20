@@ -30,10 +30,24 @@ type App struct {
 	height   int
 }
 
-func NewApp(port string, initialView router.View) App {
+type Option func(*options)
+
+type options struct {
+	list []sessionlist.Option
+}
+
+func WithEscQuits() Option {
+	return func(o *options) { o.list = append(o.list, sessionlist.WithEscQuits()) }
+}
+
+func NewApp(port string, initialView router.View, opts ...Option) App {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
 	views := map[router.View]router.ViewEntry{
-		router.SessionListView:        &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
+		router.SessionListView:        &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New(o.list...)},
 		router.SessionFormView:        &router.ViewAdapter[sessionform.Model]{Model: sessionform.New()},
 		router.SessionProgressView:    &router.ViewAdapter[sessionprogress.Model]{Model: sessionprogress.New()},
 		router.WorkspaceListView:      &router.ViewAdapter[workspacelist.Model]{Model: workspacelist.New()},

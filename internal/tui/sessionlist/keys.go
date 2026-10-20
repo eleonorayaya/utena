@@ -47,4 +47,10 @@ var keys = keyMap{
 	Quit:         key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 }
 
+var pickerKeys = func() keyMap {
+	k := keys
+	k.Quit = key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q/esc", "quit"))
+	return k
+}()
+
 var _ help.KeyMap = keys
