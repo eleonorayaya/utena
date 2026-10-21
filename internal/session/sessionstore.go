@@ -142,10 +142,11 @@ func (s *SessionStore) List(statuses ...SessionStatus) ([]Session, error) {
 }
 
 type MuxSessionRef struct {
-	ID      uint
-	Name    string
-	Status  SessionStatus
-	MuxName string
+	ID          uint
+	Name        string
+	Status      SessionStatus
+	MuxName     string
+	SessionRoot string
 }
 
 func (s *SessionStore) ListByMuxNames(muxNames []string) ([]MuxSessionRef, error) {
@@ -154,7 +155,7 @@ func (s *SessionStore) ListByMuxNames(muxNames []string) ([]MuxSessionRef, error
 		return refs, nil
 	}
 	err := s.db.Model(&Session{}).
-		Select("sessions.id, sessions.name, sessions.status, mux_sessions.name AS mux_name").
+		Select("sessions.id, sessions.name, sessions.status, sessions.session_root, mux_sessions.name AS mux_name").
 		Joins("JOIN mux_sessions ON mux_sessions.id = sessions.mux_session_id AND mux_sessions.deleted_at IS NULL").
 		Where("sessions.status <> ? AND mux_sessions.name IN ?", StatusDeleted, muxNames).
 		Scan(&refs).Error

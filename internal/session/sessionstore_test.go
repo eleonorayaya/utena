@@ -622,3 +622,17 @@ func TestSession_MigratesDatabaseWithLegacyTodoColumns(t *testing.T) {
 	require.NoError(t, database.Where("name = ?", "legacy").First(&sess).Error)
 	require.Equal(t, StatusActive, sess.Status)
 }
+
+func TestSessionStore_ListByMuxNames_IncludesSessionRoot(t *testing.T) {
+	database := setupTestDB(t)
+	ms := &mux.Session{Name: "utena-alpha", StartDir: "/tmp/alpha", Status: mux.StatusActive}
+	require.NoError(t, database.Create(ms).Error)
+	store := NewSessionStore(database)
+	require.NoError(t, store.Add(&Session{Name: "alpha", MuxSessionID: &ms.ID, SessionRoot: "/tmp/sessions/alpha", Status: StatusActive, LastUsedAt: time.Now()}))
+
+	refs, err := store.ListByMuxNames([]string{"utena-alpha"})
+	require.NoError(t, err)
+	require.Len(t, refs, 1)
+	require.Equal(t, "/tmp/sessions/alpha", refs[0].SessionRoot)
+	require.Equal(t, "utena-alpha", refs[0].MuxName)
+}

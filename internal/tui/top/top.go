@@ -5,6 +5,7 @@ import (
 	"io"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ const (
 	SortCPU  Sort = "cpu"
 	SortMem  Sort = "mem"
 	SortName Sort = "name"
+	SortDisk Sort = "disk"
 )
 
 func SortResources(rows []session.SessionResources, by Sort) []session.SessionResources {
@@ -39,18 +41,41 @@ func SortResources(rows []session.SessionResources, by Sort) []session.SessionRe
 			if a.CPUPercent != b.CPUPercent {
 				return a.CPUPercent > b.CPUPercent
 			}
+		case SortDisk:
+			if da, db := diskBytes(a), diskBytes(b); da != db {
+				return da > db
+			}
 		}
 		return a.Name < b.Name
 	})
 	return out
 }
 
+func diskBytes(r session.SessionResources) int64 {
+	if r.DiskBytes == nil {
+		return -1
+	}
+	return *r.DiskBytes
+}
+
+func formatOptional(n *int64, format func(int64) string, missing string) string {
+	if n == nil {
+		return missing
+	}
+	return format(*n)
+}
+
+func formatInt(n int64) string {
+	return strconv.FormatInt(n, 10)
+}
+
 func WriteTSV(w io.Writer, rows []session.SessionResources) error {
-	if _, err := fmt.Fprintln(w, "name\tstatus\tcpu_pct\trss_bytes\tprocs"); err != nil {
+	if _, err := fmt.Fprintln(w, "name\tstatus\tcpu_pct\trss_bytes\tprocs\tdisk_bytes"); err != nil {
 		return err
 	}
 	for _, r := range rows {
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%.1f\t%d\t%d\n", r.Name, r.Status, r.CPUPercent, r.RSSBytes, r.Procs); err != nil {
+		disk := formatOptional(r.DiskBytes, formatInt, "-")
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%.1f\t%d\t%d\t%s\n", r.Name, r.Status, r.CPUPercent, r.RSSBytes, r.Procs, disk); err != nil {
 			return err
 		}
 	}
@@ -61,6 +86,7 @@ type keyMap struct {
 	SortCPU  key.Binding
 	SortMem  key.Binding
 	SortName key.Binding
+	SortDisk key.Binding
 	Procs    key.Binding
 	Quit     key.Binding
 }
@@ -69,12 +95,13 @@ var keys = keyMap{
 	SortCPU:  key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "cpu")),
 	SortMem:  key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mem")),
 	SortName: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "name")),
+	SortDisk: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "disk")),
 	Procs:    key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "processes")),
 	Quit:     key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
 func (k keyMap) bindings() []key.Binding {
-	return []key.Binding{k.SortCPU, k.SortMem, k.SortName, k.Procs, k.Quit}
+	return []key.Binding{k.SortCPU, k.SortMem, k.SortName, k.SortDisk, k.Procs, k.Quit}
 }
 
 const (
@@ -135,6 +162,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sortBy = SortMem
 		case key.Matches(msg, keys.SortName):
 			m.sortBy = SortName
+		case key.Matches(msg, keys.SortDisk):
+			m.sortBy = SortDisk
 		case key.Matches(msg, keys.Procs):
 			m.showProcs = !m.showProcs
 		}
@@ -169,18 +198,19 @@ func (m *Model) recordHistory() {
 }
 
 type layout struct {
+	meter int
 	bar   int
 	trend int
 }
 
 func layoutFor(width int) layout {
 	switch {
-	case width >= 104:
-		return layout{bar: 10, trend: historyLen / 2}
-	case width >= 84:
-		return layout{bar: 8}
+	case width >= 114:
+		return layout{meter: 20, bar: 10, trend: historyLen / 2}
+	case width >= 94:
+		return layout{meter: 20, bar: 8}
 	default:
-		return layout{}
+		return layout{meter: 12}
 	}
 }
 
@@ -191,7 +221,7 @@ func (m Model) View() string {
 	}
 	lay := layoutFor(width)
 
-	lines := []string{m.titleLine(width), "", m.summaryLine(width), "", m.headerRow(width, lay)}
+	lines := []string{m.titleLine(width), "", m.summaryLine(width, lay), "", m.headerRow(width, lay)}
 	rows := SortResources(m.rows, m.sortBy)
 	var maxRSS int64
 	for _, r := range rows {
@@ -235,27 +265,35 @@ func (m Model) titleLine(width int) string {
 	return ui.Clamp(left+strings.Repeat(" ", gap)+right, width)
 }
 
-func (m Model) summaryLine(width int) string {
+func (m Model) summaryLine(width int, lay layout) string {
 	var cpu float64
 	var rss int64
+	var disk *int64
 	var procs int
 	for _, r := range m.rows {
 		cpu += r.CPUPercent
 		rss += r.RSSBytes
 		procs += r.Procs
+		if r.DiskBytes != nil {
+			if disk == nil {
+				disk = new(int64)
+			}
+			*disk += *r.DiskBytes
+		}
 	}
 	cores := runtime.NumCPU()
 	label := ui.Muted()
 	value := ui.FG(theme.Current.TextEmphasis).Bold(true)
-	line := label.Render("CPU ") + ui.Meter(cpu/float64(cores*100), 20, cpuStyle(cpu/float64(cores))) +
+	line := label.Render("CPU ") + ui.Meter(cpu/float64(cores*100), lay.meter, cpuStyle(cpu/float64(cores))) +
 		" " + value.Render(fmt.Sprintf("%.1f%%", cpu)) + label.Render(fmt.Sprintf(" of %d cores", cores)) +
 		label.Render("    MEM ") + value.Render(ui.FormatBytes(rss)) +
+		label.Render("    DISK ") + value.Render(formatOptional(disk, ui.FormatBytes, "—")) +
 		label.Render("    ") + value.Render(fmt.Sprintf("%d", procs)) + label.Render(" procs")
 	return ui.Clamp(line, width)
 }
 
 type columns struct {
-	glyph, name, status, cpuBar, cpu, memBar, mem, procs, trend []ui.Span
+	glyph, name, status, cpuBar, cpu, memBar, mem, procs, disk, trend []ui.Span
 }
 
 func (lay layout) row(c columns, width int) string {
@@ -267,7 +305,7 @@ func (lay layout) row(c columns, width int) string {
 	if lay.bar > 0 {
 		cells = append(cells, ui.Cell{Spans: c.memBar, Width: lay.bar + 1})
 	}
-	cells = append(cells, ui.Cell{Spans: c.mem, Width: 10, Align: ui.AlignRight}, ui.Cell{Spans: c.procs, Width: 7, Align: ui.AlignRight})
+	cells = append(cells, ui.Cell{Spans: c.mem, Width: 10, Align: ui.AlignRight}, ui.Cell{Spans: c.procs, Width: 7, Align: ui.AlignRight}, ui.Cell{Spans: c.disk, Width: 10, Align: ui.AlignRight})
 	if lay.trend > 0 {
 		cells = append(cells, ui.Cell{Width: 2}, ui.Cell{Spans: c.trend, Width: lay.trend})
 	}
@@ -305,6 +343,7 @@ func (m Model) headerRow(width int, lay layout) string {
 		cpu:    head("CPU", SortCPU),
 		mem:    head("MEM", SortMem),
 		procs:  head("PROCS", ""),
+		disk:   head("DISK", SortDisk),
 		trend:  head("TREND", ""),
 	}, width)
 }
@@ -324,6 +363,7 @@ func (m Model) sessionRow(r session.SessionResources, maxRSS int64, width int, l
 		memBar: span(ui.Meter(memFrac, lay.bar, st.mem), lipgloss.NewStyle()),
 		mem:    span(ui.FormatBytes(r.RSSBytes), st.name),
 		procs:  span(fmt.Sprintf("%d", r.Procs), ui.Muted()),
+		disk:   span(formatOptional(r.DiskBytes, ui.FormatBytes, "—"), st.name),
 		trend:  span(ui.Sparkline(m.history[r.MuxSession], lay.trend), st.cpu),
 	}, width)
 }
