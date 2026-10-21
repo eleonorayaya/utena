@@ -37,6 +37,21 @@ func TestGitModule_RegisterJobs(t *testing.T) {
 	assert.Error(t, svc.TriggerJob("nonexistent"))
 }
 
+func TestGitModule_DisableGitHubSkipsClientAndPRSync(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("PATH", t.TempDir())
+	module := NewGitModule(testdb.New(t), eventbus.NewEventBus())
+	module.DisableGitHub()
+
+	require.NoError(t, module.OnAppStart(context.Background()))
+	assert.Nil(t, module.Service.githubClient)
+
+	svc := jobs.NewJobService()
+	module.RegisterJobs(svc)
+	assert.Error(t, svc.TriggerJob("git.prs"))
+	assert.NoError(t, svc.TriggerJob("git.branches"))
+}
+
 func TestGitModule_OnAppStart_SetsCurrentUser(t *testing.T) {
 	database := testdb.New(t)
 

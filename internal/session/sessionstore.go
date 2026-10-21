@@ -218,7 +218,7 @@ func (s *SessionStore) Update(session *Session) error {
 		return err
 	}
 
-	if err := s.db.Omit("ClaudeSessions", "MuxSession", "Bundles", "RemoteSessionID", "RemoteAttention", "RemotePRs", "RemoteSyncedAt").Save(session).Error; err != nil {
+	if err := s.db.Omit("ClaudeSessions", "MuxSession", "Bundles", "RemoteSessionID", "RemoteAttention", "RemoteSyncedAt").Save(session).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return common.WrapConflict(sessionConflictMessage(session), ErrSessionAlreadyExists)
 		}
@@ -405,9 +405,8 @@ func (s *SessionStore) MarkAttached(id uint, at time.Time) error {
 
 func (s *SessionStore) ApplyRemoteState(id uint, st RemoteState, mirrored []SessionStatus) error {
 	synced := st.SyncedAt
-	if err := s.db.Model(&Session{}).Where("id = ?", id).Select("RemoteAttention", "RemotePRs", "RemoteSyncedAt").Updates(&Session{
+	if err := s.db.Model(&Session{}).Where("id = ?", id).Select("RemoteAttention", "RemoteSyncedAt").Updates(&Session{
 		RemoteAttention: st.Attention,
-		RemotePRs:       st.PullRequests,
 		RemoteSyncedAt:  &synced,
 	}).Error; err != nil {
 		return err

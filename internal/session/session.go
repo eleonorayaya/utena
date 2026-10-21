@@ -74,7 +74,7 @@ type Session struct {
 	CoderWorkspace  string                     `json:"coder_workspace,omitempty"`
 	RemoteSessionID *uint                      `json:"remote_session_id,omitempty"`
 	RemoteAttention claude.ClaudeSessionStatus `json:"remote_attention_status,omitempty"`
-	RemotePRs       []git.PullRequest          `json:"-" gorm:"serializer:json"`
+	RemoteRepoID    *uint                      `json:"remote_repo_id,omitempty"`
 	RemoteSyncedAt  *time.Time                 `json:"remote_synced_at,omitempty"`
 }
 

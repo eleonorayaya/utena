@@ -85,6 +85,8 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 	sessions := browserSessions{sessions: sessionModule.Service}
 	var browserModule common.Module
 	if cfg.Follower {
+		gitModule.DisableGitHub()
+		sessionModule.DisableGitHub()
 		sessionModule.Service.SetSourceReader(workspace.NewLeaderSourceReader(cfg.LeaderURL, nil))
 		browserModule = browser.NewFollowerModule(cfg.LeaderURL, nil, sessions)
 	} else {

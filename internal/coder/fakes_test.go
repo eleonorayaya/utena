@@ -209,7 +209,7 @@ type fakeFollower struct {
 	statuses  []session.SessionStatus
 	statusErr string
 	attention claude.ClaudeSessionStatus
-	prs       []git.PullRequest
+	branches  []string
 	sessionID uint
 	wsID      uint
 }
@@ -286,7 +286,14 @@ func (f *fakeFollower) serve(w http.ResponseWriter, r *http.Request) {
 		if len(f.statuses) > 1 {
 			f.statuses = f.statuses[1:]
 		}
-		s := &session.Session{Model: gorm.Model{ID: f.sessionID}, Name: "ws", Status: status, StatusError: f.statusErr, PullRequests: f.prs}
+		s := &session.Session{Model: gorm.Model{ID: f.sessionID}, Name: "ws", Status: status, StatusError: f.statusErr}
+		for i, name := range f.branches {
+			if i == 0 {
+				s.Worktrees = []session.SessionWorktree{{Worktree: &git.Worktree{Branch: &git.Branch{Name: name}}}}
+				continue
+			}
+			s.Branches = append(s.Branches, session.SessionBranch{Branch: &git.Branch{Name: name}})
+		}
 		if f.attention != "" {
 			s.ClaudeSessions = []claude.ClaudeSession{{ClaudeSessionID: "c1", Status: f.attention}}
 		}

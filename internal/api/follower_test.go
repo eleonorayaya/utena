@@ -244,3 +244,11 @@ func TestBuildApp_FollowerUsesFollowerBrowserModule(t *testing.T) {
 	_, ok := app.Browser.(*browser.FollowerModule)
 	assert.True(t, ok)
 }
+
+func TestFollower_DoesNotScheduleGitHubJobs(t *testing.T) {
+	app, _ := setupFollowerRouter(t, "http://127.0.0.1:1")
+
+	assert.Error(t, app.Jobs.Service.TriggerJob("git.prs"))
+	assert.Error(t, app.Jobs.Service.TriggerJob("session.pr_activity"))
+	assert.NoError(t, app.Jobs.Service.TriggerJob("git.branches"))
+}

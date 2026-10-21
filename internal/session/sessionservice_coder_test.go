@@ -370,27 +370,60 @@ func TestCoderRemoteState_MirroredIntoResponses(t *testing.T) {
 	sess := addCoderSession(t, f.store, "ws", StatusActive)
 	now := time.Now().UTC().Truncate(time.Second)
 	require.NoError(t, f.svc.ApplyRemoteState(sess.ID, RemoteState{
-		Status:       StatusActive,
-		StatusError:  "warning",
-		Attention:    claude.StatusNeedsAttention,
-		PullRequests: []git.PullRequest{{Number: 17, Title: "Add widgets", HTMLURL: "https://example.com/pr/17"}},
-		SyncedAt:     now,
+		Status:      StatusActive,
+		StatusError: "warning",
+		Attention:   claude.StatusNeedsAttention,
+		SyncedAt:    now,
 	}))
 
 	got, err := f.svc.GetSession(context.Background(), sess.ID)
 	require.NoError(t, err)
 	assert.Equal(t, claude.StatusNeedsAttention, got.AttentionStatus())
 	assert.Equal(t, "warning", got.StatusError)
-	require.Len(t, got.PullRequests, 1)
-	assert.Equal(t, 17, got.PullRequests[0].Number)
 	require.NotNil(t, got.RemoteSyncedAt)
 	assert.True(t, now.Equal(*got.RemoteSyncedAt))
 
 	list, err := f.svc.ListSessions(context.Background())
 	require.NoError(t, err)
 	require.Len(t, list, 1)
-	assert.Equal(t, 17, list[0].PullRequests[0].Number)
 	assert.Equal(t, "coder · ws", list[0].WorkspaceDisplay())
+}
+
+func TestCoderRemoteState_FollowerBranchesGetLeaderPRs(t *testing.T) {
+	f := setupCoderService(t)
+	sess := f.create(t, "ws")
+	st := RemoteState{Status: StatusActive, Branches: []string{"eqt/widgets", "", "eqt/widgets"}, SyncedAt: time.Now()}
+	require.NoError(t, f.svc.ApplyRemoteState(sess.ID, st))
+	require.NoError(t, f.svc.ApplyRemoteState(sess.ID, st))
+
+	got, err := f.svc.GetSession(context.Background(), sess.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Branches, 1)
+	assert.Equal(t, "eqt/widgets", got.Branches[0].Branch.Name)
+
+	branchID := got.Branches[0].BranchID
+	require.NoError(t, f.store.db.Create(&git.PullRequest{RepoID: *got.RemoteRepoID, Number: 17, HeadBranchID: &branchID, State: git.PRStateOpen}).Error)
+
+	got, err = f.svc.GetSession(context.Background(), sess.ID)
+	require.NoError(t, err)
+	require.Len(t, got.PullRequests, 1)
+	assert.Equal(t, 17, got.PullRequests[0].Number)
+
+	list, err := f.svc.ListSessions(context.Background())
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Len(t, list[0].PullRequests, 1)
+}
+
+func TestCoderRemoteState_BranchesNeedTheLeaderRepo(t *testing.T) {
+	f := setupCoderService(t)
+	sess := addCoderSession(t, f.store, "ws", StatusActive)
+
+	require.NoError(t, f.svc.ApplyRemoteState(sess.ID, RemoteState{Status: StatusActive, Branches: []string{"eqt/widgets"}, SyncedAt: time.Now()}))
+
+	got, err := f.svc.GetSession(context.Background(), sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.Branches)
 }
 
 func TestCoderRemoteState_NeverOverridesLeaderLifecycle(t *testing.T) {

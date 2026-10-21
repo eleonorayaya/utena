@@ -404,15 +404,30 @@ func (s *Service) apply(leaderID uint, workspace string, fs *FollowerSession) {
 	}
 	s.setBusy(workspace, isBusy(attention))
 	st := session.RemoteState{
-		Status:       fs.Status,
-		StatusError:  fs.StatusError,
-		Attention:    attention,
-		PullRequests: fs.PullRequests,
-		SyncedAt:     s.now(),
+		Status:      fs.Status,
+		StatusError: fs.StatusError,
+		Attention:   attention,
+		Branches:    followerBranches(fs.Session),
+		SyncedAt:    s.now(),
 	}
 	if err := s.sessions.ApplyRemoteState(leaderID, st); err != nil {
 		slog.Warn("coder: apply follower state failed", "session", leaderID, "error", err)
 	}
+}
+
+func followerBranches(sess session.Session) []string {
+	var names []string
+	for _, swt := range sess.Worktrees {
+		if wt := swt.Worktree; wt != nil && wt.Branch != nil {
+			names = append(names, wt.Branch.Name)
+		}
+	}
+	for _, sb := range sess.Branches {
+		if sb.Branch != nil {
+			names = append(names, sb.Branch.Name)
+		}
+	}
+	return names
 }
 
 var unpolledStatuses = []session.SessionStatus{session.StatusArchived, session.StatusDeleted, session.StatusCreating}

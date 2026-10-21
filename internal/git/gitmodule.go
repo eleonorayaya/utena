@@ -14,12 +14,17 @@ import (
 )
 
 type GitModule struct {
-	Service *GitService
+	Service        *GitService
+	githubDisabled bool
 }
 
 func NewGitModule(database db.Database, bus eventbus.EventBus) *GitModule {
 	service := NewGitService(database, WithEventBus(bus))
 	return &GitModule{Service: service}
+}
+
+func (m *GitModule) DisableGitHub() {
+	m.githubDisabled = true
 }
 
 func (m *GitModule) OnAppStart(ctx context.Context) error {
@@ -28,6 +33,10 @@ func (m *GitModule) OnAppStart(ctx context.Context) error {
 	}
 	if err := m.Service.worktreeStore.BackfillStatus(); err != nil {
 		slog.WarnContext(ctx, "git: backfill worktree status failed", "error", err)
+	}
+
+	if m.githubDisabled {
+		return nil
 	}
 
 	if m.Service.githubClient == nil {
@@ -98,6 +107,8 @@ func (t *branchSyncTask) Run(ctx context.Context) error {
 }
 
 func (m *GitModule) RegisterJobs(svc *jobs.JobService) {
-	svc.Register(&prSyncTask{service: m.Service})
+	if !m.githubDisabled {
+		svc.Register(&prSyncTask{service: m.Service})
+	}
 	svc.Register(&branchSyncTask{service: m.Service})
 }

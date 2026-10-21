@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/claude"
-	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -320,11 +319,10 @@ func TestService_DeleteTreatsMissingWorkspaceAsDeleted(t *testing.T) {
 func TestService_PollMirrorsStateWhileConnected(t *testing.T) {
 	sess := coderSession(9, "ws", session.StatusActive, remoteID(42))
 	h := newHarness(t, sess)
-	prNumber := 17
 	h.follower.set(func(f *fakeFollower) {
 		f.attention = claude.StatusReadyForReview
 		f.statusErr = "warning"
-		f.prs = []git.PullRequest{{Number: prNumber, Title: "Add widgets", HTMLURL: "https://example.com/pr/17"}}
+		f.branches = []string{"eqt/widgets", "eqt/widgets-v2"}
 	})
 
 	h.svc.poll(context.Background())
@@ -339,8 +337,7 @@ func TestService_PollMirrorsStateWhileConnected(t *testing.T) {
 	assert.Equal(t, session.StatusActive, st.Status)
 	assert.Equal(t, "warning", st.StatusError)
 	assert.Equal(t, claude.StatusReadyForReview, st.Attention)
-	require.Len(t, st.PullRequests, 1)
-	assert.Equal(t, prNumber, st.PullRequests[0].Number)
+	assert.Equal(t, []string{"eqt/widgets", "eqt/widgets-v2"}, st.Branches)
 	assert.Equal(t, h.clock.Now(), st.SyncedAt)
 }
 

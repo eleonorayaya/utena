@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/claude"
 	"github.com/eleonorayaya/utena/internal/common"
 	"github.com/eleonorayaya/utena/internal/eventbus"
-	"github.com/eleonorayaya/utena/internal/git"
 )
 
 var ErrCoderNotConfigured = common.NewInvalidRequest("coder backend is not configured: set coder.template in daemon.json")
@@ -31,11 +31,11 @@ type RemoteCreate struct {
 }
 
 type RemoteState struct {
-	Status       SessionStatus
-	StatusError  string
-	Attention    claude.ClaudeSessionStatus
-	PullRequests []git.PullRequest
-	SyncedAt     time.Time
+	Status      SessionStatus
+	StatusError string
+	Attention   claude.ClaudeSessionStatus
+	Branches    []string
+	SyncedAt    time.Time
 }
 
 type RemoteBackend interface {
@@ -64,7 +64,57 @@ func (s *SessionService) SetRemoteSessionID(id, remoteID uint) error {
 }
 
 func (s *SessionService) ApplyRemoteState(id uint, st RemoteState) error {
-	return s.store.ApplyRemoteState(id, st, MirroredStatuses)
+	if err := s.store.ApplyRemoteState(id, st, MirroredStatuses); err != nil {
+		return err
+	}
+	return s.recordRemoteBranches(context.Background(), id, st.Branches)
+}
+
+func (s *SessionService) recordRemoteBranches(ctx context.Context, id uint, names []string) error {
+	sess, err := s.store.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if sess.RemoteRepoID == nil {
+		return nil
+	}
+	recorded := make(map[string]bool, len(sess.Branches))
+	for _, sb := range sess.Branches {
+		if sb.Branch != nil {
+			recorded[sb.Branch.Name] = true
+		}
+	}
+	var fresh []string
+	for _, name := range names {
+		if name != "" && !recorded[name] && !slices.Contains(fresh, name) {
+			fresh = append(fresh, name)
+		}
+	}
+	if len(fresh) == 0 {
+		return nil
+	}
+	repo, err := s.gitService.GetRepo(*sess.RemoteRepoID)
+	if err != nil {
+		return fmt.Errorf("load repo for coder session %d: %w", id, err)
+	}
+	defaultBranch := s.gitService.DefaultBranch(ctx, repo.Path)
+	now := time.Now()
+	for _, name := range fresh {
+		if name == defaultBranch {
+			continue
+		}
+		branch, err := s.gitService.FindOrCreateBranch(ctx, name, repo.ID)
+		if err != nil {
+			return fmt.Errorf("find-or-create branch %q: %w", name, err)
+		}
+		if err := s.sessionBranchStore.Add(&SessionBranch{SessionID: id, BranchID: branch.ID, FirstSeenAt: now}); err != nil {
+			return fmt.Errorf("record session branch: %w", err)
+		}
+		for _, event := range openPRNotifications(id, s.gitService.GetPRsForBranch(branch.ID), func(uint) string { return branch.Name }) {
+			s.publishNotification(ctx, event.SessionID, event.Type, event.Data)
+		}
+	}
+	return nil
 }
 
 func (s *SessionService) createCoderSession(ctx context.Context, name string, slot assignedSlot, input CreateSessionInput) (*Session, error) {
@@ -98,6 +148,7 @@ func (s *SessionService) createCoderSession(ctx context.Context, name string, sl
 		Bundles:        bundles.Union(input.Bundles),
 		Backend:        BackendCoder,
 		CoderWorkspace: wsName,
+		RemoteRepoID:   &repoID,
 	}
 	if err := s.store.Add(sess); err != nil {
 		return nil, err

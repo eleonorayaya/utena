@@ -16,10 +16,15 @@ import (
 )
 
 type SessionModule struct {
-	Store      *SessionStore
-	Service    *SessionService
-	Controller *SessionController
-	Router     *SessionRouter
+	Store          *SessionStore
+	Service        *SessionService
+	Controller     *SessionController
+	Router         *SessionRouter
+	githubDisabled bool
+}
+
+func (m *SessionModule) DisableGitHub() {
+	m.githubDisabled = true
 }
 
 func NewSessionModule(muxService *mux.Service, workspaceModule *workspace.WorkspaceModule, bus eventbus.EventBus, database db.Database, branchPrefix string, configDir string, sessionsRoot string) *SessionModule {
@@ -211,6 +216,8 @@ func (t *sessionBranchesTask) Run(ctx context.Context) error {
 
 func (m *SessionModule) RegisterJobs(svc *jobs.JobService) {
 	svc.Register(&reconcileSyncTask{service: m.Service})
-	svc.Register(&prActivityTask{service: m.Service})
+	if !m.githubDisabled {
+		svc.Register(&prActivityTask{service: m.Service})
+	}
 	svc.Register(&sessionBranchesTask{service: m.Service})
 }

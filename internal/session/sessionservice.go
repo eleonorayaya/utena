@@ -291,10 +291,6 @@ func (s *SessionService) attachPullRequests(sessions []Session) {
 	}
 	byBranch := groupPRsByBranch(s.gitService.GetPRsForBranches(branchIDs))
 	for i := range sessions {
-		if sessions[i].IsCoder() {
-			sessions[i].PullRequests = sessions[i].RemotePRs
-			continue
-		}
 		var prs []git.PullRequest
 		for _, id := range sessions[i].BranchIDs() {
 			prs = append(prs, byBranch[id]...)
@@ -339,10 +335,6 @@ func (s *SessionService) GetSession(ctx context.Context, id uint) (*Session, err
 		return nil, err
 	}
 	s.populateMuxWindows(ctx, sess)
-	if sess.IsCoder() {
-		sess.PullRequests = sess.RemotePRs
-		return sess, nil
-	}
 	sess.PullRequests = s.gitService.GetPRsForBranches(sess.BranchIDs())
 	return sess, nil
 }
