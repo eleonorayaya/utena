@@ -287,3 +287,48 @@ func TestLoadConfig_RejectsBadCoderBlock(t *testing.T) {
 		assert.ErrorContains(t, err, "coder.", body)
 	}
 }
+
+func TestLoadConfig_DaemonLocalFileOverridesDaemonFile(t *testing.T) {
+	clearWMEnv(t)
+	t.Setenv("UTENA_PORT", "")
+	t.Setenv("UTENA_BROWSER", "")
+	dir := t.TempDir()
+	t.Setenv("UTENA_DATA_DIR", dir)
+	shared := `{"browser":"chrome","bundles":{"go":{"plugins":["gopls"]},"web":{"plugins":["eslint"]}},"coder":{"ssh_suffix":".example","follower_port":4444}}`
+	local := `{"browser":"firefox","bundles":{"web":{"plugins":["biome"]}},"coder":{"template":"my-template"}}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(shared), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "daemon.local.json"), []byte(local), 0o644))
+
+	cfg, err := LoadConfig(nil)
+	require.NoError(t, err)
+	assert.Equal(t, "firefox", cfg.Browser)
+	assert.Equal(t, []string{"gopls"}, cfg.Bundles["go"].Plugins)
+	assert.Equal(t, []string{"biome"}, cfg.Bundles["web"].Plugins)
+	assert.Equal(t, "my-template", cfg.Coder.Template)
+	assert.Equal(t, "ws.example", cfg.Coder.SSHHost("ws"))
+	assert.Equal(t, 4444, cfg.Coder.FollowerPort)
+}
+
+func TestLoadConfig_DaemonLocalFileAlone(t *testing.T) {
+	clearWMEnv(t)
+	t.Setenv("UTENA_PORT", "")
+	dir := t.TempDir()
+	t.Setenv("UTENA_DATA_DIR", dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "daemon.local.json"), []byte(`{"coder":{"template":"my-template"}}`), 0o644))
+
+	cfg, err := LoadConfig(nil)
+	require.NoError(t, err)
+	assert.True(t, cfg.Coder.Enabled())
+}
+
+func TestLoadConfig_InvalidDaemonLocalFile(t *testing.T) {
+	clearWMEnv(t)
+	t.Setenv("UTENA_PORT", "")
+	dir := t.TempDir()
+	t.Setenv("UTENA_DATA_DIR", dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "daemon.local.json"), []byte(`{`), 0o644))
+
+	_, err := LoadConfig(nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "daemon.local.json")
+}
