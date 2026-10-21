@@ -13,10 +13,6 @@ func FetchSessions() tea.Cmd {
 	return func() tea.Msg { return fetchSessionsIntentMsg{} }
 }
 
-func RequestSessionsState() tea.Cmd {
-	return func() tea.Msg { return requestSessionsStateMsg{} }
-}
-
 func ActivateSession(id uint) tea.Cmd {
 	return func() tea.Msg { return activateSessionMsg{id: id} }
 }
@@ -71,7 +67,6 @@ func AddWorkspaceToSession(sessionID uint, spec SessionWorkspaceSpec) tea.Cmd {
 }
 
 type fetchSessionsIntentMsg struct{}
-type requestSessionsStateMsg struct{}
 
 type activateSessionMsg struct {
 	id uint
@@ -196,9 +191,6 @@ func (p sessionsProvider) Update(msg tea.Msg) (sessionsProvider, tea.Cmd) {
 
 	case fetchSessionsIntentMsg:
 		return p, p.client.fetchSessions()
-
-	case requestSessionsStateMsg:
-		return p, p.emitState()
 
 	case activateSessionMsg:
 		id := msg.id

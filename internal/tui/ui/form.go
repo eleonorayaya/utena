@@ -82,10 +82,7 @@ func (f Form) View(fields []Field, width int) string {
 
 	lines := []string{clampWidth(FormTitle(f.Title), width), ""}
 	for i, fl := range fields {
-		gutter := "  "
-		if i == f.focus {
-			gutter = fg(theme.Current.Primary).Render("▌ ")
-		}
+		gutter := Gutter(i == f.focus)
 		label := labelStyle.Render(fl.Label) + strings.Repeat(" ", labelW-lipgloss.Width(fl.Label))
 		for j, v := range strings.Split(fl.Value, "\n") {
 			prefix := indent

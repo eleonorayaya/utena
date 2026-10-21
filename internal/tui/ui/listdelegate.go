@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -49,14 +50,24 @@ func (ListDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	}
 }
 
+func GutterSpan(selected bool, color lipgloss.Color) Span {
+	if !selected {
+		return Span{Text: strings.Repeat(" ", GutterWidth)}
+	}
+	return Span{Text: "▌ ", Style: fg(color)}
+}
+
+func Gutter(selected bool) string {
+	g := GutterSpan(selected, theme.Current.Primary)
+	return g.Style.Render(g.Text)
+}
+
 func SelectableRow(cells []Cell, selected bool, width int) string {
 	var bg lipgloss.TerminalColor
-	gutter := Span{Text: "  "}
 	if selected {
 		bg = theme.Current.Selection
-		gutter = Span{Text: "▌ ", Style: fg(theme.Current.Primary)}
 	}
-	all := append([]Cell{{Spans: []Span{gutter}, Width: GutterWidth}}, cells...)
+	all := append([]Cell{{Spans: []Span{GutterSpan(selected, theme.Current.Primary)}, Width: GutterWidth}}, cells...)
 	all = append(all, Cell{Width: GutterWidth})
 	return Row(all, width, bg)
 }

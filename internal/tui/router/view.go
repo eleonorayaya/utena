@@ -8,7 +8,6 @@ const (
 	SessionProgressView
 	WorkspaceListView
 	WorkspaceCloneFormView
-	SessionDetailView
 	AddWorkspaceFormView
 	BlockerFormView
 )

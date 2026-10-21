@@ -57,28 +57,51 @@ func statusPill(status session.SessionStatus) string {
 		Render(" " + string(status) + " ")
 }
 
-func RenderPanel(s *session.Session, width, height int) string {
-	return RenderPanelWithBrowser(s, browser.SessionsView{}, width, height)
+func (m Model) contentWidth() int {
+	if m.width < 1 {
+		return 60
+	}
+	return m.width
 }
 
-func RenderPanelWithBrowser(s *session.Session, state browser.SessionsView, width, height int) string {
-	m := Model{sess: s, browserState: state, width: width, height: height}
-	return m.View()
+func (m *Model) ensureVisible() {
+	if !m.focused || m.sess == nil || m.height <= 1 {
+		m.offset = 0
+		return
+	}
+	lines, sel := m.body(m.contentWidth())
+	if sel < 0 {
+		m.offset = ui.ScrollOffset(m.offset, m.offset, m.offset, len(lines), m.height-1)
+		return
+	}
+	top := max(sel-1, 0)
+	if m.cursor == 0 {
+		top = 0
+	}
+	m.offset = ui.ScrollOffset(m.offset, top, sel, len(lines), m.height-1)
 }
 
 func (m Model) View() string {
-	width := m.width
-	if width < 1 {
-		width = 60
-	}
+	width := m.contentWidth()
 	if m.sess == nil {
 		return ui.FitHeight(mutedStyle().Render("Select a session"), m.height)
 	}
 	if m.pickingBundles {
 		return ui.FitHeight(m.bundlePicker.View(), m.height)
 	}
+	body, _ := m.body(width)
+	lines := append([]string{headerBand(*m.sess, width)}, body[min(m.offset, len(body)):]...)
+	return ui.FitHeight(strings.Join(lines, "\n"), m.height)
+}
+
+func (m Model) body(width int) ([]string, int) {
 	s := *m.sess
 	bw := max(width-2*padW, 1)
+	var sel *item
+	if m.focused {
+		sel = m.selectedItem()
+	}
+	selLine := -1
 
 	body := []string{statusLine(s, bw), ""}
 
@@ -94,18 +117,23 @@ func (m Model) View() string {
 
 	if open := s.OpenBlockers(); len(open) > 0 {
 		var rows []string
+		selRow := -1
 		for i, bl := range open {
 			text := valueStyle().Render(fmt.Sprintf("%s · %s · %s", bl.Kind, ui.SingleLine(bl.Label()), common.TimeAgo(bl.CreatedAt)))
-			if m.interactive {
-				gutter := "  "
-				if i == m.cursor {
-					gutter = lipgloss.NewStyle().Foreground(theme.Current.Primary).Render("▌ ")
+			if m.focused {
+				selected := sel != nil && sel.kind == blockerItem && sel.blockerID == bl.ID
+				if selected {
+					selRow = i
 				}
-				text = gutter + text
+				text = ui.Gutter(selected) + text
 			}
 			rows = append(rows, text)
 		}
-		body = append(body, card("Blocked", len(open), rows, theme.Current.StatusActive, bw)...)
+		lines := card("Blocked", len(open), rows, theme.Current.StatusActive, bw)
+		if selRow >= 0 {
+			selLine = len(body) + cardFirstRow(bw) + selRow
+		}
+		body = append(body, lines...)
 		body = append(body, "")
 	}
 
@@ -121,34 +149,32 @@ func (m Model) View() string {
 		body = append(body, "")
 	}
 
-	if rows := m.browserRows(bw); len(rows) > 0 {
+	if rows, rowSel := m.browserRows(sel, bw); len(rows) > 0 {
+		if rowSel >= 0 {
+			selLine = len(body) + rowSel
+		}
 		body = append(body, rows...)
 		body = append(body, "")
 	}
 
-	for _, g := range groupPRs(s) {
+	for gi, g := range groupPRs(s) {
 		body = append(body, sectionRule(workspaceStyle().Render(ui.SingleLine(g.name)), mutedStyle().Render(prSummary(g.prs)), bw))
 		for _, pr := range g.prs {
-			body = append(body, prLine(pr, bw))
+			selected := sel != nil && sel.kind == prItem && sel.section == gi && sel.prURL == pr.HTMLURL
+			if selected {
+				selLine = len(body)
+			}
+			body = append(body, prLine(pr, selected, bw))
 		}
 		body = append(body, "")
 	}
 
-	lines := []string{headerBand(s, width)}
-	for _, l := range body {
-		if l == "" {
-			lines = append(lines, "")
-			continue
+	for i, l := range body {
+		if l != "" {
+			body[i] = ui.Clamp(pad+l, width)
 		}
-		lines = append(lines, ui.Clamp(pad+l, width))
 	}
-
-	out := strings.Join(lines, "\n")
-	if m.picker.IsOpen() && m.height > 0 {
-		rows := m.picker.Height(m.height - 1)
-		out = ui.FitHeight(out, max(m.height-rows, 1)) + "\n" + m.picker.View(width, rows)
-	}
-	return ui.FitHeight(out, m.height)
+	return body, selLine
 }
 
 func headerBand(s session.Session, width int) string {
@@ -233,6 +259,13 @@ func sectionRule(title, info string, width int) string {
 		line += " " + info
 	}
 	return line
+}
+
+func cardFirstRow(width int) int {
+	if width < minCardW {
+		return 0
+	}
+	return 1
 }
 
 func card(title string, count int, rows []string, color lipgloss.Color, width int) []string {
@@ -341,7 +374,7 @@ func checksGlyph(state git.ChecksState) string {
 	}
 }
 
-func prLine(pr git.PullRequest, width int) string {
+func prLine(pr git.PullRequest, selected bool, width int) string {
 	numText := fmt.Sprintf("#%d", pr.Number)
 	num := ui.Hyperlink(pr.HTMLURL, lipgloss.NewStyle().Foreground(theme.Current.AccentBlue).Render(numText))
 	numPad := strings.Repeat(" ", max(prNumW-len(numText), 0))
@@ -350,7 +383,7 @@ func prLine(pr git.PullRequest, width int) string {
 
 	fixed := 2 + max(prNumW, len(numText)) + 2 + 2 + 1 + 2 + badgeW
 	if fixed+1 > width {
-		return "  " + num + numPad
+		return ui.Gutter(selected) + num + numPad
 	}
 	titleStyle := valueStyle()
 	if pr.State == git.PRStateMerged || pr.State == git.PRStateClosed {
@@ -359,7 +392,7 @@ func prLine(pr git.PullRequest, width int) string {
 	titleW := width - fixed
 	title := ui.Truncate(ui.SingleLine(pr.Title), titleW)
 	title += strings.Repeat(" ", max(titleW-lipgloss.Width(title), 0))
-	return "  " + num + numPad + "  " + titleStyle.Render(title) + "  " + checksGlyph(pr.ChecksState) + "  " + badge
+	return ui.Gutter(selected) + num + numPad + "  " + titleStyle.Render(title) + "  " + checksGlyph(pr.ChecksState) + "  " + badge
 }
 
 func tabCountText(n int) string {
@@ -377,13 +410,13 @@ func tabHost(raw string) string {
 	return strings.TrimPrefix(u.Hostname(), "www.")
 }
 
-func (m Model) browserRows(width int) []string {
+func (m Model) browserRows(sel *item, width int) ([]string, int) {
 	sb := m.sessionBrowser()
 	if len(sb.Windows) == 0 {
-		return nil
+		return nil, -1
 	}
 	rows := []string{sectionRule(sectionTitleStyle().Render("Browser"), mutedStyle().Render(tabCountText(sb.TabCount)+" · "+sb.State), width)}
-	selectable := len(m.sess.OpenBlockers())
+	selRow := -1
 	for i, w := range sb.Windows {
 		if len(sb.Windows) > 1 {
 			heading := fmt.Sprintf("window %d", i+1)
@@ -393,23 +426,18 @@ func (m Model) browserRows(width int) []string {
 			rows = append(rows, "  "+mutedStyle().Render(heading))
 		}
 		for _, t := range w.Tabs {
-			selected := false
-			if focusable(w, t) {
-				selected = m.interactive && m.cursor == selectable
-				selectable++
+			selected := sel != nil && sel.kind == tabItem && sel.tab == tabRef{windowID: w.ID, tabID: t.ID}
+			if selected {
+				selRow = len(rows)
 			}
 			rows = append(rows, tabLine(w, t, selected, width))
 		}
 	}
-	return rows
+	return rows, selRow
 }
 
 func tabLine(w browser.WindowView, t browser.TabView, selected bool, width int) string {
 	live := focusable(w, t)
-	gutter := "  "
-	if selected {
-		gutter = lipgloss.NewStyle().Foreground(theme.Current.Primary).Render("▌ ")
-	}
 	titleStyle := valueStyle()
 	markerStyle := lipgloss.NewStyle().Foreground(theme.Current.AccentBlue)
 	if !live {
@@ -434,7 +462,7 @@ func tabLine(w browser.WindowView, t browser.TabView, selected bool, width int) 
 	if hostW > 0 {
 		titleW = max(avail-hostW-2, 1)
 	}
-	line := gutter + marker + " " + titleStyle.Render(ui.Truncate(title, titleW))
+	line := ui.Gutter(selected) + marker + " " + titleStyle.Render(ui.Truncate(title, titleW))
 	if hostW > 0 {
 		line += "  " + mutedStyle().Render(ui.Truncate(host, hostW))
 	}

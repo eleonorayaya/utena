@@ -52,7 +52,7 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 - `internal/aerospace/` - `wm.Driver` over the `aerospace` CLI
 - `internal/claude/` - Claude session management
 - `internal/bundles/` - plugin bundle catalog (`daemon.json` `"bundles"`, with plugins and MCP server names, plus `"mcp_servers"` definitions) and `GET /bundles`; sessions get plugins in `.claude/settings.local.json` and servers in `.mcp.json`
-- `internal/tui/` - Bubbletea TUI application; `internal/tui/bundlepicker` is the plugin bundle multi-select used by the new-session form and session detail (`p`); `internal/tui/provider` holds the daemon client and providers (sessions, workspaces, and a browser provider that fetches `GET /browser/sessions` after every sessions load and focuses tabs through `POST /browser/focus`)
+- `internal/tui/` - Bubbletea TUI application; `internal/tui/bundlepicker` is the plugin bundle multi-select used by the new-session form and the session list's focused detail panel (`p`); `internal/tui/sessiondetail` is that panel, a child model of `internal/tui/sessionlist` that `tab` focuses; `internal/tui/provider` holds the daemon client and providers (sessions, workspaces, and a browser provider that fetches `GET /browser/sessions` after every sessions load and focuses tabs through `POST /browser/focus`)
 - `internal/common/` - shared utilities
 
 ### Persistence

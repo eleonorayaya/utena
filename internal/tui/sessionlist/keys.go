@@ -14,19 +14,19 @@ type keyMap struct {
 	Delete       key.Binding
 	Block        key.Binding
 	New          key.Binding
-	Info         key.Binding
+	Focus        key.Binding
 	Workspaces   key.Binding
 	ToggleHidden key.Binding
 	Quit         key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Select, k.OpenPR, k.New, k.Block, k.Archive}
+	return []key.Binding{k.Select, k.Focus, k.OpenPR, k.New, k.Block, k.Archive}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Select, k.Info, k.OpenPR},
+		{k.Up, k.Down, k.Select, k.Focus, k.OpenPR},
 		{k.New, k.Block, k.Archive, k.Delete},
 		{k.Workspaces, k.ToggleHidden, k.Quit},
 	}
@@ -41,7 +41,7 @@ var keys = keyMap{
 	Delete:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 	Block:        key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "block")),
 	New:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
-	Info:         key.NewBinding(key.WithKeys("i", "right"), key.WithHelp("i/→", "details")),
+	Focus:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "details")),
 	Workspaces:   key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "workspaces")),
 	ToggleHidden: key.NewBinding(key.WithKeys("."), key.WithHelp(".", "hidden")),
 	Quit:         key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),

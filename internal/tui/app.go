@@ -11,7 +11,6 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/blockerform"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
-	"github.com/eleonorayaya/utena/internal/tui/sessiondetail"
 	"github.com/eleonorayaya/utena/internal/tui/sessionform"
 	"github.com/eleonorayaya/utena/internal/tui/sessionlist"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
@@ -35,7 +34,6 @@ func NewApp(port string, initialView router.View) App {
 	baseURL := fmt.Sprintf("http://127.0.0.1:%s", port)
 	views := map[router.View]router.ViewEntry{
 		router.SessionListView:        &router.ViewAdapter[sessionlist.Model]{Model: sessionlist.New()},
-		router.SessionDetailView:      &router.ViewAdapter[sessiondetail.Model]{Model: sessiondetail.New()},
 		router.SessionFormView:        &router.ViewAdapter[sessionform.Model]{Model: sessionform.New()},
 		router.SessionProgressView:    &router.ViewAdapter[sessionprogress.Model]{Model: sessionprogress.New()},
 		router.WorkspaceListView:      &router.ViewAdapter[workspacelist.Model]{Model: workspacelist.New()},

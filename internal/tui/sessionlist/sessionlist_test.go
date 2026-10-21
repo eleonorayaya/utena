@@ -61,16 +61,6 @@ func pressA(m Model) (Model, tea.Cmd, bool) {
 	return m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 }
 
-func TestSessionList_InfoKey_NavigatesToDetail(t *testing.T) {
-	m := New()
-	m.filtered = []session.Session{
-		{Name: "test-session", Status: session.StatusActive},
-	}
-	_, cmd, handled := m.OnKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
-	assert.True(t, handled)
-	assert.NotNil(t, cmd)
-}
-
 func TestSessionList_Archive_Active_FirstPress_ShowsArchiveMessage(t *testing.T) {
 	m := New()
 	m.filtered = []session.Session{
@@ -356,5 +346,5 @@ func TestSessionList_InitRequestsBrowserState(t *testing.T) {
 	for _, c := range batch {
 		got = append(got, reflect.TypeOf(c()).String())
 	}
-	assert.ElementsMatch(t, []string{"provider.fetchSessionsIntentMsg", "provider.requestBrowserStateMsg"}, got)
+	assert.ElementsMatch(t, []string{"provider.fetchSessionsIntentMsg", "provider.requestBrowserStateMsg", "provider.fetchBundlesIntentMsg"}, got)
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eleonorayaya/utena/internal/browser"
+	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/addworkspaceform"
 	"github.com/eleonorayaya/utena/internal/tui/blockerform"
@@ -20,13 +21,13 @@ import (
 type Model struct {
 	sess                   *session.Session
 	pendingDeleteID        uint
-	interactive            bool
+	focused                bool
 	cursor                 int
+	offset                 int
 	browserState           browser.SessionsView
 	pendingBlockerDeleteID uint
 	width                  int
 	height                 int
-	picker                 ui.PRPicker
 	statusMsg              string
 	statusKind             ui.StatusKind
 	bundlePicker           bundlepicker.Model
@@ -34,11 +35,29 @@ type Model struct {
 }
 
 func New() Model {
-	return Model{bundlePicker: bundlepicker.New("Plugin bundles")}
+	return Model{bundlePicker: bundlepicker.New("Plugin bundles"), cursor: -1}
+}
+
+func (m Model) Init() tea.Cmd {
+	if m.bundlePicker.Catalog() == nil {
+		return provider.FetchBundles()
+	}
+	return nil
 }
 
 func (m Model) CapturesText() bool {
 	return m.pickingBundles && m.bundlePicker.CapturesText()
+}
+
+func (m Model) Focused() bool {
+	return m.focused
+}
+
+func (m Model) SessionID() uint {
+	if m.sess == nil {
+		return 0
+	}
+	return m.sess.ID
 }
 
 func (m *Model) setStatus(text string, kind ui.StatusKind) {
@@ -50,17 +69,78 @@ func (m Model) Status() ui.Status {
 	if m.pickingBundles {
 		return ui.Status{}
 	}
-	if m.picker.IsOpen() {
-		return ui.Status{Text: "↑/↓ choose · enter open · esc cancel", Kind: ui.StatusInfo}
-	}
 	return ui.Status{Text: m.statusMsg, Kind: m.statusKind}
 }
 
-func (m Model) Init() (Model, tea.Cmd) {
-	if m.sess == nil {
-		return m, nil
+func (m Model) Select(s *session.Session) Model {
+	if s == nil {
+		m.sess = nil
+		m.reset()
+		return m
 	}
-	return m, tea.Batch(provider.RequestSessionsState(), provider.RequestBrowserState())
+	fresh := *s
+	if m.sess == nil || m.sess.ID != fresh.ID {
+		m.sess = &fresh
+		m.reset()
+		return m
+	}
+	sel := m.currentSelection()
+	m.sess = &fresh
+	if fresh.Status == session.StatusDeleted {
+		m.pickingBundles = false
+	}
+	m.restoreSelection(sel)
+	m.ensureVisible()
+	return m
+}
+
+func (m *Model) reset() {
+	m.clearTransient()
+	m.focused = false
+	m.cursor = 0
+	m.clampCursor()
+}
+
+func (m *Model) clearTransient() {
+	m.pendingDeleteID = 0
+	m.pendingBlockerDeleteID = 0
+	m.pickingBundles = false
+	m.offset = 0
+	m.setStatus("", ui.StatusInfo)
+}
+
+func (m Model) Focus() Model {
+	m.focused = true
+	m.setStatus("", ui.StatusInfo)
+	m.clampCursor()
+	m.ensureVisible()
+	return m
+}
+
+func (m Model) FocusPR() Model {
+	m.focused = true
+	m.setStatus("", ui.StatusInfo)
+	m.clampCursor()
+	openable := map[string]bool{}
+	if m.sess != nil {
+		for _, pr := range ui.OpenablePRs(m.sess.PullRequests) {
+			openable[pr.HTMLURL] = true
+		}
+	}
+	for i, it := range m.items() {
+		if it.kind == prItem && openable[it.prURL] {
+			m.cursor = i
+			break
+		}
+	}
+	m.ensureVisible()
+	return m
+}
+
+func (m Model) Blur() Model {
+	m.focused = false
+	m.clearTransient()
+	return m
 }
 
 type tabRef struct {
@@ -91,84 +171,174 @@ func (m Model) selectableTabs() []tabRef {
 	return out
 }
 
-func (m Model) minCursor() int {
-	if len(m.sess.OpenBlockers()) > 0 {
-		return 0
+func (m Model) selectablePRs() [][]git.PullRequest {
+	var out [][]git.PullRequest
+	for _, g := range groupPRs(*m.sess) {
+		var prs []git.PullRequest
+		for _, pr := range g.prs {
+			if pr.HTMLURL != "" {
+				prs = append(prs, pr)
+			}
+		}
+		out = append(out, prs)
 	}
-	return -1
+	return out
+}
+
+type itemKind int
+
+const (
+	blockerItem itemKind = iota
+	tabItem
+	prItem
+)
+
+type itemKey struct {
+	kind      itemKind
+	blockerID uint
+	tab       tabRef
+	prURL     string
+}
+
+type item struct {
+	itemKey
+	section int
+}
+
+func (m Model) items() []item {
+	if m.sess == nil {
+		return nil
+	}
+	var out []item
+	for _, b := range m.sess.OpenBlockers() {
+		out = append(out, item{itemKey: itemKey{kind: blockerItem, blockerID: b.ID}})
+	}
+	for _, t := range m.selectableTabs() {
+		out = append(out, item{itemKey: itemKey{kind: tabItem, tab: t}})
+	}
+	for g, prs := range m.selectablePRs() {
+		for _, pr := range prs {
+			out = append(out, item{itemKey: itemKey{kind: prItem, prURL: pr.HTMLURL}, section: g})
+		}
+	}
+	return out
 }
 
 type selection struct {
-	blockerID uint
-	tab       tabRef
-	index     int
-	tabIndex  int
+	item      item
+	ok        bool
+	kindIndex int
 }
 
 func (m Model) currentSelection() selection {
-	sel := selection{index: m.cursor, tabIndex: m.cursor - len(m.sess.OpenBlockers())}
-	if b := m.selectedBlocker(); b != nil {
-		sel.blockerID = b.ID
+	items := m.items()
+	if m.cursor < 0 || m.cursor >= len(items) {
+		return selection{}
 	}
-	if t := m.selectedTab(); t != nil {
-		sel.tab = *t
+	sel := selection{item: items[m.cursor], ok: true}
+	for _, it := range items[:m.cursor] {
+		if it.kind == sel.item.kind {
+			sel.kindIndex++
+		}
 	}
 	return sel
 }
 
 func (m *Model) restoreSelection(sel selection) {
-	open := m.sess.OpenBlockers()
-	if sel.blockerID != 0 {
-		for i, b := range open {
-			if b.ID == sel.blockerID {
-				m.cursor = i
-				return
-			}
-		}
-		m.cursor = min(sel.index, len(open)-1)
+	if !sel.ok {
 		m.clampCursor()
 		return
 	}
-	if sel.tab != (tabRef{}) {
-		tabs := m.selectableTabs()
-		for i, t := range tabs {
-			if t == sel.tab {
-				m.cursor = len(open) + i
-				return
-			}
-		}
-		if len(tabs) > 0 {
-			m.cursor = len(open) + min(sel.tabIndex, len(tabs)-1)
+	items := m.items()
+	var sameKind []int
+	for i, it := range items {
+		if it.itemKey == sel.item.itemKey {
+			m.cursor = i
 			return
 		}
+		if it.kind == sel.item.kind {
+			sameKind = append(sameKind, i)
+		}
+	}
+	if len(sameKind) > 0 {
+		m.cursor = sameKind[min(sel.kindIndex, len(sameKind)-1)]
+		return
 	}
 	m.clampCursor()
 }
 
 func (m *Model) clampCursor() {
-	last := len(m.sess.OpenBlockers()) + len(m.selectableTabs()) - 1
-	m.cursor = max(min(m.cursor, last), m.minCursor())
+	n := len(m.items())
+	if n == 0 {
+		m.cursor = -1
+		return
+	}
+	m.cursor = max(min(m.cursor, n-1), 0)
+}
+
+func (m *Model) jumpSection(dir int) {
+	items := m.items()
+	if m.cursor < 0 || m.cursor >= len(items) {
+		return
+	}
+	var starts []int
+	for i, it := range items {
+		if i == 0 || it.kind != items[i-1].kind || it.section != items[i-1].section {
+			starts = append(starts, i)
+		}
+	}
+	if dir > 0 {
+		for _, s := range starts {
+			if s > m.cursor {
+				m.cursor = s
+				return
+			}
+		}
+		return
+	}
+	for i := len(starts) - 1; i >= 0; i-- {
+		if starts[i] < m.cursor {
+			m.cursor = starts[i]
+			return
+		}
+	}
+}
+
+func (m Model) selectedItem() *item {
+	items := m.items()
+	if m.cursor < 0 || m.cursor >= len(items) {
+		return nil
+	}
+	return &items[m.cursor]
 }
 
 func (m Model) selectedBlocker() *session.SessionBlocker {
-	open := m.sess.OpenBlockers()
-	if m.cursor < 0 || m.cursor >= len(open) {
+	it := m.selectedItem()
+	if it == nil || it.kind != blockerItem {
 		return nil
 	}
-	b := open[m.cursor]
-	return &b
+	for _, b := range m.sess.OpenBlockers() {
+		if b.ID == it.blockerID {
+			return &b
+		}
+	}
+	return nil
 }
 
 func (m Model) selectedTab() *tabRef {
-	if m.sess == nil {
+	it := m.selectedItem()
+	if it == nil || it.kind != tabItem {
 		return nil
 	}
-	i := m.cursor - len(m.sess.OpenBlockers())
-	tabs := m.selectableTabs()
-	if i < 0 || i >= len(tabs) {
-		return nil
+	return &it.tab
+}
+
+func (m Model) selectedPRURL() string {
+	it := m.selectedItem()
+	if it == nil || it.kind != prItem {
+		return ""
 	}
-	return &tabs[i]
+	return it.prURL
 }
 
 func (m Model) Keys() help.KeyMap {
@@ -176,10 +346,18 @@ func (m Model) Keys() help.KeyMap {
 		return m.bundlePicker.Keys()
 	}
 	k := keys
-	if m.selectedTab() != nil {
-		k.Activate = openTabKey
+	items := m.items()
+	if m.cursor >= 0 && m.cursor < len(items) {
+		switch items[m.cursor].kind {
+		case tabItem:
+			k.Activate = openTabKey
+			k.Open = openTabKey
+		case prItem:
+			k.Open = openPRKey
+			k.showOpen = true
+		}
 	}
-	k.showNext = len(m.selectableTabs()) > 0
+	k.showNext = len(items) > 1
 	return k
 }
 
@@ -189,21 +367,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.bundlePicker.SetSize(msg.Width, msg.Height)
+		m.ensureVisible()
 		return m, nil
-	case SelectMsg:
-		s := msg.Session
-		m.sess = &s
-		m.pendingDeleteID = 0
-		m.interactive = true
-		m.cursor = m.minCursor()
-		m.pendingBlockerDeleteID = 0
-		m.picker = m.picker.Close()
-		m.pickingBundles = false
-		m.setStatus("", ui.StatusInfo)
-		if m.bundlePicker.Catalog() == nil {
-			return m, tea.Batch(provider.RequestBrowserState(), provider.FetchBundles())
-		}
-		return m, provider.RequestBrowserState()
 	case provider.BundlesLoadedMsg:
 		if msg.Err == nil {
 			m.bundlePicker = m.bundlePicker.SetCatalog(msg.Bundles)
@@ -231,42 +396,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		sel := m.currentSelection()
 		m.browserState = msg.State
 		m.restoreSelection(sel)
-		return m, nil
-	case provider.ErrMsg:
-		m.setStatus(msg.Err.Error(), ui.StatusError)
-		return m, nil
-	case ui.OpenURLFailedMsg:
-		m.setStatus("could not open PR: "+msg.Err.Error(), ui.StatusError)
-		return m, nil
-	case provider.SessionSwitchedMsg:
-		return m, tea.Quit
-	case provider.SessionsStateUpdatedMsg:
-		if m.sess == nil {
-			return m, nil
-		}
-		sel := m.currentSelection()
-		found := false
-		for _, s := range msg.Sessions {
-			if s.ID == m.sess.ID {
-				fresh := s
-				m.sess = &fresh
-				found = true
-				break
-			}
-		}
-		if found {
-			m.picker = m.picker.Sync(m.sess.PullRequests)
-		} else {
-			m.picker = m.picker.Close()
-		}
-		if !found || m.sess.Status == session.StatusDeleted {
-			m.pickingBundles = false
-		}
-		m.restoreSelection(sel)
+		m.ensureVisible()
 		return m, nil
 	case tea.KeyMsg:
 		if !m.pickingBundles {
-			return m.onKeyMsg(msg)
+			var cmd tea.Cmd
+			m, cmd = m.onKeyMsg(msg)
+			m.ensureVisible()
+			return m, cmd
 		}
 	}
 	if m.pickingBundles {
@@ -278,18 +415,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if !m.focused {
+		return m, nil
+	}
+	if key.Matches(msg, keys.Back) {
+		return m.Blur(), nil
+	}
 	if m.sess == nil {
 		return m, nil
 	}
 
-	if m.picker.IsOpen() {
-		var url string
-		m.picker, url = m.picker.Update(msg)
-		if url != "" {
-			return m, provider.OpenURL(m.sess.ID, url)
-		}
-		return m, nil
-	}
 	m.setStatus("", ui.StatusInfo)
 
 	pendingID := m.pendingDeleteID
@@ -298,9 +433,6 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 	m.pendingBlockerDeleteID = 0
 
 	switch {
-	case key.Matches(msg, keys.Back):
-		return m, router.Back()
-
 	case key.Matches(msg, keys.Up):
 		m.cursor--
 		m.clampCursor()
@@ -309,6 +441,14 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.Down):
 		m.cursor++
 		m.clampCursor()
+		return m, nil
+
+	case key.Matches(msg, keys.NextSection):
+		m.jumpSection(1)
+		return m, nil
+
+	case key.Matches(msg, keys.PrevSection):
+		m.jumpSection(-1)
 		return m, nil
 
 	case key.Matches(msg, keys.Block):
@@ -348,27 +488,22 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, provider.ActivateSession(m.sess.ID)
 
-	case key.Matches(msg, keys.OpenPR):
-		prs := ui.OpenablePRs(m.sess.PullRequests)
-		switch len(prs) {
-		case 0:
-			m.setStatus("no open pull requests", ui.StatusInfo)
-			return m, nil
-		case 1:
-			return m, provider.OpenURL(m.sess.ID, prs[0].HTMLURL)
-		default:
-			m.picker = ui.NewPRPicker(prs)
-			return m, nil
+	case key.Matches(msg, keys.Open):
+		if t := m.selectedTab(); t != nil {
+			return m, provider.FocusTab(m.sess.ID, t.windowID, t.tabID)
 		}
+		if url := m.selectedPRURL(); url != "" {
+			return m, provider.OpenURL(m.sess.ID, url)
+		}
+		m.setStatus("select a tab or pull request to open", ui.StatusInfo)
+		return m, nil
 
 	case key.Matches(msg, keys.Archive):
 		if !m.sess.CanArchive() {
 			return m, nil
 		}
-		return m, tea.Batch(
-			provider.ArchiveSession(m.sess.ID),
-			router.Back(),
-		)
+		id := m.sess.ID
+		return m.Blur(), provider.ArchiveSession(id)
 
 	case key.Matches(msg, keys.Delete):
 		// Only archived sessions can be deleted; creating sessions keep the
@@ -377,10 +512,8 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		if pendingID == m.sess.ID {
-			return m, tea.Batch(
-				provider.DeleteSession(m.sess.ID, m.sess.IsCreating()),
-				router.Back(),
-			)
+			cmd := provider.DeleteSession(m.sess.ID, m.sess.IsCreating())
+			return m.Blur(), cmd
 		}
 		m.pendingDeleteID = m.sess.ID
 		m.setStatus(fmt.Sprintf("press d again to delete %s (removes worktrees)", m.sess.DisplayLabel()), ui.StatusWarning)

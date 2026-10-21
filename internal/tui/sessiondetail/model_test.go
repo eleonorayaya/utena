@@ -14,7 +14,6 @@ import (
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/bundlepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
-	"github.com/eleonorayaya/utena/internal/tui/router"
 	"github.com/eleonorayaya/utena/internal/tui/uitest"
 	"github.com/eleonorayaya/utena/internal/workspace"
 	"github.com/stretchr/testify/assert"
@@ -42,7 +41,7 @@ func makeMultiWorkspaceSession(utenaBranch, dotfilesBranch uint) session.Session
 }
 
 func TestSessionDetail_ShowsEmbeddedPRsFromEveryWorkspace(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeMultiWorkspaceSession(1, 2)})
+	m := focusedOn(makeMultiWorkspaceSession(1, 2))
 
 	out := m.View()
 	assert.Contains(t, out, "utena pr")
@@ -52,13 +51,26 @@ func TestSessionDetail_ShowsEmbeddedPRsFromEveryWorkspace(t *testing.T) {
 }
 
 func TestSessionDetail_RefreshUpdatesEmbeddedPRs(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeMultiWorkspaceSession(1, 2)})
+	m := focusedOn(makeMultiWorkspaceSession(1, 2))
 
 	refreshed := makeMultiWorkspaceSession(1, 2)
 	refreshed.PullRequests[0].State = git.PRStateMerged
-	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{refreshed}})
+	m = selectIn(m, refreshed)
 
 	assert.Contains(t, m.View(), "⊕ merged")
+}
+
+func focusedOn(s session.Session) Model {
+	return New().Select(&s).Focus()
+}
+
+func selectIn(m Model, s session.Session) Model {
+	return m.Select(&s)
+}
+
+func RenderPanel(s *session.Session, width, height int) string {
+	m, _ := New().Update(tea.WindowSizeMsg{Width: width, Height: height})
+	return m.Select(s).View()
 }
 
 func makeActiveSession() session.Session {
@@ -86,49 +98,60 @@ func makeArchivedSession() session.Session {
 	}
 }
 
-func TestSessionDetail_SelectMsg_LoadsSession(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
+func TestSessionDetail_Select_LoadsSession(t *testing.T) {
+	m := focusedOn(makeActiveSession())
 	require.NotNil(t, m.sess)
 	assert.Equal(t, "my-feature", m.sess.Name)
 }
 
-func TestSessionDetail_Back_NavigatesBack(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	require.NotNil(t, cmd)
-	msg := cmd()
-	assert.IsType(t, router.BackMsg{}, msg)
+func TestSessionDetail_BackKeysBlur(t *testing.T) {
+	for _, k := range []tea.KeyMsg{{Type: tea.KeyEsc}, {Type: tea.KeyTab}, {Type: tea.KeyShiftTab}} {
+		m := focusedOn(makeActiveSession())
+		m, cmd := m.Update(k)
+		assert.Nil(t, cmd)
+		assert.False(t, m.Focused())
+	}
+}
+
+func TestSessionDetail_IgnoresKeysWhenNotFocused(t *testing.T) {
+	s := makeActiveSession()
+	m := New().Select(&s)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.Nil(t, cmd)
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.Nil(t, cmd)
 }
 
 func TestSessionDetail_Activate_SkipsWhenAttached(t *testing.T) {
 	attached := makeActiveSession()
 	attached.IsAttached = true
-	m, _ := New().Update(SelectMsg{Session: attached})
+	m := focusedOn(attached)
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	assert.Nil(t, cmd)
 }
 
-func TestSessionDetail_Archive_ArchivesAndGoesBack(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
-	assert.NotNil(t, cmd)
+func TestSessionDetail_Archive_ArchivesAndBlurs(t *testing.T) {
+	m := focusedOn(makeActiveSession())
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	assert.Equal(t, []string{"provider.archiveSessionIntentMsg"}, uitest.MsgTypes(cmd))
+	assert.False(t, m.Focused())
 }
 
 func TestSessionDetail_Archive_ArchivesWhenBroken(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeBrokenSession()})
+	m := focusedOn(makeBrokenSession())
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	assert.NotNil(t, cmd)
 }
 
 func TestSessionDetail_Delete_SkipsWhenActive(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
+	m := focusedOn(makeActiveSession())
 	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	assert.Nil(t, cmd)
 	assert.Equal(t, uint(0), m2.pendingDeleteID)
 }
 
 func TestSessionDetail_Delete_RequiresDoublePress(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeArchivedSession()})
+	m := focusedOn(makeArchivedSession())
 	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	assert.Nil(t, cmd)
 	assert.Equal(t, uint(3), m2.pendingDeleteID)
@@ -138,22 +161,22 @@ func TestSessionDetail_Delete_RequiresDoublePress(t *testing.T) {
 }
 
 func TestSessionDetail_Delete_ResetsByInterveningKey(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeArchivedSession()})
+	m := focusedOn(makeArchivedSession())
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	assert.Equal(t, uint(3), m2.pendingDeleteID)
 
-	m3, _ := m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m3, _ := m2.Update(runeKey("j"))
 	assert.Equal(t, uint(0), m3.pendingDeleteID)
 }
 
 func TestSessionDetail_Repair_SkipsWhenHealthy(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
+	m := focusedOn(makeActiveSession())
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 	assert.Nil(t, cmd)
 }
 
 func TestSessionDetail_Repair_FiresWhenBroken(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeBrokenSession()})
+	m := focusedOn(makeBrokenSession())
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 	assert.NotNil(t, cmd)
 }
@@ -165,13 +188,13 @@ func TestSessionDetail_View_ShowsWarning(t *testing.T) {
 		Status:      session.StatusActive,
 		StatusError: "branch not pulled: dirty",
 	}
-	m, _ := New().Update(SelectMsg{Session: warned})
+	m := focusedOn(warned)
 	assert.Contains(t, m.View(), "⚠")
 	assert.Contains(t, m.View(), "branch not pulled")
 }
 
 func TestSessionDetail_View_NoWarningWhenClean(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
+	m := focusedOn(makeActiveSession())
 	assert.NotContains(t, m.View(), "⚠")
 }
 
@@ -189,7 +212,7 @@ func runeKey(r string) tea.KeyMsg {
 }
 
 func TestSessionDetail_RendersOpenBlockers(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeBlockedSession()})
+	m := focusedOn(makeBlockedSession())
 	out := m.View()
 	assert.Contains(t, out, "Blocked 2")
 	assert.Contains(t, out, "first")
@@ -197,7 +220,7 @@ func TestSessionDetail_RendersOpenBlockers(t *testing.T) {
 }
 
 func TestSessionDetail_ResolveHighlightedBlocker(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeBlockedSession()})
+	m := focusedOn(makeBlockedSession())
 	m, _ = m.Update(runeKey("j"))
 	_, cmd := m.Update(runeKey("u"))
 	require.NotNil(t, cmd)
@@ -207,7 +230,7 @@ func TestSessionDetail_ResolveHighlightedBlocker(t *testing.T) {
 }
 
 func TestSessionDetail_DeleteBlockerNeedsTwoPresses(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeBlockedSession()})
+	m := focusedOn(makeBlockedSession())
 	m, cmd := m.Update(runeKey("x"))
 	assert.Nil(t, cmd)
 	_, cmd = m.Update(runeKey("x"))
@@ -216,14 +239,14 @@ func TestSessionDetail_DeleteBlockerNeedsTwoPresses(t *testing.T) {
 }
 
 func TestSessionDetail_RefreshClampsCursorWhenLastBlockerResolved(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeBlockedSession()})
+	m := focusedOn(makeBlockedSession())
 	m, _ = m.Update(runeKey("j"))
 
 	now := time.Now()
 	refreshed := makeBlockedSession()
 	refreshed.Blockers[0].ResolvedAt = &now
 	refreshed.Blockers[1].ResolvedAt = &now
-	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{refreshed}})
+	m = selectIn(m, refreshed)
 
 	assert.NotContains(t, m.View(), "Blocked")
 	_, cmd := m.Update(runeKey("u"))
@@ -233,7 +256,7 @@ func TestSessionDetail_RefreshClampsCursorWhenLastBlockerResolved(t *testing.T) 
 }
 
 func TestSessionDetail_BlockKeyOpensForm(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
+	m := focusedOn(makeActiveSession())
 	_, cmd := m.Update(runeKey("b"))
 	require.NotNil(t, cmd)
 }
@@ -283,27 +306,24 @@ func feedAll(m Model, msg tea.Msg) Model {
 
 func bundleDetail(s session.Session) Model {
 	m, _ := New().Update(tea.WindowSizeMsg{Width: 80, Height: 20})
-	m, _ = m.Update(SelectMsg{Session: s})
+	m = selectIn(m, s).Focus()
 	m, _ = m.Update(provider.BundlesLoadedMsg{Bundles: bundleCatalog()})
 	return m
 }
 
-func TestSessionDetail_SelectFetchesBundles(t *testing.T) {
-	_, cmd := New().Update(SelectMsg{Session: makeActiveSession()})
-	assert.Contains(t, uitest.MsgTypes(cmd), "provider.fetchBundlesIntentMsg")
+func TestSessionDetail_InitFetchesBundles(t *testing.T) {
+	assert.Contains(t, uitest.MsgTypes(New().Init()), "provider.fetchBundlesIntentMsg")
 }
 
-func TestSessionDetail_SelectSkipsFetchOnceCatalogLoaded(t *testing.T) {
+func TestSessionDetail_InitSkipsFetchOnceCatalogLoaded(t *testing.T) {
 	m := bundleDetail(makeActiveSession())
-	_, cmd := m.Update(SelectMsg{Session: makeActiveSession()})
-	assert.NotContains(t, uitest.MsgTypes(cmd), "provider.fetchBundlesIntentMsg")
+	assert.Nil(t, m.Init())
 }
 
 func TestSessionDetail_FailedCatalogLoadKeepsFetching(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
+	m := focusedOn(makeActiveSession())
 	m, _ = m.Update(provider.BundlesLoadedMsg{Err: errors.New("down")})
-	_, cmd := m.Update(SelectMsg{Session: makeActiveSession()})
-	assert.Contains(t, uitest.MsgTypes(cmd), "provider.fetchBundlesIntentMsg")
+	assert.Contains(t, uitest.MsgTypes(m.Init()), "provider.fetchBundlesIntentMsg")
 }
 
 func TestSessionDetail_PluginsKeyOpensPickerAndSaves(t *testing.T) {
@@ -386,7 +406,7 @@ func TestSessionDetail_LateCatalogRefreshesOpenPicker(t *testing.T) {
 	s := makeActiveSession()
 	s.Bundles = []string{"go"}
 	m, _ := New().Update(tea.WindowSizeMsg{Width: 80, Height: 20})
-	m, _ = m.Update(SelectMsg{Session: s})
+	m = selectIn(m, s).Focus()
 	m, _ = m.Update(runeKey("p"))
 	require.True(t, m.pickingBundles)
 	assert.Contains(t, m.View(), "unknown bundle")
@@ -405,22 +425,22 @@ func TestSessionDetail_BundlePickerClosesWhenSessionGone(t *testing.T) {
 		return m
 	}
 
-	m, _ := open().Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{makeArchivedSession()}})
+	m := selectIn(open(), makeArchivedSession())
 	assert.False(t, m.pickingBundles)
 
 	deleted := makeActiveSession()
 	deleted.Status = session.StatusDeleted
-	m, _ = open().Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{deleted}})
+	m = selectIn(open(), deleted)
 	assert.False(t, m.pickingBundles)
 
-	m, _ = open().Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{makeActiveSession()}})
+	m = selectIn(open(), makeActiveSession())
 	assert.True(t, m.pickingBundles)
 }
 
 func TestSessionDetail_UnknownBundleMarked(t *testing.T) {
 	s := makeActiveSession()
 	s.Bundles = []string{"go", "legacy"}
-	m, _ := New().Update(SelectMsg{Session: s})
+	m := focusedOn(s)
 	m, _ = m.Update(provider.BundlesLoadedMsg{Bundles: []bundles.Entry{{Name: "go"}}})
 	assert.Contains(t, m.View(), "legacy (unknown)")
 }

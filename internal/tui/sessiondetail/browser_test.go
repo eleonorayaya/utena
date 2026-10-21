@@ -1,7 +1,6 @@
 package sessiondetail
 
 import (
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,8 +12,6 @@ import (
 	"github.com/eleonorayaya/utena/internal/browser"
 	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
-	"github.com/eleonorayaya/utena/internal/tui/ui"
-	"github.com/eleonorayaya/utena/internal/tui/uitest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -51,7 +48,7 @@ func twoWindows() browser.SessionBrowser {
 
 func detailWith(s session.Session, sb browser.SessionBrowser) Model {
 	m, _ := New().Update(tea.WindowSizeMsg{Width: 60, Height: 40})
-	m, _ = m.Update(SelectMsg{Session: s})
+	m = selectIn(m, s).Focus()
 	m, _ = m.Update(browserState(s.ID, sb))
 	return m
 }
@@ -71,7 +68,7 @@ func browserLines(out string) []string {
 }
 
 func TestBrowserSection_OneWindow(t *testing.T) {
-	m := detailWith(makeActiveSession(), oneWindow())
+	m := detailWith(makeActiveSession(), oneWindow()).Blur()
 	got := browserLines(m.View())
 	assert.Equal(t, []string{
 		"  Browser " + strings.Repeat("─", 34) + " 2 tabs · open",
@@ -84,7 +81,7 @@ func TestBrowserSection_OneWindow(t *testing.T) {
 }
 
 func TestBrowserSection_SeveralWindowsAndSnapshotted(t *testing.T) {
-	m := detailWith(makeActiveSession(), twoWindows())
+	m := detailWith(makeActiveSession(), twoWindows()).Blur()
 	assert.Equal(t, []string{
 		"  Browser " + strings.Repeat("─", 34) + " 3 tabs · open",
 		"    window 1",
@@ -119,22 +116,21 @@ func TestBrowserSection_PendingTabsAreMarkedAndNotSelectable(t *testing.T) {
 	m := detailWith(makeActiveSession(), sb)
 	assert.Equal(t, []string{
 		"  Browser " + strings.Repeat("─", 34) + " 2 tabs · open",
-		"    ● Docs  docs.example.com",
+		"  ▌ ● Docs  docs.example.com",
 		"    ◌ https://github.com/o/r/pull/7",
 	}, browserLines(m.View()))
 	assert.Len(t, m.selectableTabs(), 1)
 }
 
 func TestBrowserSection_OmittedWithoutRows(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
+	m := focusedOn(makeActiveSession())
 	assert.NotContains(t, m.View(), "Browser")
 	m, _ = m.Update(browserState(999, oneWindow()))
 	assert.NotContains(t, m.View(), "Browser")
 }
 
 func TestBrowserSection_PanelPreviewHasNoCursor(t *testing.T) {
-	s := makeActiveSession()
-	out := RenderPanelWithBrowser(&s, browser.SessionsView{Sessions: map[uint]browser.SessionBrowser{s.ID: oneWindow()}}, 60, 30)
+	out := detailWith(makeActiveSession(), oneWindow()).Blur().View()
 	assert.Contains(t, out, "Pull request #42")
 	assert.NotContains(t, out, "▌")
 }
@@ -153,31 +149,27 @@ func TestBrowserCursor_MovesFromBlockersIntoTabs(t *testing.T) {
 	assert.Nil(t, cmd)
 
 	m, _ = m.Update(runeKey("j"))
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	require.NotNil(t, cmd)
-	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t2"}, cmd())
+	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t2"}, openTarget(t, m))
 
 	m, _ = m.Update(runeKey("j"))
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t2"}, cmd())
+	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t2"}, openTarget(t, m))
 }
 
 func TestBrowserCursor_SkipsUnfocusableTabs(t *testing.T) {
 	m := detailWith(makeActiveSession(), twoWindows())
 	m, _ = m.Update(runeKey("j"))
 	m, _ = m.Update(runeKey("j"))
+	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t1"}, openTarget(t, m))
+}
+
+func TestBrowserCursor_EnterOnTabOpensIt(t *testing.T) {
+	attached := makeActiveSession()
+	attached.IsAttached = true
+	m := detailWith(attached, oneWindow())
+	assert.Equal(t, 0, m.cursor)
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t1"}, cmd())
-}
-
-func TestBrowserCursor_EnterWithoutSelectionSwitches(t *testing.T) {
-	m := detailWith(makeActiveSession(), oneWindow())
-	assert.Equal(t, -1, m.cursor)
-	assert.Equal(t, "switch", m.Keys().ShortHelp()[0].Help().Desc)
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	require.NotNil(t, cmd)
-	assert.Equal(t, "provider.activateSessionMsg", msgType(cmd()))
 }
 
 func TestBrowserCursor_EnterOnBlockerSwitches(t *testing.T) {
@@ -187,13 +179,13 @@ func TestBrowserCursor_EnterOnBlockerSwitches(t *testing.T) {
 	assert.Equal(t, "provider.activateSessionMsg", msgType(cmd()))
 }
 
-func TestBrowserCursor_UpReturnsToNoSelection(t *testing.T) {
+func TestBrowserCursor_UpStopsAtFirstItem(t *testing.T) {
 	m := detailWith(makeActiveSession(), oneWindow())
 	m, _ = m.Update(runeKey("j"))
+	assert.Equal(t, 1, m.cursor)
+	m, _ = m.Update(runeKey("k"))
+	m, _ = m.Update(runeKey("k"))
 	assert.Equal(t, 0, m.cursor)
-	m, _ = m.Update(runeKey("k"))
-	m, _ = m.Update(runeKey("k"))
-	assert.Equal(t, -1, m.cursor)
 }
 
 func TestBrowserCursor_ClampsWhenStateChanges(t *testing.T) {
@@ -223,20 +215,8 @@ func TestBrowserCursor_ClampsWhenBlockersResolve(t *testing.T) {
 
 	refreshed := makeBlockedSession()
 	refreshed.Blockers = nil
-	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{refreshed}})
+	m = selectIn(m, refreshed)
 	assert.Equal(t, 1, m.cursor)
-}
-
-func TestDetail_SelectRequestsBrowserState(t *testing.T) {
-	_, cmd := New().Update(SelectMsg{Session: makeActiveSession()})
-	require.NotNil(t, cmd)
-	assert.Contains(t, uitest.MsgTypes(cmd), "provider.requestBrowserStateMsg")
-}
-
-func TestDetail_ErrorShowsInFooter(t *testing.T) {
-	m, _ := New().Update(SelectMsg{Session: makeActiveSession()})
-	m, _ = m.Update(provider.ErrMsg{Err: errors.New("browser unavailable")})
-	assert.Equal(t, ui.Status{Text: "browser unavailable", Kind: ui.StatusError}, m.Status())
 }
 
 func oneBlocker() session.Session {
@@ -245,9 +225,9 @@ func oneBlocker() session.Session {
 	return s
 }
 
-func enterTarget(t *testing.T, m Model) tea.Msg {
+func openTarget(t *testing.T, m Model) tea.Msg {
 	t.Helper()
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(runeKey("o"))
 	require.NotNil(t, cmd)
 	return cmd()
 }
@@ -256,25 +236,24 @@ func TestBrowserCursor_StaysOnTabWhenBlockersChange(t *testing.T) {
 	m := detailWith(oneBlocker(), oneWindow())
 	m, _ = m.Update(runeKey("j"))
 	want := provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t1"}
-	assert.Equal(t, want, enterTarget(t, m))
+	assert.Equal(t, want, openTarget(t, m))
 
 	resolved := oneBlocker()
 	now := time.Now()
 	resolved.Blockers[0].ResolvedAt = &now
-	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{resolved}})
-	assert.Equal(t, want, enterTarget(t, m))
+	m = selectIn(m, resolved)
+	assert.Equal(t, want, openTarget(t, m))
 
-	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{makeBlockedSession()}})
-	assert.Equal(t, want, enterTarget(t, m))
+	m = selectIn(m, makeBlockedSession())
+	assert.Equal(t, want, openTarget(t, m))
 }
 
 func TestBrowserCursor_StaysOnTabWhenTabsChange(t *testing.T) {
 	m := detailWith(makeActiveSession(), oneWindow())
-	m, _ = m.Update(runeKey("j"))
 	grown := oneWindow()
 	grown.Windows[0].Tabs = append([]browser.TabView{{ID: "t0", Title: "New", URL: "https://new.example.com"}}, grown.Windows[0].Tabs...)
 	m, _ = m.Update(browserState(1, grown))
-	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t1"}, enterTarget(t, m))
+	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t1"}, openTarget(t, m))
 }
 
 func TestBrowserCursor_BlockerGoneClampsWithinBlockers(t *testing.T) {
@@ -283,15 +262,15 @@ func TestBrowserCursor_BlockerGoneClampsWithinBlockers(t *testing.T) {
 	now := time.Now()
 	refreshed := makeBlockedSession()
 	refreshed.Blockers[1].ResolvedAt = &now
-	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{refreshed}})
+	m = selectIn(m, refreshed)
 	assert.Equal(t, 0, m.cursor)
 
 	gone := makeBlockedSession()
 	gone.Blockers[0].ResolvedAt = &now
 	gone.Blockers[1].ResolvedAt = &now
-	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: []session.Session{gone}})
-	assert.Equal(t, -1, m.cursor)
-	assert.Equal(t, "provider.activateSessionMsg", msgType(enterTarget(t, m)))
+	m = selectIn(m, gone)
+	assert.Equal(t, 0, m.cursor)
+	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t1"}, openTarget(t, m))
 }
 
 func TestBrowserSection_SanitizesControlCharacters(t *testing.T) {
@@ -326,7 +305,7 @@ func TestBrowserSection_FitsNarrowAndWideRunes(t *testing.T) {
 	sb.Windows[0].Tabs[1].Title = "🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀"
 	for _, w := range []int{20, 60} {
 		m, _ := New().Update(tea.WindowSizeMsg{Width: w, Height: 40})
-		m, _ = m.Update(SelectMsg{Session: makeActiveSession()})
+		m = selectIn(m, makeActiveSession()).Focus()
 		m, _ = m.Update(browserState(1, sb))
 		m, _ = m.Update(runeKey("j"))
 		out := m.View()
@@ -343,10 +322,10 @@ func TestDetail_ShortHelpShowsNextWhenTabsSelectable(t *testing.T) {
 	for _, b := range m.Keys().ShortHelp() {
 		got = append(got, b.Help().Key+" "+b.Help().Desc)
 	}
-	assert.Equal(t, []string{"enter switch", "↓/j next item", "o open PR", "b block", "a archive", "esc back"}, got)
+	assert.Equal(t, []string{"enter/o open tab", "↓/j next item", "b block", "a archive", "tab/esc sessions"}, got)
 
-	m, _ = New().Update(SelectMsg{Session: makeActiveSession()})
-	assert.Len(t, m.Keys().ShortHelp(), 5)
+	m = focusedOn(makeActiveSession())
+	assert.Len(t, m.Keys().ShortHelp(), 4)
 }
 
 func threeTabs() browser.SessionBrowser {
@@ -361,7 +340,7 @@ func TestBrowserCursor_TabGoneWhileBlockersChangeKeepsTabPosition(t *testing.T) 
 	m, _ = m.Update(runeKey("j"))
 	m, _ = m.Update(runeKey("j"))
 	sel := m.currentSelection()
-	require.Equal(t, "t1", sel.tab.tabID)
+	require.Equal(t, "t1", sel.item.tab.tabID)
 
 	fewer := makeBlockedSession()
 	fewer.Blockers = fewer.Blockers[:1]
@@ -370,7 +349,7 @@ func TestBrowserCursor_TabGoneWhileBlockersChangeKeepsTabPosition(t *testing.T) 
 	gone.Windows[0].Tabs = gone.Windows[0].Tabs[1:]
 	m.browserState = browserState(1, gone).State
 	m.restoreSelection(sel)
-	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t2"}, enterTarget(t, m))
+	assert.Equal(t, provider.FocusTabIntentMsg{SessionID: 1, WindowID: "w1", TabID: "t2"}, openTarget(t, m))
 
 	m.browserState = browserState(1, browser.SessionBrowser{}).State
 	m.restoreSelection(sel)

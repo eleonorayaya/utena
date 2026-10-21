@@ -28,13 +28,19 @@ func nameStyle(s session.Session, selected bool) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(theme.Current.Text)
 }
 
+func (m Model) cursorColor() lipgloss.Color {
+	if m.detail.Focused() {
+		return theme.Current.TextMuted
+	}
+	return theme.Current.Primary
+}
+
 func (m Model) renderRow(s session.Session, selected bool, width int) string {
 	var bg lipgloss.TerminalColor
-	gutter := ui.Span{Text: "  "}
 	if selected {
 		bg = theme.Current.Selection
-		gutter = ui.Span{Text: "▌ ", Style: lipgloss.NewStyle().Foreground(theme.Current.Primary)}
 	}
+	gutter := ui.GutterSpan(selected, m.cursorColor())
 
 	var attached ui.Span
 	if s.IsAttached {

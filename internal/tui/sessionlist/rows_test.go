@@ -49,7 +49,7 @@ func TestSessionList_ShortHelp(t *testing.T) {
 	for _, b := range keys.ShortHelp() {
 		got = append(got, b.Help().Key+" "+b.Help().Desc)
 	}
-	assert.Equal(t, []string{"enter switch", "o open PR", "n new", "b block", "a archive"}, got)
+	assert.Equal(t, []string{"enter switch", "tab details", "o open PR", "n new", "b block", "a archive"}, got)
 }
 
 func TestBrowserSpan_States(t *testing.T) {

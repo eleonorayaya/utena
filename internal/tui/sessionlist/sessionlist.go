@@ -36,23 +36,29 @@ type Model struct {
 	pendingRepairID  uint
 	statusMsg        string
 	statusKind       ui.StatusKind
-	picker           ui.PRPicker
-	pickerSessionID  uint
 	browserState     browser.SessionsView
+	detail           sessiondetail.Model
 	width            int
 	height           int
 }
 
 func New() Model {
-	return Model{}
+	return Model{detail: sessiondetail.New()}
 }
 
 func (m Model) Init() (Model, tea.Cmd) {
-	return m, tea.Batch(provider.FetchSessions(), provider.RequestBrowserState())
+	return m, tea.Batch(provider.FetchSessions(), provider.RequestBrowserState(), m.detail.Init())
 }
 
 func (m Model) Keys() help.KeyMap {
+	if m.detail.Focused() {
+		return m.detail.Keys()
+	}
 	return keys
+}
+
+func (m Model) CapturesText() bool {
+	return m.detail.Focused() && m.detail.CapturesText()
 }
 
 func (m Model) isSplit() bool {
@@ -65,11 +71,21 @@ func (m Model) listWidth() int {
 }
 
 func (m Model) bodyHeight() int {
-	return max(m.height-m.pickerRows(), 1)
+	return max(m.height, 1)
 }
 
-func (m Model) pickerRows() int {
-	return m.picker.Height(m.height - 1)
+func (m Model) panelWidth() int {
+	if !m.isSplit() {
+		return m.width
+	}
+	return m.width - m.listWidth() - 2
+}
+
+func (m Model) selectedID() uint {
+	if sel := m.selectedSession(); sel != nil {
+		return sel.ID
+	}
+	return 0
 }
 
 func (m Model) selectedSession() *session.Session {
@@ -96,27 +112,35 @@ func (m *Model) setStatus(text string, kind ui.StatusKind) {
 }
 
 func (m Model) Status() ui.Status {
-	if m.picker.IsOpen() {
-		return ui.Status{Text: "↑/↓ choose · enter open · esc cancel", Kind: ui.StatusInfo}
+	if m.detail.Focused() {
+		if st := m.detail.Status(); !st.Empty() {
+			return st
+		}
 	}
-	if m.statusMsg == "" && m.browserState.Outdated {
+	if m.statusMsg != "" {
+		return ui.Status{Text: m.statusMsg, Kind: m.statusKind}
+	}
+	return m.browserWarning()
+}
+
+func (m Model) browserWarning() ui.Status {
+	if m.browserState.Outdated {
 		text := outdatedWarning
 		if m.browserState.UpdateHint != "" {
 			text += " — " + m.browserState.UpdateHint
 		}
 		return ui.Status{Text: text, Kind: ui.StatusWarning}
 	}
-	if m.statusMsg == "" && m.browserState.Warning != "" {
+	if m.browserState.Warning != "" {
 		return ui.Status{Text: m.browserState.Warning, Kind: ui.StatusWarning}
 	}
-	return ui.Status{Text: m.statusMsg, Kind: m.statusKind}
+	return ui.Status{}
 }
 
 func (m *Model) clearPending() {
 	m.pendingArchiveID = 0
 	m.pendingDeleteID = 0
 	m.pendingRepairID = 0
-	m.picker = m.picker.Close()
 	m.setStatus("", ui.StatusInfo)
 }
 
@@ -132,13 +156,7 @@ func (m *Model) clampOffset() {
 	if cr > 0 && rows[cr-1].kind == rowHeader && bh > 1 {
 		top = cr - 1
 	}
-	if top < m.offset {
-		m.offset = top
-	}
-	if cr >= m.offset+bh {
-		m.offset = cr - bh + 1
-	}
-	m.offset = max(min(m.offset, len(rows)-bh), 0)
+	m.offset = ui.ScrollOffset(m.offset, top, cr, len(rows), bh)
 }
 
 func (m *Model) rebuildFiltered() {
@@ -177,61 +195,61 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.OnWindowSizeMsg(msg)
-	case provider.SessionsStateUpdatedMsg:
-		m.sessions = msg.Sessions
-		prevSel := m.selectedSession()
-		m.rebuildFiltered()
-		newSel := m.selectedSession()
-		if prevSel == nil || newSel == nil || prevSel.ID != newSel.ID {
-			m.clearPending()
-		} else {
-			m.picker = m.picker.Sync(newSel.PullRequests)
-		}
-		return m, nil
-	case provider.BrowserStateUpdatedMsg:
-		m.browserState = msg.State
-		return m, nil
-	case ui.OpenURLFailedMsg:
-		m.setStatus("could not open PR: "+msg.Err.Error(), ui.StatusError)
-		return m, nil
-	case provider.ErrMsg:
-		m.setStatus(msg.Err.Error(), ui.StatusError)
-		return m, nil
-	case provider.SessionSwitchedMsg:
-		return m, tea.Quit
 	case tea.KeyMsg:
-		var cmd tea.Cmd
-		var handled bool
-		m, cmd, handled = m.OnKeyMsg(msg)
-		if handled {
+		if m.detail.Focused() {
+			m.setStatus("", ui.StatusInfo)
+			var cmd tea.Cmd
+			m.detail, cmd = m.detail.Update(msg)
 			return m, cmd
 		}
+		m, cmd, _ := m.OnKeyMsg(msg)
+		return m, cmd
 	}
-	return m, nil
+
+	var detailCmd tea.Cmd
+	m.detail, detailCmd = m.detail.Update(msg)
+
+	switch msg := msg.(type) {
+	case provider.SessionsStateUpdatedMsg:
+		m.sessions = msg.Sessions
+		prevID := m.selectedID()
+		m.rebuildFiltered()
+		if id := m.selectedID(); id == 0 || id != prevID {
+			m.clearPending()
+		}
+		m.detail = m.detail.Select(m.selectedSession())
+	case provider.BrowserStateUpdatedMsg:
+		m.browserState = msg.State
+	case ui.OpenURLFailedMsg:
+		m.setStatus("could not open PR: "+msg.Err.Error(), ui.StatusError)
+	case provider.ErrMsg:
+		m.setStatus(msg.Err.Error(), ui.StatusError)
+	case provider.SessionSwitchedMsg:
+		return m, tea.Quit
+	}
+	return m, detailCmd
 }
 
 func (m Model) OnWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 	m.clampOffset()
-	return m, nil
+	var cmd tea.Cmd
+	m.detail, cmd = m.detail.Update(tea.WindowSizeMsg{Width: m.panelWidth(), Height: m.bodyHeight()})
+	return m, cmd
 }
 
 func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	if m.picker.IsOpen() {
-		var url string
-		m.picker, url = m.picker.Update(msg)
-		m.clampOffset()
-		if url != "" {
-			return m, provider.OpenURL(m.pickerSessionID, url), true
-		}
-		return m, nil, true
+	prevID := m.selectedID()
+	m, cmd, handled := m.onKeyMsg(msg)
+	if id := m.selectedID(); id != 0 && id != prevID {
+		m.clearPending()
 	}
+	m.detail = m.detail.Select(m.selectedSession())
+	return m, cmd, handled
+}
 
-	prevID := uint(0)
-	if sel := m.selectedSession(); sel != nil {
-		prevID = sel.ID
-	}
+func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 
 	isNav := key.Matches(msg, keys.Up) || key.Matches(msg, keys.Down)
 	if !key.Matches(msg, keys.Archive) && !isNav {
@@ -256,9 +274,6 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			m.cursor--
 			m.clampOffset()
 		}
-		if sel := m.selectedSession(); sel != nil && sel.ID != prevID {
-			m.clearPending()
-		}
 		return m, nil, true
 
 	case key.Matches(msg, keys.Down):
@@ -266,20 +281,15 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			m.cursor++
 			m.clampOffset()
 		}
-		if sel := m.selectedSession(); sel != nil && sel.ID != prevID {
-			m.clearPending()
-		}
 		return m, nil, true
 
-	case key.Matches(msg, keys.Info):
-		sel := m.selectedSession()
-		if sel == nil {
+	case key.Matches(msg, keys.Focus):
+		if m.selectedSession() == nil {
 			return m, nil, false
 		}
-		return m, tea.Sequence(
-			router.NavigateTo(router.SessionDetailView),
-			sessiondetail.Select(*sel),
-		), true
+		m.clearPending()
+		m.detail = m.detail.Focus()
+		return m, nil, true
 
 	case key.Matches(msg, keys.ToggleHidden):
 		m.showHidden = !m.showHidden
@@ -341,9 +351,8 @@ func (m Model) OnKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		case 1:
 			return m, provider.OpenURL(sel.ID, prs[0].HTMLURL), true
 		default:
-			m.picker = ui.NewPRPicker(prs)
-			m.pickerSessionID = sel.ID
-			m.clampOffset()
+			m.clearPending()
+			m.detail = m.detail.FocusPR()
 			return m, nil, true
 		}
 
@@ -426,29 +435,30 @@ func (m Model) renderList(width int) string {
 	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 }
 
+func (m Model) dividerColor() lipgloss.Color {
+	if m.detail.Focused() {
+		return theme.Current.Primary
+	}
+	return theme.Current.SurfaceVariant
+}
+
 func (m Model) View() string {
-	listW := m.width
-	if m.isSplit() {
-		listW = m.listWidth() - listGutter
-	}
-	listStr := m.renderList(listW)
-	if m.picker.IsOpen() {
-		listStr += "\n" + lipgloss.NewStyle().Width(listW).Render(m.picker.View(listW, m.pickerRows()))
-	}
-	h := max(m.height, 1)
-	listStr = ui.FitHeight(listStr, h)
+	h := m.bodyHeight()
 	if !m.isSplit() {
-		return listStr
+		if m.detail.Focused() {
+			return ui.FitHeight(m.detail.View(), h)
+		}
+		return ui.FitHeight(m.renderList(m.width), h)
 	}
 
-	panelW := m.width - listW - listGutter - 2
-	divStyle := lipgloss.NewStyle().Foreground(theme.Current.SurfaceVariant)
+	listStr := ui.FitHeight(m.renderList(m.listWidth()-listGutter), h)
+	divStyle := lipgloss.NewStyle().Foreground(m.dividerColor())
 	divLines := make([]string, h)
 	for i := range divLines {
 		divLines[i] = strings.Repeat(" ", listGutter) + divStyle.Render("│ ")
 	}
 	divider := strings.Join(divLines, "\n")
 
-	panelStr := ui.FitHeight(sessiondetail.RenderPanelWithBrowser(m.selectedSession(), m.browserState, panelW, h), h)
+	panelStr := ui.FitHeight(m.detail.View(), h)
 	return lipgloss.JoinHorizontal(lipgloss.Top, listStr, divider, panelStr)
 }
