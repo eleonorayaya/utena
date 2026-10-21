@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"strconv"
@@ -22,6 +23,15 @@ const (
 )
 
 type PortAllocator func() (int, error)
+
+const (
+	minRemotePort = 30000
+	maxRemotePort = 60000
+)
+
+func RandomRemotePort() (int, error) {
+	return minRemotePort + rand.IntN(maxRemotePort-minRemotePort), nil
+}
 
 func FreePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -57,14 +67,15 @@ type conn struct {
 }
 
 type ConnManager struct {
-	cfg        Config
-	runner     Runner
-	ports      PortAllocator
-	now        Clock
-	sleep      Sleeper
-	httpClient *http.Client
-	ctx        context.Context
-	cancel     context.CancelFunc
+	cfg         Config
+	runner      Runner
+	ports       PortAllocator
+	remotePorts PortAllocator
+	now         Clock
+	sleep       Sleeper
+	httpClient  *http.Client
+	ctx         context.Context
+	cancel      context.CancelFunc
 
 	locks sync.Map
 	mu    sync.Mutex
@@ -75,8 +86,11 @@ type ConnManager struct {
 type ConnOption func(*ConnManager)
 
 func WithPorts(p PortAllocator) ConnOption { return func(m *ConnManager) { m.ports = p } }
-func WithClock(c Clock) ConnOption         { return func(m *ConnManager) { m.now = c } }
-func WithSleeper(s Sleeper) ConnOption     { return func(m *ConnManager) { m.sleep = s } }
+func WithRemotePorts(p PortAllocator) ConnOption {
+	return func(m *ConnManager) { m.remotePorts = p }
+}
+func WithClock(c Clock) ConnOption     { return func(m *ConnManager) { m.now = c } }
+func WithSleeper(s Sleeper) ConnOption { return func(m *ConnManager) { m.sleep = s } }
 func WithHTTPClient(c *http.Client) ConnOption {
 	return func(m *ConnManager) { m.httpClient = c }
 }
@@ -84,15 +98,16 @@ func WithHTTPClient(c *http.Client) ConnOption {
 func NewConnManager(cfg Config, runner Runner, opts ...ConnOption) *ConnManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &ConnManager{
-		cfg:        cfg,
-		runner:     runner,
-		ports:      FreePort,
-		now:        time.Now,
-		sleep:      sleepCtx,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
-		ctx:        ctx,
-		cancel:     cancel,
-		conns:      make(map[string]*conn),
+		cfg:         cfg,
+		runner:      runner,
+		ports:       FreePort,
+		remotePorts: RandomRemotePort,
+		now:         time.Now,
+		sleep:       sleepCtx,
+		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		ctx:         ctx,
+		cancel:      cancel,
+		conns:       make(map[string]*conn),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -210,14 +225,14 @@ func (m *ConnManager) removeHost(workspace string) {
 	}
 }
 
-func (m *ConnManager) SSHCommand(workspace string, localPort int) Command {
+func (m *ConnManager) SSHCommand(workspace string, localPort, remotePort int) Command {
 	return Command{Name: "ssh", Args: []string{
 		"-N",
 		"-o", "BatchMode=yes",
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "ServerAliveInterval=15",
 		"-L", fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", localPort, m.cfg.FollowerPort),
-		"-R", fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", m.cfg.LeaderPort, m.cfg.LocalAPIPort),
+		"-R", fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", remotePort, m.cfg.LocalAPIPort),
 		m.cfg.SSHHost(workspace),
 	}}
 }
@@ -255,12 +270,19 @@ func (m *ConnManager) connect(ctx context.Context, workspace string) (*watchedPr
 		if err != nil {
 			return nil, 0, fmt.Errorf("allocate local port: %w", err)
 		}
-		started, err := m.runner.Start(m.SSHCommand(workspace, port))
+		remotePort, err := m.remotePorts()
+		if err != nil {
+			return nil, 0, fmt.Errorf("allocate remote port: %w", err)
+		}
+		started, err := m.runner.Start(m.SSHCommand(workspace, port, remotePort))
 		if err != nil {
 			return nil, 0, fmt.Errorf("start ssh forward to %s: %w", workspace, err)
 		}
 		proc := watch(started)
 		err = m.waitReady(ctx, proc, port)
+		if err == nil {
+			err = m.pointAtLeader(ctx, port, remotePort)
+		}
 		if err == nil {
 			return proc, port, nil
 		}
@@ -271,6 +293,19 @@ func (m *ConnManager) connect(ctx context.Context, workspace string) (*watchedPr
 		}
 	}
 	return nil, 0, fmt.Errorf("connect to %s: %w", workspace, lastErr)
+}
+
+func (m *ConnManager) pointAtLeader(ctx context.Context, port, remotePort int) error {
+	ctx, cancel := context.WithTimeout(ctx, readyTimeout)
+	defer cancel()
+	err := NewFollowerClient(m.baseURL(port), m.httpClient).SetLeader(ctx, m.baseURL(remotePort))
+	if isNotFound(err) {
+		return fmt.Errorf("follower cannot take a leader address; restart the workspace to update its utena: %w", err)
+	}
+	if err != nil {
+		return fmt.Errorf("point follower at the leader: %w", err)
+	}
+	return nil
 }
 
 func (m *ConnManager) waitReady(ctx context.Context, proc *watchedProcess, port int) error {

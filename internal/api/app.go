@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/eleonorayaya/utena/internal/leader"
 	"log/slog"
 	"path/filepath"
 
@@ -43,6 +44,7 @@ type App struct {
 	Jobs      *jobs.JobsModule
 	Monitor   *monitor.MonitorModule
 	Coder     *coder.Module
+	Leader    *leader.Module
 }
 
 func NewApp(cfg Config) (*App, error) {
@@ -84,11 +86,13 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 	bundlesModule := bundles.NewModule(cfg.Bundles)
 	sessions := browserSessions{sessions: sessionModule.Service}
 	var browserModule common.Module
+	var leaderAddress *leader.Address
 	if cfg.Follower {
+		leaderAddress = leader.NewAddress(cfg.LeaderURL)
 		gitModule.DisableGitHub()
 		sessionModule.DisableGitHub()
-		sessionModule.Service.SetSourceReader(workspace.NewLeaderSourceReader(cfg.LeaderURL, nil))
-		browserModule = browser.NewFollowerModule(cfg.LeaderURL, nil, sessions)
+		sessionModule.Service.SetSourceReader(workspace.NewLeaderSourceReader(leaderAddress, nil))
+		browserModule = browser.NewFollowerModule(leaderAddress, nil, sessions)
 	} else {
 		browserModule = browser.NewModule(newBrowserDriver(cfg.Browser), sessions, newWMDriver(cfg.WM), browser.Layout{BrowserWorkspace: cfg.BrowserWorkspace, ParkWorkspace: cfg.ParkWorkspace}, bus, database)
 	}
@@ -117,6 +121,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 		Jobs:      jobsModule,
 		Monitor:   monitor.NewMonitorModule(bus, sessionModule.Service),
 		Coder:     coderModule,
+		Leader:    leader.NewModule(leaderAddress),
 	}
 
 	database.RegisterModels(app.collectModels()...)
@@ -230,5 +235,6 @@ func (a *App) modules() []moduleEntry {
 		{"browser", "/browser", a.Browser},
 		{"jobs", "/jobs", a.Jobs},
 		{"monitor", "/monitor", a.Monitor},
+		{"leader", "/leader", a.Leader},
 	}
 }

@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"github.com/eleonorayaya/utena/internal/leader"
 	"io"
 	"io/fs"
 	"net/http"
@@ -15,17 +16,17 @@ import (
 const defaultLeaderTimeout = 30 * time.Second
 
 type LeaderSourceReader struct {
-	baseURL string
-	client  *http.Client
+	leader *leader.Address
+	client *http.Client
 }
 
 var _ SourceReader = (*LeaderSourceReader)(nil)
 
-func NewLeaderSourceReader(baseURL string, client *http.Client) *LeaderSourceReader {
+func NewLeaderSourceReader(address *leader.Address, client *http.Client) *LeaderSourceReader {
 	if client == nil {
 		client = &http.Client{Timeout: defaultLeaderTimeout}
 	}
-	return &LeaderSourceReader{baseURL: strings.TrimRight(baseURL, "/"), client: client}
+	return &LeaderSourceReader{leader: address, client: client}
 }
 
 func (r *LeaderSourceReader) ReadSourceFile(ctx context.Context, ws Workspace, relPath string) ([]byte, fs.FileMode, error) {
@@ -35,12 +36,12 @@ func (r *LeaderSourceReader) ReadSourceFile(ctx context.Context, ws Workspace, r
 	if err := ValidateRelPath(relPath); err != nil {
 		return nil, 0, fmt.Errorf("source path %q: %w", relPath, err)
 	}
-	u := fmt.Sprintf("%s/workspaces/%d/files/%s", r.baseURL, *ws.LeaderWorkspaceID, escapeRelPath(relPath))
+	u := fmt.Sprintf("%s/workspaces/%d/files/%s", r.leader.URL(), *ws.LeaderWorkspaceID, escapeRelPath(relPath))
 	return r.get(ctx, u, relPath)
 }
 
 func (r *LeaderSourceReader) ReadGlobalSetupScript(ctx context.Context) ([]byte, fs.FileMode, error) {
-	return r.get(ctx, r.baseURL+"/workspaces/"+GlobalSetupScriptName, "global "+GlobalSetupScriptName)
+	return r.get(ctx, r.leader.URL()+"/workspaces/"+GlobalSetupScriptName, "global "+GlobalSetupScriptName)
 }
 
 func (r *LeaderSourceReader) get(ctx context.Context, u, what string) ([]byte, fs.FileMode, error) {

@@ -93,7 +93,7 @@ func TestService_CreateRunsLifecycleInOrder(t *testing.T) {
 
 	port := h.follower.port()
 	require.Len(t, h.runner.Starts(), 1)
-	assert.Equal(t, fmt.Sprintf("ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -L 127.0.0.1:%d:127.0.0.1:3333 -R 127.0.0.1:3334:127.0.0.1:3333 ws.coder", port), h.runner.Starts()[0].String())
+	assert.Equal(t, fmt.Sprintf("ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -L 127.0.0.1:%d:127.0.0.1:3333 -R 127.0.0.1:%d:127.0.0.1:3333 ws.coder", port, testRemotePort), h.runner.Starts()[0].String())
 
 	wsCalls := h.follower.CallsTo("POST", "/workspaces")
 	require.Len(t, wsCalls, 1)

@@ -8,7 +8,6 @@ import (
 const (
 	DefaultSSHSuffix      = ".coder"
 	DefaultFollowerPort   = 3333
-	DefaultLeaderPort     = 3334
 	DefaultIdleDisconnect = 10 * time.Minute
 )
 
@@ -17,7 +16,6 @@ type FileConfig struct {
 	Parameters     map[string]string `json:"parameters"`
 	SSHSuffix      string            `json:"ssh_suffix"`
 	FollowerPort   int               `json:"follower_port"`
-	LeaderPort     int               `json:"leader_port"`
 	IdleDisconnect string            `json:"idle_disconnect"`
 }
 
@@ -26,7 +24,6 @@ type Config struct {
 	Parameters     map[string]string
 	SSHSuffix      string
 	FollowerPort   int
-	LeaderPort     int
 	IdleDisconnect time.Duration
 	LocalAPIPort   int
 }
@@ -37,7 +34,6 @@ func ParseConfig(f FileConfig, localAPIPort int) (Config, error) {
 		Parameters:     f.Parameters,
 		SSHSuffix:      f.SSHSuffix,
 		FollowerPort:   f.FollowerPort,
-		LeaderPort:     f.LeaderPort,
 		IdleDisconnect: DefaultIdleDisconnect,
 		LocalAPIPort:   localAPIPort,
 	}
@@ -46,9 +42,6 @@ func ParseConfig(f FileConfig, localAPIPort int) (Config, error) {
 	}
 	if cfg.FollowerPort == 0 {
 		cfg.FollowerPort = DefaultFollowerPort
-	}
-	if cfg.LeaderPort == 0 {
-		cfg.LeaderPort = DefaultLeaderPort
 	}
 	if f.IdleDisconnect != "" {
 		d, err := time.ParseDuration(f.IdleDisconnect)
@@ -60,13 +53,8 @@ func ParseConfig(f FileConfig, localAPIPort int) (Config, error) {
 		}
 		cfg.IdleDisconnect = d
 	}
-	for _, port := range []struct {
-		name  string
-		value int
-	}{{"follower_port", cfg.FollowerPort}, {"leader_port", cfg.LeaderPort}} {
-		if port.value < 1 || port.value > 65535 {
-			return Config{}, fmt.Errorf("invalid coder.%s %d", port.name, port.value)
-		}
+	if cfg.FollowerPort < 1 || cfg.FollowerPort > 65535 {
+		return Config{}, fmt.Errorf("invalid coder.follower_port %d", cfg.FollowerPort)
 	}
 	for k := range cfg.Parameters {
 		if k == "" {
