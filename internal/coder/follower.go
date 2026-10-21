@@ -92,6 +92,10 @@ func (c *FollowerClient) Ping(ctx context.Context) error {
 	return c.do(ctx, http.MethodGet, "/bundles", nil, nil)
 }
 
+func (c *FollowerClient) SetLeader(ctx context.Context, url string) error {
+	return c.do(ctx, http.MethodPut, "/leader", map[string]string{"url": url}, nil, http.StatusNoContent)
+}
+
 func (c *FollowerClient) LinkWorkspace(ctx context.Context, path string, leaderWorkspaceID uint) (uint, error) {
 	var resp workspace.WorkspaceListResponse
 	req := workspace.AddWorkspaceRequest{Path: path, LeaderWorkspaceID: &leaderWorkspaceID}

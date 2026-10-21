@@ -248,7 +248,6 @@ func TestLoadConfig_CoderDefaultsWithoutBlock(t *testing.T) {
 	assert.False(t, cfg.Coder.Enabled())
 	assert.Equal(t, ".coder", cfg.Coder.SSHSuffix)
 	assert.Equal(t, 3333, cfg.Coder.FollowerPort)
-	assert.Equal(t, 3334, cfg.Coder.LeaderPort)
 	assert.Equal(t, 10*time.Minute, cfg.Coder.IdleDisconnect)
 	assert.Equal(t, 4000, cfg.Coder.LocalAPIPort)
 }
@@ -258,7 +257,7 @@ func TestLoadConfig_CoderFromDaemonFile(t *testing.T) {
 	t.Setenv("UTENA_PORT", "")
 	dir := t.TempDir()
 	t.Setenv("UTENA_DATA_DIR", dir)
-	body := `{"coder":{"template":"my-template","parameters":{"size":"large"},"ssh_suffix":".example","follower_port":4444,"leader_port":5555,"idle_disconnect":"90s"}}`
+	body := `{"coder":{"template":"my-template","parameters":{"size":"large"},"ssh_suffix":".example","follower_port":4444,"idle_disconnect":"90s"}}`
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "daemon.json"), []byte(body), 0o644))
 
 	cfg, err := LoadConfig(nil)
@@ -268,7 +267,6 @@ func TestLoadConfig_CoderFromDaemonFile(t *testing.T) {
 	assert.Equal(t, map[string]string{"size": "large"}, cfg.Coder.Parameters)
 	assert.Equal(t, "ws-1.example", cfg.Coder.SSHHost("ws-1"))
 	assert.Equal(t, 4444, cfg.Coder.FollowerPort)
-	assert.Equal(t, 5555, cfg.Coder.LeaderPort)
 	assert.Equal(t, 90*time.Second, cfg.Coder.IdleDisconnect)
 	assert.Equal(t, 3333, cfg.Coder.LocalAPIPort)
 }

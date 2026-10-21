@@ -212,6 +212,8 @@ type fakeFollower struct {
 	branches  []string
 	sessionID uint
 	wsID      uint
+	leaders   []string
+	leaderErr int
 }
 
 func newFakeFollower(t *testing.T) *fakeFollower {
@@ -233,6 +235,12 @@ func (f *fakeFollower) set(fn func(f *fakeFollower)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	fn(f)
+}
+
+func (f *fakeFollower) Leaders() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.leaders...)
 }
 
 func (f *fakeFollower) Calls() []followerCall {
@@ -259,11 +267,24 @@ func (f *fakeFollower) serve(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" {
 		path += "?" + r.URL.RawQuery
 	}
-	if r.URL.Path != "/bundles" {
+	if r.URL.Path != "/bundles" && r.URL.Path != "/leader" {
 		f.calls = append(f.calls, followerCall{Method: r.Method, Path: path, Body: body})
 	}
 	sessPath := fmt.Sprintf("/sessions/%d", f.sessionID)
 	switch {
+	case r.Method == http.MethodPut && r.URL.Path == "/leader":
+		status := http.StatusNoContent
+		if f.leaderErr != 0 {
+			status = f.leaderErr
+		} else {
+			var req struct {
+				URL string `json:"url"`
+			}
+			_ = json.Unmarshal(data, &req)
+			f.leaders = append(f.leaders, req.URL)
+		}
+		f.mu.Unlock()
+		w.WriteHeader(status)
 	case r.Method == http.MethodGet && r.URL.Path == "/bundles":
 		f.mu.Unlock()
 		_, _ = w.Write([]byte(`{"bundles":[]}`))
@@ -373,6 +394,8 @@ type harness struct {
 	svc      *Service
 }
 
+const testRemotePort = 40000
+
 func newHarness(t *testing.T, sessions ...session.Session) *harness {
 	t.Helper()
 	h := &harness{
@@ -385,6 +408,7 @@ func newHarness(t *testing.T, sessions ...session.Session) *harness {
 	port := h.follower.port()
 	h.conns = NewConnManager(testConfig(), h.runner,
 		WithPorts(func() (int, error) { return port, nil }),
+		WithRemotePorts(func() (int, error) { return testRemotePort, nil }),
 		WithClock(h.clock.Now),
 		WithSleeper(h.sleeper.Sleep),
 	)

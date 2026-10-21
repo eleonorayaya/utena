@@ -252,3 +252,32 @@ func TestFollower_DoesNotScheduleGitHubJobs(t *testing.T) {
 	assert.Error(t, app.Jobs.Service.TriggerJob("session.pr_activity"))
 	assert.NoError(t, app.Jobs.Service.TriggerJob("git.branches"))
 }
+
+func TestFollower_LeaderAddressCanBeChanged(t *testing.T) {
+	browserLeader := &recordingBrowserLeader{}
+	leaderMux := http.NewServeMux()
+	leaderMux.Handle("/browser/open", browserLeader)
+	leader := httptest.NewServer(leaderMux)
+	defer leader.Close()
+
+	_, follower := setupFollowerRouter(t, "http://127.0.0.1:1")
+
+	w := doJSON(t, follower, http.MethodPut, "/leader", `{"url":"https://example.com"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+
+	w = doJSON(t, follower, http.MethodPut, "/leader", fmt.Sprintf(`{"url":%q}`, leader.URL))
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+
+	w = doJSON(t, follower, http.MethodPost, "/browser/open", `{"url":"https://example.com/pr"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, browserLeader.requests, 1)
+	assert.Equal(t, "https://example.com/pr", browserLeader.requests[0].URL)
+}
+
+func TestLeader_RejectsLeaderAddress(t *testing.T) {
+	_, router, _, _, _ := setupTestRouter(t)
+
+	w := doJSON(t, router, http.MethodPut, "/leader", `{"url":"http://127.0.0.1:4000"}`)
+
+	assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+}

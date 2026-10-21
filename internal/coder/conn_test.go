@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,12 @@ func TestConn_ForwardFailureRetriesWithFreshPort(t *testing.T) {
 		ports = ports[1:]
 		return p, nil
 	}
+	remotes := []int{41000, 42000}
+	h.conns.remotePorts = func() (int, error) {
+		p := remotes[0]
+		remotes = remotes[1:]
+		return p, nil
+	}
 	h.runner.onStart = func(n int, p *fakeProcess) {
 		if n == 1 {
 			p.Exit(errors.New("remote port forwarding failed"))
@@ -44,7 +51,31 @@ func TestConn_ForwardFailureRetriesWithFreshPort(t *testing.T) {
 	starts := h.runner.Starts()
 	require.Len(t, starts, 2)
 	assert.Contains(t, starts[0].String(), fmt.Sprintf("-L 127.0.0.1:%d:", dead))
+	assert.Contains(t, starts[0].String(), "-R 127.0.0.1:41000:")
 	assert.Contains(t, starts[1].String(), fmt.Sprintf("-L 127.0.0.1:%d:", live))
+	assert.Contains(t, starts[1].String(), "-R 127.0.0.1:42000:")
+	assert.Equal(t, []string{"http://127.0.0.1:42000"}, h.follower.Leaders())
+}
+
+func TestConn_EnsureTellsFollowerItsLeaderAddress(t *testing.T) {
+	h := newHarness(t)
+
+	_, err := h.conns.Ensure(context.Background(), "ws")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{fmt.Sprintf("http://127.0.0.1:%d", testRemotePort)}, h.follower.Leaders())
+}
+
+func TestConn_FollowerWithoutLeaderEndpointFails(t *testing.T) {
+	h := newHarness(t)
+	h.follower.set(func(f *fakeFollower) { f.leaderErr = http.StatusNotFound })
+
+	_, err := h.conns.Ensure(context.Background(), "ws")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "restart the workspace")
+	_, ok := h.conns.Connected("ws")
+	assert.False(t, ok)
 }
 
 func TestConn_EnsureFailureRemovesHost(t *testing.T) {

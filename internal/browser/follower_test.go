@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	leaderaddr "github.com/eleonorayaya/utena/internal/leader"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,7 +65,7 @@ func setupFollower(t *testing.T, leader *fakeLeader, sessions LeaderSessions) (h
 	t.Helper()
 	srv := httptest.NewServer(leader.handler(t))
 	t.Cleanup(srv.Close)
-	return NewFollowerModule(srv.URL+"/", nil, sessions).Routes(), srv
+	return NewFollowerModule(leaderaddr.NewAddress(srv.URL+"/"), nil, sessions).Routes(), srv
 }
 
 func postOpen(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
@@ -226,5 +227,5 @@ func TestFollower_RejectsCrossOrigin(t *testing.T) {
 }
 
 func TestFollower_RegistersBrowserModels(t *testing.T) {
-	assert.Len(t, NewFollowerModule("http://127.0.0.1:1", nil, fakeLeaderSessions{}).Models(), 2)
+	assert.Len(t, NewFollowerModule(leaderaddr.NewAddress("http://127.0.0.1:1"), nil, fakeLeaderSessions{}).Models(), 2)
 }

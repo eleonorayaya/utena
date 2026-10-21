@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/eleonorayaya/utena/internal/leader"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/eleonorayaya/utena/internal/common"
@@ -20,16 +20,16 @@ type LeaderSessions interface {
 }
 
 type FollowerModule struct {
-	leaderURL string
-	client    *http.Client
-	sessions  LeaderSessions
+	leader   *leader.Address
+	client   *http.Client
+	sessions LeaderSessions
 }
 
-func NewFollowerModule(leaderURL string, client *http.Client, sessions LeaderSessions) *FollowerModule {
+func NewFollowerModule(address *leader.Address, client *http.Client, sessions LeaderSessions) *FollowerModule {
 	if client == nil {
 		client = &http.Client{}
 	}
-	return &FollowerModule{leaderURL: strings.TrimRight(leaderURL, "/"), client: client, sessions: sessions}
+	return &FollowerModule{leader: address, client: client, sessions: sessions}
 }
 
 func (m *FollowerModule) OnAppStart(context.Context) error { return nil }
@@ -65,7 +65,7 @@ func (m *FollowerModule) Open(ctx context.Context, req OpenRequest) (OpenResult,
 		}
 	}
 
-	res, err := RequestOpen(ctx, m.client, m.leaderURL+"/browser", req)
+	res, err := RequestOpen(ctx, m.client, m.leader.URL()+"/browser", req)
 	if err != nil {
 		var appErr *common.AppError
 		if errors.As(err, &appErr) {
