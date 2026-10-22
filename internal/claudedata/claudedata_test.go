@@ -35,7 +35,6 @@ func TestProjects_ReadsCWDPastLeadingRecordsAndLongLines(t *testing.T) {
 	require.Len(t, projects, 1)
 	assert.Equal(t, "/s/foo", projects[0].CWD)
 	assert.Equal(t, []string{"abc"}, projects[0].SessionIDs)
-	assert.False(t, projects[0].ModTime.IsZero())
 }
 
 func TestProjects_MemoryOnlyDirHasNoCWD(t *testing.T) {

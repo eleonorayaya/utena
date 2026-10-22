@@ -172,7 +172,6 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.resumeCoderDeletes(sessions)
 	s.reconcileMuxState(ctx, sessions)
 	s.syncWatchedSessionBranches(ctx, sessions)
-	go s.sweepClaudeArtifacts()
 	return nil
 }
 

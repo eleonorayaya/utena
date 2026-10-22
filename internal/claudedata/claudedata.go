@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 const maxRecordsForCWD = 200
@@ -27,7 +26,6 @@ type Project struct {
 	Dir        string
 	CWD        string
 	SessionIDs []string
-	ModTime    time.Time
 }
 
 func Projects(dataDir string) ([]Project, error) {
@@ -60,9 +58,6 @@ func readProject(dir string) (Project, error) {
 	}
 	p := Project{Dir: dir}
 	for _, e := range entries {
-		if info, err := e.Info(); err == nil && info.ModTime().After(p.ModTime) {
-			p.ModTime = info.ModTime()
-		}
 		id, ok := strings.CutSuffix(e.Name(), ".jsonl")
 		if !ok || e.IsDir() || !validSessionID(id) {
 			continue
