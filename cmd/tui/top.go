@@ -19,13 +19,14 @@ func topCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")
 			once, _ := cmd.Flags().GetBool("once")
+			archived, _ := cmd.Flags().GetBool("archived")
 			interval, _ := cmd.Flags().GetDuration("interval")
 			if interval < 500*time.Millisecond {
 				return fmt.Errorf("--interval must be at least 500ms")
 			}
 
 			if once {
-				resp, err := fetchResources(port, 10*time.Second)
+				resp, err := fetchResources(port, 10*time.Second, archived)
 				if err != nil {
 					return err
 				}
@@ -33,19 +34,24 @@ func topCmd() *cobra.Command {
 			}
 
 			loadTheme()
-			_, err := tea.NewProgram(top.New(interval, func() (*session.SessionResourcesResponse, error) {
-				return fetchResources(port, interval+5*time.Second)
+			_, err := tea.NewProgram(top.New(interval, func(archived bool) (*session.SessionResourcesResponse, error) {
+				return fetchResources(port, interval+5*time.Second, archived)
 			}), tea.WithAltScreen()).Run()
 			return err
 		},
 	}
 	cmd.Flags().Bool("once", false, "print one tab-separated snapshot and exit")
+	cmd.Flags().Bool("archived", false, "with --once, also list archived sessions (disk use only)")
 	cmd.Flags().Duration("interval", 2*time.Second, "refresh interval for the live view")
 	return cmd
 }
 
-func fetchResources(port string, timeout time.Duration) (*session.SessionResourcesResponse, error) {
-	resp, err := getJSON[session.SessionResourcesResponse](port, "/sessions/resources", timeout)
+func fetchResources(port string, timeout time.Duration, archived bool) (*session.SessionResourcesResponse, error) {
+	path := "/sessions/resources"
+	if archived {
+		path += "?archived=true"
+	}
+	resp, err := getJSON[session.SessionResourcesResponse](port, path, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("could not reach utena daemon on port %s (is it running?): %w", port, err)
 	}

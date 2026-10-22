@@ -170,6 +170,16 @@ func (s *SessionStore) ListByMuxNames(muxNames []string) ([]MuxSessionRef, error
 	return refs, err
 }
 
+func (s *SessionStore) ListRefsByStatus(status SessionStatus) ([]MuxSessionRef, error) {
+	var refs []MuxSessionRef
+	err := s.db.Model(&Session{}).
+		Select("id, name, status, session_root").
+		Where("status = ?", status).
+		Order("name").
+		Scan(&refs).Error
+	return refs, err
+}
+
 func (s *SessionStore) ListByWorkspace(workspaceID uint) ([]Session, error) {
 	var sessions []Session
 	if err := s.loaded().

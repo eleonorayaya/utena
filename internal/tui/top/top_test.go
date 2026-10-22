@@ -57,7 +57,7 @@ func TestWriteResourcesTSV(t *testing.T) {
 func TestTopModel_FetchRenderSortAndQuit(t *testing.T) {
 	sampled := time.Date(2026, 10, 14, 9, 30, 0, 0, time.Local)
 	m := New(time.Second, nil)
-	m.fetch = func() (*session.SessionResourcesResponse, error) {
+	m.fetch = func(bool) (*session.SessionResourcesResponse, error) {
 		return &session.SessionResourcesResponse{Sessions: topRows(), SampledAt: sampled}, nil
 	}
 
@@ -203,4 +203,47 @@ func TestTopModel_UnknownDiskTotalRendersDash(t *testing.T) {
 	m := New(time.Second, nil)
 	next, _ := m.Update(loaded(rows))
 	assert.Contains(t, ansi.Strip(next.(Model).View()), "DISK —")
+}
+
+func TestTopModel_DotTogglesArchivedAndIgnoresStaleResponses(t *testing.T) {
+	disk := int64(7 << 30)
+	id := uint(9)
+	var asked []bool
+	m := New(time.Second, func(archived bool) (*session.SessionResourcesResponse, error) {
+		asked = append(asked, archived)
+		rows := topRows()
+		if archived {
+			rows = append(rows, session.SessionResources{SessionID: &id, Name: "old-work", Status: "archived", DiskBytes: &disk})
+		}
+		return &session.SessionResourcesResponse{Sessions: rows, SampledAt: time.Now()}, nil
+	})
+	stale := m.Init()()
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(".")})
+	m = next.(Model)
+	require.NotNil(t, cmd)
+	fresh := cmd()
+	assert.Equal(t, []bool{false, true}, asked)
+
+	next, tick := m.Update(stale)
+	m = next.(Model)
+	assert.Nil(t, tick)
+	assert.Empty(t, m.rows)
+
+	next, tick = m.Update(fresh)
+	m = next.(Model)
+	require.NotNil(t, tick)
+	view := ansi.Strip(m.View())
+	assert.Contains(t, view, "incl. archived")
+	assert.Contains(t, view, "old-work")
+	assert.Contains(t, view, "7.0GiB")
+	assert.NotContains(t, m.history, "")
+
+	line := ""
+	for _, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, "old-work") {
+			line = l
+		}
+	}
+	assert.Equal(t, 3, strings.Count(line, "—"), line)
 }

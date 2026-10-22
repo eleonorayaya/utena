@@ -719,3 +719,31 @@ func TestSessionRouter_DefaultBundles_UnknownWorkspace(t *testing.T) {
 	w := getDefaultBundles(t, router, "?workspace_id=99999")
 	require.NotEqual(t, http.StatusOK, w.Code)
 }
+
+func TestSessionRouter_ListResources_IncludesArchivedOnRequest(t *testing.T) {
+	router, sessionStore, _, _, _, _ := setupSessionRouter(t)
+	root := t.TempDir()
+	old := &Session{Name: "old-work", Status: StatusArchived, SessionRoot: root, LastUsedAt: time.Now()}
+	require.NoError(t, sessionStore.Add(old))
+	require.NoError(t, sessionStore.Add(&Session{Name: "idle", Status: StatusInactive, LastUsedAt: time.Now()}))
+	router.controller.service.muxService.SetProcessLister(&mux.FakeProcessLister{})
+
+	list := func(path string) []SessionResources {
+		w := httptest.NewRecorder()
+		router.Routes().ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp SessionResourcesResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return resp.Sessions
+	}
+
+	require.Empty(t, list("/resources"))
+	rows := list("/resources?archived=true")
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].SessionID)
+	require.Equal(t, old.ID, *rows[0].SessionID)
+	require.Equal(t, "old-work", rows[0].Name)
+	require.Equal(t, string(StatusArchived), rows[0].Status)
+	require.Empty(t, rows[0].MuxSession)
+	require.Zero(t, rows[0].Procs)
+}
