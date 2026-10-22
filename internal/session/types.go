@@ -39,6 +39,7 @@ type SessionResources struct {
 	CPUPercent float64            `json:"cpu_pct"`
 	RSSBytes   int64              `json:"rss_bytes"`
 	Procs      int                `json:"procs"`
+	DiskBytes  *int64             `json:"disk_bytes,omitempty"`
 	Processes  []mux.ProcessUsage `json:"processes"`
 }
 

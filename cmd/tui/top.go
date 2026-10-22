@@ -14,7 +14,7 @@ import (
 func topCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "top",
-		Short:        "Show CPU and memory use per session",
+		Short:        "Show CPU, memory and disk use per session",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, _ := cmd.Root().Flags().GetString("port")

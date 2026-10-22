@@ -17,6 +17,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/bundles"
 	"github.com/eleonorayaya/utena/internal/claudesettings"
 	"github.com/eleonorayaya/utena/internal/common"
+	"github.com/eleonorayaya/utena/internal/diskusage"
 	"github.com/eleonorayaya/utena/internal/eventbus"
 	"github.com/eleonorayaya/utena/internal/git"
 	"github.com/eleonorayaya/utena/internal/mux"
@@ -93,6 +94,7 @@ type SessionService struct {
 	trustedRoots         map[string]struct{}
 	remote               RemoteBackend
 	setups               sync.WaitGroup
+	diskUsage            *diskusage.Cache
 }
 
 func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, setupStepStore *SessionSetupStepStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, muxService *mux.Service, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
@@ -113,6 +115,7 @@ func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktre
 		sources:              workspace.NewLocalSourceReader(configDir),
 		sessionsRoot:         sessionsRoot,
 		setupTimeout:         defaultSetupTimeout,
+		diskUsage:            diskusage.NewCache(diskusage.DirSize, diskusage.DefaultTTL),
 	}
 }
 
@@ -260,9 +263,12 @@ func (s *SessionService) ResourceUsage(ctx context.Context) (*SessionResourcesRe
 		return nil, err
 	}
 	byMux := make(map[string]MuxSessionRef, len(refs))
+	roots := make([]string, 0, len(refs))
 	for _, ref := range refs {
 		byMux[ref.MuxName] = ref
+		roots = append(roots, ref.SessionRoot)
 	}
+	sizes := s.diskUsage.Sizes(roots)
 
 	rows := make([]SessionResources, 0, len(usages))
 	for _, u := range usages {
@@ -279,6 +285,9 @@ func (s *SessionService) ResourceUsage(ctx context.Context) (*SessionResourcesRe
 			row.SessionID = &ref.ID
 			row.Name = ref.Name
 			row.Status = string(ref.Status)
+			if size, ok := sizes[ref.SessionRoot]; ok {
+				row.DiskBytes = &size
+			}
 		}
 		rows = append(rows, row)
 	}
