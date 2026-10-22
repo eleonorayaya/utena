@@ -160,13 +160,11 @@ func TestChecksTransitions(t *testing.T) {
 			wantState: ChecksStatePending,
 		},
 		{
-			name:       "first failure while others run",
-			prev:       ChecksStatePending,
-			prevSHA:    "abc123",
-			runs:       []*github.CheckRun{checkRun("lint", "completed", "failure"), checkRun("build", "in_progress", "")},
-			wantEvent:  true,
-			wantState:  ChecksStateFailing,
-			wantFailed: []string{"lint"},
+			name:      "first failure while others run is silent",
+			prev:      ChecksStatePending,
+			prevSHA:   "abc123",
+			runs:      []*github.CheckRun{checkRun("lint", "completed", "failure"), checkRun("build", "in_progress", "")},
+			wantState: ChecksStateFailing,
 		},
 		{
 			name:      "repeat failure is silent",
@@ -191,6 +189,38 @@ func TestChecksTransitions(t *testing.T) {
 			wantEvent:  true,
 			wantState:  ChecksStateFailed,
 			wantFailed: []string{"lint", "build"},
+		},
+		{
+			name:       "failed rollup straight from pending",
+			prev:       ChecksStatePending,
+			prevSHA:    "abc123",
+			runs:       []*github.CheckRun{checkRun("lint", "completed", "failure"), checkRun("build", "completed", "success")},
+			wantEvent:  true,
+			wantState:  ChecksStateFailed,
+			wantFailed: []string{"lint"},
+		},
+		{
+			name:      "repeat rollup is silent",
+			prev:      ChecksStatePassed,
+			prevSHA:   "abc123",
+			runs:      []*github.CheckRun{checkRun("lint", "completed", "success")},
+			wantState: ChecksStatePassed,
+		},
+		{
+			name:      "late run on a settled commit keeps the rollup",
+			prev:      ChecksStatePassed,
+			prevSHA:   "abc123",
+			runs:      []*github.CheckRun{checkRun("lint", "completed", "success"), checkRun("review", "in_progress", "")},
+			wantState: ChecksStatePassed,
+		},
+		{
+			name:       "late run failing a passed commit reports the new rollup",
+			prev:       ChecksStatePassed,
+			prevSHA:    "abc123",
+			runs:       []*github.CheckRun{checkRun("lint", "completed", "success"), checkRun("review", "completed", "failure")},
+			wantEvent:  true,
+			wantState:  ChecksStateFailed,
+			wantFailed: []string{"review"},
 		},
 		{
 			name:      "new commit resets without an event",
@@ -223,6 +253,36 @@ func TestChecksTransitions(t *testing.T) {
 			data := event.Data.(ChecksActivity)
 			require.Equal(t, string(tc.wantState), data.State)
 			require.Equal(t, tc.wantFailed, data.Failed)
+		})
+	}
+}
+
+func TestPRStateNotifies(t *testing.T) {
+	cases := []struct {
+		name     string
+		previous PRState
+		current  PRState
+		isNew    bool
+		want     bool
+	}{
+		{name: "new PR", current: PRStateOpen, isNew: true},
+		{name: "new draft", current: PRStateDraft, isNew: true},
+		{name: "unchanged", previous: PRStateOpen, current: PRStateOpen},
+		{name: "out of draft", previous: PRStateDraft, current: PRStateOpen, want: true},
+		{name: "back to draft", previous: PRStateOpen, current: PRStateDraft},
+		{name: "merged", previous: PRStateOpen, current: PRStateMerged, want: true},
+		{name: "closed", previous: PRStateOpen, current: PRStateClosed, want: true},
+		{name: "draft closed", previous: PRStateDraft, current: PRStateClosed, want: true},
+		{name: "reopened", previous: PRStateClosed, current: PRStateOpen},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var previous *PullRequest
+			if !tc.isNew {
+				previous = &PullRequest{State: tc.previous}
+			}
+			require.Equal(t, tc.want, PRStateNotifies(previous, &PullRequest{State: tc.current}))
 		})
 	}
 }

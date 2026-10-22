@@ -192,3 +192,31 @@ func TestPRStore_UpsertUpdates(t *testing.T) {
 	require.Equal(t, "Updated", found.Title)
 	require.Equal(t, PRStateMerged, found.State)
 }
+
+func TestPRStore_UpdateActivityKeepsSyncedColumns(t *testing.T) {
+	database := setupPRTestDB(t)
+	repoStore := NewRepoStore(database)
+	prStore := NewPRStore(database)
+
+	repo := createPRTestRepo(t, repoStore)
+	pr := &PullRequest{RepoID: repo.ID, Number: 42, Title: "Draft", State: PRStateDraft, HeadSHA: "old"}
+	require.NoError(t, prStore.Add(pr))
+
+	stale := *pr
+	pr.State = PRStateMerged
+	pr.Title = "Final"
+	pr.HeadSHA = "new"
+	require.NoError(t, prStore.Update(pr))
+
+	stale.LastReviewID = 7
+	stale.ChecksState = ChecksStatePassed
+	require.NoError(t, prStore.UpdateActivity(&stale))
+
+	found, err := prStore.GetByID(pr.ID)
+	require.NoError(t, err)
+	require.Equal(t, PRStateMerged, found.State)
+	require.Equal(t, "Final", found.Title)
+	require.Equal(t, "new", found.HeadSHA)
+	require.Equal(t, int64(7), found.LastReviewID)
+	require.Equal(t, ChecksStatePassed, found.ChecksState)
+}

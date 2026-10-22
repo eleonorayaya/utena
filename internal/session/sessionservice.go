@@ -1939,6 +1939,10 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 
 	isNew := data.Previous == nil
 	newlyAssigned := pr.IsAssignedToMe && pr.State == git.PRStateOpen && (isNew || !data.Previous.IsAssignedToMe)
+	notifies := git.PRStateNotifies(data.Previous, pr)
+	if !newlyAssigned && !notifies {
+		return nil
+	}
 
 	sess, _ := s.store.GetByBranchID(*pr.HeadBranchID)
 
@@ -1946,7 +1950,7 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 		s.maybeCreatePendingSession(ctx, data)
 		sess, _ = s.store.GetByBranchID(*pr.HeadBranchID)
 	}
-	if sess == nil {
+	if sess == nil || !notifies {
 		return nil
 	}
 
@@ -1958,31 +1962,6 @@ func (s *SessionService) handlePRUpdated(ctx context.Context, event eventbus.Eve
 func (s *SessionService) notifyPRUpdated(ctx context.Context, sess *Session, pr *git.PullRequest, previous *git.PullRequest) {
 	data := git.NewPRNotification(pr, previous, sess.branchName(*pr.HeadBranchID))
 	s.publishNotification(ctx, sess.ID, git.NotificationPullRequest, data)
-}
-
-func (s *SessionService) SessionSnapshot(ctx context.Context, sessionID uint) []eventbus.SessionNotificationEvent {
-	sess, err := s.store.GetByID(sessionID)
-	if err != nil {
-		return nil
-	}
-
-	return openPRNotifications(sessionID, s.gitService.GetPRsForBranches(sess.BranchIDs()), sess.branchName)
-}
-
-func openPRNotifications(sessionID uint, prs []git.PullRequest, branchName func(uint) string) []eventbus.SessionNotificationEvent {
-	var out []eventbus.SessionNotificationEvent
-	for i := range prs {
-		pr := &prs[i]
-		if !pr.State.IsOpen() || pr.HeadBranchID == nil {
-			continue
-		}
-		out = append(out, eventbus.SessionNotificationEvent{
-			SessionID: sessionID,
-			Type:      git.NotificationPullRequest,
-			Data:      git.NewPRNotification(pr, nil, branchName(*pr.HeadBranchID)),
-		})
-	}
-	return out
 }
 
 // SyncPRActivity polls reviews, review comments and CI checks for the PRs of

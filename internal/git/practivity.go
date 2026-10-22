@@ -34,19 +34,29 @@ type PRNotification struct {
 	URL           string `json:"url"`
 }
 
+func PRStateNotifies(previous *PullRequest, pr *PullRequest) bool {
+	if previous == nil || previous.State == pr.State {
+		return false
+	}
+	switch pr.State {
+	case PRStateMerged, PRStateClosed:
+		return true
+	case PRStateOpen:
+		return previous.State == PRStateDraft
+	}
+	return false
+}
+
 func NewPRNotification(pr *PullRequest, previous *PullRequest, branch string) PRNotification {
-	n := PRNotification{
-		Number: pr.Number,
-		Title:  pr.Title,
-		State:  string(pr.State),
-		Branch: branch,
-		Checks: string(pr.ChecksState),
-		URL:    pr.HTMLURL,
+	return PRNotification{
+		Number:        pr.Number,
+		Title:         pr.Title,
+		State:         string(pr.State),
+		PreviousState: string(previous.State),
+		Branch:        branch,
+		Checks:        string(pr.ChecksState),
+		URL:           pr.HTMLURL,
 	}
-	if previous != nil && previous.State != pr.State {
-		n.PreviousState = string(previous.State)
-	}
-	return n
 }
 
 type ReviewActivity struct {
@@ -135,7 +145,7 @@ func (s *GitService) SyncPRActivity(ctx context.Context, pr *PullRequest) ([]PRA
 	}
 
 	if updated {
-		if err := s.prStore.Update(pr); err != nil {
+		if err := s.prStore.UpdateActivity(pr); err != nil {
 			return nil, err
 		}
 	}
@@ -199,8 +209,8 @@ func (s *GitService) newReviewComments(pr *PullRequest, comments []*github.PullR
 }
 
 // checksTransition reports the check state for the PR's head commit and the
-// event worth sending: the first failure while a run is still in flight, and
-// the rollup once every run has finished. A new head commit resets silently.
+// event worth sending: the rollup once every run has finished. A new head
+// commit resets silently.
 func checksTransition(pr *PullRequest, runs []*github.CheckRun) (*PRActivity, ChecksState) {
 	var failed []string
 	complete := true
@@ -230,13 +240,17 @@ func checksTransition(pr *PullRequest, runs []*github.CheckRun) (*PRActivity, Ch
 	if pr.ChecksHeadSHA != pr.HeadSHA {
 		previous = "" // a new head commit invalidates the old rollup
 	}
-	// Stay quiet while runs are in flight, on the first sight of a PR (the
-	// connect snapshot carries current state, so adopting a batch of PRs does
-	// not fire a rollup for each), on a repeat of what we already reported,
-	// and when a run fails and finishes inside one poll — that needs only the
-	// rollup.
-	if state == ChecksStatePending || state == previous || pr.ChecksHeadSHA == "" ||
-		(state == ChecksStateFailing && previous.terminal()) {
+	// Stay quiet until every run has finished, keeping a rollup already
+	// reported for this commit while a late run is in flight, on the first
+	// sight of a PR (so adopting a batch of PRs does not fire a rollup for
+	// each), and on a repeat of what we already reported.
+	if !state.terminal() {
+		if previous.terminal() {
+			return nil, previous
+		}
+		return nil, state
+	}
+	if state == previous || pr.ChecksHeadSHA == "" {
 		return nil, state
 	}
 

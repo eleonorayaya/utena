@@ -81,6 +81,27 @@ func TestHandlePRUpdated_NoSessionForBranch_PublishesNothing(t *testing.T) {
 	require.Empty(t, got())
 }
 
+func TestHandlePRUpdated_NewPRPublishesNothing(t *testing.T) {
+	env := setupPRTestEnv(t)
+	ctx := context.Background()
+	got := collectNotifications(env)
+
+	branchID := env.branch.ID
+	sess := &Session{Name: "feature-pr", Status: StatusActive, LastUsedAt: time.Now()}
+	require.NoError(t, env.sessionStore.Add(sess))
+	env.attachBranchWorktree(t, sess.ID, branchID, 0)
+
+	require.NoError(t, env.service.handlePRUpdated(ctx, eventbus.Event{
+		Type: git.EventPRUpdated,
+		Data: git.PRUpdatedEvent{
+			PullRequest: &git.PullRequest{Number: 42, HeadBranchID: &branchID, State: git.PRStateDraft},
+			Repo:        env.repo,
+		},
+	}))
+
+	require.Empty(t, got())
+}
+
 func TestSyncPRActivity_FansOutToEverySessionOnTheBranch(t *testing.T) {
 	client := &git.MockGitHubClient{Reviews: []*github.PullRequestReview{{
 		ID:    github.Ptr(int64(101)),
@@ -122,66 +143,6 @@ func TestSyncPRActivity_FansOutToEverySessionOnTheBranch(t *testing.T) {
 	}
 }
 
-func TestSessionSnapshot_ReturnsSessionPRs(t *testing.T) {
-	env := setupPRTestEnv(t)
-	ctx := context.Background()
-
-	branchID := env.branch.ID
-	sess := &Session{Name: "feature-pr", Status: StatusActive, LastUsedAt: time.Now()}
-	require.NoError(t, env.sessionStore.Add(sess))
-	env.attachBranchWorktree(t, sess.ID, branchID, 0)
-	require.NoError(t, env.database.Create(&git.PullRequest{
-		RepoID:       env.repo.ID,
-		Number:       7,
-		HeadBranchID: &branchID,
-		Title:        "Snapshot PR",
-		State:        git.PRStateOpen,
-		HTMLURL:      "https://github.com/eleonorayaya/utena/pull/7",
-	}).Error)
-
-	snapshot := env.service.SessionSnapshot(ctx, sess.ID)
-
-	require.Len(t, snapshot, 1)
-	require.Equal(t, sess.ID, snapshot[0].SessionID)
-	require.Equal(t, git.NotificationPullRequest, snapshot[0].Type)
-	require.Equal(t, git.PRNotification{
-		Number: 7,
-		Title:  "Snapshot PR",
-		State:  "open",
-		Branch: "feature-pr",
-		URL:    "https://github.com/eleonorayaya/utena/pull/7",
-	}, snapshot[0].Data)
-}
-
-func TestSessionSnapshot_SkipsClosedAndMergedPRs(t *testing.T) {
-	env := setupPRTestEnv(t)
-	ctx := context.Background()
-
-	branchID := env.branch.ID
-	sess := &Session{Name: "feature-pr", Status: StatusActive, LastUsedAt: time.Now()}
-	require.NoError(t, env.sessionStore.Add(sess))
-	env.attachBranchWorktree(t, sess.ID, branchID, 0)
-	for i, state := range []git.PRState{git.PRStateMerged, git.PRStateClosed, git.PRStateDraft} {
-		require.NoError(t, env.database.Create(&git.PullRequest{
-			RepoID:       env.repo.ID,
-			Number:       100 + i,
-			HeadBranchID: &branchID,
-			State:        state,
-		}).Error)
-	}
-
-	snapshot := env.service.SessionSnapshot(ctx, sess.ID)
-
-	require.Len(t, snapshot, 1)
-	require.Equal(t, "draft", snapshot[0].Data.(git.PRNotification).State)
-}
-
-func TestSessionSnapshot_UnknownSession(t *testing.T) {
-	env := setupPRTestEnv(t)
-
-	require.Empty(t, env.service.SessionSnapshot(context.Background(), 9999))
-}
-
 func (env *prTestEnv) addHistoryBranch(t *testing.T, sessionID uint, name string) *git.Branch {
 	t.Helper()
 	branch := &git.Branch{Name: name, RepoID: env.repo.ID}
@@ -213,23 +174,6 @@ func TestHandlePRUpdated_RoutesPRFromHistoryBranch(t *testing.T) {
 	require.Len(t, got(), 1)
 	require.Equal(t, sess.ID, got()[0].SessionID)
 	require.Equal(t, "stacked-base", got()[0].Data.(git.PRNotification).Branch)
-}
-
-func TestSessionSnapshot_IncludesHistoryBranchPRs(t *testing.T) {
-	env := setupPRTestEnv(t)
-	sess := &Session{Name: "stacked", Status: StatusActive, LastUsedAt: time.Now()}
-	require.NoError(t, env.sessionStore.Add(sess))
-	env.attachBranchWorktree(t, sess.ID, env.branch.ID, 0)
-	past := env.addHistoryBranch(t, sess.ID, "stacked-base")
-	currentID, pastID := env.branch.ID, past.ID
-	require.NoError(t, env.database.Create(&git.PullRequest{RepoID: env.repo.ID, Number: 1, HeadBranchID: &currentID, State: git.PRStateOpen}).Error)
-	require.NoError(t, env.database.Create(&git.PullRequest{RepoID: env.repo.ID, Number: 2, HeadBranchID: &pastID, State: git.PRStateOpen}).Error)
-
-	snapshot := env.service.SessionSnapshot(context.Background(), sess.ID)
-
-	require.Len(t, snapshot, 2)
-	branches := []string{snapshot[0].Data.(git.PRNotification).Branch, snapshot[1].Data.(git.PRNotification).Branch}
-	require.ElementsMatch(t, []string{"feature-pr", "stacked-base"}, branches)
 }
 
 func TestSyncPRActivity_CoversHistoryBranches(t *testing.T) {

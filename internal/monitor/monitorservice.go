@@ -11,28 +11,22 @@ import (
 
 const sendBuffer = 32
 
-type SnapshotProvider interface {
-	SessionSnapshot(ctx context.Context, sessionID uint) []eventbus.SessionNotificationEvent
-}
-
 type client struct {
 	sessionID uint
 	send      chan []byte
 }
 
 type MonitorService struct {
-	eventBus  eventbus.EventBus
-	snapshots SnapshotProvider
+	eventBus eventbus.EventBus
 
 	mu      sync.Mutex
 	clients map[uint]map[*client]struct{}
 }
 
-func NewMonitorService(bus eventbus.EventBus, snapshots SnapshotProvider) *MonitorService {
+func NewMonitorService(bus eventbus.EventBus) *MonitorService {
 	return &MonitorService{
-		eventBus:  bus,
-		snapshots: snapshots,
-		clients:   make(map[uint]map[*client]struct{}),
+		eventBus: bus,
+		clients:  make(map[uint]map[*client]struct{}),
 	}
 }
 
@@ -45,22 +39,11 @@ func (s *MonitorService) OnAppEnd(ctx context.Context) error {
 	return nil
 }
 
-// Stream sends the session's current state, then every later event for it, to
+// Stream sends every event for the session published after it connects to
 // write. It returns when ctx is done or write fails.
 func (s *MonitorService) Stream(ctx context.Context, sessionID uint, write func([]byte) error) error {
 	c := s.add(sessionID)
 	defer s.remove(c)
-
-	for _, event := range s.snapshots.SessionSnapshot(ctx, sessionID) {
-		msg, err := json.Marshal(event)
-		if err != nil {
-			slog.Warn("failed to encode monitor snapshot", "type", event.Type, "error", err)
-			continue
-		}
-		if err := write(msg); err != nil {
-			return err
-		}
-	}
 
 	for {
 		select {

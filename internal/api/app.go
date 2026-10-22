@@ -124,7 +124,7 @@ func buildApp(gormDB *gorm.DB, fs afero.Fs, cfg Config, muxModule *mux.Module, g
 		Mux:       muxModule,
 		Claude:    claude.NewClaudeModule(database),
 		Jobs:      jobsModule,
-		Monitor:   monitor.NewMonitorModule(bus, sessionModule.Service),
+		Monitor:   monitor.NewMonitorModule(bus),
 		Coder:     coderModule,
 		Leader:    leader.NewModule(leaderAddress),
 	}

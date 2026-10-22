@@ -13,8 +13,8 @@ type MonitorModule struct {
 	Router     *MonitorRouter
 }
 
-func NewMonitorModule(bus eventbus.EventBus, snapshots SnapshotProvider) *MonitorModule {
-	service := NewMonitorService(bus, snapshots)
+func NewMonitorModule(bus eventbus.EventBus) *MonitorModule {
+	service := NewMonitorService(bus)
 	controller := NewMonitorController(service)
 	router := NewMonitorRouter(controller)
 
