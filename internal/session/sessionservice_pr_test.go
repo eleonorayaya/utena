@@ -104,6 +104,7 @@ func setupPRTestEnv(t *testing.T, gitOpts ...git.GitServiceOption) *prTestEnv {
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
 	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	t.Cleanup(service.setups.Wait)
 
 	return &prTestEnv{
 		service:          service,
@@ -519,6 +520,7 @@ func TestHandlePRUpdated_BareWorkspace_CreatesWorktree(t *testing.T) {
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
 	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	t.Cleanup(service.setups.Wait)
 
 	branchID := branch.ID
 	event := eventbus.Event{
