@@ -89,6 +89,7 @@ type SessionService struct {
 	bundleCatalog        bundles.Catalog
 	mcpServers           bundles.Servers
 	claudeGlobalConfig   string
+	claudeDataDir        string
 	trustedMu            sync.Mutex
 	trustedRoots         map[string]struct{}
 	remote               RemoteBackend
@@ -171,6 +172,7 @@ func (s *SessionService) OnAppStart(ctx context.Context) error {
 	s.resumeCoderDeletes(sessions)
 	s.reconcileMuxState(ctx, sessions)
 	s.syncWatchedSessionBranches(ctx, sessions)
+	go s.sweepClaudeArtifacts()
 	return nil
 }
 
@@ -1492,6 +1494,7 @@ func (s *SessionService) cleanupSessionResources(ctx context.Context, session *S
 		s.cleanupPastBranches(ctx, session, wsCache)
 	}
 
+	s.removeClaudeArtifacts(session)
 	s.removeSessionRoot(session)
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/chrome"
 	"github.com/eleonorayaya/utena/internal/chromescript"
 	"github.com/eleonorayaya/utena/internal/claude"
+	"github.com/eleonorayaya/utena/internal/claudedata"
 	"github.com/eleonorayaya/utena/internal/claudesettings"
 	"github.com/eleonorayaya/utena/internal/coder"
 	"github.com/eleonorayaya/utena/internal/common"
@@ -57,6 +58,11 @@ func NewApp(cfg Config) (*App, error) {
 		slog.Warn("resolve claude global config path failed; session roots won't be trusted", "error", err)
 	} else {
 		app.Session.Service.SetClaudeGlobalConfigPath(path)
+	}
+	if dir, err := claudedata.DataDir(); err != nil {
+		slog.Warn("resolve claude data dir failed; deleted sessions' claude data won't be removed", "error", err)
+	} else {
+		app.Session.Service.SetClaudeDataDir(dir)
 	}
 	return app, nil
 }
