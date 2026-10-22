@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -144,10 +145,11 @@ type fakeSessions struct {
 	sessions map[uint]*session.Session
 	remote   map[uint]uint
 	states   map[uint][]session.RemoteState
+	steps    map[uint][][]session.SessionSetupStep
 }
 
 func newFakeSessions(list ...session.Session) *fakeSessions {
-	f := &fakeSessions{sessions: map[uint]*session.Session{}, remote: map[uint]uint{}, states: map[uint][]session.RemoteState{}}
+	f := &fakeSessions{sessions: map[uint]*session.Session{}, remote: map[uint]uint{}, states: map[uint][]session.RemoteState{}, steps: map[uint][][]session.SessionSetupStep{}}
 	for i := range list {
 		s := list[i]
 		f.sessions[s.ID] = &s
@@ -177,6 +179,19 @@ func (f *fakeSessions) ApplyRemoteState(id uint, st session.RemoteState) error {
 	defer f.mu.Unlock()
 	f.states[id] = append(f.states[id], st)
 	return nil
+}
+
+func (f *fakeSessions) SetRemoteSteps(id uint, steps []session.SessionSetupStep) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.steps[id] = append(f.steps[id], slices.Clone(steps))
+	return nil
+}
+
+func (f *fakeSessions) stepHistory(id uint) [][]session.SessionSetupStep {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.steps[id])
 }
 
 func (f *fakeSessions) setAttached(id uint, attached bool) {
@@ -210,6 +225,7 @@ type fakeFollower struct {
 	statusErr string
 	attention claude.ClaudeSessionStatus
 	branches  []string
+	steps     []session.SessionSetupStep
 	sessionID uint
 	wsID      uint
 	leaders   []string
@@ -307,7 +323,7 @@ func (f *fakeFollower) serve(w http.ResponseWriter, r *http.Request) {
 		if len(f.statuses) > 1 {
 			f.statuses = f.statuses[1:]
 		}
-		s := &session.Session{Model: gorm.Model{ID: f.sessionID}, Name: "ws", Status: status, StatusError: f.statusErr}
+		s := &session.Session{Model: gorm.Model{ID: f.sessionID}, Name: "ws", Status: status, StatusError: f.statusErr, SetupSteps: f.steps}
 		for i, name := range f.branches {
 			if i == 0 {
 				s.Worktrees = []session.SessionWorktree{{Worktree: &git.Worktree{Branch: &git.Branch{Name: name}}}}

@@ -2,7 +2,6 @@ package sessionprogress
 
 import (
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -175,19 +174,6 @@ func (m Model) title() string {
 	return "Creating " + name
 }
 
-func stepState(s session.SetupStepStatus) ui.StepState {
-	switch s {
-	case session.SetupStepRunning:
-		return ui.StepRunning
-	case session.SetupStepDone:
-		return ui.StepDone
-	case session.SetupStepFailed:
-		return ui.StepFailed
-	default:
-		return ui.StepPending
-	}
-}
-
 func (m Model) steps() []ui.Step {
 	if m.session == nil || len(m.session.SetupSteps) == 0 {
 		if m.done {
@@ -195,13 +181,7 @@ func (m Model) steps() []ui.Step {
 		}
 		return []ui.Step{{Label: "Setting up", State: ui.StepRunning}}
 	}
-	src := slices.Clone(m.session.SetupSteps)
-	slices.SortStableFunc(src, func(a, b session.SessionSetupStep) int { return a.Position - b.Position })
-	out := make([]ui.Step, len(src))
-	for i, s := range src {
-		out[i] = ui.Step{Label: s.Label, State: stepState(s.Status), Error: s.ErrorMsg}
-	}
-	return out
+	return ui.SetupSteps(m.session.SetupSteps)
 }
 
 func (m Model) View() string {

@@ -32,6 +32,7 @@ type Sessions interface {
 	CoderSessions() ([]session.Session, error)
 	SetRemoteSessionID(id, remoteID uint) error
 	ApplyRemoteState(id uint, st session.RemoteState) error
+	SetRemoteSteps(id uint, steps []session.SessionSetupStep) error
 }
 
 type Service struct {
@@ -184,44 +185,68 @@ func (s *Service) Create(ctx context.Context, in session.RemoteCreate) error {
 		return err
 	}
 	defer s.lock(in.Workspace)()
-	if _, err := s.coder(ctx, s.CreateArgs(in.Workspace, in.Repo)...); err != nil {
-		return fmt.Errorf("coder create: %w", err)
-	}
-	if err := s.waitForAgent(ctx, in.Workspace); err != nil {
+	p := newProgress(s.sessions, in.SessionID, createStages)
+	if err := p.run(stepBuild, func() error {
+		if _, err := s.coder(ctx, s.CreateArgs(in.Workspace, in.Repo)...); err != nil {
+			return fmt.Errorf("coder create: %w", err)
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
-	if err := s.installKeepaliveToken(ctx, in.Workspace); err != nil {
+	if err := p.run(stepAgent, func() error { return s.waitForAgent(ctx, in.Workspace) }); err != nil {
 		return err
 	}
-	follower, err := s.conns.Ensure(ctx, in.Workspace)
-	if err != nil {
+	if err := p.run(stepToken, func() error { return s.installKeepaliveToken(ctx, in.Workspace) }); err != nil {
 		return err
 	}
-	followerWS, err := follower.LinkWorkspace(ctx, FollowerHome+"/"+name, in.LeaderWorkspaceID)
-	if err != nil {
-		return fmt.Errorf("register workspace on follower: %w", err)
+	var follower *FollowerClient
+	if err := p.run(stepConnect, func() error {
+		var err error
+		follower, err = s.conns.Ensure(ctx, in.Workspace)
+		return err
+	}); err != nil {
+		return err
 	}
-	leaderID := in.SessionID
-	created, err := follower.CreateSession(ctx, session.CreateSessionRequest{
-		Name: in.Workspace,
-		Workspaces: []session.WorkspaceBranchSpec{{
-			WorkspaceID: followerWS,
-			Branch:      in.Spec.Branch,
-			BaseBranch:  in.Spec.BaseBranch,
-		}},
-		Bundles:         in.Bundles,
-		LeaderSessionID: &leaderID,
-	})
-	if err != nil {
-		return fmt.Errorf("create follower session: %w", err)
+	var followerWS uint
+	if err := p.run(stepLink, func() error {
+		var err error
+		followerWS, err = follower.LinkWorkspace(ctx, FollowerHome+"/"+name, in.LeaderWorkspaceID)
+		if err != nil {
+			return fmt.Errorf("register workspace on follower: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	if err := s.sessions.SetRemoteSessionID(in.SessionID, created.ID); err != nil {
-		return fmt.Errorf("record follower session: %w", err)
+	var remoteID uint
+	if err := p.run(stepSession, func() error {
+		leaderID := in.SessionID
+		created, err := follower.CreateSession(ctx, session.CreateSessionRequest{
+			Name: in.Workspace,
+			Workspaces: []session.WorkspaceBranchSpec{{
+				WorkspaceID: followerWS,
+				Branch:      in.Spec.Branch,
+				BaseBranch:  in.Spec.BaseBranch,
+			}},
+			Bundles:         in.Bundles,
+			LeaderSessionID: &leaderID,
+		})
+		if err != nil {
+			return fmt.Errorf("create follower session: %w", err)
+		}
+		remoteID = created.ID
+		if err := s.sessions.SetRemoteSessionID(in.SessionID, created.ID); err != nil {
+			return fmt.Errorf("record follower session: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	return s.waitFollowerActive(ctx, in.Workspace, in.SessionID, created.ID)
+	return s.waitFollowerActive(ctx, in.Workspace, in.SessionID, remoteID, p)
 }
 
-func (s *Service) waitFollowerActive(ctx context.Context, workspace string, leaderID, remoteID uint) error {
+func (s *Service) waitFollowerActive(ctx context.Context, workspace string, leaderID, remoteID uint, p *progress) error {
 	for {
 		follower, err := s.conns.Ensure(ctx, workspace)
 		if err != nil {
@@ -229,6 +254,7 @@ func (s *Service) waitFollowerActive(ctx context.Context, workspace string, lead
 		}
 		fs, err := follower.GetSession(ctx, remoteID)
 		if err == nil {
+			p.followerSteps(fs.SetupSteps)
 			switch fs.Status {
 			case session.StatusActive:
 				s.apply(leaderID, workspace, fs)
