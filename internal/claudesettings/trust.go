@@ -10,14 +10,26 @@ import (
 const globalConfigFileName = ".claude.json"
 
 func ClaudeGlobalConfigPath() (string, error) {
+	dir, err := claudeDir("")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, globalConfigFileName), nil
+}
+
+func ClaudeDataDir() (string, error) {
+	return claudeDir(".claude")
+}
+
+func claudeDir(homeSubdir string) (string, error) {
 	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
-		return filepath.Join(dir, globalConfigFileName), nil
+		return dir, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	return filepath.Join(home, globalConfigFileName), nil
+	return filepath.Join(home, homeSubdir), nil
 }
 
 var trustMu sync.Mutex

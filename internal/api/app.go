@@ -58,6 +58,11 @@ func NewApp(cfg Config) (*App, error) {
 	} else {
 		app.Session.Service.SetClaudeGlobalConfigPath(path)
 	}
+	if dir, err := claudesettings.ClaudeDataDir(); err != nil {
+		slog.Warn("resolve claude data dir failed; deleted sessions' claude data won't be removed", "error", err)
+	} else {
+		app.Session.Service.SetClaudeDataDir(dir)
+	}
 	return app, nil
 }
 
