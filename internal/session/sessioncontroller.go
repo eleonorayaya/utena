@@ -56,7 +56,7 @@ func parseStatusFilter(r *http.Request) []SessionStatus {
 }
 
 func (c *SessionController) ListResources(w http.ResponseWriter, r *http.Request) {
-	resp, err := c.service.ResourceUsage(r.Context())
+	resp, err := c.service.ResourceUsage(r.Context(), r.URL.Query().Get("archived") == "true")
 	if err != nil {
 		common.RenderError(w, r, err)
 		return

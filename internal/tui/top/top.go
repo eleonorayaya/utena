@@ -88,6 +88,7 @@ type keyMap struct {
 	SortName key.Binding
 	SortDisk key.Binding
 	Procs    key.Binding
+	Archived key.Binding
 	Quit     key.Binding
 }
 
@@ -97,11 +98,12 @@ var keys = keyMap{
 	SortName: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "name")),
 	SortDisk: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "disk")),
 	Procs:    key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "processes")),
+	Archived: key.NewBinding(key.WithKeys("."), key.WithHelp(".", "archived")),
 	Quit:     key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
 func (k keyMap) bindings() []key.Binding {
-	return []key.Binding{k.SortCPU, k.SortMem, k.SortName, k.SortDisk, k.Procs, k.Quit}
+	return []key.Binding{k.SortCPU, k.SortMem, k.SortName, k.SortDisk, k.Procs, k.Archived, k.Quit}
 }
 
 const (
@@ -110,26 +112,29 @@ const (
 )
 
 type resourcesMsg struct {
+	seq  int
 	resp *session.SessionResourcesResponse
 	err  error
 }
 
-type tickMsg struct{}
+type tickMsg struct{ seq int }
 
 type Model struct {
-	interval  time.Duration
-	fetch     func() (*session.SessionResourcesResponse, error)
-	rows      []session.SessionResources
-	history   map[string][]float64
-	sampledAt time.Time
-	err       error
-	sortBy    Sort
-	showProcs bool
-	width     int
-	height    int
+	interval     time.Duration
+	fetch        func(archived bool) (*session.SessionResourcesResponse, error)
+	seq          int
+	rows         []session.SessionResources
+	history      map[string][]float64
+	sampledAt    time.Time
+	err          error
+	sortBy       Sort
+	showProcs    bool
+	showArchived bool
+	width        int
+	height       int
 }
 
-func New(interval time.Duration, fetch func() (*session.SessionResourcesResponse, error)) Model {
+func New(interval time.Duration, fetch func(archived bool) (*session.SessionResourcesResponse, error)) Model {
 	return Model{
 		interval: interval,
 		sortBy:   SortCPU,
@@ -139,10 +144,10 @@ func New(interval time.Duration, fetch func() (*session.SessionResourcesResponse
 }
 
 func (m Model) load() tea.Cmd {
-	fetch := m.fetch
+	fetch, seq, archived := m.fetch, m.seq, m.showArchived
 	return func() tea.Msg {
-		resp, err := fetch()
-		return resourcesMsg{resp: resp, err: err}
+		resp, err := fetch(archived)
+		return resourcesMsg{seq: seq, resp: resp, err: err}
 	}
 }
 
@@ -166,20 +171,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sortBy = SortDisk
 		case key.Matches(msg, keys.Procs):
 			m.showProcs = !m.showProcs
+		case key.Matches(msg, keys.Archived):
+			m.showArchived = !m.showArchived
+			m.seq++
+			return m, m.load()
 		}
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case resourcesMsg:
+		if msg.seq != m.seq {
+			return m, nil
+		}
 		m.err = msg.err
 		if msg.err == nil {
 			m.rows = msg.resp.Sessions
 			m.sampledAt = msg.resp.SampledAt
 			m.recordHistory()
 		}
-		return m, tea.Tick(m.interval, func(time.Time) tea.Msg { return tickMsg{} })
+		seq := m.seq
+		return m, tea.Tick(m.interval, func(time.Time) tea.Msg { return tickMsg{seq: seq} })
 	case tickMsg:
+		if msg.seq != m.seq {
+			return m, nil
+		}
 		return m, m.load()
 	}
 	return m, nil
@@ -188,6 +204,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) recordHistory() {
 	next := make(map[string][]float64, len(m.rows))
 	for _, r := range m.rows {
+		if !hasProcesses(r) {
+			continue
+		}
 		h := append(m.history[r.MuxSession], r.CPUPercent)
 		if len(h) > historyLen {
 			h = h[len(h)-historyLen:]
@@ -256,6 +275,9 @@ func (m Model) titleLine(width int) string {
 	t := theme.Current
 	left := lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("utena top") +
 		ui.Muted().Render(fmt.Sprintf("  %d sessions", len(m.rows)))
+	if m.showArchived {
+		left += ui.Muted().Render(" · incl. archived")
+	}
 	var right string
 	if !m.sampledAt.IsZero() {
 		right = ui.Muted().Render("sampled ") + ui.FG(t.Text).Render(m.sampledAt.Local().Format("15:04:05")) + ui.Muted().Render(" · ")
@@ -348,7 +370,22 @@ func (m Model) headerRow(width int, lay layout) string {
 	}, width)
 }
 
+func hasProcesses(r session.SessionResources) bool {
+	return r.MuxSession != ""
+}
+
 func (m Model) sessionRow(r session.SessionResources, maxRSS int64, width int, lay layout) string {
+	if !hasProcesses(r) {
+		return lay.row(columns{
+			glyph:  []ui.Span{ui.SessionGlyph(session.SessionStatus(r.Status))},
+			name:   span(r.Name, ui.Muted()),
+			status: span(r.Status, ui.Muted()),
+			cpu:    span("—", ui.Muted()),
+			mem:    span("—", ui.Muted()),
+			procs:  span("—", ui.Muted()),
+			disk:   span(formatOptional(r.DiskBytes, ui.FormatBytes, "—"), ui.FG(theme.Current.Text)),
+		}, width)
+	}
 	st := stylesFor(r.SessionID == nil, r.CPUPercent)
 	memFrac := 0.0
 	if maxRSS > 0 {

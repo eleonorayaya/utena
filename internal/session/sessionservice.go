@@ -250,7 +250,7 @@ func (s *SessionService) ListSessions(ctx context.Context, statuses ...SessionSt
 	return sessions, nil
 }
 
-func (s *SessionService) ResourceUsage(ctx context.Context) (*SessionResourcesResponse, error) {
+func (s *SessionService) ResourceUsage(ctx context.Context, includeArchived bool) (*SessionResourcesResponse, error) {
 	usages, err := s.muxService.ResourceUsage(ctx)
 	if err != nil {
 		return nil, err
@@ -268,6 +268,15 @@ func (s *SessionService) ResourceUsage(ctx context.Context) (*SessionResourcesRe
 	for _, ref := range refs {
 		byMux[ref.MuxName] = ref
 		roots = append(roots, ref.SessionRoot)
+	}
+	var archived []MuxSessionRef
+	if includeArchived {
+		if archived, err = s.store.ListRefsByStatus(StatusArchived); err != nil {
+			return nil, err
+		}
+		for _, ref := range archived {
+			roots = append(roots, ref.SessionRoot)
+		}
 	}
 	sizes := s.diskUsage.Sizes(roots)
 
@@ -289,6 +298,13 @@ func (s *SessionService) ResourceUsage(ctx context.Context) (*SessionResourcesRe
 			if size, ok := sizes[ref.SessionRoot]; ok {
 				row.DiskBytes = &size
 			}
+		}
+		rows = append(rows, row)
+	}
+	for _, ref := range archived {
+		row := SessionResources{SessionID: &ref.ID, Name: ref.Name, Status: string(ref.Status)}
+		if size, ok := sizes[ref.SessionRoot]; ok {
+			row.DiskBytes = &size
 		}
 		rows = append(rows, row)
 	}

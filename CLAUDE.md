@@ -27,7 +27,7 @@ Key commands: `task daemon:run`, `task tui:run`, `task fmt`, `task test`.
 2. **TUI → Daemon**: The TUI makes HTTP requests to `http://127.0.0.1:3333/sessions`. Activating a session publishes `SessionActivated`; `utena attach` long-polls `GET /mux/activations/next` and restarts its `tuios attach` child on the new session, reporting attach/detach via `PUT /mux/hooks/{event}`
 
 3. **Daemon API**: Uses chi router, serves on port 3333 and listens on 127.0.0.1 only (clients must use `127.0.0.1`, not `localhost`), mounts controllers:
-   - `/sessions` - session management endpoints (`GET /sessions/resources` backs `utena top`, `PUT /sessions/{id}/bundles` sets a session's plugin bundles, `GET /sessions/default-bundles?workspace_id=…` unions workspaces' `default_bundles` for the new-session form)
+   - `/sessions` - session management endpoints (`GET /sessions/resources` backs `utena top`; `?archived=true` adds archived sessions with disk use only, `PUT /sessions/{id}/bundles` sets a session's plugin bundles, `GET /sessions/default-bundles?workspace_id=…` unions workspaces' `default_bundles` for the new-session form)
    - `/bundles` - plugin bundle catalog from daemon.json
    - `/mux` - client attach hooks, activation long-poll, session env lookup
    - `/claude` - Claude session endpoints
