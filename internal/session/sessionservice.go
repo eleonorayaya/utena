@@ -92,6 +92,7 @@ type SessionService struct {
 	trustedMu            sync.Mutex
 	trustedRoots         map[string]struct{}
 	remote               RemoteBackend
+	setups               sync.WaitGroup
 }
 
 func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktreeStore, dismissedPRStore *DismissedPRStore, sessionActionStore *SessionActionStore, setupStepStore *SessionSetupStepStore, workspaceService *workspace.WorkspaceService, gitService *git.GitService, muxService *mux.Service, bus eventbus.EventBus, branchPrefix string, configDir string, sessionsRoot string) *SessionService {
@@ -561,7 +562,7 @@ func (s *SessionService) CreateSession(ctx context.Context, input CreateSessionI
 		slog.WarnContext(ctx, "failed to pre-create setup steps", "session", sess.ID, "error", err)
 	}
 
-	go s.runSetup(sess.ID, muxName, input.Workspaces)
+	s.setups.Go(func() { s.runSetup(sess.ID, muxName, input.Workspaces) })
 
 	return sess, nil
 }
@@ -677,7 +678,7 @@ func (s *SessionService) AddWorkspace(ctx context.Context, sessionID uint, spec 
 		}
 	}
 
-	go s.runAddWorkspace(sess.ID, spec)
+	s.setups.Go(func() { s.runAddWorkspace(sess.ID, spec) })
 
 	return s.store.GetByID(sess.ID)
 }
@@ -1298,7 +1299,7 @@ func (s *SessionService) RepairSession(_ context.Context, id uint) (*Session, er
 		}
 		specs = append(specs, WorkspaceBranchSpec{WorkspaceID: ws.ID, Branch: wt.Branch.Name})
 	}
-	go s.runSetup(sess.ID, muxName, specs)
+	s.setups.Go(func() { s.runSetup(sess.ID, muxName, specs) })
 	return sess, nil
 }
 

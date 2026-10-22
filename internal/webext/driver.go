@@ -398,6 +398,30 @@ func (d *Driver) CloseWindow(ctx context.Context, windowID string) error {
 	return d.call(ctx, "windows.remove", map[string]any{"windowId": wid}, nil)
 }
 
+func (d *Driver) MoveTab(ctx context.Context, fromWindowID, tabID, toWindowID string) error {
+	tid, err := parseID(tabID)
+	if err != nil {
+		return err
+	}
+	wid, err := parseID(toWindowID)
+	if err != nil {
+		return err
+	}
+	return d.call(ctx, "tabs.move", map[string]any{"tabId": tid, "windowId": wid}, nil)
+}
+
+func (d *Driver) DetachTab(ctx context.Context, fromWindowID, tabID string) (browser.Window, error) {
+	tid, err := parseID(tabID)
+	if err != nil {
+		return browser.Window{}, err
+	}
+	var out wireWindow
+	if err := d.call(ctx, "tabs.detach", map[string]any{"tabId": tid}, &out); err != nil {
+		return browser.Window{}, err
+	}
+	return out.toWindow(), nil
+}
+
 func (d *Driver) Subscribe(ctx context.Context, onEvent func(browser.Event)) error {
 	var deliveredGen uint64
 	deliveredConnected := false

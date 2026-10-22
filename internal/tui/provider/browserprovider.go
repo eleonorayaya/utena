@@ -19,6 +19,27 @@ func FocusTab(sessionID uint, windowID, tabID string) tea.Cmd {
 	return func() tea.Msg { return FocusTabIntentMsg{SessionID: sessionID, WindowID: windowID, TabID: tabID} }
 }
 
+type EjectWindowIntentMsg struct {
+	SessionID uint
+	WindowID  string
+}
+
+func EjectWindow(sessionID uint, windowID string) tea.Cmd {
+	return func() tea.Msg { return EjectWindowIntentMsg{SessionID: sessionID, WindowID: windowID} }
+}
+
+type MoveTabIntentMsg struct {
+	browser.MoveTabRequest
+}
+
+func MoveTab(req browser.MoveTabRequest) tea.Cmd {
+	return func() tea.Msg { return MoveTabIntentMsg{req} }
+}
+
+type TabMovedMsg struct {
+	ToSessionID uint
+}
+
 func RequestBrowserState() tea.Cmd {
 	return func() tea.Msg { return requestBrowserStateMsg{} }
 }
@@ -31,7 +52,9 @@ type browserStateLoadedMsg struct {
 
 type browserFocusedMsg struct{}
 
-type browserFocusFailedMsg struct {
+type browserEjectedMsg struct{}
+
+type browserRequestFailedMsg struct {
 	err error
 }
 
@@ -51,9 +74,9 @@ func (p browserProvider) emitState() tea.Cmd {
 
 func (p browserProvider) Update(msg tea.Msg) (browserProvider, tea.Cmd) {
 	switch msg := msg.(type) {
-	case sessionsLoadedMsg, browserFocusedMsg:
+	case sessionsLoadedMsg, browserFocusedMsg, browserEjectedMsg, TabMovedMsg:
 		return p, p.client.fetchBrowserState()
-	case browserFocusFailedMsg:
+	case browserRequestFailedMsg:
 		err := msg.err
 		return p, tea.Batch(p.client.fetchBrowserState(), func() tea.Msg { return ErrMsg{err} })
 	case browserStateLoadedMsg:
@@ -63,6 +86,10 @@ func (p browserProvider) Update(msg tea.Msg) (browserProvider, tea.Cmd) {
 		return p, p.emitState()
 	case FocusTabIntentMsg:
 		return p, p.client.focusTab(msg.SessionID, msg.WindowID, msg.TabID)
+	case EjectWindowIntentMsg:
+		return p, p.client.ejectWindow(msg.SessionID, msg.WindowID)
+	case MoveTabIntentMsg:
+		return p, p.client.moveTab(msg.MoveTabRequest)
 	}
 	return p, nil
 }

@@ -7,7 +7,7 @@ import (
 	"github.com/eleonorayaya/utena/internal/browser"
 )
 
-const ProtocolVersion = 2
+const ProtocolVersion = 3
 
 type message struct {
 	Type     string          `json:"type"`

@@ -46,6 +46,7 @@ func setupSessionService(t *testing.T) (*SessionService, *SessionStore, *workspa
 	configDir := t.TempDir()
 	sessionsRoot := t.TempDir()
 	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", configDir, sessionsRoot)
+	t.Cleanup(service.setups.Wait)
 	return service, sessionStore, workspaceStore, mock, ws1.ID, ws2.ID
 }
 
@@ -608,6 +609,7 @@ func setupWorktreeSessionServiceFull(t *testing.T, repoPath string, configDir st
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
 	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", configDir, t.TempDir())
+	t.Cleanup(service.setups.Wait)
 	return service, sessionStore, mock, wsGit.ID, database, gitService
 }
 
@@ -882,6 +884,7 @@ func TestSessionService_RefreshSession_AllHealthy(t *testing.T) {
 	workspaceService := workspace.NewWorkspaceService(workspaceStore, gitService)
 	swtStore := NewSessionWorktreeStore(database)
 	service := NewSessionService(sessionStore, swtStore, NewDismissedPRStore(database), NewSessionActionStore(database), NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	t.Cleanup(service.setups.Wait)
 
 	ts := &mux.Session{Name: "utena-session-1", StartDir: "/tmp/utena", Status: mux.StatusActive}
 	require.NoError(t, database.Create(ts).Error)
@@ -1171,6 +1174,7 @@ func setupBareWorktreeSessionService(t *testing.T, configDir string) (*SessionSe
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
 	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", configDir, t.TempDir())
+	t.Cleanup(service.setups.Wait)
 	return service, sessionStore, mock, wsGit.ID, repoPath
 }
 

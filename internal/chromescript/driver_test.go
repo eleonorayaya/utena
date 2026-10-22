@@ -356,3 +356,42 @@ func TestCapabilities(t *testing.T) {
 	assert.Equal(t, "com.google.Chrome", NewDriver().AppBundleID())
 	assert.Equal(t, "A - Google Chrome", NewDriver().WindowTitle(browser.Window{Tabs: []browser.Tab{{Title: "A", Active: true}}}))
 }
+
+func TestMoveTab_PassesIDs(t *testing.T) {
+	r := &fakeRunner{reply: map[string]string{"move tab idx of src to end of tabs of window id": "ok"}}
+	require.NoError(t, newDriver(r, time.Millisecond).MoveTab(context.Background(), "7", "5", "8"))
+
+	scripts := r.scripts()
+	require.Len(t, scripts, 1)
+	assert.Equal(t, []string{"7", "5", "8"}, scripts[0].args[2:])
+}
+
+func TestMoveTab_MissingTab(t *testing.T) {
+	r := &fakeRunner{reply: map[string]string{"move tab idx": "missing"}}
+	assert.Error(t, newDriver(r, time.Millisecond).MoveTab(context.Background(), "7", "5", "8"))
+}
+
+func TestDetachTab_ReturnsNewWindow(t *testing.T) {
+	r := &fakeRunner{
+		polls: []string{up(true, win("8", "1", "1", tab("5", "https://a", "A")))},
+		reply: map[string]string{"set dst to make new window": "8"},
+	}
+	w, err := newDriver(r, time.Millisecond).DetachTab(context.Background(), "7", "5")
+	require.NoError(t, err)
+	assert.Equal(t, "8", w.ID)
+
+	scripts := r.scripts()
+	require.Len(t, scripts, 1)
+	assert.Equal(t, []string{"7", "5"}, scripts[0].args[2:])
+}
+
+func TestDetachTab_NotRunningDoesNotLaunchChrome(t *testing.T) {
+	r := &fakeRunner{}
+	_, err := newDriver(r, time.Millisecond).DetachTab(context.Background(), "7", "5")
+	assert.ErrorIs(t, err, browser.ErrNotConnected)
+	assert.Empty(t, r.scripts())
+}
+
+func TestDetachTabScript_ClosesCreatedWindowWhenMoveFails(t *testing.T) {
+	assert.Contains(t, detachTabScript, "on error errMsg number errNum\n\t\t\tclose dst\n\t\t\terror errMsg number errNum")
+}

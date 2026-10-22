@@ -8,6 +8,8 @@ import (
 type keyMap struct {
 	Activate      key.Binding
 	Open          key.Binding
+	Eject         key.Binding
+	Move          key.Binding
 	Repair        key.Binding
 	Archive       key.Binding
 	Delete        key.Binding
@@ -22,6 +24,8 @@ type keyMap struct {
 	RemoveBlocker key.Binding
 	Back          key.Binding
 	showOpen      bool
+	showEject     bool
+	showMove      bool
 	showNext      bool
 }
 
@@ -29,6 +33,12 @@ func (k keyMap) ShortHelp() []key.Binding {
 	out := []key.Binding{k.Activate}
 	if k.showOpen {
 		out = append(out, k.Open)
+	}
+	if k.showEject {
+		out = append(out, k.Eject)
+	}
+	if k.showMove {
+		out = append(out, k.Move)
 	}
 	if k.showNext {
 		out = append(out, k.Down)
@@ -38,7 +48,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Activate, k.Open, k.Back},
+		{k.Activate, k.Open, k.Eject, k.Move, k.Back},
 		{k.Up, k.Down, k.NextSection, k.PrevSection},
 		{k.Block, k.Resolve, k.RemoveBlocker},
 		{k.Archive, k.Delete, k.Repair, k.AddWorkspace, k.Bundles},
@@ -48,6 +58,8 @@ func (k keyMap) FullHelp() [][]key.Binding {
 var keys = keyMap{
 	Activate:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "switch")),
 	Open:          key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open tab/PR")),
+	Eject:         key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "eject window")),
+	Move:          key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "move tab")),
 	Repair:        key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "repair")),
 	Archive:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "archive")),
 	Delete:        key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),

@@ -590,3 +590,31 @@ func TestDriver_CreateWindowOmitsEmptyURLs(t *testing.T) {
 	assert.Equal(t, map[string]any{"focused": false}, got[0])
 	assert.Equal(t, map[string]any{"focused": true, "urls": []any{"https://x"}}, got[1])
 }
+
+func TestDriver_MoveTab(t *testing.T) {
+	d, srv, rec := newDriver(t)
+	var gotMethod string
+	var got map[string]any
+	startExt(t, srv, ProtocolVersion, func(method string, params json.RawMessage) (any, string) {
+		gotMethod = method
+		got = nil
+		_ = json.Unmarshal(params, &got)
+		if method == "tabs.detach" {
+			return map[string]any{"id": 9, "tabs": []map[string]any{{"id": 5, "url": "https://a.example.com"}}}, ""
+		}
+		return map[string]any{}, ""
+	})
+	waitConnected(t, rec)
+
+	require.NoError(t, d.MoveTab(context.Background(), "4", "5", "9"))
+	assert.Equal(t, "tabs.move", gotMethod)
+	assert.Equal(t, map[string]any{"tabId": float64(5), "windowId": float64(9)}, got)
+	assert.Error(t, d.MoveTab(context.Background(), "4", "nope", "9"))
+	assert.Error(t, d.MoveTab(context.Background(), "4", "5", "nope"))
+
+	w, err := d.DetachTab(context.Background(), "4", "5")
+	require.NoError(t, err)
+	assert.Equal(t, "tabs.detach", gotMethod)
+	assert.Equal(t, map[string]any{"tabId": float64(5)}, got)
+	assert.Equal(t, browser.Window{ID: "9", Tabs: []browser.Tab{{ID: "5", URL: "https://a.example.com"}}}, w)
+}

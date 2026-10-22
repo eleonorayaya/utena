@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,7 +25,8 @@ const browserAlias = "utena-open"
 const fallbackEnvVar = "UTENA_OPEN_FALLBACK"
 
 func openCmd() *cobra.Command {
-	return &cobra.Command{
+	var attached bool
+	cmd := &cobra.Command{
 		Use:          "open <url>...",
 		Short:        "Open URLs in this session's browser window",
 		Args:         cobra.MinimumNArgs(1),
@@ -34,26 +36,37 @@ func openCmd() *cobra.Command {
 			base := daemonURL(port)
 			sessionID := sessionIDFromEnv()
 			for _, u := range args {
-				if err := openURL(cmd.Context(), cmd.ErrOrStderr(), base, sessionID, u, systemOpen); err != nil {
+				req := browser.OpenRequest{SessionID: sessionID, URL: u, Attached: attached}
+				if err := openURL(cmd.Context(), cmd.ErrOrStderr(), base, req, systemOpen); err != nil {
 					return err
 				}
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&attached, "attached", false, "open in the attached session's window when not run inside a session")
+	return cmd
 }
 
-func openURL(ctx context.Context, out io.Writer, baseURL string, sessionID uint, url string, fallback func(string) error) error {
+func openURL(ctx context.Context, out io.Writer, baseURL string, req browser.OpenRequest, fallback func(string) error) error {
+	if !isWebURL(req.URL) {
+		return fallback(req.URL)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	res, err := browser.RequestOpen(ctx, http.DefaultClient, baseURL+"/browser", browser.OpenRequest{SessionID: sessionID, URL: url})
+	res, err := browser.RequestOpen(ctx, http.DefaultClient, baseURL+"/browser", req)
 	if err != nil {
-		return fallback(url)
+		return fallback(req.URL)
 	}
 	if res.Pending {
-		_, _ = fmt.Fprintf(out, "utena: %s is waiting in session %d's browser window\n", url, sessionID)
+		_, _ = fmt.Fprintf(out, "utena: %s is waiting in session %d's browser window\n", req.URL, req.SessionID)
 	}
 	return nil
+}
+
+func isWebURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
 }
 
 func systemOpen(url string) error {

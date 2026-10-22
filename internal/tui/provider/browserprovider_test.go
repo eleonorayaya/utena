@@ -82,7 +82,7 @@ func TestFocusTab_ErrorReturnsErrMsg(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "browser unavailable"})
 	})
-	msg, ok := newClient(srv.URL).focusTab(7, "w1", "t1")().(browserFocusFailedMsg)
+	msg, ok := newClient(srv.URL).focusTab(7, "w1", "t1")().(browserRequestFailedMsg)
 	require.True(t, ok)
 	assert.ErrorIs(t, msg.err, browser.ErrUnavailable)
 }
@@ -94,7 +94,7 @@ func TestBrowserProvider_FailedFocusRefetchesAndReportsError(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(sampleView())
 	})
 	p := newBrowserProvider(newClient(srv.URL))
-	_, cmd := p.Update(browserFocusFailedMsg{err: errors.New("tab gone")})
+	_, cmd := p.Update(browserRequestFailedMsg{err: errors.New("tab gone")})
 	require.NotNil(t, cmd)
 	batch, ok := cmd().(tea.BatchMsg)
 	require.True(t, ok)
@@ -148,4 +148,79 @@ func TestBrowserProvider_FocusIntentPostsFocus(t *testing.T) {
 	require.NotNil(t, cmd)
 	assert.Equal(t, SessionSwitchedMsg{}, cmd())
 	assert.Equal(t, "/browser/focus", path)
+}
+
+func TestEjectWindow_PostsRequest(t *testing.T) {
+	var got browser.EjectRequest
+	var path string
+	srv := browserServer(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.Method + " " + r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_ = json.NewEncoder(w).Encode(browser.EjectResult{WindowID: "w1"})
+	})
+	msg := newClient(srv.URL).ejectWindow(7, "w1")()
+	assert.Equal(t, "POST /browser/eject", path)
+	assert.Equal(t, browser.EjectRequest{SessionID: 7, WindowID: "w1"}, got)
+	assert.Equal(t, browserEjectedMsg{}, msg)
+}
+
+func TestEjectWindow_ErrorReturnsFailure(t *testing.T) {
+	srv := browserServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	msg, ok := newClient(srv.URL).ejectWindow(7, "w1")().(browserRequestFailedMsg)
+	require.True(t, ok)
+	assert.ErrorIs(t, msg.err, browser.ErrUnavailable)
+}
+
+func TestBrowserProvider_EjectIntentRefetchesAfterEject(t *testing.T) {
+	var paths []string
+	srv := browserServer(t, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodPost {
+			_ = json.NewEncoder(w).Encode(browser.EjectResult{WindowID: "w1"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(sampleView())
+	})
+	p := newBrowserProvider(newClient(srv.URL))
+	p, cmd := p.Update(EjectWindow(7, "w1")())
+	require.NotNil(t, cmd)
+	_, cmd = p.Update(cmd())
+	require.NotNil(t, cmd)
+	assert.Equal(t, browserStateLoadedMsg{state: sampleView()}, cmd())
+	assert.Equal(t, []string{"POST /browser/eject", "GET /browser/sessions"}, paths)
+}
+
+func TestMoveTab_PostsRequest(t *testing.T) {
+	var got browser.MoveTabRequest
+	var path string
+	srv := browserServer(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.Method + " " + r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_ = json.NewEncoder(w).Encode(browser.MoveTabResult{WindowID: "w9", Created: true})
+	})
+	msg := newClient(srv.URL).moveTab(browser.MoveTabRequest{SessionID: 7, WindowID: "w1", TabID: "t1", ToSessionID: 9})()
+	assert.Equal(t, "POST /browser/move", path)
+	assert.Equal(t, browser.MoveTabRequest{SessionID: 7, WindowID: "w1", TabID: "t1", ToSessionID: 9}, got)
+	assert.Equal(t, TabMovedMsg{ToSessionID: 9}, msg)
+}
+
+func TestMoveTab_ErrorReturnsFailure(t *testing.T) {
+	srv := browserServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	msg, ok := newClient(srv.URL).moveTab(browser.MoveTabRequest{SessionID: 7, WindowID: "w1", TabID: "t1", ToSessionID: 9})().(browserRequestFailedMsg)
+	require.True(t, ok)
+	assert.ErrorIs(t, msg.err, browser.ErrUnavailable)
+}
+
+func TestBrowserProvider_TabMovedRefetchesState(t *testing.T) {
+	srv := browserServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(sampleView())
+	})
+	p := newBrowserProvider(newClient(srv.URL))
+	_, cmd := p.Update(TabMovedMsg{ToSessionID: 9})
+	require.NotNil(t, cmd)
+	assert.Equal(t, browserStateLoadedMsg{state: sampleView()}, cmd())
 }

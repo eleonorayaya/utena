@@ -67,7 +67,7 @@ func TestSessionService_AddWorkspace_RejectsDuplicateWorkspace(t *testing.T) {
 func TestSessionService_AddWorkspace_CreatesJunctionRow(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, ws2ID := setupSessionService(t)
 
-	session := &Session{Name: "active-session", Status: StatusActive, SessionRoot: t.TempDir(), LastUsedAt: time.Now()}
+	session := &Session{Name: "active-session", Status: StatusActive, SessionRoot: newSessionRoot(t, service, "active-session"), LastUsedAt: time.Now()}
 	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
 	repo2 := &git.Repo{Path: "/tmp/other", FullName: "test/other"}
@@ -88,7 +88,7 @@ func TestSessionService_AddWorkspace_CreatesJunctionRow(t *testing.T) {
 func TestSessionService_AddWorkspace_AssignsCollisionFreePath(t *testing.T) {
 	service, sessionStore, _, _, ws1ID, ws2ID := setupSessionService(t)
 
-	sessionRoot := t.TempDir()
+	sessionRoot := newSessionRoot(t, service, "active-session")
 	session := &Session{Name: "active-session", Status: StatusActive, SessionRoot: sessionRoot, LastUsedAt: time.Now()}
 	addTestSession(t, sessionStore, swtStoreFor(service), session, ws1ID)
 
@@ -108,6 +108,13 @@ func TestSessionService_AddWorkspace_AssignsCollisionFreePath(t *testing.T) {
 	newWt := updated.Worktrees[1].Worktree
 	require.NotNil(t, newWt)
 	require.Equal(t, filepath.Join(sessionRoot, "other"), newWt.Path)
+}
+
+func newSessionRoot(t *testing.T, service *SessionService, name string) string {
+	t.Helper()
+	root := filepath.Join(service.sessionsRoot, name)
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	return root
 }
 
 func setupTwoRepoSessionService(t *testing.T) (*SessionService, *SessionStore, *mux.FakeDriver, uint, uint) {
@@ -139,6 +146,7 @@ func setupTwoRepoSessionService(t *testing.T) (*SessionService, *SessionStore, *
 	sessionActionStore := NewSessionActionStore(database)
 	sessionWorktreeStore := NewSessionWorktreeStore(database)
 	service := NewSessionService(sessionStore, sessionWorktreeStore, dismissedPRStore, sessionActionStore, NewSessionSetupStepStore(database), workspaceService, gitService, muxService, bus, "eqt/", t.TempDir(), t.TempDir())
+	t.Cleanup(service.setups.Wait)
 
 	return service, sessionStore, mock, ws1.ID, ws2.ID
 }

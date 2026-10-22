@@ -15,6 +15,8 @@ type Driver interface {
 	ActivateTab(ctx context.Context, windowID, tabID string) error
 	FocusWindow(ctx context.Context, windowID string) error
 	CloseWindow(ctx context.Context, windowID string) error
+	MoveTab(ctx context.Context, fromWindowID, tabID, toWindowID string) error
+	DetachTab(ctx context.Context, fromWindowID, tabID string) (Window, error)
 	Subscribe(ctx context.Context, onEvent func(Event)) error
 	Name() string
 	AppBundleID() string
