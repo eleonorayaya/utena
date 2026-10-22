@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"testing"
 
 	"github.com/eleonorayaya/utena/internal/browser"
@@ -73,4 +75,36 @@ func TestSessionIDFromEnv(t *testing.T) {
 func TestRewriteArgsForBrowserAlias(t *testing.T) {
 	assert.Equal(t, []string{"/x/utena-open", "open", "https://a"}, rewriteArgs([]string{"/x/utena-open", "https://a"}))
 	assert.Equal(t, []string{"/x/utena", "top"}, rewriteArgs([]string{"/x/utena", "top"}))
+}
+
+func TestFallbackEnvDropsBrowserAndSetsGuard(t *testing.T) {
+	got := fallbackEnv([]string{"HOME=/h", "BROWSER=/x/utena-open", "UTENA_OPEN_FALLBACK=old", "PATH=/bin"}, nil, 42)
+	assert.Equal(t, []string{"HOME=/h", "PATH=/bin", "UTENA_OPEN_FALLBACK=42"}, got)
+}
+
+func TestFallbackEnvFillsMissingDesktopVars(t *testing.T) {
+	got := fallbackEnv(
+		[]string{"HOME=/h", "DISPLAY=:9"},
+		[]string{"DISPLAY=:0", "WAYLAND_DISPLAY=wayland-0", "XDG_CURRENT_DESKTOP=KDE", "PATH=/other"},
+		42,
+	)
+	assert.Equal(t, []string{"HOME=/h", "DISPLAY=:9", "WAYLAND_DISPLAY=wayland-0", "XDG_CURRENT_DESKTOP=KDE", "UTENA_OPEN_FALLBACK=42"}, got)
+}
+
+func TestSystemOpenRefusesToRecurse(t *testing.T) {
+	t.Setenv(fallbackEnvVar, strconv.Itoa(os.Getppid()))
+	err := systemOpen("https://x.example.com")
+	require.Error(t, err)
+}
+
+func TestInsideFallback(t *testing.T) {
+	parents := map[int]int{50: 40, 40: 30, 30: 1}
+	parent := func(p int) int { return parents[p] }
+
+	assert.True(t, insideFallback("40", 50, parent), "guard pid is an ancestor: recursion")
+	assert.True(t, insideFallback("30", 50, parent))
+	assert.False(t, insideFallback("99", 50, parent), "guard pid gone: inherited by a later process")
+	assert.False(t, insideFallback("", 50, parent))
+	assert.False(t, insideFallback("1", 50, parent))
+	assert.False(t, insideFallback("junk", 50, parent))
 }
