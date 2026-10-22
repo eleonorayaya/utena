@@ -118,6 +118,12 @@ func (m Model) body(width int) ([]string, int) {
 		body = append(body, "")
 	}
 
+	if steps := setupSteps(s); len(steps) > 0 {
+		body = append(body, sectionRule(sectionTitleStyle().Render("Setup"), mutedStyle().Render(setupSummary(steps)), bw))
+		body = append(body, strings.Split(ui.StepList(steps, "▸", bw), "\n")...)
+		body = append(body, "")
+	}
+
 	if open := s.OpenBlockers(); len(open) > 0 {
 		var rows []string
 		selRow := -1
@@ -228,6 +234,29 @@ func agoText(verb, ago string) string {
 	default:
 		return verb + " " + ago + " ago"
 	}
+}
+
+func setupSteps(s session.Session) []ui.Step {
+	steps := ui.SetupSteps(s.SetupSteps)
+	if s.Status == session.StatusCreating {
+		return steps
+	}
+	for _, st := range steps {
+		if st.State != ui.StepDone {
+			return steps
+		}
+	}
+	return nil
+}
+
+func setupSummary(steps []ui.Step) string {
+	done := 0
+	for _, st := range steps {
+		if st.State == ui.StepDone {
+			done++
+		}
+	}
+	return fmt.Sprintf("%d/%d", done, len(steps))
 }
 
 func problemLines(s session.Session) []string {

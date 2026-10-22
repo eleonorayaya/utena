@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 
+	"github.com/eleonorayaya/utena/internal/session"
 	"github.com/eleonorayaya/utena/internal/tui/theme"
 )
 
@@ -19,6 +21,29 @@ type Step struct {
 	Label string
 	State StepState
 	Error string
+}
+
+func SetupSteps(steps []session.SessionSetupStep) []Step {
+	src := slices.Clone(steps)
+	slices.SortStableFunc(src, func(a, b session.SessionSetupStep) int { return a.Position - b.Position })
+	out := make([]Step, len(src))
+	for i, s := range src {
+		out[i] = Step{Label: s.Label, State: setupStepState(s.Status), Error: s.ErrorMsg}
+	}
+	return out
+}
+
+func setupStepState(s session.SetupStepStatus) StepState {
+	switch s {
+	case session.SetupStepRunning:
+		return StepRunning
+	case session.SetupStepDone:
+		return StepDone
+	case session.SetupStepFailed:
+		return StepFailed
+	default:
+		return StepPending
+	}
 }
 
 func StepList(steps []Step, spinner string, width int) string {

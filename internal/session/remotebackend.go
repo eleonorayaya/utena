@@ -63,6 +63,10 @@ func (s *SessionService) SetRemoteSessionID(id, remoteID uint) error {
 	return s.store.SetRemoteSessionID(id, remoteID)
 }
 
+func (s *SessionService) SetRemoteSteps(id uint, steps []SessionSetupStep) error {
+	return s.setupStepStore.Replace(id, steps)
+}
+
 func (s *SessionService) ApplyRemoteState(id uint, st RemoteState) error {
 	if err := s.store.ApplyRemoteState(id, st, MirroredStatuses); err != nil {
 		return err

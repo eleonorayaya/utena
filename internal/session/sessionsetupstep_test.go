@@ -82,3 +82,46 @@ func TestSessionSetupStepStore_DeleteBySessionID(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, listed)
 }
+
+func TestSessionSetupStepStore_ReplaceUpdatesInPlaceWhenShapeMatches(t *testing.T) {
+	store := newSetupStepStore(t)
+	require.NoError(t, store.Replace(4, []SessionSetupStep{
+		{Kind: "coder_build", Label: "Build", Status: SetupStepRunning},
+		{Kind: "coder_agent", Label: "Agent", Status: SetupStepPending},
+	}))
+	before, err := store.ListBySessionID(4)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Replace(4, []SessionSetupStep{
+		{Kind: "coder_build", Label: "Build", Status: SetupStepDone},
+		{Kind: "coder_agent", Label: "Agent", Status: SetupStepFailed, ErrorMsg: "timeout"},
+	}))
+
+	after, err := store.ListBySessionID(4)
+	require.NoError(t, err)
+	require.Len(t, after, 2)
+	require.Equal(t, before[0].ID, after[0].ID)
+	require.Equal(t, SetupStepDone, after[0].Status)
+	require.Equal(t, SetupStepFailed, after[1].Status)
+	require.Equal(t, "timeout", after[1].ErrorMsg)
+}
+
+func TestSessionSetupStepStore_ReplaceRewritesWhenShapeChanges(t *testing.T) {
+	store := newSetupStepStore(t)
+	require.NoError(t, store.Replace(4, []SessionSetupStep{{Kind: "coder_build", Label: "Build", Status: SetupStepDone}}))
+	require.NoError(t, store.Create([]*SessionSetupStep{{SessionID: 5, Kind: "other", Label: "Other"}}))
+
+	require.NoError(t, store.Replace(4, []SessionSetupStep{
+		{Kind: "coder_build", Label: "Build", Status: SetupStepDone},
+		{Kind: "run_command", Label: "yarn install", Status: SetupStepRunning},
+	}))
+
+	listed, err := store.ListBySessionID(4)
+	require.NoError(t, err)
+	require.Len(t, listed, 2)
+	require.Equal(t, 1, listed[1].Position)
+	require.Equal(t, "yarn install", listed[1].Label)
+	other, err := store.ListBySessionID(5)
+	require.NoError(t, err)
+	require.Len(t, other, 1, "other sessions' steps are untouched")
+}

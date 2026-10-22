@@ -70,6 +70,45 @@ func (s *SessionSetupStepStore) DeleteBySessionID(sessionID uint) error {
 	return s.db.Where("session_id = ?", sessionID).Delete(&SessionSetupStep{}).Error
 }
 
+func (s *SessionSetupStepStore) Replace(sessionID uint, steps []SessionSetupStep) error {
+	existing, err := s.ListBySessionID(sessionID)
+	if err != nil {
+		return err
+	}
+	if sameStepShape(existing, steps) {
+		for i, cur := range existing {
+			next := steps[i]
+			if cur.Status == next.Status && cur.ErrorMsg == next.ErrorMsg {
+				continue
+			}
+			if err := s.db.Model(cur).Updates(map[string]any{"status": next.Status, "error_msg": next.ErrorMsg}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := s.db.Where("session_id = ?", sessionID).Unscoped().Delete(&SessionSetupStep{}).Error; err != nil {
+		return err
+	}
+	rows := make([]*SessionSetupStep, len(steps))
+	for i, st := range steps {
+		rows[i] = &SessionSetupStep{SessionID: sessionID, Position: i, Kind: st.Kind, Label: st.Label, Status: st.Status, ErrorMsg: st.ErrorMsg}
+	}
+	return s.Create(rows)
+}
+
+func sameStepShape(existing []*SessionSetupStep, steps []SessionSetupStep) bool {
+	if len(existing) != len(steps) {
+		return false
+	}
+	for i := range existing {
+		if existing[i].Kind != steps[i].Kind || existing[i].Label != steps[i].Label {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *SessionSetupStepStore) ResetAllForSession(sessionID uint) error {
 	return s.db.Model(&SessionSetupStep{}).
 		Where("session_id = ?", sessionID).

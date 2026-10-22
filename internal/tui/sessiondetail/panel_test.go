@@ -203,3 +203,37 @@ func TestRenderPanel_NoBundlesSection(t *testing.T) {
 	out := strings.Join(plainLines(RenderPanel(&s, 80, 0)), "\n")
 	assert.NotContains(t, out, "Bundles")
 }
+
+func setupStepsFixture(last session.SetupStepStatus) []session.SessionSetupStep {
+	return []session.SessionSetupStep{
+		{Position: 1, Label: "Wait for the workspace agent", Status: last, ErrorMsg: "agent timed out"},
+		{Position: 0, Label: "Build the Coder workspace", Status: session.SetupStepDone},
+	}
+}
+
+func TestPanel_SetupStepsShowWhileCreating(t *testing.T) {
+	s := richSession()
+	s.Status = session.StatusCreating
+	s.SetupSteps = setupStepsFixture(session.SetupStepRunning)
+	lines := plainLines(RenderPanel(&s, 80, 0))
+	assert.True(t, strings.HasPrefix(lineWith(lines, "Setup"), "  Setup ─"), lineWith(lines, "Setup"))
+	assert.True(t, strings.HasSuffix(lineWith(lines, "Setup"), " 1/2"), lineWith(lines, "Setup"))
+	assert.Equal(t, "    ✓ Build the Coder workspace", lineWith(lines, "Build the Coder"))
+	assert.Equal(t, "    ▸ Wait for the workspace agent", lineWith(lines, "workspace agent"))
+	assert.Empty(t, lineWith(lines, "agent timed out"), "errors show only for failed steps")
+}
+
+func TestPanel_FailedSetupStepShowsItsError(t *testing.T) {
+	s := richSession()
+	s.Status = session.StatusBroken
+	s.SetupSteps = setupStepsFixture(session.SetupStepFailed)
+	lines := plainLines(RenderPanel(&s, 80, 0))
+	assert.Equal(t, "    ✕ Wait for the workspace agent", lineWith(lines, "workspace agent"))
+	assert.Equal(t, "      agent timed out", lineWith(lines, "agent timed out"))
+}
+
+func TestPanel_SetupHiddenOnceEveryStepIsDone(t *testing.T) {
+	s := richSession()
+	s.SetupSteps = setupStepsFixture(session.SetupStepDone)
+	assert.Empty(t, lineWith(plainLines(RenderPanel(&s, 80, 0)), "Setup"))
+}
