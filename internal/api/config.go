@@ -143,17 +143,21 @@ type daemonFile struct {
 	Coder      coder.FileConfig `json:"coder"`
 }
 
+var daemonFiles = []string{"daemon.json", "daemon.local.json"}
+
 func loadDaemonFile(dir string) (daemonFile, error) {
 	var f daemonFile
-	data, err := os.ReadFile(filepath.Join(dir, "daemon.json"))
-	if errors.Is(err, os.ErrNotExist) {
-		return f, nil
-	}
-	if err != nil {
-		return f, fmt.Errorf("reading daemon.json: %w", err)
-	}
-	if err := json.Unmarshal(data, &f); err != nil {
-		return f, fmt.Errorf("parsing daemon.json: %w", err)
+	for _, name := range daemonFiles {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return f, fmt.Errorf("reading %s: %w", name, err)
+		}
+		if err := json.Unmarshal(data, &f); err != nil {
+			return f, fmt.Errorf("parsing %s: %w", name, err)
+		}
 	}
 	return f, nil
 }

@@ -45,6 +45,18 @@ eval "$(utena shell-init)"
 
 This sets up environment variables needed for utena integrations (like Claude Code status tracking) when running inside tuios. It resolves `UTENA_SESSION_ID` from `$TUIOS_SESSION`, so panes you open by hand are attributed to the right session.
 
+#### Daemon config
+
+The daemon reads `~/.config/utena/daemon.json` at startup, then `daemon.local.json` from the same directory, if it exists. The local file is for settings a dotfiles tool shouldn't own, since tools like shizuku rewrite `daemon.json` on every sync. For example, this keeps the coder backend's template name on one machine:
+
+```json
+{
+  "coder": {"template": "my-template"}
+}
+```
+
+A value in the local file wins over the same value in `daemon.json`. Fields of the `coder` block override one at a time, and a bundle or MCP server named in the local file replaces that entry, while the other entries stay. Restart the daemon after changing either file. A malformed file stops the daemon from starting.
+
 #### Browser windows
 
 Links opened from a utena session land in that session's own browser window. The daemon drives one browser: Chrome or Firefox through the utena extension, or Chrome through AppleScript where extensions can't be installed:
