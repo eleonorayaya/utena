@@ -141,6 +141,14 @@ func (s *SessionStore) List(statuses ...SessionStatus) ([]Session, error) {
 	return sessions, nil
 }
 
+func (s *SessionStore) LiveSessionRoots(excludeID uint) ([]string, error) {
+	var roots []string
+	err := s.db.Model(&Session{}).
+		Where("id <> ? AND status <> ? AND session_root <> ''", excludeID, StatusDeleted).
+		Pluck("session_root", &roots).Error
+	return roots, err
+}
+
 type MuxSessionRef struct {
 	ID      uint
 	Name    string

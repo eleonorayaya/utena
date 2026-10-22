@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func writeTranscript(t *testing.T, dataDir, project, id, cwd string, leading ...any) string {
+func writeTranscript(t *testing.T, dataDir, id, cwd string, leading ...any) string {
 	t.Helper()
-	dir := filepath.Join(dataDir, "projects", project)
+	dir := filepath.Join(dataDir, "projects", ProjectDirName(cwd))
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	var lines []string
 	for _, rec := range append(leading, map[string]string{"type": "user", "cwd": cwd}) {
@@ -25,42 +25,53 @@ func writeTranscript(t *testing.T, dataDir, project, id, cwd string, leading ...
 	return dir
 }
 
-func TestProjects_ReadsCWDPastLeadingRecordsAndLongLines(t *testing.T) {
+func TestProjectDirName(t *testing.T) {
+	assert.Equal(t, "-Users-me-utena-sessions-a-b-c", ProjectDirName("/Users/me/utena-sessions/a.b_c"))
+}
+
+func TestProjectsUnder_ReadsCWDPastLeadingRecordsAndLongLines(t *testing.T) {
 	data := t.TempDir()
 	long := map[string]string{"type": "tool_result", "content": strings.Repeat("x", 200<<10)}
-	writeTranscript(t, data, "-s-foo", "abc", "/s/foo", map[string]string{"type": "mode"}, long)
+	writeTranscript(t, data, "abc", "/s/foo", map[string]string{"type": "mode"}, long)
 
-	projects, err := Projects(data)
+	projects, err := ProjectsUnder(data, "/s/foo")
 	require.NoError(t, err)
 	require.Len(t, projects, 1)
 	assert.Equal(t, "/s/foo", projects[0].CWD)
 	assert.Equal(t, []string{"abc"}, projects[0].SessionIDs)
 }
 
-func TestProjects_MemoryOnlyDirHasNoCWD(t *testing.T) {
+func TestProjectsUnder_MatchesCheckoutsButNotNameSiblings(t *testing.T) {
 	data := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(data, "projects", "-s-mem", "memory"), 0o755))
+	writeTranscript(t, data, "own", "/s/foo")
+	writeTranscript(t, data, "sub", "/s/foo/repo")
+	writeTranscript(t, data, "sib", "/s/foo-bar")
+	writeTranscript(t, data, "other", "/s/bar")
+	require.NoError(t, os.MkdirAll(filepath.Join(data, "projects", ProjectDirName("/s/foo")+"-mem", "memory"), 0o755))
 
-	projects, err := Projects(data)
+	projects, err := ProjectsUnder(data, "/s/foo")
 	require.NoError(t, err)
-	require.Len(t, projects, 1)
-	assert.Empty(t, projects[0].CWD)
+	var cwds []string
+	for _, p := range projects {
+		cwds = append(cwds, p.CWD)
+	}
+	assert.ElementsMatch(t, []string{"/s/foo", "/s/foo/repo"}, cwds)
 }
 
-func TestProjects_MissingDataDir(t *testing.T) {
-	projects, err := Projects(filepath.Join(t.TempDir(), "nope"))
+func TestProjectsUnder_MissingDataDir(t *testing.T) {
+	projects, err := ProjectsUnder(filepath.Join(t.TempDir(), "nope"), "/s/foo")
 	require.NoError(t, err)
 	assert.Empty(t, projects)
 }
 
 func TestRemove_DeletesProjectAndSessionKeyedData(t *testing.T) {
 	data := t.TempDir()
-	dir := writeTranscript(t, data, "-s-foo", "abc", "/s/foo")
+	dir := writeTranscript(t, data, "abc", "/s/foo")
 	for _, p := range []string{"file-history/abc", "session-env/abc", "file-history/other"} {
 		require.NoError(t, os.MkdirAll(filepath.Join(data, p), 0o755))
 	}
 
-	projects, err := Projects(data)
+	projects, err := ProjectsUnder(data, "/s/foo")
 	require.NoError(t, err)
 	require.NoError(t, Remove(data, projects[0]))
 
@@ -68,11 +79,4 @@ func TestRemove_DeletesProjectAndSessionKeyedData(t *testing.T) {
 	assert.NoDirExists(t, filepath.Join(data, "file-history", "abc"))
 	assert.NoDirExists(t, filepath.Join(data, "session-env", "abc"))
 	assert.DirExists(t, filepath.Join(data, "file-history", "other"))
-}
-
-func TestWithin(t *testing.T) {
-	assert.True(t, Within("/s/foo", "/s/foo"))
-	assert.True(t, Within("/s/foo/repo", "/s/foo"))
-	assert.False(t, Within("/s/foo-bar", "/s/foo"))
-	assert.False(t, Within("", "/s/foo"))
 }

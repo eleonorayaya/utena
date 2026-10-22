@@ -7,18 +7,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eleonorayaya/utena/internal/claudedata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func claudeProject(t *testing.T, dataDir, cwd, id string, modTime time.Time) string {
+func claudeProject(t *testing.T, dataDir, cwd, id string) string {
 	t.Helper()
-	dir := filepath.Join(dataDir, "projects", filepath.Base(filepath.Dir(cwd))+"-"+filepath.Base(cwd)+"-"+id)
+	dir := filepath.Join(dataDir, "projects", claudedata.ProjectDirName(cwd))
 	require.NoError(t, os.MkdirAll(dir, 0o755))
-	file := filepath.Join(dir, id+".jsonl")
-	require.NoError(t, os.WriteFile(file, []byte(fmt.Sprintf(`{"type":"mode"}`+"\n"+`{"cwd":%q}`+"\n", cwd)), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(fmt.Sprintf(`{"cwd":%q}`+"\n", cwd)), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "file-history", id), 0o755))
-	require.NoError(t, os.Chtimes(file, modTime, modTime))
 	return dir
 }
 
@@ -38,10 +37,9 @@ func TestRemoveClaudeArtifacts_RemovesOnlyTheDeletedSessionsProjects(t *testing.
 	sess := addRootedSession(t, store, "home", StatusArchived, root)
 	addRootedSession(t, store, "home-notifs", StatusArchived, sibling)
 
-	old := time.Now().Add(-time.Hour)
-	own := claudeProject(t, data, root, "a1", old)
-	checkout := claudeProject(t, data, filepath.Join(root, "repo"), "a2", time.Now())
-	other := claudeProject(t, data, sibling, "b1", old)
+	own := claudeProject(t, data, root, "a1")
+	checkout := claudeProject(t, data, filepath.Join(root, "repo"), "a2")
+	other := claudeProject(t, data, sibling, "b1")
 
 	service.removeClaudeArtifacts(sess)
 
@@ -59,9 +57,21 @@ func TestRemoveClaudeArtifacts_KeepsProjectsOfALiveSessionReusingTheRoot(t *test
 	root := filepath.Join(service.sessionsRoot, "reused")
 	old := addRootedSession(t, store, "reused", StatusArchived, root)
 	addRootedSession(t, store, "reused", StatusActive, root)
-	dir := claudeProject(t, data, root, "r1", time.Now().Add(-time.Hour))
+	dir := claudeProject(t, data, root, "r1")
 
 	service.removeClaudeArtifacts(old)
 
 	assert.DirExists(t, dir)
+}
+
+func TestSessionStore_LiveSessionRoots(t *testing.T) {
+	_, store, _, _, _, _ := setupSessionService(t)
+	self := addRootedSession(t, store, "self", StatusArchived, "/s/self")
+	addRootedSession(t, store, "live", StatusActive, "/s/live")
+	addRootedSession(t, store, "gone", StatusDeleted, "/s/gone")
+	addRootedSession(t, store, "rootless", StatusActive, "")
+
+	roots, err := store.LiveSessionRoots(self.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/s/live"}, roots)
 }

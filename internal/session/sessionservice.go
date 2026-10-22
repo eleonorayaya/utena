@@ -1569,10 +1569,7 @@ func (s *SessionService) removeSessionRoot(session *Session) {
 // configured sessions root, the invariant that distinguishes container-layout
 // sessions from legacy ones with arbitrary paths.
 func (s *SessionService) sessionRootWithinRoot(sessionRoot string) bool {
-	if s.sessionsRoot == "" || sessionRoot == "" {
-		return false
-	}
-	return strings.HasPrefix(sessionRoot, s.sessionsRoot+string(filepath.Separator))
+	return sessionRoot != s.sessionsRoot && common.PathWithin(sessionRoot, s.sessionsRoot)
 }
 
 // DetachWorktreesByRepoID drops join rows first so the worktree delete

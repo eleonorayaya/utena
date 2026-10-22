@@ -3,24 +3,14 @@ package claudedata
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/eleonorayaya/utena/internal/common"
 )
 
 const maxRecordsForCWD = 200
-
-func DataDir() (string, error) {
-	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
-		return dir, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
-	}
-	return filepath.Join(home, ".claude"), nil
-}
 
 type Project struct {
 	Dir        string
@@ -28,22 +18,32 @@ type Project struct {
 	SessionIDs []string
 }
 
-func Projects(dataDir string) ([]Project, error) {
-	root := filepath.Join(dataDir, "projects")
-	entries, err := os.ReadDir(root)
+func ProjectDirName(cwd string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 128 && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, cwd)
+}
+
+func ProjectsUnder(dataDir, root string) ([]Project, error) {
+	projectsDir := filepath.Join(dataDir, "projects")
+	entries, err := os.ReadDir(projectsDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	prefix := ProjectDirName(root)
 	var projects []Project
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() || (e.Name() != prefix && !strings.HasPrefix(e.Name(), prefix+"-")) {
 			continue
 		}
-		p, err := readProject(filepath.Join(root, e.Name()))
-		if err != nil {
+		p, err := readProject(filepath.Join(projectsDir, e.Name()))
+		if err != nil || !common.PathWithin(p.CWD, root) {
 			continue
 		}
 		projects = append(projects, p)
@@ -108,11 +108,4 @@ func Remove(dataDir string, p Project) error {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
-}
-
-func Within(path, root string) bool {
-	if path == "" || root == "" {
-		return false
-	}
-	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
