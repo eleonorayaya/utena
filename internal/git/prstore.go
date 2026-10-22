@@ -102,7 +102,7 @@ func (s *PRStore) Upsert(pr *PullRequest) error {
 	return s.db.Save(pr).Error
 }
 
-func (s *PRStore) Update(pr *PullRequest, omitColumns ...string) error {
+func (s *PRStore) Update(pr *PullRequest) error {
 	if pr == nil {
 		return errors.New("pull request cannot be nil")
 	}
@@ -118,11 +118,7 @@ func (s *PRStore) Update(pr *PullRequest, omitColumns ...string) error {
 		return err
 	}
 
-	writer := s.db.Save
-	if len(omitColumns) > 0 {
-		writer = s.db.Omit(omitColumns...).Save
-	}
-	if err := writer(pr).Error; err != nil {
+	if err := s.db.Omit(activityColumns()...).Save(pr).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueConstraintError(err) {
 			return common.WrapConflict(
 				fmt.Sprintf("pull request #%d is already tracked for this repo", pr.Number),
@@ -130,6 +126,23 @@ func (s *PRStore) Update(pr *PullRequest, omitColumns ...string) error {
 			)
 		}
 		return err
+	}
+	return nil
+}
+
+func (s *PRStore) UpdateActivity(pr *PullRequest) error {
+	if pr == nil {
+		return errors.New("pull request cannot be nil")
+	}
+	if pr.ID == 0 {
+		return errors.New("pull request ID cannot be zero")
+	}
+	result := s.db.Model(&PullRequest{}).Where("id = ?", pr.ID).Select(activityColumns()).Updates(pr)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrPRNotFound
 	}
 	return nil
 }

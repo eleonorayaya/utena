@@ -129,7 +129,7 @@ func TestRecordWorktreeBranch_SwitchBackIsIdempotent(t *testing.T) {
 	require.Equal(t, "eqt/multi", sess.Worktrees[0].Worktree.Branch.Name)
 }
 
-func TestRecordWorktreeBranch_ReplaysOpenPRsForNewBranch(t *testing.T) {
+func TestRecordWorktreeBranch_DoesNotNotifyOpenPRsOnNewBranch(t *testing.T) {
 	env := setupBranchSyncEnv(t)
 	ctx := context.Background()
 	var got []string
@@ -146,12 +146,11 @@ func TestRecordWorktreeBranch_ReplaysOpenPRsForNewBranch(t *testing.T) {
 	require.NoError(t, err)
 	branchID := branch.ID
 	require.NoError(t, env.store.db.Create(&git.PullRequest{RepoID: branch.RepoID, Number: 3, HeadBranchID: &branchID, State: git.PRStateOpen}).Error)
-	require.NoError(t, env.store.db.Create(&git.PullRequest{RepoID: branch.RepoID, Number: 4, HeadBranchID: &branchID, State: git.PRStateMerged}).Error)
 
 	gitIn(t, env.wtPath, "checkout", "-b", "eqt/with-pr")
 	require.NoError(t, env.service.RecordWorktreeBranch(ctx, env.wtPath, "eqt/with-pr"))
 
-	require.Equal(t, []string{"eqt/with-pr"}, got)
+	require.Empty(t, got)
 }
 
 func TestSyncSessionBranches_PicksUpBranchChangedOnDisk(t *testing.T) {
@@ -284,18 +283,9 @@ func TestRecordWorktreeBranch_IgnoresWorktreeOfDeletedSession(t *testing.T) {
 	require.Equal(t, "eqt/multi", sess.Worktrees[0].Worktree.Branch.Name)
 }
 
-func TestRecordWorktreeBranch_RepointCollisionWritesHistoryWithoutReplay(t *testing.T) {
+func TestRecordWorktreeBranch_RepointCollisionWritesHistory(t *testing.T) {
 	env := setupBranchSyncEnv(t)
 	ctx := context.Background()
-	var replayed []string
-	env.service.eventBus.Subscribe(eventbus.SessionNotification, func(_ context.Context, event eventbus.Event) error {
-		if data, ok := event.Data.(eventbus.SessionNotificationEvent); ok {
-			if n, ok := data.Data.(git.PRNotification); ok {
-				replayed = append(replayed, n.Branch)
-			}
-		}
-		return nil
-	})
 
 	wt := env.sess.Worktrees[0].Worktree
 	target, err := env.service.gitService.FindOrCreateBranch(ctx, "eqt/collide", wt.RepoID)
@@ -310,7 +300,6 @@ func TestRecordWorktreeBranch_RepointCollisionWritesHistoryWithoutReplay(t *test
 	sess := env.reload(t)
 	require.ElementsMatch(t, []string{"eqt/multi", "eqt/collide"}, branchNames(sess))
 	require.Equal(t, "eqt/multi", sess.Worktrees[0].Worktree.Branch.Name)
-	require.Empty(t, replayed)
 }
 
 func TestDeleteSession_ReconcilesDiskBranchBeforeCleanup(t *testing.T) {

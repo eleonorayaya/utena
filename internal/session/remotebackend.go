@@ -114,9 +114,6 @@ func (s *SessionService) recordRemoteBranches(ctx context.Context, id uint, name
 		if err := s.sessionBranchStore.Add(&SessionBranch{SessionID: id, BranchID: branch.ID, FirstSeenAt: now}); err != nil {
 			return fmt.Errorf("record session branch: %w", err)
 		}
-		for _, event := range openPRNotifications(id, s.gitService.GetPRsForBranch(branch.ID), func(uint) string { return branch.Name }) {
-			s.publishNotification(ctx, event.SessionID, event.Type, event.Data)
-		}
 	}
 	return nil
 }

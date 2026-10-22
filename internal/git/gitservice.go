@@ -557,7 +557,7 @@ func (s *GitService) syncGitHubPR(ctx context.Context, ghPR *github.PullRequest,
 		*previous = *existing
 		pr.Model = existing.Model
 		pr.ChecksState = existing.ChecksState // read back by NewPRNotification
-		if err := s.prStore.Update(pr, activityColumns()...); err != nil {
+		if err := s.prStore.Update(pr); err != nil {
 			return fmt.Errorf("failed to update PR #%d: %w", ghPR.GetNumber(), err)
 		}
 	} else {
@@ -581,7 +581,6 @@ func prChanged(previous *PullRequest, current *PullRequest) bool {
 		return true
 	}
 	return previous.State != current.State ||
-		previous.Title != current.Title ||
 		previous.IsAssignedToMe != current.IsAssignedToMe
 }
 

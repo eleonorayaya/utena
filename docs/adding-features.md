@@ -70,16 +70,16 @@ s.eventBus.Publish(ctx, eventbus.Event{
 
 `MonitorService` marshals it to `{"type":..., "session_id":..., "data":...}` and fans it out to the websockets watching that session. Only publish on an actual change — every event is a message in Claude's context.
 
-On connect, the monitor asks `SnapshotProvider` (implemented by `SessionService.SessionSnapshot`) for the session's current state so a session that starts after a change is not left with silence. Add the same event type there when the current state matters at connect time.
+There is no snapshot on connect: the monitor reconnects after every daemon restart, and replaying current state each time reached Claude as a burst of events about nothing new. Publish only what Claude couldn't know from its own actions.
 
 ### Current event types
 
 | Type | Fires when |
 |---|---|
-| `pull_request` | PR state, title or assignment changes (`git.prs` job, 30s). Also sent on connect for the session's open PRs |
+| `pull_request` | A PR leaves draft, is merged, or is closed (`git.prs` job, 30s; `git.PRStateNotifies`). Not for new PRs — Claude usually opened them itself |
 | `pull_request_review` | Someone submits a review — `state` is `approved` / `changes_requested` / `commented` |
 | `pull_request_review_comment` | Someone leaves an inline comment, with `path` and `line` |
-| `ci_checks` | `failing` the first time a check fails, then `passed` / `failed` once every run completes, with the failed check names |
+| `ci_checks` | `passed` / `failed` once every run on the head commit completes, with the failed check names. A run added later to the same commit reports only if the rollup changes |
 
 Reviews and comments authored by the daemon's own GitHub user are dropped — you just wrote them. Bots are kept: review bots like `gusto-fresh-eyes` do most of the reviewing, and filtering them silently swallowed the majority of real feedback. If a genuinely noisy bot shows up, add a denylist then rather than blanket-filtering by account type.
 
@@ -90,11 +90,11 @@ Reviews and comments authored by the daemon's own GitHub user are dropped — yo
 `GitService.SyncPRActivity` owns the GitHub calls and the change detection. Watermarks live on the `PullRequest` row (`ActivityBaselined`, `LastReviewID`, `LastReviewCommentID`, `ChecksHeadSHA`, `ChecksState`), so a daemon restart does not replay old activity. Two rules worth preserving:
 
 - The first sync of a PR records a baseline and emits nothing — otherwise adopting a PR would dump its history into Claude's context, and a fleet of already-green PRs would each fire a rollup at once. `ActivityBaselined` is a separate flag rather than "watermark == 0", because a PR with no reviews yet also has 0 and would lose its *first* review.
-- `syncGitHubPR` rebuilds a PR from the GitHub payload and writes every other column, so it passes `activityColumns()` to `PRStore.Update` to leave these alone. A new activity column goes in that list.
+- `syncGitHubPR` rebuilds a PR from the GitHub payload and writes every other column, so it passes `activityColumns()` to `PRStore.Update` to leave these alone, and `GitService.SyncPRActivity` writes only those columns with `PRStore.UpdateActivity`. The two jobs run concurrently, so a full-row save from either side would put back a stale state and fire its notification again. A new activity column goes in that list.
 
 The wire shapes for all four PR event types live together in `internal/git/practivity.go` (`NotificationPullRequest` and friends, `PRNotification`, `ReviewActivity`, `ReviewCommentActivity`, `ChecksActivity`). Session decides *who* gets an event; git decides what one looks like.
 
-See: `internal/monitor/`, `internal/git/practivity.go`, `internal/session/sessionservice.go` (`notifyPRUpdated`, `SyncPRActivity`, `SessionSnapshot`)
+See: `internal/monitor/`, `internal/git/practivity.go`, `internal/session/sessionservice.go` (`notifyPRUpdated`, `SyncPRActivity`)
 
 ## Adding a New Module
 

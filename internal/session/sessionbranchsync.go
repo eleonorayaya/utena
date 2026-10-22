@@ -90,10 +90,6 @@ func (s *SessionService) recordBranch(ctx context.Context, sess *Session, swt *S
 		return nil
 	}
 	slog.InfoContext(ctx, "session branch attached", "session", sess.ID, "worktree", wt.ID, "branch", branchName)
-
-	for _, event := range openPRNotifications(sess.ID, s.gitService.GetPRsForBranch(branch.ID), func(uint) string { return branch.Name }) {
-		s.publishNotification(ctx, event.SessionID, event.Type, event.Data)
-	}
 	return nil
 }
 

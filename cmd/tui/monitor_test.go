@@ -12,27 +12,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type stubSnapshots struct{}
-
-func (stubSnapshots) SessionSnapshot(_ context.Context, sessionID uint) []eventbus.SessionNotificationEvent {
-	return []eventbus.SessionNotificationEvent{{
-		SessionID: sessionID,
-		Type:      "pull_request",
-		Data:      map[string]any{"number": 42, "state": "open"},
-	}}
-}
-
 type lineCollector struct {
 	lines chan string
 }
 
 func (l *lineCollector) Write(p []byte) (int, error) {
-	l.lines <- string(p)
+	select {
+	case l.lines <- string(p):
+	default:
+	}
 	return len(p), nil
 }
 
 func TestStreamSessionEventsWritesOneLinePerEvent(t *testing.T) {
-	module := monitor.NewMonitorModule(eventbus.NewEventBus(), stubSnapshots{})
+	bus := eventbus.NewEventBus()
+	module := monitor.NewMonitorModule(bus)
 	require.NoError(t, module.OnAppStart(context.Background()))
 	server := httptest.NewServer(module.Routes())
 	defer server.Close()
@@ -40,14 +34,28 @@ func TestStreamSessionEventsWritesOneLinePerEvent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	out := &lineCollector{lines: make(chan string)}
+	out := &lineCollector{lines: make(chan string, 1)}
 	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?session_id=5"
 	go func() { _ = streamSessionEvents(ctx, url, out) }()
 
-	select {
-	case line := <-out.lines:
-		require.JSONEq(t, `{"type":"pull_request","session_id":5,"data":{"number":42,"state":"open"}}`, strings.TrimSpace(line))
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for a session event line")
+	publish := time.NewTicker(20 * time.Millisecond)
+	defer publish.Stop()
+	for {
+		select {
+		case line := <-out.lines:
+			require.JSONEq(t, `{"type":"pull_request","session_id":5,"data":{"number":42,"state":"open"}}`, strings.TrimSpace(line))
+			return
+		case <-publish.C:
+			require.NoError(t, bus.Publish(ctx, eventbus.Event{
+				Type: eventbus.SessionNotification,
+				Data: eventbus.SessionNotificationEvent{
+					SessionID: 5,
+					Type:      "pull_request",
+					Data:      map[string]any{"number": 42, "state": "open"},
+				},
+			}))
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for a session event line")
+		}
 	}
 }

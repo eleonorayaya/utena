@@ -24,7 +24,7 @@ session (depends on: workspace, git, mux, eventbus)
     ↓
 mux (depends on: eventbus; driven by tuios via mux.Driver)
     ↓
-monitor (depends on: session, eventbus)
+monitor (depends on: eventbus)
 ```
 
 `git` sits at the bottom: it never imports another domain, and everything above may call it directly. It notifies upward with `git.EventPRUpdated` on the event bus.

@@ -14,25 +14,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type fakeSnapshots struct {
-	events []eventbus.SessionNotificationEvent
-}
-
-func (f *fakeSnapshots) SessionSnapshot(_ context.Context, sessionID uint) []eventbus.SessionNotificationEvent {
-	return f.events
-}
-
-func setup(t *testing.T, snapshots ...eventbus.SessionNotificationEvent) (*eventbus.InMemoryEventBus, string) {
+func setup(t *testing.T) (*eventbus.InMemoryEventBus, *MonitorService, string) {
 	t.Helper()
 
 	bus := eventbus.NewEventBus()
-	module := NewMonitorModule(bus, &fakeSnapshots{events: snapshots})
+	module := NewMonitorModule(bus)
 	require.NoError(t, module.OnAppStart(context.Background()))
 
 	server := httptest.NewServer(module.Routes())
 	t.Cleanup(server.Close)
 
-	return bus, "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+	return bus, module.Service, "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+}
+
+func waitForClient(t *testing.T, service *MonitorService, sessionID uint) {
+	t.Helper()
+
+	require.Eventually(t, func() bool {
+		service.mu.Lock()
+		defer service.mu.Unlock()
+		return len(service.clients[sessionID]) > 0
+	}, 5*time.Second, 10*time.Millisecond)
 }
 
 func readMessage(t *testing.T, ctx context.Context, sock *websocket.Conn) eventbus.SessionNotificationEvent {
@@ -48,9 +50,7 @@ func readMessage(t *testing.T, ctx context.Context, sock *websocket.Conn) eventb
 }
 
 func TestWatchBroadcastsSessionNotifications(t *testing.T) {
-	// the snapshot is sent once the client is registered, so reading it first
-	// removes the race between the handshake completing and the subscription
-	bus, wsURL := setup(t, eventbus.SessionNotificationEvent{SessionID: 7, Type: "connected"})
+	bus, service, wsURL := setup(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -58,7 +58,7 @@ func TestWatchBroadcastsSessionNotifications(t *testing.T) {
 	sock, _, err := websocket.Dial(ctx, wsURL+"?session_id=7", nil)
 	require.NoError(t, err)
 	defer func() { _ = sock.CloseNow() }()
-	require.Equal(t, "connected", readMessage(t, ctx, sock).Type)
+	waitForClient(t, service, 7)
 
 	require.NoError(t, bus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionNotification,
@@ -75,27 +75,8 @@ func TestWatchBroadcastsSessionNotifications(t *testing.T) {
 	require.Equal(t, map[string]any{"number": float64(42)}, got.Data)
 }
 
-func TestWatchSendsSnapshotOnConnect(t *testing.T) {
-	_, wsURL := setup(t, eventbus.SessionNotificationEvent{
-		SessionID: 3,
-		Type:      "pull_request",
-		Data:      map[string]any{"number": 1},
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	sock, _, err := websocket.Dial(ctx, wsURL+"?session_id=3", nil)
-	require.NoError(t, err)
-	defer func() { _ = sock.CloseNow() }()
-
-	got := readMessage(t, ctx, sock)
-	require.Equal(t, "pull_request", got.Type)
-	require.Equal(t, uint(3), got.SessionID)
-}
-
 func TestWatchIgnoresOtherSessions(t *testing.T) {
-	bus, wsURL := setup(t, eventbus.SessionNotificationEvent{SessionID: 1, Type: "connected"})
+	bus, service, wsURL := setup(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -103,7 +84,7 @@ func TestWatchIgnoresOtherSessions(t *testing.T) {
 	sock, _, err := websocket.Dial(ctx, wsURL+"?session_id=1", nil)
 	require.NoError(t, err)
 	defer func() { _ = sock.CloseNow() }()
-	require.Equal(t, "connected", readMessage(t, ctx, sock).Type)
+	waitForClient(t, service, 1)
 
 	require.NoError(t, bus.Publish(ctx, eventbus.Event{
 		Type: eventbus.SessionNotification,
@@ -117,7 +98,7 @@ func TestWatchIgnoresOtherSessions(t *testing.T) {
 }
 
 func TestWatchRequiresSessionID(t *testing.T) {
-	_, wsURL := setup(t)
+	_, _, wsURL := setup(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
