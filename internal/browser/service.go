@@ -59,6 +59,7 @@ type OpenRequest struct {
 	SessionID uint   `json:"session_id"`
 	URL       string `json:"url"`
 	Activate  bool   `json:"activate"`
+	Attached  bool   `json:"attached"`
 }
 
 func (r *OpenRequest) Bind(*http.Request) error {
@@ -192,6 +193,13 @@ func (s *Service) Connected() bool {
 func (s *Service) Open(ctx context.Context, req OpenRequest) (OpenResult, error) {
 	focus := true
 	activated := false
+	if req.SessionID == 0 && req.Attached {
+		attached, err := s.sessions.Attached(ctx)
+		if err != nil {
+			return OpenResult{}, err
+		}
+		req.SessionID = attached
+	}
 	if req.SessionID != 0 {
 		attached, err := s.sessions.IsAttached(ctx, req.SessionID)
 		switch {

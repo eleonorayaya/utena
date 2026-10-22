@@ -254,3 +254,31 @@ func activeTabID(d *FakeDriver, windowID string) string {
 	tab, _ := w.ActiveTab()
 	return tab.ID
 }
+
+func TestRouter_EjectForgetsWindow(t *testing.T) {
+	srv, m, driver := newTestServer(t)
+	m.Service.handleEvent(context.Background(), Event{Type: EventConnected})
+	w := driver.AddWindow("https://a.example.com")
+	require.NoError(t, m.Service.store.Add(&BrowserWindow{SessionID: 3, State: WindowOpen, DriverWindowID: w.ID}))
+
+	res, err := srv.Client().Post(srv.URL+"/eject", "application/json", strings.NewReader(`{"session_id":3,"window_id":"`+w.ID+`"}`))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	raw, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"window_id":"`+w.ID+`","moved":false}`, string(raw))
+	_, err = m.Service.store.GetByDriverWindowID(w.ID)
+	assert.ErrorIs(t, err, ErrWindowNotFound)
+}
+
+func TestRouter_EjectRejectsIncompleteRequest(t *testing.T) {
+	srv, m, _ := newTestServer(t)
+	m.Service.handleEvent(context.Background(), Event{Type: EventConnected})
+	for _, body := range []string{`{"window_id":"w1"}`, `{"session_id":3}`} {
+		res, err := srv.Client().Post(srv.URL+"/eject", "application/json", strings.NewReader(body))
+		require.NoError(t, err)
+		res.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, res.StatusCode, body)
+	}
+}

@@ -352,6 +352,7 @@ func (m Model) Keys() help.KeyMap {
 		case tabItem:
 			k.Activate = openTabKey
 			k.Open = openTabKey
+			k.showEject = true
 		case prItem:
 			k.Open = openPRKey
 			k.showOpen = true
@@ -496,6 +497,13 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, provider.OpenURL(m.sess.ID, url)
 		}
 		m.setStatus("select a tab or pull request to open", ui.StatusInfo)
+		return m, nil
+
+	case key.Matches(msg, keys.Eject):
+		if t := m.selectedTab(); t != nil {
+			return m, provider.EjectWindow(m.sess.ID, t.windowID)
+		}
+		m.setStatus("select a browser tab to eject its window", ui.StatusInfo)
 		return m, nil
 
 	case key.Matches(msg, keys.Archive):

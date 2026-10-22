@@ -322,7 +322,7 @@ func TestDetail_ShortHelpShowsNextWhenTabsSelectable(t *testing.T) {
 	for _, b := range m.Keys().ShortHelp() {
 		got = append(got, b.Help().Key+" "+b.Help().Desc)
 	}
-	assert.Equal(t, []string{"enter/o open tab", "↓/j next item", "b block", "a archive", "tab/esc sessions"}, got)
+	assert.Equal(t, []string{"enter/o open tab", "e eject window", "↓/j next item", "b block", "a archive", "tab/esc sessions"}, got)
 
 	m = focusedOn(makeActiveSession())
 	assert.Len(t, m.Keys().ShortHelp(), 4)
@@ -354,4 +354,21 @@ func TestBrowserCursor_TabGoneWhileBlockersChangeKeepsTabPosition(t *testing.T) 
 	m.browserState = browserState(1, browser.SessionBrowser{}).State
 	m.restoreSelection(sel)
 	assert.Equal(t, 0, m.cursor)
+}
+
+func TestBrowserCursor_EjectsSelectedTabsWindow(t *testing.T) {
+	m := detailWith(makeActiveSession(), oneWindow())
+	m, _ = m.Update(runeKey("j"))
+	assert.Contains(t, m.Keys().ShortHelp(), keys.Eject)
+	_, cmd := m.Update(runeKey("e"))
+	require.NotNil(t, cmd)
+	assert.Equal(t, provider.EjectWindowIntentMsg{SessionID: 1, WindowID: "w1"}, cmd())
+}
+
+func TestBrowserCursor_EjectWithoutTabSelectedDoesNothing(t *testing.T) {
+	m := detailWith(makeBlockedSession(), oneWindow())
+	assert.NotContains(t, m.Keys().ShortHelp(), keys.Eject)
+	m, cmd := m.Update(runeKey("e"))
+	assert.Nil(t, cmd)
+	assert.Equal(t, "select a browser tab to eject its window", m.Status().Text)
 }

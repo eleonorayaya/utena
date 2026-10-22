@@ -9,9 +9,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/eleonorayaya/utena/internal/browser"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,7 +28,7 @@ func TestOpenURL_SendsSessionAndSkipsFallback(t *testing.T) {
 	defer srv.Close()
 
 	var fellBack []string
-	err := openURL(context.Background(), io.Discard, srv.URL, 7, "https://x.example.com", func(u string) error { fellBack = append(fellBack, u); return nil })
+	err := openURL(context.Background(), io.Discard, srv.URL, browser.OpenRequest{SessionID: 7, URL: "https://x.example.com"}, func(u string) error { fellBack = append(fellBack, u); return nil })
 	require.NoError(t, err)
 	assert.Equal(t, browser.OpenRequest{SessionID: 7, URL: "https://x.example.com"}, got)
 	assert.Empty(t, fellBack)
@@ -39,7 +41,7 @@ func TestOpenURL_PendingPrintsNotice(t *testing.T) {
 	defer srv.Close()
 
 	var out bytes.Buffer
-	err := openURL(context.Background(), &out, srv.URL, 7, "https://x.example.com", func(string) error { t.Fatal("fell back"); return nil })
+	err := openURL(context.Background(), &out, srv.URL, browser.OpenRequest{SessionID: 7, URL: "https://x.example.com"}, func(string) error { t.Fatal("fell back"); return nil })
 	require.NoError(t, err)
 	assert.Equal(t, "utena: https://x.example.com is waiting in session 7's browser window\n", out.String())
 }
@@ -51,14 +53,14 @@ func TestOpenURL_FallsBackOn503(t *testing.T) {
 	defer srv.Close()
 
 	var fellBack []string
-	err := openURL(context.Background(), io.Discard, srv.URL, 7, "https://x.example.com", func(u string) error { fellBack = append(fellBack, u); return nil })
+	err := openURL(context.Background(), io.Discard, srv.URL, browser.OpenRequest{SessionID: 7, URL: "https://x.example.com"}, func(u string) error { fellBack = append(fellBack, u); return nil })
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://x.example.com"}, fellBack)
 }
 
 func TestOpenURL_FallsBackWhenDaemonDown(t *testing.T) {
 	var fellBack []string
-	err := openURL(context.Background(), io.Discard, "http://127.0.0.1:1", 0, "https://x.example.com", func(u string) error { fellBack = append(fellBack, u); return nil })
+	err := openURL(context.Background(), io.Discard, "http://127.0.0.1:1", browser.OpenRequest{URL: "https://x.example.com"}, func(u string) error { fellBack = append(fellBack, u); return nil })
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://x.example.com"}, fellBack)
 }
@@ -107,4 +109,39 @@ func TestInsideFallback(t *testing.T) {
 	assert.False(t, insideFallback("", 50, parent))
 	assert.False(t, insideFallback("1", 50, parent))
 	assert.False(t, insideFallback("junk", 50, parent))
+}
+
+func TestOpenCmd_AttachedFlagSendsAttached(t *testing.T) {
+	var got browser.OpenRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_ = json.NewEncoder(w).Encode(browser.OpenResult{WindowID: "1"})
+	}))
+	defer srv.Close()
+	t.Setenv("UTENA_SESSION_ID", "")
+
+	root := &cobra.Command{Use: "utena"}
+	root.Flags().String("port", srv.URL[strings.LastIndex(srv.URL, ":")+1:], "")
+	root.AddCommand(openCmd())
+	root.SetArgs([]string{"open", "--attached", "https://x.example.com"})
+	require.NoError(t, root.ExecuteContext(context.Background()))
+	assert.Equal(t, browser.OpenRequest{URL: "https://x.example.com", Attached: true}, got)
+}
+
+func TestRewriteArgsKeepsFlagsForBrowserAlias(t *testing.T) {
+	assert.Equal(t, []string{"/x/utena-open", "open", "--attached", "https://a"}, rewriteArgs([]string{"/x/utena-open", "--attached", "https://a"}))
+}
+
+func TestOpenURL_NonWebURLsSkipDaemon(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("daemon called for %s", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	var fellBack []string
+	for _, u := range []string{"file://host/tmp/x.txt", "mailto:a@example.com", "ssh://host"} {
+		err := openURL(context.Background(), io.Discard, srv.URL, browser.OpenRequest{URL: u, Attached: true}, func(u string) error { fellBack = append(fellBack, u); return nil })
+		require.NoError(t, err)
+	}
+	assert.Equal(t, []string{"file://host/tmp/x.txt", "mailto:a@example.com", "ssh://host"}, fellBack)
 }

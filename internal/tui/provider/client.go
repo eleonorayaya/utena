@@ -781,12 +781,24 @@ func (c *client) focusTab(sessionID uint, windowID, tabID string) tea.Cmd {
 		out, err := browser.RequestFocus(ctx, http.DefaultClient, c.baseURL+"/browser", browser.FocusRequest{SessionID: sessionID, WindowID: windowID, TabID: tabID})
 		if err != nil {
 			log.Printf("[ERROR] focus tab %s/%s: %v", windowID, tabID, err)
-			return browserFocusFailedMsg{err}
+			return browserRequestFailedMsg{err}
 		}
 		if out.Activated {
 			return SessionSwitchedMsg{}
 		}
 		return browserFocusedMsg{}
+	}
+}
+
+func (c *client) ejectWindow(sessionID uint, windowID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if _, err := browser.RequestEject(ctx, http.DefaultClient, c.baseURL+"/browser", browser.EjectRequest{SessionID: sessionID, WindowID: windowID}); err != nil {
+			log.Printf("[ERROR] eject window %s: %v", windowID, err)
+			return browserRequestFailedMsg{err}
+		}
+		return browserEjectedMsg{}
 	}
 }
 
