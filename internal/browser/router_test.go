@@ -282,3 +282,37 @@ func TestRouter_EjectRejectsIncompleteRequest(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, res.StatusCode, body)
 	}
 }
+
+func TestRouter_MoveTabMovesIntoTargetSession(t *testing.T) {
+	srv, m, driver := newTestServer(t)
+	m.Service.handleEvent(context.Background(), Event{Type: EventConnected})
+	src := driver.AddWindow("https://a.example.com", "https://b.example.com")
+	dst := driver.AddWindow("https://c.example.com")
+	require.NoError(t, m.Service.store.Add(&BrowserWindow{SessionID: 3, State: WindowOpen, DriverWindowID: src.ID}))
+	require.NoError(t, m.Service.store.Add(&BrowserWindow{SessionID: 4, State: WindowOpen, DriverWindowID: dst.ID}))
+
+	res, err := srv.Client().Post(srv.URL+"/move", "application/json", strings.NewReader(`{"session_id":3,"window_id":"`+src.ID+`","tab_id":"`+src.Tabs[0].ID+`","to_session_id":4}`))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	raw, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"window_id":"`+dst.ID+`","created":false}`, string(raw))
+}
+
+func TestRouter_MoveTabRejectsIncompleteRequest(t *testing.T) {
+	srv, m, _ := newTestServer(t)
+	m.Service.handleEvent(context.Background(), Event{Type: EventConnected})
+	for _, body := range []string{
+		`{"window_id":"w1","tab_id":"t1","to_session_id":4}`,
+		`{"session_id":3,"tab_id":"t1","to_session_id":4}`,
+		`{"session_id":3,"window_id":"w1","to_session_id":4}`,
+		`{"session_id":3,"window_id":"w1","tab_id":"t1"}`,
+		`{"session_id":3,"window_id":"w1","tab_id":"t1","to_session_id":3}`,
+	} {
+		res, err := srv.Client().Post(srv.URL+"/move", "application/json", strings.NewReader(body))
+		require.NoError(t, err)
+		res.Body.Close()
+		assert.Equal(t, http.StatusBadRequest, res.StatusCode, body)
+	}
+}

@@ -331,12 +331,12 @@ func TestSessionDetail_PluginsKeyOpensPickerAndSaves(t *testing.T) {
 	s.Bundles = []string{"go"}
 	m := bundleDetail(s)
 	m, _ = m.Update(runeKey("p"))
-	require.True(t, m.pickingBundles)
+	require.Equal(t, overlayBundles, m.overlay)
 	assert.Contains(t, m.View(), "[x] go")
 
 	m, cmd := m.Update(bundlepicker.SelectedMsg{Bundles: []string{"docs"}})
 	assert.Equal(t, []string{"provider.setSessionBundlesIntentMsg"}, uitest.MsgTypes(cmd))
-	assert.False(t, m.pickingBundles)
+	assert.Equal(t, overlayNone, m.overlay)
 	out := m.View()
 	assert.Contains(t, out, "my-feature")
 	assert.NotContains(t, out, "[x]")
@@ -347,7 +347,7 @@ func TestSessionDetail_PluginsKeyIgnoredWhenDeleted(t *testing.T) {
 	s.Status = session.StatusDeleted
 	m := bundleDetail(s)
 	m, _ = m.Update(runeKey("p"))
-	assert.False(t, m.pickingBundles)
+	assert.Equal(t, overlayNone, m.overlay)
 }
 
 func TestSessionDetail_EscClosesBundlePicker(t *testing.T) {
@@ -357,10 +357,10 @@ func TestSessionDetail_EscClosesBundlePicker(t *testing.T) {
 	msgs := uitest.Drain(cmd)
 	require.Len(t, msgs, 1)
 	assert.IsType(t, bundlepicker.ClosedMsg{}, msgs[0])
-	assert.True(t, m.pickingBundles)
+	assert.Equal(t, overlayBundles, m.overlay)
 
 	m, _ = m.Update(msgs[0])
-	assert.False(t, m.pickingBundles)
+	assert.Equal(t, overlayNone, m.overlay)
 }
 
 func TestSessionDetail_PickerKeysDontTriggerActions(t *testing.T) {
@@ -368,7 +368,7 @@ func TestSessionDetail_PickerKeysDontTriggerActions(t *testing.T) {
 	m := bundleDetail(s)
 	m, _ = m.Update(runeKey("p"))
 	m, _ = m.Update(runeKey("d"))
-	assert.True(t, m.pickingBundles)
+	assert.Equal(t, overlayBundles, m.overlay)
 	assert.Equal(t, uint(0), m.pendingDeleteID)
 	assert.True(t, m.Status().Empty())
 }
@@ -408,7 +408,7 @@ func TestSessionDetail_LateCatalogRefreshesOpenPicker(t *testing.T) {
 	m, _ := New().Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = selectIn(m, s).Focus()
 	m, _ = m.Update(runeKey("p"))
-	require.True(t, m.pickingBundles)
+	require.Equal(t, overlayBundles, m.overlay)
 	assert.Contains(t, m.View(), "unknown bundle")
 	m, _ = m.Update(provider.BundlesLoadedMsg{Bundles: bundleCatalog()})
 	out := m.View()
@@ -421,20 +421,20 @@ func TestSessionDetail_BundlePickerClosesWhenSessionGone(t *testing.T) {
 	open := func() Model {
 		m := bundleDetail(makeActiveSession())
 		m, _ = m.Update(runeKey("p"))
-		require.True(t, m.pickingBundles)
+		require.Equal(t, overlayBundles, m.overlay)
 		return m
 	}
 
 	m := selectIn(open(), makeArchivedSession())
-	assert.False(t, m.pickingBundles)
+	assert.Equal(t, overlayNone, m.overlay)
 
 	deleted := makeActiveSession()
 	deleted.Status = session.StatusDeleted
 	m = selectIn(open(), deleted)
-	assert.False(t, m.pickingBundles)
+	assert.Equal(t, overlayNone, m.overlay)
 
 	m = selectIn(open(), makeActiveSession())
-	assert.True(t, m.pickingBundles)
+	assert.Equal(t, overlayBundles, m.overlay)
 }
 
 func TestSessionDetail_UnknownBundleMarked(t *testing.T) {

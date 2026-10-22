@@ -1,4 +1,4 @@
-const PROTOCOL = 2;
+const PROTOCOL = 3;
 const api = globalThis.browser ?? globalThis.chrome;
 const BROWSER = location.protocol === "moz-extension:" ? "firefox" : "chrome";
 const ENDPOINT = `ws://127.0.0.1:3333/browser/${BROWSER}`;
@@ -115,6 +115,11 @@ const methods = {
     await api.windows.remove(windowId);
     return {};
   },
+  "tabs.move": async ({ tabId, windowId }) => {
+    await api.tabs.move(tabId, { windowId, index: -1 });
+    return {};
+  },
+  "tabs.detach": async ({ tabId }) => toWindow(await api.windows.create({ tabId, focused: false, type: "normal" })),
   "tabs.create": async ({ windowId, url }) => toTab(await api.tabs.create({ windowId, url, active: true })),
   "tabs.activate": async ({ tabId }) => {
     await api.tabs.update(tabId, { active: true });

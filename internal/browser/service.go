@@ -766,7 +766,7 @@ func (s *Service) restoreRow(ctx context.Context, r BrowserWindow, deadline time
 		return Window{}, err
 	}
 	before, track := s.wmSnapshot(ctx)
-	w, err := s.createQuietly(ctx, urls)
+	w, err := s.createQuietly(ctx, func() (Window, error) { return s.driver.CreateWindow(ctx, urls, false) })
 	if err != nil {
 		return Window{}, err
 	}
@@ -808,28 +808,31 @@ func (s *Service) provideAttached(ctx context.Context, attached uint, live []Win
 		if len(restored) > 0 || !ensure {
 			return len(restored) > 0, err
 		}
-		created, createErr := s.createSessionWindow(ctx, attached, live)
-		return created, errors.Join(err, createErr)
+		_, createErr := s.createSessionWindow(ctx, attached, live, func() (Window, error) { return s.driver.CreateWindow(ctx, nil, false) })
+		return createErr == nil, errors.Join(err, createErr)
 	})
 }
 
-func (s *Service) createSessionWindow(ctx context.Context, sessionID uint, live []Window) (bool, error) {
+func (s *Service) createSessionWindow(ctx context.Context, sessionID uint, live []Window, create func() (Window, error)) (Window, error) {
 	before, track := s.wmSnapshot(ctx)
-	w, err := s.createQuietly(ctx, nil)
+	w, err := s.createQuietly(ctx, create)
 	if err != nil {
-		return false, driverErr(err)
+		return Window{}, driverErr(err)
 	}
 	now := s.now()
-	if err := s.store.Add(&BrowserWindow{SessionID: sessionID, State: WindowOpen, DriverWindowID: w.ID, LastFocusedAt: now, SnapshotAt: now}); err != nil {
-		if closeErr := s.closeWindow(ctx, w.ID); closeErr != nil {
-			slog.WarnContext(ctx, "browser: close unrecorded session window failed", "window", w.ID, "error", closeErr)
+	row := &BrowserWindow{SessionID: sessionID, State: WindowOpen, DriverWindowID: w.ID, LastFocusedAt: now, Tabs: savedTabs(w), SnapshotAt: now}
+	if err := s.store.Add(row); err != nil {
+		if len(row.Tabs) == 0 {
+			if closeErr := s.closeWindow(ctx, w.ID); closeErr != nil {
+				slog.WarnContext(ctx, "browser: close unrecorded session window failed", "window", w.ID, "error", closeErr)
+			}
 		}
-		return false, err
+		return Window{}, err
 	}
 	if track {
 		s.linkCreated(ctx, w.ID, before, live, time.Now().Add(createdLinkWait))
 	}
-	return true, nil
+	return w, nil
 }
 
 func (s *Service) keepFocus(ctx context.Context, act func() (bool, error)) (bool, error) {
@@ -847,8 +850,8 @@ func (s *Service) keepFocus(ctx context.Context, act func() (bool, error)) (bool
 	return act()
 }
 
-func (s *Service) createQuietly(ctx context.Context, urls []string) (Window, error) {
-	w, err := s.driver.CreateWindow(ctx, urls, false)
+func (s *Service) createQuietly(ctx context.Context, create func() (Window, error)) (Window, error) {
+	w, err := create()
 	if err == nil && s.refocusTo != "" {
 		s.refocus(ctx, s.refocusTo)
 	}

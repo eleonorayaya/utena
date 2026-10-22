@@ -802,6 +802,18 @@ func (c *client) ejectWindow(sessionID uint, windowID string) tea.Cmd {
 	}
 }
 
+func (c *client) moveTab(req browser.MoveTabRequest) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if _, err := browser.RequestMoveTab(ctx, http.DefaultClient, c.baseURL+"/browser", req); err != nil {
+			log.Printf("[ERROR] move tab %s/%s to session %d: %v", req.WindowID, req.TabID, req.ToSessionID, err)
+			return browserRequestFailedMsg{err}
+		}
+		return TabMovedMsg{ToSessionID: req.ToSessionID}
+	}
+}
+
 func (c *client) openURL(sessionID uint, link string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

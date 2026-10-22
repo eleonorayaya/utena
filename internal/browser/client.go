@@ -22,6 +22,10 @@ func RequestEject(ctx context.Context, client *http.Client, baseURL string, req 
 	return postJSON[EjectRequest, EjectResult](ctx, client, baseURL+"/eject", req)
 }
 
+func RequestMoveTab(ctx context.Context, client *http.Client, baseURL string, req MoveTabRequest) (MoveTabResult, error) {
+	return postJSON[MoveTabRequest, MoveTabResult](ctx, client, baseURL+"/move", req)
+}
+
 func postJSON[Req, Res any](ctx context.Context, client *http.Client, url string, req Req) (Res, error) {
 	var out Res
 	body, err := json.Marshal(req)

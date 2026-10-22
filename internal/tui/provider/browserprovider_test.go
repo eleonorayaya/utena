@@ -191,3 +191,36 @@ func TestBrowserProvider_EjectIntentRefetchesAfterEject(t *testing.T) {
 	assert.Equal(t, browserStateLoadedMsg{state: sampleView()}, cmd())
 	assert.Equal(t, []string{"POST /browser/eject", "GET /browser/sessions"}, paths)
 }
+
+func TestMoveTab_PostsRequest(t *testing.T) {
+	var got browser.MoveTabRequest
+	var path string
+	srv := browserServer(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.Method + " " + r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_ = json.NewEncoder(w).Encode(browser.MoveTabResult{WindowID: "w9", Created: true})
+	})
+	msg := newClient(srv.URL).moveTab(browser.MoveTabRequest{SessionID: 7, WindowID: "w1", TabID: "t1", ToSessionID: 9})()
+	assert.Equal(t, "POST /browser/move", path)
+	assert.Equal(t, browser.MoveTabRequest{SessionID: 7, WindowID: "w1", TabID: "t1", ToSessionID: 9}, got)
+	assert.Equal(t, TabMovedMsg{ToSessionID: 9}, msg)
+}
+
+func TestMoveTab_ErrorReturnsFailure(t *testing.T) {
+	srv := browserServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	msg, ok := newClient(srv.URL).moveTab(browser.MoveTabRequest{SessionID: 7, WindowID: "w1", TabID: "t1", ToSessionID: 9})().(browserRequestFailedMsg)
+	require.True(t, ok)
+	assert.ErrorIs(t, msg.err, browser.ErrUnavailable)
+}
+
+func TestBrowserProvider_TabMovedRefetchesState(t *testing.T) {
+	srv := browserServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(sampleView())
+	})
+	p := newBrowserProvider(newClient(srv.URL))
+	_, cmd := p.Update(TabMovedMsg{ToSessionID: 9})
+	require.NotNil(t, cmd)
+	assert.Equal(t, browserStateLoadedMsg{state: sampleView()}, cmd())
+}

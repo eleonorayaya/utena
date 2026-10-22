@@ -78,3 +78,21 @@ func (c *Controller) HandleEject(w http.ResponseWriter, r *http.Request) {
 	}
 	render.JSON(w, r, res)
 }
+
+func (c *Controller) HandleMoveTab(w http.ResponseWriter, r *http.Request) {
+	req := &MoveTabRequest{}
+	if err := render.Bind(r, req); err != nil {
+		common.RenderError(w, r, common.NewInvalidRequest(err.Error()))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+	defer cancel()
+
+	res, err := c.service.MoveTab(ctx, *req)
+	if err != nil {
+		common.RenderError(w, r, err)
+		return
+	}
+	render.JSON(w, r, res)
+}

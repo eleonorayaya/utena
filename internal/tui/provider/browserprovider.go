@@ -28,6 +28,18 @@ func EjectWindow(sessionID uint, windowID string) tea.Cmd {
 	return func() tea.Msg { return EjectWindowIntentMsg{SessionID: sessionID, WindowID: windowID} }
 }
 
+type MoveTabIntentMsg struct {
+	browser.MoveTabRequest
+}
+
+func MoveTab(req browser.MoveTabRequest) tea.Cmd {
+	return func() tea.Msg { return MoveTabIntentMsg{req} }
+}
+
+type TabMovedMsg struct {
+	ToSessionID uint
+}
+
 func RequestBrowserState() tea.Cmd {
 	return func() tea.Msg { return requestBrowserStateMsg{} }
 }
@@ -62,7 +74,7 @@ func (p browserProvider) emitState() tea.Cmd {
 
 func (p browserProvider) Update(msg tea.Msg) (browserProvider, tea.Cmd) {
 	switch msg := msg.(type) {
-	case sessionsLoadedMsg, browserFocusedMsg, browserEjectedMsg:
+	case sessionsLoadedMsg, browserFocusedMsg, browserEjectedMsg, TabMovedMsg:
 		return p, p.client.fetchBrowserState()
 	case browserRequestFailedMsg:
 		err := msg.err
@@ -76,6 +88,8 @@ func (p browserProvider) Update(msg tea.Msg) (browserProvider, tea.Cmd) {
 		return p, p.client.focusTab(msg.SessionID, msg.WindowID, msg.TabID)
 	case EjectWindowIntentMsg:
 		return p, p.client.ejectWindow(msg.SessionID, msg.WindowID)
+	case MoveTabIntentMsg:
+		return p, p.client.moveTab(msg.MoveTabRequest)
 	}
 	return p, nil
 }

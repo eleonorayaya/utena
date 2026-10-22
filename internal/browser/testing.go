@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 )
@@ -18,6 +19,7 @@ type FakeDriver struct {
 	ListErr   error
 	CreateErr func(urls []string) error
 	CloseErr  error
+	MoveErr   error
 	OnCreate  func(Window)
 	OnFocus   func(windowID string)
 	OnClose   func(windowID string)
@@ -250,6 +252,65 @@ func (f *FakeDriver) CloseWindow(ctx context.Context, windowID string) error {
 		onClose(windowID)
 	}
 	return nil
+}
+
+func (f *FakeDriver) windowIndexLocked(id string) int {
+	return slices.IndexFunc(f.windows, func(w Window) bool { return w.ID == id })
+}
+
+func (f *FakeDriver) takeTabLocked(windowID, tabID string) (Tab, error) {
+	if f.MoveErr != nil {
+		return Tab{}, f.MoveErr
+	}
+	i := f.windowIndexLocked(windowID)
+	j := -1
+	if i >= 0 {
+		j = slices.IndexFunc(f.windows[i].Tabs, func(t Tab) bool { return t.ID == tabID })
+	}
+	if j < 0 {
+		return Tab{}, fmt.Errorf("no tab %s in window %s", tabID, windowID)
+	}
+	tab := f.windows[i].Tabs[j]
+	tab.Active = false
+	f.windows[i].Tabs = slices.Delete(f.windows[i].Tabs, j, j+1)
+	if len(f.windows[i].Tabs) == 0 {
+		f.windows = slices.Delete(f.windows, i, i+1)
+	}
+	return tab, nil
+}
+
+func (f *FakeDriver) MoveTab(ctx context.Context, fromWindowID, tabID, toWindowID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.windowIndexLocked(toWindowID) < 0 {
+		return fmt.Errorf("no window %s", toWindowID)
+	}
+	tab, err := f.takeTabLocked(fromWindowID, tabID)
+	if err != nil {
+		return err
+	}
+	i := f.windowIndexLocked(toWindowID)
+	f.windows[i].Tabs = append(f.windows[i].Tabs, tab)
+	return nil
+}
+
+func (f *FakeDriver) DetachTab(ctx context.Context, fromWindowID, tabID string) (Window, error) {
+	f.mu.Lock()
+	tab, err := f.takeTabLocked(fromWindowID, tabID)
+	if err != nil {
+		f.mu.Unlock()
+		return Window{}, err
+	}
+	tab.Active = true
+	w := Window{ID: f.id("w"), Tabs: []Tab{tab}}
+	f.windows = append(f.windows, w)
+	w.Tabs = append([]Tab(nil), w.Tabs...)
+	onCreate := f.OnCreate
+	f.mu.Unlock()
+	if onCreate != nil {
+		onCreate(w)
+	}
+	return w, nil
 }
 
 func (f *FakeDriver) Subscribe(ctx context.Context, onEvent func(Event)) error {

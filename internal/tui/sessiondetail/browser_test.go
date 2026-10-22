@@ -322,7 +322,7 @@ func TestDetail_ShortHelpShowsNextWhenTabsSelectable(t *testing.T) {
 	for _, b := range m.Keys().ShortHelp() {
 		got = append(got, b.Help().Key+" "+b.Help().Desc)
 	}
-	assert.Equal(t, []string{"enter/o open tab", "e eject window", "↓/j next item", "b block", "a archive", "tab/esc sessions"}, got)
+	assert.Equal(t, []string{"enter/o open tab", "e eject window", "m move tab", "↓/j next item", "b block", "a archive", "tab/esc sessions"}, got)
 
 	m = focusedOn(makeActiveSession())
 	assert.Len(t, m.Keys().ShortHelp(), 4)
@@ -371,4 +371,62 @@ func TestBrowserCursor_EjectWithoutTabSelectedDoesNothing(t *testing.T) {
 	m, cmd := m.Update(runeKey("e"))
 	assert.Nil(t, cmd)
 	assert.Equal(t, "select a browser tab to eject its window", m.Status().Text)
+}
+
+func withSessions(m Model, ss ...session.Session) Model {
+	m, _ = m.Update(provider.SessionsStateUpdatedMsg{Sessions: ss})
+	return m
+}
+
+func otherSession(id uint, name string, status session.SessionStatus) session.Session {
+	return session.Session{Model: gorm.Model{ID: id}, Name: name, Status: status}
+}
+
+func TestBrowserCursor_MoveTabPicksTargetSession(t *testing.T) {
+	self := makeActiveSession()
+	m := detailWith(self, oneWindow())
+	m = withSessions(m, self, otherSession(2, "other", session.StatusActive), otherSession(3, "gone", session.StatusArchived))
+	m, _ = m.Update(runeKey("j"))
+	assert.Contains(t, m.Keys().ShortHelp(), keys.Move)
+
+	m, cmd := m.Update(runeKey("m"))
+	assert.Nil(t, cmd)
+	require.Equal(t, overlaySessions, m.overlay)
+	assert.Contains(t, m.View(), "Move tab to session")
+	assert.Contains(t, m.View(), "other")
+	assert.NotContains(t, m.View(), "gone")
+	assert.NotContains(t, m.View(), "my-feature")
+
+	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	m, cmd = m.Update(cmd())
+	assert.Equal(t, overlayNone, m.overlay)
+	require.NotNil(t, cmd)
+	assert.Equal(t, provider.MoveTabIntentMsg{MoveTabRequest: browser.MoveTabRequest{SessionID: 1, WindowID: "w1", TabID: "t2", ToSessionID: 2}}, cmd())
+	assert.Equal(t, "moving tab to other…", m.Status().Text)
+
+	m, _ = m.Update(provider.TabMovedMsg{ToSessionID: 2})
+	assert.Equal(t, "tab moved to other", m.Status().Text)
+}
+
+func TestBrowserCursor_MovePickerEscReturnsToPanel(t *testing.T) {
+	m := detailWith(makeActiveSession(), oneWindow())
+	m = withSessions(m, otherSession(2, "other", session.StatusActive))
+	m, _ = m.Update(runeKey("m"))
+	require.Equal(t, overlaySessions, m.overlay)
+
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	require.NotNil(t, cmd)
+	m, _ = m.Update(cmd())
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.True(t, m.Focused())
+}
+
+func TestBrowserCursor_MoveWithoutTabSelectedDoesNothing(t *testing.T) {
+	m := detailWith(makeBlockedSession(), oneWindow())
+	assert.NotContains(t, m.Keys().ShortHelp(), keys.Move)
+	m, cmd := m.Update(runeKey("m"))
+	assert.Nil(t, cmd)
+	assert.Equal(t, overlayNone, m.overlay)
+	assert.Equal(t, "select a browser tab to move it", m.Status().Text)
 }

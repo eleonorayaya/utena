@@ -24,6 +24,7 @@ func (rt *Router) Routes() chi.Router {
 		r.Get("/sessions", rt.controller.HandleSessions)
 		r.Post("/focus", rt.controller.HandleFocus)
 		r.Post("/eject", rt.controller.HandleEject)
+		r.Post("/move", rt.controller.HandleMoveTab)
 	})
 	if hd, ok := rt.driver.(HTTPDriver); ok {
 		r.Handle("/"+hd.Name(), hd.Handler())

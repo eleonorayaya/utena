@@ -14,8 +14,17 @@ import (
 	"github.com/eleonorayaya/utena/internal/tui/bundlepicker"
 	"github.com/eleonorayaya/utena/internal/tui/provider"
 	"github.com/eleonorayaya/utena/internal/tui/router"
+	"github.com/eleonorayaya/utena/internal/tui/sessionpicker"
 	"github.com/eleonorayaya/utena/internal/tui/sessionprogress"
 	"github.com/eleonorayaya/utena/internal/tui/ui"
+)
+
+type overlayKind int
+
+const (
+	overlayNone overlayKind = iota
+	overlayBundles
+	overlaySessions
 )
 
 type Model struct {
@@ -31,11 +40,14 @@ type Model struct {
 	statusMsg              string
 	statusKind             ui.StatusKind
 	bundlePicker           bundlepicker.Model
-	pickingBundles         bool
+	overlay                overlayKind
+	sessions               []session.Session
+	sessionPicker          sessionpicker.Model
+	moving                 tabRef
 }
 
 func New() Model {
-	return Model{bundlePicker: bundlepicker.New("Plugin bundles"), cursor: -1}
+	return Model{bundlePicker: bundlepicker.New("Plugin bundles"), sessionPicker: sessionpicker.New("Move tab to session"), cursor: -1}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -46,7 +58,13 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) CapturesText() bool {
-	return m.pickingBundles && m.bundlePicker.CapturesText()
+	switch m.overlay {
+	case overlayBundles:
+		return m.bundlePicker.CapturesText()
+	case overlaySessions:
+		return m.sessionPicker.CapturesText()
+	}
+	return false
 }
 
 func (m Model) Focused() bool {
@@ -66,7 +84,7 @@ func (m *Model) setStatus(text string, kind ui.StatusKind) {
 }
 
 func (m Model) Status() ui.Status {
-	if m.pickingBundles {
+	if m.overlay != overlayNone {
 		return ui.Status{}
 	}
 	return ui.Status{Text: m.statusMsg, Kind: m.statusKind}
@@ -87,7 +105,7 @@ func (m Model) Select(s *session.Session) Model {
 	sel := m.currentSelection()
 	m.sess = &fresh
 	if fresh.Status == session.StatusDeleted {
-		m.pickingBundles = false
+		m.overlay = overlayNone
 	}
 	m.restoreSelection(sel)
 	m.ensureVisible()
@@ -104,7 +122,7 @@ func (m *Model) reset() {
 func (m *Model) clearTransient() {
 	m.pendingDeleteID = 0
 	m.pendingBlockerDeleteID = 0
-	m.pickingBundles = false
+	m.overlay = overlayNone
 	m.offset = 0
 	m.setStatus("", ui.StatusInfo)
 }
@@ -342,8 +360,11 @@ func (m Model) selectedPRURL() string {
 }
 
 func (m Model) Keys() help.KeyMap {
-	if m.pickingBundles {
+	switch m.overlay {
+	case overlayBundles:
 		return m.bundlePicker.Keys()
+	case overlaySessions:
+		return m.sessionPicker.Keys()
 	}
 	k := keys
 	items := m.items()
@@ -353,6 +374,7 @@ func (m Model) Keys() help.KeyMap {
 			k.Activate = openTabKey
 			k.Open = openTabKey
 			k.showEject = true
+			k.showMove = true
 		case prItem:
 			k.Open = openPRKey
 			k.showOpen = true
@@ -368,7 +390,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.bundlePicker.SetSize(msg.Width, msg.Height)
+		m.sessionPicker.SetSize(msg.Width, msg.Height)
 		m.ensureVisible()
+		return m, nil
+	case provider.SessionsStateUpdatedMsg:
+		m.sessions = msg.Sessions
+		return m, nil
+	case sessionpicker.SelectedMsg:
+		m.overlay = overlayNone
+		if m.sess == nil {
+			return m, nil
+		}
+		m.setStatus("moving tab to "+msg.Session.DisplayLabel()+"…", ui.StatusInfo)
+		return m, provider.MoveTab(browser.MoveTabRequest{SessionID: m.sess.ID, WindowID: m.moving.windowID, TabID: m.moving.tabID, ToSessionID: msg.Session.ID})
+	case sessionpicker.ClosedMsg:
+		m.overlay = overlayNone
+		return m, nil
+	case provider.TabMovedMsg:
+		m.setStatus("tab moved to "+m.sessionLabel(msg.ToSessionID), ui.StatusInfo)
 		return m, nil
 	case provider.BundlesLoadedMsg:
 		if msg.Err == nil {
@@ -381,13 +420,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	case bundlepicker.SelectedMsg:
-		m.pickingBundles = false
+		m.overlay = overlayNone
 		if m.sess != nil {
 			return m, provider.SetSessionBundles(m.sess.ID, msg.Bundles)
 		}
 		return m, nil
 	case bundlepicker.ClosedMsg:
-		m.pickingBundles = false
+		m.overlay = overlayNone
 		return m, nil
 	case provider.BrowserStateUpdatedMsg:
 		if m.sess == nil {
@@ -400,19 +439,40 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.ensureVisible()
 		return m, nil
 	case tea.KeyMsg:
-		if !m.pickingBundles {
+		if m.overlay == overlayNone {
 			var cmd tea.Cmd
 			m, cmd = m.onKeyMsg(msg)
 			m.ensureVisible()
 			return m, cmd
 		}
 	}
-	if m.pickingBundles {
-		var cmd tea.Cmd
+	var cmd tea.Cmd
+	switch m.overlay {
+	case overlayBundles:
 		m.bundlePicker, cmd = m.bundlePicker.Update(msg)
-		return m, cmd
+	case overlaySessions:
+		m.sessionPicker, cmd = m.sessionPicker.Update(msg)
 	}
-	return m, nil
+	return m, cmd
+}
+
+func (m Model) moveTargets() []session.Session {
+	var out []session.Session
+	for _, s := range m.sessions {
+		if s.ID != m.sess.ID && s.CanArchive() {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (m Model) sessionLabel(id uint) string {
+	for _, s := range m.sessions {
+		if s.ID == id {
+			return s.DisplayLabel()
+		}
+	}
+	return fmt.Sprintf("session %d", id)
 }
 
 func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -506,6 +566,17 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.setStatus("select a browser tab to eject its window", ui.StatusInfo)
 		return m, nil
 
+	case key.Matches(msg, keys.Move):
+		t := m.selectedTab()
+		if t == nil {
+			m.setStatus("select a browser tab to move it", ui.StatusInfo)
+			return m, nil
+		}
+		m.moving = *t
+		m.sessionPicker = m.sessionPicker.Open(m.moveTargets())
+		m.overlay = overlaySessions
+		return m, nil
+
 	case key.Matches(msg, keys.Archive):
 		if !m.sess.CanArchive() {
 			return m, nil
@@ -553,7 +624,7 @@ func (m Model) onKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.bundlePicker = m.bundlePicker.Open(m.sess.Bundles)
-		m.pickingBundles = true
+		m.overlay = overlayBundles
 		return m, nil
 	}
 

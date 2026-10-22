@@ -296,7 +296,7 @@ func (d *Driver) ActivateTab(ctx context.Context, windowID, tabID string) error 
 		return err
 	}
 	if out != "ok" {
-		return fmt.Errorf("chromescript: no tab %s in window %s", tabID, windowID)
+		return missingTab(tabID, windowID)
 	}
 	return nil
 }
@@ -320,6 +320,65 @@ end run`
 func (d *Driver) CloseWindow(ctx context.Context, windowID string) error {
 	_, err := d.osascript(ctx, closeScript, windowID)
 	return err
+}
+
+const findTabLines = `
+		set src to window id ((item 1 of argv) as integer)
+		set tids to id of every tab of src
+		set idx to 0
+		repeat with i from 1 to count of tids
+			if ((item i of tids) as text) is (item 2 of argv) then set idx to i
+		end repeat
+		if idx is 0 then return "missing"`
+
+const moveTabScript = `on run argv
+	tell application id "com.google.Chrome"` + findTabLines + `
+		move tab idx of src to end of tabs of window id ((item 3 of argv) as integer)
+		return "ok"
+	end tell
+end run`
+
+const detachTabScript = `on run argv
+	tell application id "com.google.Chrome"` + findTabLines + `
+		set dst to make new window
+		try
+			move tab idx of src to end of tabs of dst
+		on error errMsg number errNum
+			close dst
+			error errMsg number errNum
+		end try
+		close tab 1 of dst
+		return id of dst
+	end tell
+end run`
+
+func missingTab(tabID, windowID string) error {
+	return fmt.Errorf("chromescript: no tab %s in window %s", tabID, windowID)
+}
+
+func (d *Driver) MoveTab(ctx context.Context, fromWindowID, tabID, toWindowID string) error {
+	out, err := d.osascript(ctx, moveTabScript, fromWindowID, tabID, toWindowID)
+	if err != nil {
+		return err
+	}
+	if out != "ok" {
+		return missingTab(tabID, fromWindowID)
+	}
+	return nil
+}
+
+func (d *Driver) DetachTab(ctx context.Context, fromWindowID, tabID string) (browser.Window, error) {
+	if _, err := d.running(ctx); err != nil {
+		return browser.Window{}, err
+	}
+	id, err := d.osascript(ctx, detachTabScript, fromWindowID, tabID)
+	if err != nil {
+		return browser.Window{}, err
+	}
+	if id == "missing" {
+		return browser.Window{}, missingTab(tabID, fromWindowID)
+	}
+	return d.window(ctx, id)
 }
 
 func (d *Driver) runID(ctx context.Context) string {

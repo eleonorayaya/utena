@@ -86,8 +86,11 @@ func (m Model) View() string {
 	if m.sess == nil {
 		return ui.FitHeight(mutedStyle().Render("Select a session"), m.height)
 	}
-	if m.pickingBundles {
+	switch m.overlay {
+	case overlayBundles:
 		return ui.FitHeight(m.bundlePicker.View(), m.height)
+	case overlaySessions:
+		return ui.FitHeight(m.sessionPicker.View(), m.height)
 	}
 	body, _ := m.body(width)
 	lines := append([]string{headerBand(*m.sess, width)}, body[min(m.offset, len(body)):]...)
