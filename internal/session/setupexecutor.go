@@ -393,6 +393,10 @@ func (e *setupExecution) execInstallDeps(ctx context.Context, def stepDef) error
 		return fmt.Errorf("install_deps: worktree path unavailable")
 	}
 	worktreePath := result.worktreePath
+	if result.adopted {
+		slog.InfoContext(ctx, "install_deps: skipped for an adopted checkout", "dir", worktreePath)
+		return nil
+	}
 
 	pm := def.PackageManager
 	if pm == "" || pm == packageManagerAuto {
