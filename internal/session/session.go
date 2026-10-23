@@ -76,6 +76,7 @@ type Session struct {
 	RemoteAttention claude.ClaudeSessionStatus `json:"remote_attention_status,omitempty"`
 	RemoteRepoID    *uint                      `json:"remote_repo_id,omitempty"`
 	RemoteSyncedAt  *time.Time                 `json:"remote_synced_at,omitempty"`
+	RemoteCreate    *RemoteCreate              `json:"-" gorm:"serializer:json"`
 }
 
 func (s *Session) IsCoder() bool {

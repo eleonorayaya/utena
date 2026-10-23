@@ -168,6 +168,14 @@ func (s *Service) installKeepaliveToken(ctx context.Context, workspace string) e
 	return nil
 }
 
+func (s *Service) removeKeepaliveToken(ctx context.Context, workspace string) {
+	bctx, cancel := context.WithTimeout(ctx, bestEffortTimeout)
+	defer cancel()
+	if _, err := s.coder(bctx, "tokens", "remove", tokenName(workspace)); err != nil {
+		slog.Warn("coder: delete keepalive token failed", "workspace", workspace, "error", err)
+	}
+}
+
 func repoName(repo string) (string, error) {
 	owner, name, ok := strings.Cut(repo, "/")
 	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
@@ -187,6 +195,13 @@ func (s *Service) Create(ctx context.Context, in session.RemoteCreate) error {
 	defer s.lock(in.Workspace)()
 	p := newProgress(s.sessions, in.SessionID, createStages)
 	if err := p.run(stepBuild, func() error {
+		if in.Resume {
+			if _, err := s.workspaceID(ctx, in.Workspace); err == nil {
+				return nil
+			} else if !errors.Is(err, errWorkspaceNotFound) {
+				return fmt.Errorf("look up workspace: %w", err)
+			}
+		}
 		if _, err := s.coder(ctx, s.CreateArgs(in.Workspace, in.Repo)...); err != nil {
 			return fmt.Errorf("coder create: %w", err)
 		}
@@ -197,7 +212,12 @@ func (s *Service) Create(ctx context.Context, in session.RemoteCreate) error {
 	if err := p.run(stepAgent, func() error { return s.waitForAgent(ctx, in.Workspace) }); err != nil {
 		return err
 	}
-	if err := p.run(stepToken, func() error { return s.installKeepaliveToken(ctx, in.Workspace) }); err != nil {
+	if err := p.run(stepToken, func() error {
+		if in.Resume {
+			s.removeKeepaliveToken(ctx, in.Workspace)
+		}
+		return s.installKeepaliveToken(ctx, in.Workspace)
+	}); err != nil {
 		return err
 	}
 	var follower *FollowerClient
@@ -221,6 +241,10 @@ func (s *Service) Create(ctx context.Context, in session.RemoteCreate) error {
 	}
 	var remoteID uint
 	if err := p.run(stepSession, func() error {
+		if in.RemoteSessionID != nil {
+			remoteID = *in.RemoteSessionID
+			return nil
+		}
 		leaderID := in.SessionID
 		created, err := follower.CreateSession(ctx, session.CreateSessionRequest{
 			Name: in.Workspace,
@@ -354,11 +378,7 @@ func (s *Service) Delete(ctx context.Context, sess *session.Session) error {
 	}
 	s.conns.Release(ws)
 	s.setBusy(ws, false)
-	bctx, cancel := context.WithTimeout(ctx, bestEffortTimeout)
-	if _, err := s.coder(bctx, "tokens", "remove", tokenName(ws)); err != nil {
-		slog.Warn("coder: delete keepalive token failed", "workspace", ws, "error", err)
-	}
-	cancel()
+	s.removeKeepaliveToken(ctx, ws)
 	if _, err := s.coder(ctx, "delete", ws, "-y"); err != nil {
 		if _, lookupErr := s.workspaceID(ctx, ws); errors.Is(lookupErr, errWorkspaceNotFound) {
 			return nil

@@ -28,6 +28,8 @@ type RemoteCreate struct {
 	LeaderWorkspaceID uint
 	Spec              WorkspaceBranchSpec
 	Bundles           []string
+	Resume            bool  `json:"-"`
+	RemoteSessionID   *uint `json:"-"`
 }
 
 type RemoteState struct {
@@ -142,6 +144,13 @@ func (s *SessionService) createCoderSession(ctx context.Context, name string, sl
 		return nil, common.NewInvalidRequest(err.Error())
 	}
 
+	in := RemoteCreate{
+		Workspace:         wsName,
+		Repo:              repo.FullName,
+		LeaderWorkspaceID: slot.ws.ID,
+		Spec:              slot.spec,
+		Bundles:           input.Bundles,
+	}
 	sess := &Session{
 		Name:           name,
 		Status:         StatusCreating,
@@ -150,6 +159,7 @@ func (s *SessionService) createCoderSession(ctx context.Context, name string, sl
 		Backend:        BackendCoder,
 		CoderWorkspace: wsName,
 		RemoteRepoID:   &repoID,
+		RemoteCreate:   &in,
 	}
 	if err := s.store.Add(sess); err != nil {
 		return nil, err
@@ -158,14 +168,7 @@ func (s *SessionService) createCoderSession(ctx context.Context, name string, sl
 		slog.WarnContext(ctx, "failed to touch workspace last-used timestamp", "workspace", slot.ws.ID, "error", err)
 	}
 
-	in := RemoteCreate{
-		SessionID:         sess.ID,
-		Workspace:         wsName,
-		Repo:              repo.FullName,
-		LeaderWorkspaceID: slot.ws.ID,
-		Spec:              slot.spec,
-		Bundles:           input.Bundles,
-	}
+	in.SessionID = sess.ID
 	go s.runCoderCreate(in)
 	return sess, nil
 }
@@ -176,14 +179,31 @@ func (s *SessionService) runCoderCreate(in RemoteCreate) {
 	err := s.remote.Create(ctx, in)
 	if err != nil {
 		slog.Warn("coder session create failed", "session", in.SessionID, "workspace", in.Workspace, "error", err)
-		if _, updErr := s.store.UpdateStatusWhere(in.SessionID, StatusBroken, err.Error(), StatusCreating); updErr != nil {
+		if _, updErr := s.store.FinishRemoteCreate(in.SessionID, StatusBroken, err.Error()); updErr != nil {
 			slog.Error("failed to persist broken coder session", "session", in.SessionID, "error", updErr)
 		}
 		return
 	}
-	if _, err := s.store.UpdateStatusWhere(in.SessionID, StatusActive, "", StatusCreating); err != nil {
+	if _, err := s.store.FinishRemoteCreate(in.SessionID, StatusActive, ""); err != nil {
 		slog.Error("failed to persist active coder session", "session", in.SessionID, "error", err)
 	}
+}
+
+func (s *SessionService) recoverCoderCreating(sess *Session) error {
+	if sess.RemoteCreate != nil && s.remote != nil {
+		in := *sess.RemoteCreate
+		in.SessionID = sess.ID
+		in.Resume = true
+		in.RemoteSessionID = sess.RemoteSessionID
+		slog.Info("resuming interrupted coder session create", "session", sess.ID, "workspace", sess.CoderWorkspace)
+		go s.runCoderCreate(in)
+		return nil
+	}
+	if sess.RemoteSessionID != nil {
+		_, err := s.store.UpdateStatusWhere(sess.ID, StatusArchived, "reactivation interrupted by daemon restart", StatusCreating)
+		return err
+	}
+	return s.markSessionBroken(sess, "creation interrupted by daemon restart")
 }
 
 func (s *SessionService) activateCoderSession(ctx context.Context, sess *Session) (*Session, error) {

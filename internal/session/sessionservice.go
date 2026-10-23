@@ -220,6 +220,12 @@ func (s *SessionService) recoverStuckCreatingSessions(sessions []Session) {
 		if sess.Status != StatusCreating {
 			continue
 		}
+		if sess.IsCoder() {
+			if err := s.recoverCoderCreating(sess); err != nil {
+				slog.Warn("failed to recover creating coder session", "session", sess.ID, "error", err)
+			}
+			continue
+		}
 		if err := s.markSessionBroken(sess, "creation interrupted by daemon restart"); err != nil {
 			slog.Warn("failed to recover stuck creating session", "session", sess.ID, "error", err)
 			continue

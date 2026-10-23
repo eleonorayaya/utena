@@ -206,6 +206,82 @@ func TestCoderCreate_FailureMarksBroken(t *testing.T) {
 	assert.Equal(t, "coder create: quota exceeded", got.StatusError)
 }
 
+func TestCoderCreate_ClearsCreateRequestWhenDone(t *testing.T) {
+	f := setupCoderService(t)
+	sess := f.create(t, "fix")
+	waitForStatus(t, f.store, sess.ID, StatusActive, 5*time.Second)
+	got, err := f.store.GetByID(sess.ID)
+	require.NoError(t, err)
+	assert.Nil(t, got.RemoteCreate)
+}
+
+func TestCoderCreate_ResumesAfterRestart(t *testing.T) {
+	f := setupCoderService(t)
+	f.backend.release = make(chan struct{})
+	sess := f.create(t, "fix")
+
+	require.NoError(t, f.svc.OnAppStart(context.Background()))
+	close(f.backend.release)
+	waitForStatus(t, f.store, sess.ID, StatusActive, 5*time.Second)
+
+	creates := f.backend.snapshot().creates
+	require.Len(t, creates, 2)
+	resumed := creates[0]
+	if !resumed.Resume {
+		resumed = creates[1]
+	}
+	assert.Equal(t, RemoteCreate{
+		SessionID:         sess.ID,
+		Workspace:         "fix",
+		Repo:              "acme/widgets",
+		LeaderWorkspaceID: f.wsID,
+		Spec:              WorkspaceBranchSpec{WorkspaceID: f.wsID, BaseBranch: "main"},
+		Resume:            true,
+	}, resumed)
+	got, err := f.store.GetByID(sess.ID)
+	require.NoError(t, err)
+	assert.Nil(t, got.RemoteCreate)
+}
+
+func TestCoderCreate_ResumePassesRecordedFollowerSession(t *testing.T) {
+	f := setupCoderService(t)
+	f.backend.release = make(chan struct{})
+	sess := f.create(t, "fix")
+	require.NoError(t, f.store.SetRemoteSessionID(sess.ID, 42))
+
+	require.NoError(t, f.svc.OnAppStart(context.Background()))
+	close(f.backend.release)
+	require.Eventually(t, func() bool { return len(f.backend.snapshot().creates) == 2 }, 5*time.Second, 5*time.Millisecond)
+	for _, c := range f.backend.snapshot().creates {
+		if c.Resume {
+			require.NotNil(t, c.RemoteSessionID)
+			assert.Equal(t, uint(42), *c.RemoteSessionID)
+		}
+	}
+}
+
+func TestCoderActivate_InterruptedResumeReturnsToArchived(t *testing.T) {
+	f := setupCoderService(t)
+	sess := addCoderSession(t, f.store, "ws", StatusCreating)
+	require.NoError(t, f.svc.OnAppStart(context.Background()))
+	got, err := f.store.GetByID(sess.ID)
+	require.NoError(t, err)
+	assert.Equal(t, StatusArchived, got.Status)
+	assert.Equal(t, "reactivation interrupted by daemon restart", got.StatusError)
+	assert.Empty(t, f.backend.snapshot().creates)
+}
+
+func TestCoderCreate_InterruptedWithoutRequestMarksBroken(t *testing.T) {
+	f := setupCoderService(t)
+	sess := &Session{Name: "ws", Status: StatusCreating, LastUsedAt: time.Now(), Backend: BackendCoder, CoderWorkspace: "ws"}
+	require.NoError(t, f.store.Add(sess))
+	require.NoError(t, f.svc.OnAppStart(context.Background()))
+	got, err := f.store.GetByID(sess.ID)
+	require.NoError(t, err)
+	assert.Equal(t, StatusBroken, got.Status)
+	assert.Equal(t, "creation interrupted by daemon restart", got.StatusError)
+}
+
 func TestCoderSession_SkipsLocalStartupChecks(t *testing.T) {
 	f := setupCoderService(t)
 	sess := addCoderSession(t, f.store, "ws", StatusActive)
