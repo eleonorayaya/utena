@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1200,4 +1201,83 @@ func TestRunSetup_BareWorkspace_WritesContainerClaudeSettings(t *testing.T) {
 	guide := filepath.Join(sessionRoot, "CLAUDE.md")
 	_, err = os.Stat(guide)
 	require.NoError(t, err, "session-root CLAUDE.md should exist")
+}
+
+func adoptedCheckout(t *testing.T, sessionName string, files map[string]string, gitCmds ...[]string) (string, string) {
+	t.Helper()
+	cloned := initTestRepo(t)
+	gitEnv := append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	for name, content := range files {
+		path := filepath.Join(cloned, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o755))
+	}
+	cmds := append([][]string{{"add", "."}, {"commit", "-m", "config"}, {"push"}}, gitCmds...)
+	for _, args := range cmds {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = cloned
+		cmd.Env = gitEnv
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+	sessionsRoot := t.TempDir()
+	repoPath := filepath.Join(sessionsRoot, sessionName, "git-repo")
+	require.NoError(t, os.MkdirAll(filepath.Dir(repoPath), 0o755))
+	require.NoError(t, os.Rename(cloned, repoPath))
+	return sessionsRoot, repoPath
+}
+
+func TestSessionService_CreateSession_AdoptsCheckoutAtSessionPath(t *testing.T) {
+	sessionsRoot, repoPath := adoptedCheckout(t, "adopted", map[string]string{
+		".utena/config.json": `{"setup_actions":[{"type":"install_deps","package_manager":"yarn"}]}`,
+	})
+
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+	service.sessionsRoot = sessionsRoot
+
+	sess := &Session{Name: "adopted"}
+	ctx := context.Background()
+	require.NoError(t, createSessionLegacy(ctx, service, sess, wsGitID, "", "main"))
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 10*time.Second)
+
+	current, err := exec.Command("git", "-C", repoPath, "branch", "--show-current").Output()
+	require.NoError(t, err)
+	require.Equal(t, "eqt/adopted", strings.TrimSpace(string(current)))
+	_, err = os.Stat(filepath.Join(repoPath, ".worktrees"))
+	require.True(t, os.IsNotExist(err), "no separate worktree is added")
+
+	got, err := sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Worktrees, 1)
+	require.Equal(t, repoPath, got.Worktrees[0].Worktree.Path)
+	for _, st := range got.SetupSteps {
+		if st.Kind == StepKindInstallDeps {
+			require.Equal(t, SetupStepDone, st.Status, "install is skipped, not run")
+		}
+	}
+
+	_, err = service.ArchiveSession(ctx, sess.ID)
+	require.NoError(t, err)
+	require.NoError(t, service.DeleteSession(ctx, sess.ID, false, true))
+	_, err = os.Stat(filepath.Join(repoPath, ".git"))
+	require.NoError(t, err, "deleting the session must not remove the workspace checkout")
+}
+
+func TestSessionService_CreateSession_AdoptsCheckoutOnExistingBranch(t *testing.T) {
+	sessionsRoot, repoPath := adoptedCheckout(t, "feature", map[string]string{
+		".utena/worktree-setup": "#!/bin/sh\ntouch setup-ran\n",
+	}, []string{"checkout", "-b", "feature/x"}, []string{"push", "-u", "origin", "feature/x"})
+
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+	service.sessionsRoot = sessionsRoot
+
+	sess := &Session{Name: "feature"}
+	require.NoError(t, createSessionLegacy(context.Background(), service, sess, wsGitID, "feature/x", ""))
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 10*time.Second)
+
+	current, err := exec.Command("git", "-C", repoPath, "branch", "--show-current").Output()
+	require.NoError(t, err)
+	require.Equal(t, "feature/x", strings.TrimSpace(string(current)))
+	_, err = os.Stat(filepath.Join(repoPath, "setup-ran"))
+	require.NoError(t, err, "the worktree-setup script runs for an adopted checkout already on its branch")
 }

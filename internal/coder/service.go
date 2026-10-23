@@ -22,6 +22,7 @@ const (
 	agentWaitTimeout    = 15 * time.Minute
 	bestEffortTimeout   = 30 * time.Second
 	FollowerHome        = "/home/coder"
+	followerSessions    = FollowerHome + "/utena-sessions"
 	tokenFile           = "~/.config/utena/coder-keepalive-token"
 	tokenLifetime       = "168h"
 )
@@ -93,8 +94,23 @@ func (s *Service) coder(ctx context.Context, args ...string) ([]byte, error) {
 	return s.runner.Run(ctx, Command{Name: "coder", Args: args})
 }
 
-func (s *Service) CreateArgs(workspace, repo string) []string {
-	args := []string{"create", workspace, "-t", s.cfg.Template, "--parameter", "repo=" + repo}
+func FollowerSessionDir(workspace string) string {
+	return followerSessions + "/" + session.SanitizeSessionName(workspace)
+}
+
+func cloneBranch(spec session.WorkspaceBranchSpec) string {
+	if spec.Branch != "" {
+		return spec.Branch
+	}
+	return spec.BaseBranch
+}
+
+func (s *Service) CreateArgs(workspace, repo, branch string) []string {
+	args := []string{"create", workspace, "-t", s.cfg.Template,
+		"--parameter", "repo=" + repo,
+		"--parameter", "clone_dir=" + FollowerSessionDir(workspace),
+		"--parameter", "clone_branch=" + branch,
+	}
 	keys := make([]string, 0, len(s.cfg.Parameters))
 	for k := range s.cfg.Parameters {
 		keys = append(keys, k)
@@ -202,7 +218,7 @@ func (s *Service) Create(ctx context.Context, in session.RemoteCreate) error {
 				return fmt.Errorf("look up workspace: %w", err)
 			}
 		}
-		if _, err := s.coder(ctx, s.CreateArgs(in.Workspace, in.Repo)...); err != nil {
+		if _, err := s.coder(ctx, s.CreateArgs(in.Workspace, in.Repo, cloneBranch(in.Spec))...); err != nil {
 			return fmt.Errorf("coder create: %w", err)
 		}
 		return nil
@@ -231,7 +247,7 @@ func (s *Service) Create(ctx context.Context, in session.RemoteCreate) error {
 	var followerWS uint
 	if err := p.run(stepLink, func() error {
 		var err error
-		followerWS, err = follower.LinkWorkspace(ctx, FollowerHome+"/"+name, in.LeaderWorkspaceID)
+		followerWS, err = follower.LinkWorkspace(ctx, FollowerSessionDir(in.Workspace)+"/"+name, in.LeaderWorkspaceID)
 		if err != nil {
 			return fmt.Errorf("register workspace on follower: %w", err)
 		}

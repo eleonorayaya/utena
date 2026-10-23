@@ -51,10 +51,12 @@ func TestService_CreateArgs(t *testing.T) {
 	assert.Equal(t, []string{
 		"create", "ws", "-t", "my-template",
 		"--parameter", "repo=acme/widgets",
+		"--parameter", "clone_dir=/home/coder/utena-sessions/ws",
+		"--parameter", "clone_branch=main",
 		"--parameter", "size=large",
 		"--parameter", "zone=b",
 		"--use-parameter-defaults", "-y",
-	}, svc.CreateArgs("ws", "acme/widgets"))
+	}, svc.CreateArgs("ws", "acme/widgets", "main"))
 }
 
 func TestService_CreateRunsLifecycleInOrder(t *testing.T) {
@@ -74,7 +76,7 @@ func TestService_CreateRunsLifecycleInOrder(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{
-		"coder create ws -t my-template --parameter repo=acme/widgets --parameter size=large --use-parameter-defaults -y",
+		"coder create ws -t my-template --parameter repo=acme/widgets --parameter clone_dir=/home/coder/utena-sessions/ws --parameter clone_branch=main --parameter size=large --use-parameter-defaults -y",
 		"coder ssh ws -- true",
 		"coder list --search owner:me name:ws -o json",
 		"coder tokens create -n utena-ws --scope workspace:read --scope workspace:update --allow workspace:ws-id --lifetime 168h",
@@ -97,7 +99,7 @@ func TestService_CreateRunsLifecycleInOrder(t *testing.T) {
 
 	wsCalls := h.follower.CallsTo("POST", "/workspaces")
 	require.Len(t, wsCalls, 1)
-	assert.JSONEq(t, `{"path":"/home/coder/widgets","as_root":false,"leader_workspace_id":5}`, wsCalls[0].Body)
+	assert.JSONEq(t, `{"path":"/home/coder/utena-sessions/ws/widgets","as_root":false,"leader_workspace_id":5}`, wsCalls[0].Body)
 
 	sessCalls := h.follower.CallsTo("POST", "/sessions")
 	require.Len(t, sessCalls, 1)
@@ -201,7 +203,7 @@ func TestService_CreateResumeBuildsMissingWorkspace(t *testing.T) {
 	require.NoError(t, err)
 	runs := h.runner.Runs()
 	require.GreaterOrEqual(t, len(runs), 2)
-	assert.Equal(t, "coder create ws -t my-template --parameter repo=acme/widgets --parameter size=large --use-parameter-defaults -y", runs[1])
+	assert.Equal(t, "coder create ws -t my-template --parameter repo=acme/widgets --parameter clone_dir=/home/coder/utena-sessions/ws --parameter clone_branch=main --parameter size=large --use-parameter-defaults -y", runs[1])
 }
 
 func TestService_CreateResumeReusesFollowerSession(t *testing.T) {

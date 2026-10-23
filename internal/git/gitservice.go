@@ -135,6 +135,38 @@ func (s *GitService) SetupWorktreeAt(ctx context.Context, repoPath string, branc
 	return true, path, nil
 }
 
+func (s *GitService) AdoptCheckout(ctx context.Context, repoPath string, branchName string, baseBranch string, branchID uint, repoID uint) (bool, error) {
+	current, err := s.cli.currentBranch(ctx, repoPath)
+	if err != nil {
+		return false, err
+	}
+	if current == branchName {
+		recorded := false
+		if existing, err := s.worktreeStore.GetByBranchID(branchID); err == nil && existing.Path == repoPath && existing.Status == WorktreeStatusPresent {
+			recorded = true
+		}
+		s.ensureWorktreeRecord(branchID, repoID, repoPath)
+		return !recorded, nil
+	}
+	exists, err := s.cli.hasBranch(ctx, repoPath, branchName)
+	if err != nil {
+		return false, fmt.Errorf("failed to check branch %q: %v", branchName, err)
+	}
+	if baseBranch != "" && exists {
+		return false, fmt.Errorf("branch %q already exists; use it as an existing branch instead", branchName)
+	}
+	if baseBranch == "" && !exists {
+		if err := s.cli.fetch(ctx, repoPath, branchName); err != nil {
+			return false, fmt.Errorf("failed to fetch branch %q: %v", branchName, err)
+		}
+	}
+	if err := s.cli.checkoutInPlace(ctx, repoPath, branchName, baseBranch); err != nil {
+		return false, err
+	}
+	s.ensureWorktreeRecord(branchID, repoID, repoPath)
+	return true, nil
+}
+
 func (s *GitService) RegisterPendingWorktree(branchID uint, repoID uint, path string) (*Worktree, error) {
 	if branchID == 0 {
 		return nil, fmt.Errorf("branchID is required")

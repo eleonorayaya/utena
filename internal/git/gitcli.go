@@ -181,6 +181,17 @@ func (s *gitCLI) checkoutWorktree(ctx context.Context, repoPath string, branch s
 	return worktreePath, nil
 }
 
+func (s *gitCLI) checkoutInPlace(ctx context.Context, repoPath string, branch string, baseBranch string) error {
+	args := []string{"-C", repoPath, "checkout", branch}
+	if baseBranch != "" {
+		args = []string{"-C", repoPath, "checkout", "-b", branch, baseBranch}
+	}
+	if output, err := gitCommand(ctx, args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout failed: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
+
 func (s *gitCLI) pushSetUpstream(ctx context.Context, repoPath string, branchName string) error {
 	cmd := gitCommand(ctx, "-C", repoPath, "push", "--set-upstream", "origin", branchName)
 	if output, err := cmd.CombinedOutput(); err != nil {

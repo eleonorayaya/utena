@@ -411,6 +411,7 @@ type worktreeSetupResult struct {
 	branch       *git.Branch
 	worktreePath string
 	created      bool
+	adopted      bool
 	warning      string
 }
 
@@ -933,7 +934,17 @@ func (s *SessionService) setupSingleWorktree(ctx context.Context, sess *Session,
 		created bool
 		wtPath  string
 	)
-	if err := traceOp(ctx, "git worktree add", func() error {
+	adopted := isAdoptedCheckout(ws, wt)
+	if adopted {
+		wtPath = ws.Path
+		if err := traceOp(ctx, "git checkout in place", func() error {
+			var e error
+			created, e = s.gitService.AdoptCheckout(ctx, ws.Path, finalBranchName, baseBranchName, branch.ID, repoID)
+			return e
+		}, "branch", finalBranchName, "ws", ws.Name); err != nil {
+			return worktreeSetupResult{}, fmt.Errorf("checkout setup: %w", err)
+		}
+	} else if err := traceOp(ctx, "git worktree add", func() error {
 		var e error
 		created, wtPath, e = s.gitService.SetupWorktreeAt(ctx, ws.Path, finalBranchName, baseBranchName, branch.ID, repoID, wt.Path)
 		return e
@@ -957,7 +968,11 @@ func (s *SessionService) setupSingleWorktree(ctx context.Context, sess *Session,
 		wt.Path = wtPath
 	}
 
-	return worktreeSetupResult{swt: swt, wt: wt, ws: ws, branch: branch, worktreePath: wt.Path, created: created, warning: warning}, nil
+	return worktreeSetupResult{swt: swt, wt: wt, ws: ws, branch: branch, worktreePath: wt.Path, created: created, adopted: adopted, warning: warning}, nil
+}
+
+func isAdoptedCheckout(ws *workspace.Workspace, wt *git.Worktree) bool {
+	return ws.Path != "" && wt.Path != "" && filepath.Clean(ws.Path) == filepath.Clean(wt.Path)
 }
 
 func (s *SessionService) runSetup(sessionID uint, muxName string, specs []WorkspaceBranchSpec) {
@@ -1498,6 +1513,7 @@ func (s *SessionService) cleanupSessionResources(ctx context.Context, session *S
 	}
 
 	wsCache := make(map[uint]*workspace.Workspace)
+	keepRoot := false
 	for i := range session.Worktrees {
 		wt := session.Worktrees[i].Worktree
 		if wt == nil {
@@ -1508,7 +1524,9 @@ func (s *SessionService) cleanupSessionResources(ctx context.Context, session *S
 			slog.Warn("cleanup: failed to resolve workspace", "worktree", wt.ID, "error", err)
 			continue
 		}
-		if wt.Path != "" {
+		if isAdoptedCheckout(ws, wt) {
+			keepRoot = true
+		} else if wt.Path != "" {
 			if err := s.gitService.RemoveWorktree(ctx, ws.Path, wt.Path); err != nil {
 				slog.Warn("failed to remove worktree dir", "worktree", wt.ID, "error", err)
 			}
@@ -1525,7 +1543,9 @@ func (s *SessionService) cleanupSessionResources(ctx context.Context, session *S
 	}
 
 	s.removeClaudeArtifacts(session)
-	s.removeSessionRoot(session)
+	if !keepRoot {
+		s.removeSessionRoot(session)
+	}
 }
 
 func (s *SessionService) cleanupPastBranches(ctx context.Context, session *Session, wsCache map[uint]*workspace.Workspace) {
