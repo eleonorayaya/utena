@@ -168,6 +168,55 @@ func TestService_CreateRejectsUnexpectedTokenOutput(t *testing.T) {
 	require.ErrorContains(t, err, "keepalive token")
 }
 
+func TestService_CreateResumeSkipsExistingWorkspace(t *testing.T) {
+	h := newHarness(t)
+	h.runner.handle = coderHandler(nil)
+
+	err := h.svc.Create(context.Background(), session.RemoteCreate{SessionID: 9, Workspace: "ws", Repo: "acme/widgets", LeaderWorkspaceID: 5, Spec: session.WorkspaceBranchSpec{BaseBranch: "main"}, Resume: true})
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"coder list --search owner:me name:ws -o json",
+		"coder ssh ws -- true",
+		"coder tokens remove utena-ws",
+		"coder list --search owner:me name:ws -o json",
+		"coder tokens create -n utena-ws --scope workspace:read --scope workspace:update --allow workspace:ws-id --lifetime 168h",
+		"ssh ws.coder umask 077; mkdir -p ~/.config/utena; cat > ~/.config/utena/coder-keepalive-token",
+		"tuios hosts add ws ws.coder",
+	}, h.runner.Runs())
+	assert.Len(t, h.follower.CallsTo("POST", "/sessions"), 1)
+}
+
+func TestService_CreateResumeBuildsMissingWorkspace(t *testing.T) {
+	h := newHarness(t)
+	listed := false
+	h.runner.handle = coderHandler(func(c Command) ([]byte, error, bool) {
+		if c.Name == "coder" && c.Args[0] == "list" && !listed {
+			listed = true
+			return []byte(`[]`), nil, true
+		}
+		return nil, nil, false
+	})
+
+	err := h.svc.Create(context.Background(), session.RemoteCreate{SessionID: 9, Workspace: "ws", Repo: "acme/widgets", LeaderWorkspaceID: 5, Spec: session.WorkspaceBranchSpec{BaseBranch: "main"}, Resume: true})
+	require.NoError(t, err)
+	runs := h.runner.Runs()
+	require.GreaterOrEqual(t, len(runs), 2)
+	assert.Equal(t, "coder create ws -t my-template --parameter repo=acme/widgets --parameter size=large --use-parameter-defaults -y", runs[1])
+}
+
+func TestService_CreateResumeReusesFollowerSession(t *testing.T) {
+	h := newHarness(t)
+	h.runner.handle = coderHandler(nil)
+
+	err := h.svc.Create(context.Background(), session.RemoteCreate{SessionID: 9, Workspace: "ws", Repo: "acme/widgets", LeaderWorkspaceID: 5, Spec: session.WorkspaceBranchSpec{BaseBranch: "main"}, Resume: true, RemoteSessionID: remoteID(42)})
+	require.NoError(t, err)
+	assert.Empty(t, h.follower.CallsTo("POST", "/sessions"))
+	assert.NotEmpty(t, h.follower.CallsTo("GET", "/sessions/42"))
+	st, ok := h.sessions.lastState(9)
+	require.True(t, ok)
+	assert.Equal(t, session.StatusActive, st.Status)
+}
+
 func TestService_WorkspaceIDNeedsExactName(t *testing.T) {
 	h := newHarness(t)
 	h.runner.handle = func(Command) ([]byte, error) {

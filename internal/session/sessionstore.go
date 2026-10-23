@@ -414,6 +414,11 @@ func (s *SessionStore) UpdateStatusWhere(id uint, status SessionStatus, statusEr
 	return res.RowsAffected > 0, res.Error
 }
 
+func (s *SessionStore) FinishRemoteCreate(id uint, status SessionStatus, statusError string) (bool, error) {
+	res := s.db.Model(&Session{}).Where("id = ? AND status = ?", id, StatusCreating).Updates(map[string]any{"status": status, "status_error": statusError, "remote_create": nil})
+	return res.RowsAffected > 0, res.Error
+}
+
 func (s *SessionStore) SetStatusError(id uint, statusError string, statuses ...SessionStatus) error {
 	return s.db.Model(&Session{}).Where("id = ? AND status IN ?", id, statuses).Update("status_error", statusError).Error
 }
