@@ -28,6 +28,7 @@ type stepDef struct {
 	Label        string
 	WorkspaceID  *uint
 	DependsOnPos *int
+	Background   bool
 
 	CopySrc       string
 	CopyDest      string
@@ -104,6 +105,7 @@ func appendActionSteps(defs []stepDef, ws stepWorkspace, cfg *WorkspaceConfig, l
 			Label:          label,
 			WorkspaceID:    uintPtr(ws.ID),
 			DependsOnPos:   intPtr(lastPos),
+			Background:     true,
 			PackageManager: action.PackageManager,
 			RunWith:        action.RunWith,
 		})

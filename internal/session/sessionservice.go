@@ -95,8 +95,7 @@ type SessionService struct {
 	trustedRoots         map[string]struct{}
 	remote               RemoteBackend
 	setups               sync.WaitGroup
-	blockOnInstallDeps   bool
-	statusWarningMu      sync.Mutex
+	foregroundSetup      bool
 	diskUsage            *diskusage.Cache
 }
 
@@ -127,8 +126,8 @@ func (s *SessionService) SetBundleCatalog(catalog bundles.Catalog, servers bundl
 	s.mcpServers = servers
 }
 
-func (s *SessionService) BlockSetupOnInstallDeps() {
-	s.blockOnInstallDeps = true
+func (s *SessionService) RunSetupInForeground() {
+	s.foregroundSetup = true
 }
 
 func (s *SessionService) SetSourceReader(reader workspace.SourceReader) {
@@ -1049,7 +1048,11 @@ func (s *SessionService) newSetupExecution(sess *Session, muxName string, defs [
 	steps := s.ensureSetupSteps(sess.ID, defs)
 	execSteps := make([]execStep, len(defs))
 	for i := range defs {
-		execSteps[i] = execStep{def: defs[i], db: steps[i]}
+		def := defs[i]
+		if s.foregroundSetup {
+			def.Background = false
+		}
+		execSteps[i] = execStep{def: def, db: steps[i]}
 	}
 	return &setupExecution{
 		svc:       s,
@@ -1062,24 +1065,8 @@ func (s *SessionService) newSetupExecution(sess *Session, muxName string, defs [
 		swtByID:   swtByID,
 		updater:   &stepUpdater{store: s.setupStepStore},
 		results:   make(map[uint]*worktreeSetupResult, len(orderedWS)),
-
-		detachInstall: !s.blockOnInstallDeps,
-		finished:      make(chan struct{}),
+		finished:  make(chan struct{}),
 	}
-}
-
-func (s *SessionService) appendActiveStatusWarning(id uint, warning string) error {
-	s.statusWarningMu.Lock()
-	defer s.statusWarningMu.Unlock()
-	sess, err := s.store.GetByID(id)
-	if err != nil {
-		return err
-	}
-	msg := warning
-	if sess.StatusError != "" {
-		msg = sess.StatusError + "; " + warning
-	}
-	return s.store.SetStatusError(id, msg, StatusActive)
 }
 
 func (s *SessionService) completeSetup(ctx context.Context, sess *Session, executor *setupExecution) {

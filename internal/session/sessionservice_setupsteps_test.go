@@ -324,18 +324,25 @@ func writeBlockingPM(t *testing.T) (pmScript, release string) {
 	return pmScript, release
 }
 
-func TestSessionService_ConfigAction_InstallDeps_DoesNotBlockSetup(t *testing.T) {
+func startInstallDepsSession(t *testing.T, pmScript, name string, foreground bool) (*SessionService, *SessionStore, *Session) {
+	t.Helper()
 	repoPath := initTestRepo(t)
-	pmScript, release := writeBlockingPM(t)
 	writeWorkspaceConfig(t, repoPath, `{"setup_actions": [{"type": "install_deps", "package_manager": "`+pmScript+`"}]}`)
-
 	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
-
+	if foreground {
+		service.RunSetupInForeground()
+	}
 	sess, err := service.CreateSession(context.Background(), CreateSessionInput{
-		Name:       "install-bg",
+		Name:       name,
 		Workspaces: []WorkspaceBranchSpec{{WorkspaceID: wsGitID, BaseBranch: "main"}},
 	})
 	require.NoError(t, err)
+	return service, sessionStore, sess
+}
+
+func TestSessionService_ConfigAction_InstallDeps_DoesNotBlockSetup(t *testing.T) {
+	pmScript, release := writeBlockingPM(t)
+	service, sessionStore, sess := startInstallDepsSession(t, pmScript, "install-bg", false)
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
 
 	steps, err := service.setupStepStore.ListBySessionID(sess.ID)
@@ -355,18 +362,9 @@ func TestSessionService_ConfigAction_InstallDeps_DoesNotBlockSetup(t *testing.T)
 }
 
 func TestSessionService_ConfigAction_InstallDeps_BackgroundFailureWarns(t *testing.T) {
-	repoPath := initTestRepo(t)
 	pmScript := filepath.Join(t.TempDir(), "fake-pm")
 	writeScript(t, pmScript, "#!/bin/sh\necho boom\nexit 1\n")
-	writeWorkspaceConfig(t, repoPath, `{"setup_actions": [{"type": "install_deps", "package_manager": "`+pmScript+`"}]}`)
-
-	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
-
-	sess, err := service.CreateSession(context.Background(), CreateSessionInput{
-		Name:       "install-bg-fail",
-		Workspaces: []WorkspaceBranchSpec{{WorkspaceID: wsGitID, BaseBranch: "main"}},
-	})
-	require.NoError(t, err)
+	service, sessionStore, sess := startInstallDepsSession(t, pmScript, "install-bg-fail", false)
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
 	service.setups.Wait()
 
@@ -380,28 +378,18 @@ func TestSessionService_ConfigAction_InstallDeps_BackgroundFailureWarns(t *testi
 	require.Equal(t, SetupStepFailed, stepByKind(t, steps, StepKindInstallDeps).Status)
 }
 
-func TestSessionService_ConfigAction_InstallDeps_BlocksSetupWhenConfigured(t *testing.T) {
-	repoPath := initTestRepo(t)
+func TestSessionService_ConfigAction_InstallDeps_BlocksSetupInForeground(t *testing.T) {
 	pmScript, release := writeBlockingPM(t)
-	writeWorkspaceConfig(t, repoPath, `{"setup_actions": [{"type": "install_deps", "package_manager": "`+pmScript+`"}]}`)
-
-	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
-	service.BlockSetupOnInstallDeps()
-
-	sess, err := service.CreateSession(context.Background(), CreateSessionInput{
-		Name:       "install-fg",
-		Workspaces: []WorkspaceBranchSpec{{WorkspaceID: wsGitID, BaseBranch: "main"}},
-	})
-	require.NoError(t, err)
+	service, sessionStore, sess := startInstallDepsSession(t, pmScript, "install-fg", true)
 
 	require.Eventually(t, func() bool {
 		steps, err := service.setupStepStore.ListBySessionID(sess.ID)
 		return err == nil && stepByKind(t, steps, StepKindInstallDeps).Status == SetupStepRunning
 	}, 5*time.Second, 20*time.Millisecond)
-	time.Sleep(200 * time.Millisecond)
-	cur, err := sessionStore.GetByID(sess.ID)
-	require.NoError(t, err)
-	require.Equal(t, StatusCreating, cur.Status)
+	require.Never(t, func() bool {
+		cur, err := sessionStore.GetByID(sess.ID)
+		return err != nil || cur.Status != StatusCreating
+	}, 200*time.Millisecond, 20*time.Millisecond)
 
 	require.NoError(t, os.WriteFile(release, nil, 0o644))
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)

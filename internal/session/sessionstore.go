@@ -423,6 +423,11 @@ func (s *SessionStore) SetStatusError(id uint, statusError string, statuses ...S
 	return s.db.Model(&Session{}).Where("id = ? AND status IN ?", id, statuses).Update("status_error", statusError).Error
 }
 
+func (s *SessionStore) AppendStatusError(id uint, warning string, statuses ...SessionStatus) error {
+	return s.db.Model(&Session{}).Where("id = ? AND status IN ?", id, statuses).
+		Update("status_error", gorm.Expr("CASE WHEN status_error = '' THEN ? ELSE status_error || '; ' || ? END", warning, warning)).Error
+}
+
 func (s *SessionStore) MarkAttached(id uint, at time.Time) error {
 	return s.db.Model(&Session{}).Where("id = ?", id).Updates(map[string]any{"is_attached": true, "last_used_at": at}).Error
 }
