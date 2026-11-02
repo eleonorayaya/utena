@@ -231,6 +231,7 @@ func TestSessionService_AddWorkspace_RunsSetupActions(t *testing.T) {
 	updated, err := service.AddWorkspace(ctx, sess.ID, WorkspaceBranchSpec{WorkspaceID: ws2ID, BaseBranch: "main"})
 	require.NoError(t, err)
 	waitForUpdatedAfter(t, sessionStore, sess.ID, updated.UpdatedAt, 10*time.Second)
+	service.setups.Wait()
 
 	final, err := sessionStore.GetByID(sess.ID)
 	require.NoError(t, err)

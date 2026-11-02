@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/eleonorayaya/utena/internal/workspace"
+	slogctx "github.com/veqryn/slog-context"
 )
 
 func assignedToStepWorkspaces(assigned []assignedSlot) []stepWorkspace {
@@ -132,20 +133,23 @@ func (u *stepUpdater) set(step *SessionSetupStep, status SetupStepStatus, errMsg
 }
 
 type execStep struct {
-	def stepDef
-	db  *SessionSetupStep
+	def      stepDef
+	db       *SessionSetupStep
+	detached bool
 }
 
 type setupExecution struct {
-	svc       *SessionService
-	sess      *Session
-	muxName   string
-	execSteps []execStep
-	orderedWS []stepWorkspace
-	specByWS  map[uint]WorkspaceBranchSpec
-	wsByID    map[uint]*workspace.Workspace
-	swtByID   map[uint]*SessionWorktree
-	updater   *stepUpdater
+	svc           *SessionService
+	sess          *Session
+	muxName       string
+	execSteps     []execStep
+	orderedWS     []stepWorkspace
+	specByWS      map[uint]WorkspaceBranchSpec
+	wsByID        map[uint]*workspace.Workspace
+	swtByID       map[uint]*SessionWorktree
+	updater       *stepUpdater
+	detachInstall bool
+	finished      chan struct{}
 
 	mu          sync.Mutex
 	results     map[uint]*worktreeSetupResult
@@ -205,9 +209,13 @@ func (e *setupExecution) isBroken() bool {
 	return e.broken
 }
 
+func (e *setupExecution) runsDetached(def stepDef) bool {
+	return e.detachInstall && def.Kind == StepKindInstallDeps
+}
+
 func (e *setupExecution) ready(idx int) bool {
 	es := e.execSteps[idx]
-	if es.db.Status != SetupStepPending {
+	if es.detached || es.db.Status != SetupStepPending {
 		return false
 	}
 	switch {
@@ -216,7 +224,7 @@ func (e *setupExecution) ready(idx int) bool {
 	case es.def.Kind == StepKindApplyClaude && es.def.DependsOnPos == nil:
 		for i := range e.execSteps {
 			o := e.execSteps[i]
-			if o.def.WorkspaceID != nil && !isTerminalStatus(o.db.Status) {
+			if o.def.WorkspaceID != nil && !e.runsDetached(o.def) && !isTerminalStatus(o.db.Status) {
 				return false
 			}
 		}
@@ -252,6 +260,11 @@ func (e *setupExecution) run(ctx context.Context) {
 		for _, idx := range ready {
 			es := &e.execSteps[idx]
 			e.updater.set(es.db, SetupStepRunning, "")
+			if e.runsDetached(es.def) {
+				es.detached = true
+				e.svc.setups.Go(func() { e.runDetachedInstall(es) })
+				continue
+			}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -274,6 +287,23 @@ func (e *setupExecution) run(ctx context.Context) {
 		if e.isBroken() {
 			return
 		}
+	}
+}
+
+func (e *setupExecution) runDetachedInstall(es *execStep) {
+	ctx, cancel := context.WithTimeout(context.Background(), e.svc.setupTimeout)
+	defer cancel()
+	ctx = slogctx.Append(ctx, "session", e.sess.ID)
+
+	err := e.execInstallDeps(ctx, es.def)
+	if err == nil {
+		e.updater.set(es.db, SetupStepDone, "")
+		return
+	}
+	e.updater.set(es.db, SetupStepFailed, err.Error())
+	<-e.finished
+	if appendErr := e.svc.appendActiveStatusWarning(e.sess.ID, err.Error()); appendErr != nil {
+		slog.WarnContext(ctx, "failed to record install_deps warning", "error", appendErr)
 	}
 }
 
