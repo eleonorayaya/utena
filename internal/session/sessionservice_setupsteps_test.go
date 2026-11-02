@@ -119,6 +119,7 @@ func TestSessionService_ConfigAction_InstallDeps(t *testing.T) {
 	})
 	require.NoError(t, err)
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+	service.setups.Wait()
 
 	marker := filepath.Join(service.sessionsRoot, "install-test", "git-repo", "dep-installed")
 	_, err = os.Stat(marker)
@@ -154,6 +155,7 @@ func TestSessionService_ConfigAction_InstallDeps_Parallel(t *testing.T) {
 	})
 	require.NoError(t, err)
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 10*time.Second)
+	service.setups.Wait()
 
 	for _, sub := range []string{"repo1", "repo2"} {
 		marker := filepath.Join(service.sessionsRoot, "parallel-install", sub, "dep-installed")
@@ -192,6 +194,7 @@ func TestSessionService_ConfigAction_CopyFailsInstallContinues(t *testing.T) {
 	})
 	require.NoError(t, err)
 	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+	service.setups.Wait()
 
 	final, err := sessionStore.GetByID(sess.ID)
 	require.NoError(t, err)
@@ -310,4 +313,84 @@ func TestSessionService_SetupWorktree_PushesUpstreamFromWorktree(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "ls-remote failed: %s", string(out))
 	require.Contains(t, string(out), "eqt/bare-upstream", "expected branch pushed to origin")
+}
+
+func writeBlockingPM(t *testing.T) (pmScript, release string) {
+	t.Helper()
+	release = filepath.Join(t.TempDir(), "release")
+	pmScript = filepath.Join(t.TempDir(), "fake-pm")
+	writeScript(t, pmScript, "#!/bin/sh\nwhile [ ! -f "+release+" ]; do sleep 0.05; done\ntouch dep-installed\n")
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o644) })
+	return pmScript, release
+}
+
+func startInstallDepsSession(t *testing.T, pmScript, name string, foreground bool) (*SessionService, *SessionStore, *Session) {
+	t.Helper()
+	repoPath := initTestRepo(t)
+	writeWorkspaceConfig(t, repoPath, `{"setup_actions": [{"type": "install_deps", "package_manager": "`+pmScript+`"}]}`)
+	service, sessionStore, _, wsGitID := setupWorktreeSessionService(t, repoPath, t.TempDir())
+	if foreground {
+		service.RunSetupInForeground()
+	}
+	sess, err := service.CreateSession(context.Background(), CreateSessionInput{
+		Name:       name,
+		Workspaces: []WorkspaceBranchSpec{{WorkspaceID: wsGitID, BaseBranch: "main"}},
+	})
+	require.NoError(t, err)
+	return service, sessionStore, sess
+}
+
+func TestSessionService_ConfigAction_InstallDeps_DoesNotBlockSetup(t *testing.T) {
+	pmScript, release := writeBlockingPM(t)
+	service, sessionStore, sess := startInstallDepsSession(t, pmScript, "install-bg", false)
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+
+	steps, err := service.setupStepStore.ListBySessionID(sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, SetupStepRunning, stepByKind(t, steps, StepKindInstallDeps).Status)
+	require.Equal(t, SetupStepDone, stepByKind(t, steps, StepKindApplyClaude).Status)
+	require.Equal(t, SetupStepDone, stepByKind(t, steps, StepKindSetupMux).Status)
+
+	require.NoError(t, os.WriteFile(release, nil, 0o644))
+	service.setups.Wait()
+
+	steps, err = service.setupStepStore.ListBySessionID(sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, SetupStepDone, stepByKind(t, steps, StepKindInstallDeps).Status)
+	_, err = os.Stat(filepath.Join(service.sessionsRoot, "install-bg", "git-repo", "dep-installed"))
+	require.NoError(t, err)
+}
+
+func TestSessionService_ConfigAction_InstallDeps_BackgroundFailureWarns(t *testing.T) {
+	pmScript := filepath.Join(t.TempDir(), "fake-pm")
+	writeScript(t, pmScript, "#!/bin/sh\necho boom\nexit 1\n")
+	service, sessionStore, sess := startInstallDepsSession(t, pmScript, "install-bg-fail", false)
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
+	service.setups.Wait()
+
+	final, err := sessionStore.GetByID(sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusActive, final.Status)
+	require.Contains(t, final.StatusError, "boom")
+
+	steps, err := service.setupStepStore.ListBySessionID(sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, SetupStepFailed, stepByKind(t, steps, StepKindInstallDeps).Status)
+}
+
+func TestSessionService_ConfigAction_InstallDeps_BlocksSetupInForeground(t *testing.T) {
+	pmScript, release := writeBlockingPM(t)
+	service, sessionStore, sess := startInstallDepsSession(t, pmScript, "install-fg", true)
+
+	require.Eventually(t, func() bool {
+		steps, err := service.setupStepStore.ListBySessionID(sess.ID)
+		return err == nil && stepByKind(t, steps, StepKindInstallDeps).Status == SetupStepRunning
+	}, 5*time.Second, 20*time.Millisecond)
+	require.Never(t, func() bool {
+		cur, err := sessionStore.GetByID(sess.ID)
+		return err != nil || cur.Status != StatusCreating
+	}, 200*time.Millisecond, 20*time.Millisecond)
+
+	require.NoError(t, os.WriteFile(release, nil, 0o644))
+	waitForStatus(t, sessionStore, sess.ID, StatusActive, 5*time.Second)
 }

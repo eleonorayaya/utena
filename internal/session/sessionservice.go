@@ -95,6 +95,7 @@ type SessionService struct {
 	trustedRoots         map[string]struct{}
 	remote               RemoteBackend
 	setups               sync.WaitGroup
+	foregroundSetup      bool
 	diskUsage            *diskusage.Cache
 }
 
@@ -123,6 +124,10 @@ func NewSessionService(store *SessionStore, sessionWorktreeStore *SessionWorktre
 func (s *SessionService) SetBundleCatalog(catalog bundles.Catalog, servers bundles.Servers) {
 	s.bundleCatalog = catalog
 	s.mcpServers = servers
+}
+
+func (s *SessionService) RunSetupInForeground() {
+	s.foregroundSetup = true
 }
 
 func (s *SessionService) SetSourceReader(reader workspace.SourceReader) {
@@ -1043,7 +1048,11 @@ func (s *SessionService) newSetupExecution(sess *Session, muxName string, defs [
 	steps := s.ensureSetupSteps(sess.ID, defs)
 	execSteps := make([]execStep, len(defs))
 	for i := range defs {
-		execSteps[i] = execStep{def: defs[i], db: steps[i]}
+		def := defs[i]
+		if s.foregroundSetup {
+			def.Background = false
+		}
+		execSteps[i] = execStep{def: def, db: steps[i]}
 	}
 	return &setupExecution{
 		svc:       s,
@@ -1056,10 +1065,12 @@ func (s *SessionService) newSetupExecution(sess *Session, muxName string, defs [
 		swtByID:   swtByID,
 		updater:   &stepUpdater{store: s.setupStepStore},
 		results:   make(map[uint]*worktreeSetupResult, len(orderedWS)),
+		finished:  make(chan struct{}),
 	}
 }
 
 func (s *SessionService) completeSetup(ctx context.Context, sess *Session, executor *setupExecution) {
+	defer close(executor.finished)
 	executor.run(ctx)
 
 	if executor.broken {
