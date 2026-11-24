@@ -55,6 +55,15 @@ All domain data (workspaces, sessions, mux sessions, claude sessions) is stored 
 
 Subsystem rules (coder backend, session setup, database module, workspace manager, multiplexer, browser) live in the `CLAUDE.md` of each package: `internal/coder/`, `internal/session/`, `internal/db/`, `internal/workspace/`, `internal/mux/`, `internal/browser/`. Read the relevant one before changing that subsystem.
 
+## Go Conventions
+
+- Each domain package is layered store/service/controller/router/module, wired by the module constructor; modules implement `common.ModelProvider` to register GORM models. Copy the shape of an existing domain (e.g. `internal/workspace/`) for a new one.
+- Accept interfaces, return structs; inject `db.Database` and other dependencies through constructors.
+- Stores query GORM/SQLite directly: no in-memory maps, mutexes or defensive copies. Map `gorm.ErrRecordNotFound` to the domain's sentinel error; load associations with `Joins("Workspace")` and skip them on writes with `Omit("Workspace")`.
+- Use sentinel errors (`errors.Is`) by default, a custom error type (`errors.As`) when the error carries context such as an ID.
+- Use `afero.Fs` only for non-database file I/O (e.g. workspace `config.json`).
+- When one module needs to trigger behavior in another without depending on it, publish an event on `internal/eventbus`.
+
 ## Testing
 
 Store and integration tests use in-memory SQLite (`db.OpenInMemory()`). Run tests with `task test`.
