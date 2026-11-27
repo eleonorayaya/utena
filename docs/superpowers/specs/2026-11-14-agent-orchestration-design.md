@@ -55,7 +55,7 @@ Sessions gain and lose resources and hosts over time; any resource may be absent
 
 ## Agents
 
-The runtime that runs an agent understands what it is doing and how to talk to it. utena tracks each agent's activity (working, finished, blocked on a prompt, and so on) and its conversation, so an agent can be stopped and resumed later. utena, not tuios, is the record.
+The runtime that runs an agent understands what it is doing and how to talk to it. utena tracks each agent's activity (working, finished, blocked on a prompt, and so on) and its conversation, so an agent can be stopped and resumed later. utena, not the runtime, is the record.
 
 ## Three channels
 
